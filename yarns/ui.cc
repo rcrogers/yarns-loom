@@ -377,7 +377,7 @@ void Ui::PrintFactoryTesting() {
 }
 
 void Ui::PrintVersionNumber() {
-  display_.Print("L1"); // Loom v1
+  display_.Print("L2"); // Loom v1.2.0
 }
 
 // Generic Handlers
