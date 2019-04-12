@@ -71,8 +71,9 @@ void Voice::Init(bool reset_calibration) {
   }
   dirty_ = false;
   oscillator_.Init(
-    calibrated_dac_code_[3] - calibrated_dac_code_[8],
-    calibrated_dac_code_[3]);
+    // voltage = index - 3
+    calibrated_dac_code_[0] - calibrated_dac_code_[10], // 10Vpp
+    calibrated_dac_code_[5]); // +2V offset
 }
 
 void Voice::Calibrate(uint16_t* calibrated_dac_code) {
