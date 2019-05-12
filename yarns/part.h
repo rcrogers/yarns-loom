@@ -352,8 +352,8 @@ class Part {
     has_siblings_ = has_siblings;
   }
   
-  void set_transposable(bool transposable) {
-    transposable_ = transposable;
+  void set_receives_input(bool receives_input) {
+    receives_input_ = receives_input;
   }
   
  private:
@@ -408,7 +408,7 @@ class Part {
   uint16_t lfo_counter_;
   
   bool has_siblings_;
-  bool transposable_;
+  bool receives_input_;
   
   DISALLOW_COPY_AND_ASSIGN(Part);
 };

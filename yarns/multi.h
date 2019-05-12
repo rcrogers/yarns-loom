@@ -217,7 +217,7 @@ class Multi {
         if (part_[i].midi_settings().channel == channel || \
             channel == 0x10 || \
             part_[i].midi_settings().channel == 0x10) {
-          part_[i].set_transposable(false);
+          part_[i].set_receives_input(false);
         }
       }
       recording_ = true;
@@ -228,7 +228,7 @@ class Multi {
     if (recording_) {
       part_[part].StopRecording();
       for (uint8_t i = 0; i < num_active_parts_; ++i) {
-        part_[i].set_transposable(true);
+        part_[i].set_receives_input(true);
       }
       recording_ = false;
     }

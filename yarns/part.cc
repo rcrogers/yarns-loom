@@ -63,7 +63,7 @@ void Part::Init() {
   seq_recording_ = false;
   seq_running_ = false;
   release_latched_keys_on_next_note_on_ = false;
-  transposable_ = true;
+  receives_input_ = true;
 }
   
 void Part::AllocateVoices(Voice* voice, uint8_t num_voices, bool polychain) {
@@ -327,7 +327,7 @@ void Part::ClockSequencer() {
 
   if (step.has_note()) {
     int16_t note = step.note();
-    if (pressed_keys_.size() && transposable_) {
+    if (pressed_keys_.size() && receives_input_) {
       // When we play a monophonic sequence, we can make the guess that root
       // note = first note.
       // But this is not the case when we are playing several sequences at the
