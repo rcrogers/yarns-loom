@@ -101,7 +101,7 @@ void Multi::Clock() {
     return;
   }
   
-  uint16_t output_division = clock_division::num_ticks[settings_.clock_output_division];
+  uint16_t output_division = clock_division::list[settings_.clock_output_division].num_ticks;
   uint16_t input_division = settings_.clock_input_division;
   
   if (previous_output_division_ &&

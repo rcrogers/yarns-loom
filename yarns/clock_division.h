@@ -32,42 +32,28 @@
 namespace yarns {
 namespace clock_division {
 
-const uint8_t count = 15;
-
-const char* const display[] = {
-  "x4",
-  "x3",
-  "x2",
-  "/1",
-  "/2",
-  "/3",
-  "/4",
-  "/6",
-  "/8",
-  "12",
-  "16",
-  "24",
-  "32",
-  "48",
-  "96",
+struct ClockDivision {
+  const char* const display;
+  const uint16_t num_ticks;
 };
 
-const uint16_t num_ticks[] = {
-  96 * 4,
-  96 * 3,
-  96 * 2, 
-  96,
-  48,
-  32,
-  24,
-  16,
-  12,
-  8,
-  6,
-  4,
-  3,
-  2,
-  1,
+const uint8_t count = 15;
+const ClockDivision list[] = {
+  { "x4", 96 * 4 },
+  { "x3", 96 * 3 },
+  { "x2", 96 * 2 },
+  { "/1", 96 },
+  { "/2", 48 },
+  { "/3", 32 },
+  { "/4", 24 },
+  { "/6", 16 },
+  { "/8", 12 },
+  { "12", 8 },
+  { "16", 6 },
+  { "24", 4 },
+  { "32", 3 },
+  { "48", 2 },
+  { "96", 1 },
 };
 
 }  // namespace clock_division

@@ -204,7 +204,7 @@ const Setting Settings::settings_[] = {
   {
     "O/", "OUTPUT CLK DIV",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OUTPUT_DIVISION, 0 },
-    SETTING_UNIT_ENUMERATION, 0, clock_division::count - 1, clock_division::display,
+    SETTING_UNIT_CLOCK_DIV, 0, clock_division::count - 1, NULL,
     0, 0,
   },
   {
@@ -440,7 +440,7 @@ const Setting Settings::settings_[] = {
   {
     "C/", "CLOCK DIV",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_CLOCK_DIVISION, 0 },
-    SETTING_UNIT_ENUMERATION, 0, clock_division::count - 1, clock_division::display,
+    SETTING_UNIT_CLOCK_DIV, 0, clock_division::count - 1, NULL,
     102, 24,
   },
   {
@@ -663,12 +663,16 @@ void Settings::Print(const Setting& setting, uint8_t active_part, char* buffer) 
         PrintInteger(buffer, value);
       }
       break;
+
+    case SETTING_UNIT_CLOCK_DIV:
+      strcpy(buffer, clock_division::list[value].display);
+      break;
     
     case SETTING_UNIT_VIBRATO_SPEED:
       if (value < 100) {
         PrintInteger(buffer, value);
       } else {
-        strcpy(buffer, clock_division::display[value - 100]);
+        Print(settings_[SETTING_SEQUENCER_CLOCK_DIVISION], value - 100, buffer);
       }
       break;
       

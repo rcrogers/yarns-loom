@@ -416,7 +416,7 @@ void Part::Clock() {
       if (step.is_continuation()) {
         // The next step contains a "sustain" message; or a slid note. Extends
         // the duration of the current note.
-        gate_length_counter_ += clock_division::num_ticks[seq_.clock_division];
+        gate_length_counter_ += clock_division::list[seq_.clock_division].num_ticks;
       } else {
         StopSequencerArpeggiatorNotes();
       }
@@ -424,21 +424,21 @@ void Part::Clock() {
   }
   
   ++arp_seq_prescaler_;
-  if (arp_seq_prescaler_ >= clock_division::num_ticks[seq_.clock_division]) {
+  if (arp_seq_prescaler_ >= clock_division::list[seq_.clock_division].num_ticks) {
     arp_seq_prescaler_ = 0;
   }
   
   uint16_t num_ticks;
 
   if (voicing_.modulation_rate >= 100) {
-    num_ticks = clock_division::num_ticks[voicing_.modulation_rate - 100];
+    num_ticks = clock_division::list[voicing_.modulation_rate - 100].num_ticks;
     for (uint8_t i = 0; i < num_voices_; ++i) {
       voice_[i]->synced_lfo_.Tap(num_ticks);
     }
   }
 
   // looper
-  num_ticks = clock_division::num_ticks[seq_.clock_division];
+  num_ticks = clock_division::list[seq_.clock_division].num_ticks;
   uint8_t bar_duration = multi.settings().clock_bar_duration;
   bar_lfo_.Tap(num_ticks * (bar_duration ? bar_duration : 1));
 }
