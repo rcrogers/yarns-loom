@@ -48,6 +48,9 @@ const uint8_t kNumMaxVoicesPerPart = 4;
 const uint8_t kNumParaphonicVoices = 3;
 const uint8_t kNoteStackSize = 12;
 
+const uint8_t kCCRecordOffOn = 110;
+const uint8_t kCCDeleteRecording = 111;
+
 const uint8_t kC4 = 60;
 const uint8_t whiteKeyValues[] = {
   0,    0xff, 1,    0xff,

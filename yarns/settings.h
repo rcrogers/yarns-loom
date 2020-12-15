@@ -32,9 +32,6 @@
 
 #include "stmlib/stmlib.h"
 
-#include "yarns/multi.h"
-#include "yarns/part.h"
-
 namespace yarns {
 
 enum SettingDomain {
@@ -135,38 +132,21 @@ struct Setting {
   const char* const* values;
   uint8_t part_cc;
   uint8_t remote_control_cc;
-  
-  uint8_t Scale(uint8_t value_7bits) const {
-    uint8_t scaled_value;
-    uint8_t range = max_value - min_value + 1;
-    scaled_value = range * value_7bits >> 7;
-    scaled_value += min_value;
-    if (unit == SETTING_UNIT_TEMPO) {
-      scaled_value &= 0xfe;
-      if (scaled_value < TEMPO_EXTERNAL) {
-        scaled_value = TEMPO_EXTERNAL;
-      }
-    }
-    return scaled_value;
-  }
 };
 
 class Settings {
  public:
   Settings() { }
   ~Settings() { }
+
+  uint8_t part_cc_map[128];
+  uint8_t remote_control_cc_map[128];
   
   void Init();
-  bool ApplySetting(const Setting& setting, uint8_t part, uint8_t value);
-  uint8_t Constrain(const Setting& setting, uint8_t part, int16_t raw_value);
-  uint8_t SettingIndexFromCC(uint8_t part_index, uint8_t controller);
-
-  uint8_t Get(const Setting& setting, uint8_t active_part) const;
-  void Increment(const Setting& setting, uint8_t active_part, int16_t increment);
   
   void Print(const Setting& setting, uint8_t active_part, char* buffer) const;
   
-  inline const Setting& setting(uint8_t index) const {
+  inline const Setting& get(uint8_t index) const {
     return settings_[index];
   }
   
@@ -176,14 +156,11 @@ class Settings {
  private:
    
   static const Setting settings_[SETTING_LAST];
-
-  uint8_t part_cc_map_[128];
-  uint8_t remote_control_cc_map_[128];
   
   DISALLOW_COPY_AND_ASSIGN(Settings);
 };
 
-extern Settings settings;
+extern Settings setting_defs;
 
 }  // namespace yarns
 

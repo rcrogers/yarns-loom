@@ -251,7 +251,7 @@ void Ui::PrintParameterName() {
 }
 
 void Ui::PrintParameterValue() {
-  settings.Print(setting(), active_part_, buffer_);
+  setting_defs.Print(setting(), active_part_, buffer_);
   display_.Print(buffer_, buffer_);
 }
 
@@ -292,7 +292,7 @@ void Ui::PrintActivePartAndPlayMode() {
   }
   strcpy(buffer_, "1x");
   buffer_[0] += active_part_;
-  buffer_[1] = settings.setting(SETTING_SEQUENCER_PLAY_MODE).values[play_mode][0];
+  buffer_[1] = setting_defs.get(SETTING_SEQUENCER_PLAY_MODE).values[play_mode][0];
   buffer_[2] = '\0';
   display_.Print(buffer_);
 }
@@ -443,7 +443,7 @@ void Ui::SplashOn(Splash s) {
       break;
 
     case SPLASH_TEMPO:
-      settings.Print(settings.setting(SETTING_CLOCK_TEMPO), active_part_, buffer_);
+      setting_defs.Print(setting_defs.get(SETTING_CLOCK_TEMPO), active_part_, buffer_);
       display_.Print(buffer_);
       display_.Scroll();
       break;
@@ -469,10 +469,10 @@ void Ui::OnLongClick(const Event& e) {
 }
 
 void Ui::OnClick(const Event& e) {
-  if (&setting() == &settings.setting(SETTING_MENU_SETUP)) {
+  if (&setting() == &setting_defs.get(SETTING_MENU_SETUP)) {
     current_menu_ = &setup_menu_;
     return;
-  } else if (&setting() == &settings.setting(SETTING_MENU_ENVELOPE)) {
+  } else if (&setting() == &setting_defs.get(SETTING_MENU_ENVELOPE)) {
     current_menu_ = &envelope_menu_;
     return;
   } else if (current_menu_ != &live_menu_ && mode_ == UI_MODE_PARAMETER_EDIT) {
@@ -569,7 +569,12 @@ void Ui::OnIncrementParameterSelect(const Event& e) {
 }
 
 void Ui::OnIncrementParameterEdit(const stmlib::Event& e) {
-  settings.Increment(setting(), active_part_, e.data);
+  int16_t value = multi.GetSetting(setting(), active_part_);
+  if (setting().unit == SETTING_UNIT_INT8) {
+    value = static_cast<int8_t>(value);
+  }
+  value += e.data;
+  multi.ApplySetting(setting(), active_part_, value);
 }
 
 void Ui::OnIncrementCalibrationAdjustment(const stmlib::Event& e) {
@@ -892,8 +897,8 @@ void Ui::DoEvents() {
     } else if (
       mode_ == UI_MODE_MAIN_MENU || (
         mode_ == UI_MODE_PARAMETER_SELECT && (
-          &setting() == &settings.setting(SETTING_MENU_SETUP) ||
-          &setting() == &settings.setting(SETTING_MENU_ENVELOPE) ||
+          &setting() == &setting_defs.get(SETTING_MENU_SETUP) ||
+          &setting() == &setting_defs.get(SETTING_MENU_ENVELOPE) ||
           current_menu_ != &live_menu_
         )
       )

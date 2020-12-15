@@ -31,6 +31,9 @@
 #include "yarns/resources.h"
 #include "yarns/clock_division.h"
 
+#include "yarns/multi.h"
+#include "yarns/part.h"
+
 #include <algorithm>
 #include <cstring>
 
@@ -533,87 +536,26 @@ const Setting Settings::settings_[] = {
 
 void Settings::Init() {
   // Build tables used to convert from a CC to a parameter number.
-  std::fill(&part_cc_map_[0], &part_cc_map_[128], 0xff);
-  std::fill(&remote_control_cc_map_[0], &remote_control_cc_map_[128], 0xff);
+  std::fill(&part_cc_map[0], &part_cc_map[128], 0xff);
+  std::fill(&remote_control_cc_map[0], &remote_control_cc_map[128], 0xff);
   
   for (uint8_t i = 0; i < SETTING_LAST; ++i) {
     const Setting& setting = settings_[i];
     if (setting.part_cc) {
       if (setting.domain != SETTING_DOMAIN_PART) while (1);
-      part_cc_map_[setting.part_cc] = i;
+      part_cc_map[setting.part_cc] = i;
     }
     if (setting.remote_control_cc) {
       uint8_t num_instances = setting.domain == SETTING_DOMAIN_PART ? 4 : 1;
       for (uint8_t j = 0; j < num_instances; ++j) {
-        remote_control_cc_map_[setting.remote_control_cc + j * 32] = i;
+        remote_control_cc_map[setting.remote_control_cc + j * 32] = i;
       }
     }
   }
 }
 
-uint8_t Settings::SettingIndexFromCC(uint8_t part_index, uint8_t controller) {
-  uint8_t* map = part_index == 0xff ? remote_control_cc_map_ : part_cc_map_;
-  return map[controller];
-}
-
-uint8_t Settings::Constrain(const Setting& setting, uint8_t part, int16_t raw_value) {
-  // Apply dynamic min/max as needed
-  int16_t min_value = setting.min_value;
-  int16_t max_value = setting.max_value;
-  if (
-    &setting == &settings_[SETTING_VOICING_ALLOCATION_MODE] &&
-    multi.part(part).num_voices() == 1
-  ) {
-    max_value = VOICE_ALLOCATION_MODE_MONO;
-  }
-  if (
-    multi.layout() == LAYOUT_PARAPHONIC_PLUS_TWO &&
-    part == 0 &&
-    &setting == &settings_[SETTING_VOICING_AUDIO_MODE]
-  ) {
-    min_value = AUDIO_MODE_SAW;
-  }
-  CONSTRAIN(raw_value, min_value, max_value);
-  return static_cast<uint8_t>(raw_value);
-}
-
-bool Settings::ApplySetting(const Setting& setting, uint8_t part, uint8_t value) {
-  switch (setting.domain) {
-    case SETTING_DOMAIN_MULTI:
-      return multi.Set(setting.address[0], value);
-
-    case SETTING_DOMAIN_PART:
-      // When the module is configured in *triggers* mode, each part is mapped
-      // to a single note. To edit this setting, both the "note min" and
-      // "note max" parameters are simultaneously changed to the same value.
-      // This is a bit more user friendly than letting the user set note min
-      // and note max to the same value.
-      if (setting.address[1]) {
-        multi.mutable_part(part)->Set(setting.address[1], value);
-      }
-      return multi.mutable_part(part)->Set(setting.address[0], value);
-
-    default:
-      return false;
-  }
-}
-
-uint8_t Settings::Get(const Setting& setting, uint8_t active_part) const {
-  uint8_t value = 0;
-  switch (setting.domain) {
-    case SETTING_DOMAIN_MULTI:
-      value = multi.Get(setting.address[0]);
-      break;
-      
-    case SETTING_DOMAIN_PART:
-      value = multi.part(active_part).Get(setting.address[0]);
-      break;
-  }
-  return value;
-}
-
 void Settings::Print(const Setting& setting, uint8_t active_part, char* buffer) const {
-  uint8_t value = Get(setting, active_part);
+  uint8_t value = multi.GetSetting(setting, active_part);
   switch (setting.unit) {
     case SETTING_UNIT_UINT8:
       PrintInteger(buffer, value);
@@ -699,15 +641,6 @@ void Settings::Print(const Setting& setting, uint8_t active_part, char* buffer) 
   }
 }
 
-void Settings::Increment(const Setting& setting, uint8_t active_part, int16_t increment) {
-  int16_t value = Get(setting, active_part);
-  if (setting.unit == SETTING_UNIT_INT8) {
-    value = static_cast<int8_t>(value);
-  }
-  value += increment;
-  ApplySetting(setting, active_part, Constrain(setting, active_part, value));
-}
-
 /* static */
 void Settings::PrintInteger(char* buffer, uint8_t number) {
   buffer[1] = '0' + (number % 10);
@@ -738,6 +671,6 @@ void Settings::PrintSignedInteger(char* buffer, int8_t number) {
 }
 
 /* extern */
-Settings settings;
+Settings setting_defs;
 
 }  // namespace yarns

@@ -166,7 +166,7 @@ void TIM1_UP_IRQHandler(void) {
 void Init() {
   sys.Init();
   
-  settings.Init();
+  setting_defs.Init();
   multi.Init(true);
   ui.Init();
 

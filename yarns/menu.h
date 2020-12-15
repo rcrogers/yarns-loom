@@ -316,7 +316,7 @@ class Menu {
   }
 
   const Setting& setting() {
-    return settings.setting(setting_list()[pos_]);
+    return setting_defs.get(setting_list()[pos_]);
   }
 
   void increment_index(int32_t n) {

@@ -288,7 +288,7 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       value >= 64 ? SustainOn() : SustainOff();
       break;
 
-    case 111:
+    case kCCDeleteRecording:
       DeleteRecording();
       break;
 
@@ -1004,14 +1004,6 @@ bool Part::Set(uint8_t address, uint8_t value) {
   uint8_t* bytes;
   bytes = static_cast<uint8_t*>(static_cast<void*>(&midi_));
   uint8_t previous_value = bytes[address];
-  if (
-    address == PART_SEQUENCER_CLOCK_QUANTIZATION ||
-    (address == PART_SEQUENCER_ARP_PATTERN && (previous_value == 0 || value == 0))
-  ) {
-    // Stop notes before changing note-control semantics
-    // TODO should stop recording completely?
-    StopSequencerArpeggiatorNotes();
-  }
   bytes[address] = value;
   if (value == previous_value) { return false; }
   switch (address) {
