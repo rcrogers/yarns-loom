@@ -524,8 +524,8 @@ void Part::StartRecording() {
       LooperRecordNoteOn(i);
     }
   } else {
-    seq_rec_step_ = 0;
     seq_overdubbing_ = seq_.num_steps > 0;
+    if (!seq_overdubbing_) { seq_rec_step_ = 0; }
   }
 }
 
@@ -1009,6 +1009,7 @@ bool Part::Set(uint8_t address, uint8_t value) {
     (address == PART_SEQUENCER_ARP_PATTERN && (previous_value == 0 || value == 0))
   ) {
     // Stop notes before changing note-control semantics
+    // TODO should stop recording completely?
     StopSequencerArpeggiatorNotes();
   }
   bytes[address] = value;

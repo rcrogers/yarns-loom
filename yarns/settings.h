@@ -157,13 +157,12 @@ class Settings {
   ~Settings() { }
   
   void Init();
-  bool ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value);
-  bool SetFromCC(uint8_t part, uint8_t controller, uint8_t value);
+  bool ApplySetting(const Setting& setting, uint8_t part, uint8_t value);
+  uint8_t Constrain(const Setting& setting, uint8_t part, int16_t raw_value);
+  uint8_t SettingIndexFromCC(uint8_t part_index, uint8_t controller);
 
   uint8_t Get(const Setting& setting, uint8_t active_part) const;
   void Increment(const Setting& setting, uint8_t active_part, int16_t increment);
-
-  void Set(uint8_t address, uint8_t value);
   
   void Print(const Setting& setting, uint8_t active_part, char* buffer) const;
   

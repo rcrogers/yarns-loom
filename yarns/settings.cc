@@ -551,19 +551,12 @@ void Settings::Init() {
   }
 }
 
-bool Settings::SetFromCC(
-    uint8_t part_index,
-    uint8_t controller,
-    uint8_t value) {
+uint8_t Settings::SettingIndexFromCC(uint8_t part_index, uint8_t controller) {
   uint8_t* map = part_index == 0xff ? remote_control_cc_map_ : part_cc_map_;
-  uint8_t part = part_index == 0xff ? controller >> 5 : part_index;
-  uint8_t setting_index = map[controller];
-  if (setting_index == 0xff) { return false; }
-  const Setting& setting = settings_[setting_index];
-  return ApplySetting(setting, part, setting.Scale(value));
+  return map[controller];
 }
 
-bool Settings::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value) {
+uint8_t Settings::Constrain(const Setting& setting, uint8_t part, int16_t raw_value) {
   // Apply dynamic min/max as needed
   int16_t min_value = setting.min_value;
   int16_t max_value = setting.max_value;
@@ -581,8 +574,10 @@ bool Settings::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_va
     min_value = AUDIO_MODE_SAW;
   }
   CONSTRAIN(raw_value, min_value, max_value);
-  uint8_t value = static_cast<uint8_t>(raw_value);
+  return static_cast<uint8_t>(raw_value);
+}
 
+bool Settings::ApplySetting(const Setting& setting, uint8_t part, uint8_t value) {
   switch (setting.domain) {
     case SETTING_DOMAIN_MULTI:
       return multi.Set(setting.address[0], value);
@@ -710,7 +705,7 @@ void Settings::Increment(const Setting& setting, uint8_t active_part, int16_t in
     value = static_cast<int8_t>(value);
   }
   value += increment;
-  ApplySetting(setting, active_part, value);
+  ApplySetting(setting, active_part, Constrain(setting, active_part, value));
 }
 
 /* static */

@@ -43,6 +43,8 @@ namespace yarns {
 using namespace std;
 using namespace stmlib;
 
+uint8_t kCCRecordOffOn = 110;
+
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
   
@@ -777,7 +779,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
   bool thru = true;
   
   if (channel + 1 == settings_.remote_control_channel) {
-    yarns::settings.SetFromCC(0xff, controller, value);
+    SetFromCC(0xff, controller, value);
     if (num_active_parts_ >= 4 && \
         (controller == 0x78 || controller == 0x79 || controller == 0x7b)) {
       // Do not continue to avoid treating these messages as "all sound off",
@@ -789,25 +791,45 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
   for (uint8_t i = 0; i < num_active_parts_; ++i) {
     if (part_[i].accepts(channel) && \
         channel + 1 != settings_.remote_control_channel) {
-      if (controller == 110) {
+      if (controller == kCCRecordOffOn) {
         // Intercept this CC so multi can update its own recording state
         value >= 64 ? StartRecording(i) : StopRecording(i);
         continue;
       }
       thru = part_[i].ControlChange(channel, controller, value) && thru;
-      bool changed = yarns::settings.SetFromCC(i, controller, value);
-      if (!changed) { continue; }
-      if (
-        controller == yarns::settings.setting(SETTING_SEQUENCER_PLAY_MODE).part_cc
-      ) {
-        // Changing play mode forces recording to stop
-        StopRecording(i);
-      }
+      SetFromCC(i, controller, value);
     }
   }
   return thru;
 }
 
+void Multi::SetFromCC(uint8_t part_index, uint8_t controller, uint8_t raw_value) {
+  uint8_t setting_index = yarns::settings.SettingIndexFromCC(part_index, controller);
+  if (setting_index == 0xff) { return; }
+  uint8_t part = part_index == 0xff ? controller >> 5 : part_index;
+  const Setting& setting = yarns::settings.setting(setting_index);
+  uint8_t value = yarns::settings.Constrain(setting, part, setting.Scale(raw_value));
+
+  uint8_t prev_value = yarns::settings.Get(setting, part);
+  bool change = prev_value != value;
+  if (!change) { return; }
+
+  bool sequencer_semantics = setting_index == SETTING_SEQUENCER_CLOCK_QUANTIZATION || (
+    setting_index == SETTING_SEQUENCER_ARP_PATTERN && (
+      prev_value == 0 || value == 0
+    )
+  );
+  bool restart_recording = recording_ && recording_part_ == part && (
+    setting_index == SETTING_SEQUENCER_PLAY_MODE ||
+    sequencer_semantics
+  );
+  // TODO stop recording if layout change
+
+  if (restart_recording) { StopRecording(recording_part_); }
+  if (sequencer_semantics) { part_[part].StopSequencerArpeggiatorNotes(); }
+  yarns::settings.ApplySetting(setting, part, value);
+  if (restart_recording) { StartRecording(recording_part_); }
+}
 
 /* extern */
 Multi multi;

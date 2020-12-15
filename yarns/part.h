@@ -416,6 +416,7 @@ class Part {
   bool Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity);
   bool Aftertouch(uint8_t channel, uint8_t velocity);
   void AllNotesOff();
+  void StopSequencerArpeggiatorNotes();
   void Reset();
   void Clock();
   void Start();
@@ -753,7 +754,6 @@ class Part {
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = 60) const;
   const SequencerStep BuildSeqStep() const;
   const ArpeggiatorState BuildArpState(SequencerStep seq_step) const;
-  void StopSequencerArpeggiatorNotes();
 
   MidiSettings midi_;
   VoicingSettings voicing_;

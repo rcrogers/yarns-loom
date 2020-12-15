@@ -630,12 +630,12 @@ void Ui::OnSwitchPress(const Event& e) {
           if (recording_mode_is_displaying_pitch_) {
             StopRecording();
             SplashOn(SPLASH_ACTIVE_PART);
+            recording_mode_is_displaying_pitch_ = false;
           } else {
             // Toggle pitch display on
             recording_mode_is_displaying_pitch_ = true;
           }
         } else {
-          recording_mode_is_displaying_pitch_ = false;
           multi.StartRecording(active_part_);
         }
       }
