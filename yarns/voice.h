@@ -94,8 +94,8 @@ class Voice {
   }
 
   inline void Clock() {
-    if (!modulation_sync_ticks_) { return; }
-    synced_lfo_.Tap(modulation_sync_ticks_);
+    if (modulation_increment_) { return; }
+    synced_lfo_.Tap();
   }
   void set_modulation_rate(uint8_t modulation_rate, uint8_t index);
   inline void set_pitch_bend_range(uint8_t pitch_bend_range) {
@@ -205,7 +205,6 @@ class Voice {
   
   uint8_t pitch_bend_range_;
   uint32_t modulation_increment_;
-  uint16_t modulation_sync_ticks_;
   uint8_t vibrato_range_;
   uint8_t vibrato_initial_;
   

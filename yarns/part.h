@@ -37,6 +37,7 @@
 #include "stmlib/algorithms/note_stack.h"
 
 #include "yarns/looper.h"
+#include "yarns/clock_division.h"
 
 namespace yarns {
 
@@ -679,6 +680,13 @@ class Part {
   void StartRecording();
   void DeleteSequence();
 
+  inline uint16_t ClockPeriod() const {
+    return clock_division::list[seq_.clock_division].num_ticks;
+  }
+  inline void TouchLooper() {
+    looper_.mutable_lfo().SetPeriod(ClockPeriod() * (1 << seq_.loop_length));
+  }
+
   inline void NewLayout() {
     midi_.min_note = 0;
     midi_.max_note = 127;
@@ -966,6 +974,8 @@ class Part {
     CONSTRAIN(seq_.loop_length, 0, 7);
     CONSTRAIN(seq_.arp_range, 0, 3);
     CONSTRAIN(seq_.arp_direction, 0, ARPEGGIATOR_DIRECTION_LAST - 1);
+    CONSTRAIN(seq_.clock_division, 0, clock_division::count - 1);
+    TouchLooper();
     TouchVoices();
     TouchVoiceAllocation();
   }

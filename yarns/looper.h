@@ -93,7 +93,6 @@ class Deck {
   inline uint16_t phase() const {
     return pos_;
   }
-  void Clock();
   inline void Refresh() {
     uint16_t new_phase = lfo_.Refresh() >> 16;
     if (
@@ -127,6 +126,8 @@ class Deck {
   inline const Note& note_at(uint8_t index) const {
     return notes_[index];
   }
+
+  inline SyncedLFO& mutable_lfo() { return lfo_; }
 
  private:
 

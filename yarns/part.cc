@@ -38,7 +38,6 @@
 #include "yarns/midi_handler.h"
 #include "yarns/resources.h"
 #include "yarns/voice.h"
-#include "yarns/clock_division.h"
 #include "yarns/multi.h"
 #include "yarns/ui.h"
 
@@ -419,7 +418,7 @@ void Part::Clock() {
       if (step.is_continuation()) {
         // The next step contains a "sustain" message; or a slid note. Extends
         // the duration of the current note.
-        gate_length_counter_ += clock_division::list[seq_.clock_division].num_ticks;
+        gate_length_counter_ += ClockPeriod();
       } else {
         StopSequencerArpeggiatorNotes();
       }
@@ -427,7 +426,7 @@ void Part::Clock() {
   }
   
   ++arp_seq_prescaler_;
-  if (arp_seq_prescaler_ >= clock_division::list[seq_.clock_division].num_ticks) {
+  if (arp_seq_prescaler_ >= ClockPeriod()) {
     arp_seq_prescaler_ = 0;
   }
   
@@ -435,7 +434,7 @@ void Part::Clock() {
     voice_[i]->Clock();
   }
 
-  looper_.Clock();
+  looper_.mutable_lfo().Tap();
 }
 
 void Part::Start() {
@@ -1043,9 +1042,15 @@ bool Part::Set(uint8_t address, uint8_t value) {
       arp_.key_increment = 1;
       break;
 
+    case PART_SEQUENCER_CLOCK_DIVISION:
+    case PART_SEQUENCER_LOOP_LENGTH:
+      TouchLooper();
+      break;
+
     case PART_MIDI_SUSTAIN_MODE:
     case PART_MIDI_SUSTAIN_POLARITY:
       ResetLatch();
+      break;
 
     default:
       break;

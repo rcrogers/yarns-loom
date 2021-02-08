@@ -59,7 +59,6 @@ void Voice::Init() {
   ResetAllControllers();
   
   modulation_increment_ = lut_lfo_increments[50];
-  modulation_sync_ticks_ = 0;
   pitch_bend_range_ = 2;
   vibrato_range_ = 0;
   
@@ -119,10 +118,10 @@ void Voice::set_modulation_rate(uint8_t modulation_rate, uint8_t index) {
   if (modulation_rate < LUT_LFO_INCREMENTS_SIZE) {
     modulation_increment_ = lut_lfo_increments[modulation_rate];
     modulation_increment_ *= pow(1.123f, (int) index);
-    modulation_sync_ticks_ = 0;
   } else {
     modulation_increment_ = 0;
-    modulation_sync_ticks_ = clock_division::list[modulation_rate - LUT_LFO_INCREMENTS_SIZE].num_ticks;
+    uint16_t ticks = clock_division::list[modulation_rate - LUT_LFO_INCREMENTS_SIZE].num_ticks;
+    synced_lfo_.SetPeriod(ticks);
   }
 }
 

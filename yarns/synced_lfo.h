@@ -35,40 +35,47 @@ namespace yarns {
 class SyncedLFO {
  public:
 
-  uint8_t clock_division_;
-
   SyncedLFO() { }
   ~SyncedLFO() { }
-  void Init() {
+  inline void Init() {
     counter_ = 0;
+    ticks_per_cycle_ = 0;
     phase_ = 0;
   }
 
-  uint32_t GetPhase() const {
+  inline uint32_t GetPhase() const {
     return phase_;
   }
 
-  uint32_t GetPhaseIncrement() const {
+  inline uint32_t GetPhaseIncrement() const {
     return phase_increment_;
   }
 
-  uint32_t Increment(uint32_t increment) {
+  inline uint32_t Increment(uint32_t increment) {
     phase_ += increment;
     return GetPhase();
   }
 
-  uint32_t Refresh() {
+  inline uint32_t Refresh() {
     return Increment(phase_increment_);
   }
 
-  int16_t Triangle(uint32_t phase) {
+  inline int16_t Triangle(uint32_t phase) {
     return phase < 1UL << 31       // x < 0.5
       ?  INT16_MIN + (phase >> 15) // y = -0.5 + 2x = 2(x - 1/4)
       : 0x17fff - (phase >> 15);   // y =  1.5 - 2x = 2(3/4 - x)
   }
 
-  void Tap(uint16_t num_ticks) {
-    uint32_t target_phase = ((counter_ % num_ticks) * 65536 / num_ticks) << 16;
+  inline void SetPeriod(uint16_t n) {
+    if (ticks_per_cycle_) {
+      counter_ *= 1 + ((n - 1) / ticks_per_cycle_);
+    }
+    ticks_per_cycle_ = n;
+    counter_ %= ticks_per_cycle_;
+  }
+
+  inline void Tap() {
+    uint32_t target_phase = ((counter_ % ticks_per_cycle_) * 65536 / ticks_per_cycle_) << 16;
     uint32_t target_increment = target_phase - previous_target_phase_;
 
     int32_t d_error = target_increment - (phase_ - previous_phase_);
@@ -87,12 +94,14 @@ class SyncedLFO {
 
     previous_phase_ = phase_;
     previous_target_phase_ = target_phase;
-    counter_ = (counter_ + 1) % num_ticks;
+    counter_ = (counter_ + 1) % ticks_per_cycle_;
   }
 
  private:
 
+  uint16_t ticks_per_cycle_;
   uint16_t counter_;
+
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t previous_target_phase_;

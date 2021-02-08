@@ -102,12 +102,6 @@ void Deck::Pack(PackedPart& storage) {
   }
 }
 
-void Deck::Clock() {
-  SequencerSettings seq = part_->sequencer_settings();
-  uint16_t num_ticks = clock_division::list[seq.clock_division].num_ticks;
-  lfo_.Tap(num_ticks * (1 << seq.loop_length));
-}
-
 void Deck::RemoveOldestNote() {
   RemoveNote(oldest_index_);
   if (size_) {
