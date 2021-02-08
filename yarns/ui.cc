@@ -818,6 +818,7 @@ void Ui::DoEvents() {
     Event e = queue_.PullEvent();
     const Mode& mode = modes_[mode_];
     splash_ = SPLASH_NONE; // Exit splash on any input
+    refresh_display = true;
     if (e.control_type == CONTROL_ENCODER_CLICK) {
       if (multi.recording()) {
         OnClickRecording(e);
@@ -825,6 +826,8 @@ void Ui::DoEvents() {
         (this->*mode.on_click)(e);
         if (mode_ == UI_MODE_PARAMETER_EDIT) {
           scroll_display = true;
+        } else {
+          refresh_display = false;
         }
       }
     } else if (e.control_type == CONTROL_ENCODER) {
@@ -841,7 +844,6 @@ void Ui::DoEvents() {
     } else if (e.control_type == CONTROL_SWITCH_HOLD) {
       OnSwitchHeld(e);
     }
-    refresh_display = true;
   }
 
   if (!tap_tempo_resolved_) {

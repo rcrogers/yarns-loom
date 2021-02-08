@@ -44,6 +44,10 @@ namespace yarns {
 using namespace std;
 using namespace stmlib;
 
+void Multi::Print(uint8_t byte) {
+  ui.PrintDebugByte(byte);
+}
+
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
   

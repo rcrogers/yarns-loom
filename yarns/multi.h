@@ -403,6 +403,8 @@ class Multi {
   void GetAudioSource(bool* audio_source);
   void GetLedsBrightness(uint8_t* brightness);
 
+  void Print(uint8_t byte);
+
   template<typename T>
   void Serialize(T* stream_buffer) {
     PackedMulti packed;

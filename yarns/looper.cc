@@ -28,6 +28,8 @@
 
 #include "yarns/looper.h"
 
+#include "yarns/multi.h"
+
 #include "yarns/clock_division.h"
 #include "yarns/part.h"
 
@@ -277,23 +279,35 @@ void Deck::RemoveNote(uint8_t target_index) {
     return;
   }
 
-  size_--;
   uint8_t search_prev_index;
   uint8_t search_next_index;
+
+  multi.Print(0xF0);
 
   Note& target_note = notes_[target_index];
   if (NoteIsPlaying(target_index)) {
     part_->LooperPlayNoteOff(target_index, target_note.pitch);
   }
 
+  multi.Print(0xF1);
+
   search_prev_index = target_index;
   while (true) {
+    // TODO infinite loop scenario -- there's a closed cycle that does not include target_index
     search_next_index = next_link_[search_prev_index].on;
+    /*
+    multi.Print(search_next_index);
+    for (uint32_t i = 0; i < 10000000; i++) {
+      search_next_index++;
+      search_next_index--;
+    }
+    */
     if (search_next_index == target_index) {
       break;
     }
     search_prev_index = search_next_index;
   }
+  multi.Print(0xF2);
   next_link_[search_prev_index].on = next_link_[target_index].on;
   next_link_[target_index].on = kNullIndex; // unneeded?
   if (target_index == search_prev_index) {
@@ -302,6 +316,8 @@ void Deck::RemoveNote(uint8_t target_index) {
   } else if (target_index == head_.on) {
     head_.on = search_prev_index;
   }
+
+  multi.Print(0xF3);
 
   if (next_link_[target_index].off == kNullIndex) {
     // Don't try to relink off
@@ -316,6 +332,7 @@ void Deck::RemoveNote(uint8_t target_index) {
     }
     search_prev_index = search_next_index;
   }
+  multi.Print(0xF4);
   next_link_[search_prev_index].off = next_link_[target_index].off;
   next_link_[target_index].off = kNullIndex;
   if (target_index == search_prev_index) {
@@ -324,6 +341,10 @@ void Deck::RemoveNote(uint8_t target_index) {
   } else if (target_index == head_.off) {
     head_.off = search_prev_index;
   }
+
+  multi.Print(0xF5);
+
+  size_--;
 }
 
 } // namespace looper
