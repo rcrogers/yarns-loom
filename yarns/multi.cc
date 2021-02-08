@@ -92,7 +92,7 @@ void Multi::Init(bool reset_calibration) {
   // seq->step[2].data[1] = 0x7f;
   // seq->step[3].data[0] = 72;
   // seq->step[3].data[1] = 0x7f;
-  // voicing->audio_mode = 1;
+  // voicing->oscillator_shape = 1;
   // settings_.clock_tempo = 100;
   // settings_.clock_swing = 99;
 
@@ -259,7 +259,11 @@ void Multi::Refresh() {
   }
 
   for (uint8_t j = 0; j < num_active_parts_; ++j) {
-    part_[j].mutable_looper().Refresh();
+    Part& part = part_[j];
+    part.mutable_looper().Refresh();
+    for (uint8_t v = 0; v < part.num_voices(); ++v) {
+      part.voice(v)->Refresh(v);
+    }
   }
 
   for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
@@ -289,18 +293,19 @@ void Multi::AssignVoicesToCVOutputs() {
   switch (settings_.layout) {
     case LAYOUT_MONO:
     case LAYOUT_DUAL_POLYCHAINED:
-      for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        cv_outputs_[i].assign_voices(&voice_[0]);
-      }
+      cv_outputs_[0].assign(&voice_[0], 0);
+      cv_outputs_[1].assign(&voice_[0], 0);
+      cv_outputs_[2].assign(&voice_[0], 0);
+      cv_outputs_[3].assign(&voice_[0], 1);
       break;
 
     case LAYOUT_DUAL_MONO:
     case LAYOUT_DUAL_POLY:
     case LAYOUT_QUAD_POLYCHAINED:
-      cv_outputs_[0].assign_voices(&voice_[0]);
-      cv_outputs_[1].assign_voices(&voice_[1]);
-      cv_outputs_[2].assign_voices(&voice_[0]);
-      cv_outputs_[3].assign_voices(&voice_[1]);
+      cv_outputs_[0].assign(&voice_[0], 0);
+      cv_outputs_[1].assign(&voice_[1], 0);
+      cv_outputs_[2].assign(&voice_[0], 1);
+      cv_outputs_[3].assign(&voice_[1], 1);
       break;
 
     case LAYOUT_QUAD_MONO:
@@ -311,22 +316,22 @@ void Multi::AssignVoicesToCVOutputs() {
     case LAYOUT_QUAD_TRIGGERS:
     case LAYOUT_QUAD_VOLTAGES:
       for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        cv_outputs_[i].assign_voices(&voice_[i]);
+        cv_outputs_[i].assign(&voice_[0], 1);
       }
       break;
 
     case LAYOUT_TWO_ONE:
-      cv_outputs_[0].assign_voices(&voice_[0]);
-      cv_outputs_[1].assign_voices(&voice_[1]);
-      cv_outputs_[2].assign_voices(&voice_[2]);
-      cv_outputs_[3].assign_voices(&voice_[2]);
+      cv_outputs_[0].assign(&voice_[0], 1);
+      cv_outputs_[1].assign(&voice_[1], 1);
+      cv_outputs_[2].assign(&voice_[2], 1);
+      cv_outputs_[3].assign(&voice_[2], 0);
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
-      cv_outputs_[0].assign_voices(&voice_[0], kNumParaphonicVoices);
-      cv_outputs_[1].assign_voices(&voice_[kNumParaphonicVoices]);
-      cv_outputs_[2].assign_voices(&voice_[kNumParaphonicVoices]);
-      cv_outputs_[3].assign_voices(&voice_[kNumParaphonicVoices + 1]);
+      cv_outputs_[0].assign(&voice_[0], kNumParaphonicVoices);
+      cv_outputs_[1].assign(&voice_[kNumParaphonicVoices], 1);
+      cv_outputs_[2].assign(&voice_[kNumParaphonicVoices], 0);
+      cv_outputs_[3].assign(&voice_[kNumParaphonicVoices + 1], 1);
       break;
   }
 }
@@ -449,60 +454,6 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
         gate[2] = voice_[2].gate();
         gate[3] = voice_[3].gate();
       }
-      break;
-  }
-}
-
-void Multi::GetAudioSource(bool* audio_source) {
-  switch (settings_.layout) {
-    case LAYOUT_MONO:
-    case LAYOUT_DUAL_POLYCHAINED:
-      audio_source[0] = false;
-      audio_source[1] = false;
-      audio_source[2] = false;
-      audio_source[3] = cv_outputs_[3].has_audio();
-      break;
-      
-    case LAYOUT_DUAL_MONO:
-    case LAYOUT_DUAL_POLY:
-    case LAYOUT_QUAD_POLYCHAINED:
-      audio_source[0] = false;
-      audio_source[1] = false;
-      audio_source[2] = cv_outputs_[2].has_audio();
-      audio_source[3] = cv_outputs_[3].has_audio();
-      break;
-      
-    case LAYOUT_QUAD_MONO:
-    case LAYOUT_QUAD_POLY:
-    case LAYOUT_OCTAL_POLYCHAINED:
-    case LAYOUT_THREE_ONE:
-    case LAYOUT_TWO_TWO:
-      audio_source[0] = cv_outputs_[0].has_audio();
-      audio_source[1] = cv_outputs_[1].has_audio();
-      audio_source[2] = cv_outputs_[2].has_audio();
-      audio_source[3] = cv_outputs_[3].has_audio();
-      break;
-    
-    case LAYOUT_TWO_ONE:
-      audio_source[0] = cv_outputs_[0].has_audio();
-      audio_source[1] = cv_outputs_[1].has_audio();
-      audio_source[2] = false;
-      audio_source[3] = cv_outputs_[3].has_audio();
-      break;
-
-    case LAYOUT_PARAPHONIC_PLUS_TWO:
-      audio_source[0] = true;
-      audio_source[1] = cv_outputs_[1].has_audio();
-      audio_source[2] = false;
-      audio_source[3] = cv_outputs_[3].has_audio();
-      break;
-
-    case LAYOUT_QUAD_TRIGGERS:
-    case LAYOUT_QUAD_VOLTAGES:
-      audio_source[0] = false;
-      audio_source[1] = false;
-      audio_source[2] = false;
-      audio_source[3] = false;
       break;
   }
 }
@@ -641,7 +592,7 @@ void Multi::AllocateParts() {
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
       {
-        CONSTRAIN(part_[0].mutable_voicing_settings()->audio_mode, 1, AUDIO_MODE_LAST - 1);
+        CONSTRAIN(part_[0].mutable_voicing_settings()->oscillator_mode, OSCILLATOR_MODE_OFF + 1, OSCILLATOR_MODE_LAST - 1);
         part_[0].AllocateVoices(&voice_[0], kNumParaphonicVoices, false);
         part_[1].AllocateVoices(&voice_[kNumParaphonicVoices], 1, false);
         part_[2].AllocateVoices(&voice_[kNumParaphonicVoices + 1], 1, false);
@@ -739,10 +690,10 @@ const uint8_t song[] = {
 
 void Multi::StartSong() {
   Set(MULTI_LAYOUT, LAYOUT_QUAD_MONO);
-  part_[0].mutable_voicing_settings()->audio_mode = 0x83;
-  part_[1].mutable_voicing_settings()->audio_mode = 0x83;
-  part_[2].mutable_voicing_settings()->audio_mode = 0x84;
-  part_[3].mutable_voicing_settings()->audio_mode = 0x86;
+  part_[0].mutable_voicing_settings()->oscillator_shape = 0x83;
+  part_[1].mutable_voicing_settings()->oscillator_shape = 0x83;
+  part_[2].mutable_voicing_settings()->oscillator_shape = 0x84;
+  part_[3].mutable_voicing_settings()->oscillator_shape = 0x86;
   AllocateParts();
   settings_.clock_tempo = 140;
   Stop();
@@ -899,9 +850,9 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value
   if (
     multi.layout() == LAYOUT_PARAPHONIC_PLUS_TWO &&
     part == 0 &&
-    &setting == &setting_defs.get(SETTING_VOICING_AUDIO_MODE)
+    &setting == &setting_defs.get(SETTING_VOICING_OSCILLATOR_MODE)
   ) {
-    min_value = AUDIO_MODE_SAW;
+    min_value = OSCILLATOR_MODE_DRONE;
   }
   CONSTRAIN(raw_value, min_value, max_value);
   uint8_t value = static_cast<uint8_t>(raw_value);

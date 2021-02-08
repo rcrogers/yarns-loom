@@ -67,8 +67,12 @@ const char* const legato_mode_values[] = {
   "OFF", "AUTO PORTAMENTO", "ON"
 };
 
-const char* const voicing_oscillator_values[] = {
-  "OF", "\x88\x88", "\x8C\x8C", "\x8C_", "/\\", "SINE", "**"
+const char* const voicing_oscillator_mode_values[] = {
+  "OFF", "DRONE", "ENVELOPED"
+};
+
+const char* const voicing_oscillator_shape_values[] = {
+  "\x88\x88", "\x8C\x8C", "\x8C_", "/\\", "SINE", "**"
 };
 
 const char* const voicing_allocation_priority_values[] = {
@@ -174,6 +178,12 @@ STATIC_ASSERT(kVibratoSpeedMax <= 127, overflow);
 const Setting Settings::settings_[] = {
   {
     "\x82""S", "SETUP MENU",
+    SETTING_DOMAIN_MULTI, { 0, 0 },
+    SETTING_UNIT_UINT8, 0, 0, NULL,
+    0, 0,
+  },
+  {
+    "\x82""O", "OSCILLATOR MENU",
     SETTING_DOMAIN_MULTI, { 0, 0 },
     SETTING_UNIT_UINT8, 0, 0, NULL,
     0, 0,
@@ -397,9 +407,15 @@ const Setting Settings::settings_[] = {
     72, 0,
   },
   {
-    "OS", "OSC WAVE",
-    SETTING_DOMAIN_PART, { PART_VOICING_AUDIO_MODE, 0 },
-    SETTING_UNIT_ENUMERATION, 0, AUDIO_MODE_LAST - 1, voicing_oscillator_values,
+    "OM", "OSC MODE",
+    SETTING_DOMAIN_PART, { PART_VOICING_OSCILLATOR_MODE, 0 },
+    SETTING_UNIT_ENUMERATION, 0, OSCILLATOR_MODE_LAST - 1, voicing_oscillator_mode_values,
+    70, 0,
+  },
+  {
+    "OS", "OSC SHAPE",
+    SETTING_DOMAIN_PART, { PART_VOICING_OSCILLATOR_SHAPE, 0 },
+    SETTING_UNIT_ENUMERATION, 0, OSCILLATOR_SHAPE_LAST - 1, voicing_oscillator_shape_values,
     71, 23,
   },
   {
@@ -550,7 +566,7 @@ const Setting Settings::settings_[] = {
   {
     "L-", "LOOP LENGTH",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_LOOP_LENGTH, 0 },
-    SETTING_UNIT_UINT8, 1, 127, NULL,
+    SETTING_UNIT_LOOP_LENGTH, 0, 7, NULL,
     84, 0,
   },
   {
@@ -679,6 +695,10 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       } else {
         PrintInteger(buffer, value);
       }
+      break;
+
+    case SETTING_UNIT_LOOP_LENGTH:
+      PrintInteger(buffer, 1 << value);
       break;
       
     default:

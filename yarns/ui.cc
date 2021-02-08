@@ -135,6 +135,7 @@ void Ui::Init() {
   active_part_ = 0;
 
   setup_menu_.Init(SETTING_MENU_SETUP);
+  oscillator_menu_.Init(SETTING_MENU_OSCILLATOR);
   envelope_menu_.Init(SETTING_MENU_ENVELOPE);
   live_menu_.Init(SETTING_LAST);
   current_menu_ = &live_menu_;
@@ -482,6 +483,9 @@ void Ui::OnLongClick(const Event& e) {
 void Ui::OnClick(const Event& e) {
   if (&setting() == &setting_defs.get(SETTING_MENU_SETUP)) {
     current_menu_ = &setup_menu_;
+    return;
+  } else if (&setting() == &setting_defs.get(SETTING_MENU_OSCILLATOR)) {
+    current_menu_ = &oscillator_menu_;
     return;
   } else if (&setting() == &setting_defs.get(SETTING_MENU_ENVELOPE)) {
     current_menu_ = &envelope_menu_;
@@ -915,6 +919,7 @@ void Ui::DoEvents() {
       mode_ == UI_MODE_MAIN_MENU || (
         mode_ == UI_MODE_PARAMETER_SELECT && (
           &setting() == &setting_defs.get(SETTING_MENU_SETUP) ||
+          &setting() == &setting_defs.get(SETTING_MENU_OSCILLATOR) ||
           &setting() == &setting_defs.get(SETTING_MENU_ENVELOPE) ||
           current_menu_ != &live_menu_
         )

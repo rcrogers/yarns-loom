@@ -130,7 +130,7 @@ class Deck {
 
  private:
 
-  inline uint8_t index_mod(uint8_t i) const {
+  inline uint8_t index_mod(int8_t i) const {
     return stmlib::modulo(i, kMaxNotes);
   }
   void Advance(uint16_t new_pos, bool play);

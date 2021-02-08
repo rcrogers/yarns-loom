@@ -67,10 +67,11 @@ void Deck::Rewind() {
 }
 
 void Deck::Unpack(PackedPart& storage) {
+  RemoveAll();
   oldest_index_ = storage.looper_oldest_index;
   size_ = storage.looper_size;
-  for (uint8_t i = 0; i < kMaxNotes; ++i) {
-    uint8_t index = index_mod(oldest_index_ + i);
+  for (uint8_t ordinal = 0; ordinal < kMaxNotes; ++ordinal) {
+    uint8_t index = index_mod(oldest_index_ + ordinal);
     PackedNote& packed_note = storage.looper_notes[index];
     Note& note = notes_[index];
 
@@ -79,7 +80,7 @@ void Deck::Unpack(PackedPart& storage) {
     note.pitch    = packed_note.pitch;
     note.velocity = packed_note.velocity;
 
-    if (index < size_) {
+    if (ordinal < size_) {
       Advance(note.on_pos, false);
       LinkOn(index);
       Advance(note.off_pos, false);
@@ -91,8 +92,8 @@ void Deck::Unpack(PackedPart& storage) {
 void Deck::Pack(PackedPart& storage) {
   storage.looper_oldest_index = oldest_index_;
   storage.looper_size = size_;
-  for (uint8_t i = 0; i < kMaxNotes; ++i) {
-    uint8_t index = index_mod(oldest_index_ + i);
+  for (uint8_t ordinal = 0; ordinal < kMaxNotes; ++ordinal) {
+    uint8_t index = index_mod(oldest_index_ + ordinal);
     PackedNote& packed_note = storage.looper_notes[index];
     Note& note = notes_[index];
 
@@ -106,7 +107,7 @@ void Deck::Pack(PackedPart& storage) {
 void Deck::Clock() {
   SequencerSettings seq = part_->sequencer_settings();
   uint16_t num_ticks = clock_division::list[seq.clock_division].num_ticks;
-  lfo_.Tap(num_ticks * seq.loop_length);
+  lfo_.Tap(num_ticks * (1 << seq.loop_length));
 }
 
 void Deck::RemoveOldestNote() {

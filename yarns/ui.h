@@ -271,6 +271,7 @@ class Ui {
   uint8_t splash_part_;
   
   Menu setup_menu_;
+  Menu oscillator_menu_;
   Menu envelope_menu_;
   Menu live_menu_;
   Menu* current_menu_;

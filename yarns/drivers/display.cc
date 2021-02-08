@@ -46,9 +46,10 @@ const uint16_t kBlinkMask = 128;
 
 // Sets max:min brightness ratio. Here, 2^5 results in brightness floor of 1/32
 const uint8_t kDisplayBrightnessRatioBits = 5;
-// PWM >7 bits causes visible flickering due to over-long PWM cycle at 8kHz
-const uint8_t kDisplayBrightnessPWMBits = 7;
+// PWM >6 bits causes visible flickering due to over-long PWM cycle at 8kHz
+const uint8_t kDisplayBrightnessPWMBits = 6;
 const uint8_t kDisplayBrightnessPWMMax = 1 << kDisplayBrightnessPWMBits;
+const uint8_t kDisplayBrightnessPWMMaxPerChar = kDisplayBrightnessPWMMax / kDisplayWidth;
 
 const uint16_t kCharacterEnablePins[] = {
   GPIO_Pin_6,
@@ -122,6 +123,7 @@ void Display::RefreshSlow() {
   // E.g.: actual_brightness_ = 1/8 + 7/8 * actual_brightness_
   actual_brightness_ = (1 << (16 - kDisplayBrightnessRatioBits)) + ((1 << kDisplayBrightnessRatioBits) - 1) * (actual_brightness_ >> kDisplayBrightnessRatioBits);
   blink_counter_ = (blink_counter_ + 1) % (kBlinkMask * 2);
+  std::fill(&redraw_[0], &redraw_[kDisplayWidth], true); // Force redraw
 
 #else
 
@@ -134,19 +136,29 @@ void Display::RefreshSlow() {
 }
 
 void Display::RefreshFast() {
-  if (brightness_pwm_cycle_ <= actual_brightness_
-      && (!blinking_ || blink_counter_ < kBlinkMask)) {
+  if (brightness_pwm_cycle_ == 0) {
+    // On rising edge, switch to next display position and draw it
     GPIOB->BRR = kCharacterEnablePins[active_position_];
     active_position_ = (active_position_ + 1) % kDisplayWidth;
-    if (use_mask_) {
-      Shift14SegmentsWord(mask_[active_position_]);
+    redraw_[active_position_] = true;
+  } else if (brightness_pwm_cycle_ - 1 == actual_brightness_) {
+    // On falling edge, undraw current display position
+    redraw_[active_position_] = true;
+  }
+  if (redraw_[active_position_]) {
+    redraw_[active_position_] = false;
+    if (brightness_pwm_cycle_ <= actual_brightness_
+        && (!blinking_ || blink_counter_ < kBlinkMask)) {
+      if (use_mask_) {
+        Shift14SegmentsWord(mask_[active_position_]);
+      } else {
+        Shift14SegmentsWord(chr_characters[
+          static_cast<uint8_t>(displayed_buffer_[active_position_])]);
+      }
+      GPIOB->BSRR = kCharacterEnablePins[active_position_];
     } else {
-      Shift14SegmentsWord(chr_characters[
-        static_cast<uint8_t>(displayed_buffer_[active_position_])]);
+      GPIOB->BRR = kCharacterEnablePins[active_position_];
     }
-    GPIOB->BSRR = kCharacterEnablePins[active_position_];
-  } else {
-    GPIOB->BRR = kCharacterEnablePins[active_position_];
   }
   brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
 }

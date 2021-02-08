@@ -69,7 +69,7 @@ class Display {
   char* mutable_buffer() { return short_buffer_; }
   void set_brightness(uint16_t fraction) {
     uint16_t base = fraction >> (16 - kDisplayBrightnessLinearizingBaseBits);
-    uint32_t power = pow(base, kDisplayBrightnessLinearizingExponent);
+    uint32_t power = base * base;
     brightness_ = power >> (kDisplayBrightnessLinearizingPowerBits - 16);
   }
   void Scroll();
@@ -103,6 +103,7 @@ class Display {
   uint16_t active_position_;
   uint16_t brightness_pwm_cycle_;
   uint16_t brightness_;
+  bool redraw_[kDisplayWidth];
   uint16_t blink_counter_;
   
   DISALLOW_COPY_AND_ASSIGN(Display);

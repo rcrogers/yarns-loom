@@ -22,18 +22,22 @@
 
 # Synth voice
 
-### ADSR envelopes with velocity control
-- Configured via the `▽📉 (ENVELOPE MENU)`
-- The envelope's amplitude and its sensitivity to velocity are set by `GAIN INIT` and `GAIN MOD`
-- The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.  
-- Controls voice amplitude for the paraphonic part in the new [`*2` layout](#layouts)
-- Available as an assignable CV output (`ENVELOPE`) in all layouts
-
-### Oscillator PWM
-  - Replaced the "25% rectangle" wave with a pulse-width modulated rectangle wave
+### Oscillator controls
+- Configured via the `▽O (OSCILLATOR MENU)`
+- `O? (OSCILLATOR MODE)` switches the oscillator between `OFF`, `DRONE`, and `ENVELOPED`
+- `OS (OSCILLATOR SHAPE)` sets the waveform
+- A pulse-width modulated rectangle wave replaces the "25% rectangle" wave
   - The modulating LFO for the PWM is the quadrature of the vibrato LFO
   - `OSC PW INITIAL` sets initial pulse width
-  - `OSC PW MOD` sets the depth of pulse width modulation by the LFO
+  - `OSC PW MOD` sets the bipolar depth of pulse width modulation by the LFO
+
+### ADSR envelopes with velocity control
+- Configured via the `▽📉 (ENVELOPE MENU)`
+- Controls voice amplitude when the `OSCILLATOR MODE` is `ENVELOPED`
+- Available as an assignable CV output (`ENVELOPE`) in all layouts
+- The envelope's amplitude and its sensitivity to velocity are set by `GAIN INIT` and `GAIN MOD`
+- The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
+  - Segment times range from 0.375 ms (3 ticks) to 3 seconds
   
 # Sequencer
 
@@ -71,7 +75,7 @@
 - `22` 3-part layout: one two-voice polyphonic part, two monophonic parts
 - `21` 2-part layout: 2-voice polyphonic part, monophonic part with modulation output
 - `*2` 3-part layout: 3-voice paraphonic part, 1 monophonic part with modulation, 1 monophonic part without modulation
-  - Paraphonic part can use the new [amplitude envelopes](#amplitude-envelopes)
+  - Paraphonic part can use the new [envelopes](#adsr-envelopes-with-velocity-control)
   - Audio mode is always on for the paraphonic part
   - Output channels:
     1. Part 1, 3 voices mixed to 1 audio output
