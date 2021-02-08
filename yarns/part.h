@@ -614,6 +614,7 @@ class Part {
   uint16_t arp_seq_prescaler_;
   
   ArpeggiatorState arp_;
+  uint8_t euclidean_step_index_;
   
   bool seq_recording_;
   bool seq_overdubbing_;

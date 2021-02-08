@@ -354,10 +354,19 @@ void Part::Reset() {
 
 void Part::Clock() {
   if (!arp_seq_prescaler_) {
-    if (seq_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      ClockArpeggiator();
-    } else if (seq_.play_mode == PLAY_MODE_SEQUENCER) {
-      ClockSequencer();
+    uint32_t step_mask = 1 << stmlib::modulo(euclidean_step_index_ + seq_.euclidean_rotate, seq_.euclidean_length);
+    // Read euclidean pattern from ROM.
+    uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) * 32;
+    if (step_mask & lut_euclidean[offset + seq_.euclidean_fill]) {
+      if (seq_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+        ClockArpeggiator();
+      } else if (seq_.play_mode == PLAY_MODE_SEQUENCER) {
+        ClockSequencer();
+      }
+    }
+    ++euclidean_step_index_;
+    if (euclidean_step_index_ >= seq_.euclidean_length) {
+      euclidean_step_index_ = 0;
     }
   }
   
@@ -396,6 +405,7 @@ void Part::Start() {
   release_latched_keys_on_next_note_on_ = false;
   ignore_note_off_messages_ = false;
   
+  euclidean_step_index_ = 0;
   arp_.key_index = 0;
   arp_.octave = 0;
   arp_.key_increment = 1;
@@ -523,14 +533,14 @@ void Part::ClockArpeggiator() {
   uint32_t pattern_mask;
   uint32_t pattern;
   uint32_t pattern_length;
-  
-  if (seq_.euclidean_length != 0) {
-    pattern_length = seq_.euclidean_length;
-    pattern_mask = 1 << ((arp_.step_index + seq_.euclidean_rotate) % pattern_length);
-    // Read euclidean pattern from ROM.
-    uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) * 32;
-    pattern = lut_euclidean[offset + seq_.euclidean_fill];
-    if (pattern_mask & pattern) {
+  if (
+    seq_.arp_direction == ARPEGGIATOR_DIRECTION_SEQUENCER_ALL ||
+    seq_.arp_direction == ARPEGGIATOR_DIRECTION_SEQUENCER_REST ||
+    seq_.arp_direction == ARPEGGIATOR_DIRECTION_SEQUENCER_WRAP
+  ) {
+    pattern_length = seq_.num_steps;
+    seq_step_ = arp_.step_index;
+    if (seq_.step[arp_.step_index].has_note()) {
       ArpeggiatorNoteOn();
     }
   } else {
