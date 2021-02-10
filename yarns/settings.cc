@@ -73,13 +73,14 @@ const char* const voicing_oscillator_mode_values[] = {
 };
 
 const char* const voicing_oscillator_shape_values[] = {
-  "\x88\x88",
-  "\x89\x89",
-  "\x8C_",
+  "\x88\x88", // VSaw
+  "\x89\x89", // CSaw
+  "\x88\x8C", // Saw-square morph
+  "\x8C_",    // Square
   "/\\",
   "SINE",
-  "\x8E\x8E",
-  "**",
+  "\x8E\x8E", // Pulse
+  "**",       // Noise
 };
 
 const char* const voicing_allocation_priority_values[] = {

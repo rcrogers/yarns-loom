@@ -190,6 +190,47 @@ void AnalogOscillator::RenderSquare() {
   next_sample_ = next_sample;
 }
 
+void AnalogOscillator::RenderSawSquareMorph() {
+  uint32_t pw = 0x80000000;
+  int32_t next_sample = next_sample_;
+  size_t size = kAudioBlockSize;
+  while (size--) {
+    bool self_reset = false;
+    int32_t this_sample = next_sample;
+    next_sample = 0;
+    phase_ += phase_increment_;
+    if (phase_ < phase_increment_) {
+      self_reset = true;
+    }
+    while (true) {
+      if (!high_) {
+        if (phase_ < pw) {
+          break;
+        }
+        uint32_t t = (phase_ - pw) / (phase_increment_ >> 16);
+        this_sample -= ThisBlepSample(t) >> 2; // TODO halving for the square BLEP is naive, this should be weighted in some fashion?
+        next_sample -= NextBlepSample(t) >> 2;
+        high_ = true;
+      }
+      if (high_) {
+        if (!self_reset) {
+          break;
+        }
+        self_reset = false;
+        uint32_t t = phase_ / (phase_increment_ >> 16);
+        this_sample -= ThisBlepSample(t) >> 1;
+        next_sample -= NextBlepSample(t) >> 1;
+        high_ = false;
+      }
+    }
+    int16_t saw = phase_ >> 17;
+    int16_t square = phase_ < pw ? 0 : 32767;
+    next_sample += Mix(saw, square, parameter_ << 1);
+    WriteSample((this_sample - 16384) << 1);
+  }
+  next_sample_ = next_sample;
+}
+
 void AnalogOscillator::RenderVariableSaw() {
   size_t size = kAudioBlockSize;
   int32_t next_sample = next_sample_;
@@ -334,6 +375,7 @@ void AnalogOscillator::RenderNoise() {
 AnalogOscillator::RenderFn AnalogOscillator::fn_table_[] = {
   &AnalogOscillator::RenderVariableSaw,
   &AnalogOscillator::RenderCSaw,
+  &AnalogOscillator::RenderSawSquareMorph,
   &AnalogOscillator::RenderSquare,
   &AnalogOscillator::RenderTriangleFold,
   &AnalogOscillator::RenderSineFold,

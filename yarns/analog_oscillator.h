@@ -43,6 +43,7 @@ const size_t kAudioBlockSize = 64;
 enum AnalogOscillatorShape {
   OSC_SHAPE_VARIABLE_SAW,
   OSC_SHAPE_CSAW,
+  OSC_SHAPE_SAW_SQUARE_MORPH,
   OSC_SHAPE_SQUARE,
   OSC_SHAPE_TRIANGLE_FOLD,
   OSC_SHAPE_SINE_FOLD,
@@ -129,6 +130,7 @@ class AnalogOscillator {
   
  private:
   void RenderSquare();
+  void RenderSawSquareMorph();
   void RenderVariableSaw();
   void RenderCSaw();
   void RenderTriangleFold();
