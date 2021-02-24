@@ -384,7 +384,7 @@ void Part::Clock() {
     step = BuildSeqStep();
     if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
       arp_ = BuildArpState(step);
-      step = arp_.step;
+      step = arp_.output_step;
     }
     if (step.has_note()) {
       if (step.is_slid()) {
@@ -418,7 +418,7 @@ void Part::Clock() {
       // Peek at next step to see if it's a continuation
       step = BuildSeqStep();
       if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-        step = BuildArpState(step).step;
+        step = BuildArpState(step).output_step;
       }
       if (step.is_continuation()) {
         // The next step contains a "sustain" message; or a slid note. Extends
@@ -448,7 +448,7 @@ void Part::Start() {
   seq_step_ = 0;
   
   arp_.ResetKey();
-  arp_.step_index = 0;
+  arp_.pattern_pos = 0;
   
   looper_.Rewind();
   std::fill(
@@ -592,10 +592,10 @@ const SequencerStep Part::BuildSeqStep() const {
   return SequencerStep((0x80 & step.data[0]) | (0x7f & note), step.data[1]);
 }
 
-const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
+const ArpeggiatorState Part::BuildArpState(SequencerStep input_step) const {
   ArpeggiatorState next = arp_;
   // In case the pattern doesn't hit a note, the default output step is a REST
-  next.step.data[0] = SEQUENCER_STEP_REST;
+  next.output_step.data[0] = SEQUENCER_STEP_REST;
 
   // Advance pattern
   uint32_t pattern_mask;
@@ -604,33 +604,33 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
   bool hit = false;
   if (seq_driven_arp()) {
     pattern_length = seq_.num_steps;
-    if (seq_step.has_note()) {
+    if (input_step.has_note()) {
       hit = true;
     } else { // Here, the output step can also be a TIE
-      next.step.data[0] = seq_step.data[0];
+      next.output_step.data[0] = input_step.data[0];
     }
   } else {
     // Build a dummy input step for ROTATE/SUBROTATE
-    seq_step.data[0] = kC4 + 1 + next.step_index;
-    seq_step.data[1] = 0x7f; // Full velocity
+    input_step.data[0] = kC4 + 1 + next.pattern_pos;
+    input_step.data[1] = 0x7f; // Full velocity
 
     if (seq_.euclidean_length != 0) {
       pattern_length = seq_.euclidean_length;
-      pattern_mask = 1 << ((next.step_index + seq_.euclidean_rotate) % seq_.euclidean_length);
+      pattern_mask = 1 << ((next.pattern_pos + seq_.euclidean_rotate) % seq_.euclidean_length);
       // Read euclidean pattern from ROM.
       uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) * 32;
       pattern = lut_euclidean[offset + seq_.euclidean_fill];
       hit = pattern_mask & pattern;
     } else {
       pattern_length = 16;
-      pattern_mask = 1 << next.step_index;
+      pattern_mask = 1 << next.pattern_pos;
       pattern = lut_arpeggiator_patterns[seq_.arp_pattern - 1];
       hit = pattern_mask & pattern;
     }
   }
-  ++next.step_index;
-  if (next.step_index >= pattern_length) {
-    next.step_index = 0;
+  ++next.pattern_pos;
+  if (next.pattern_pos >= pattern_length) {
+    next.pattern_pos = 0;
   }
 
   // If the pattern didn't hit a note, return a REST/TIE output step, and don't
@@ -655,11 +655,11 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
     case ARPEGGIATOR_DIRECTION_STEP_ROTATE:
       {
         next.key_increment = 0; // These arp directions move before playing the note
-        if (seq_step.is_white()) {
-          next.key_index = key_with_octave + seq_step.white_key_distance_from_middle_c();
+        if (input_step.is_white()) {
+          next.key_index = key_with_octave + input_step.white_key_distance_from_middle_c();
           next.octave = next.key_index / num_keys;
         } else { // If black key
-          next.key_index = seq_step.black_key_distance_from_middle_c();
+          next.key_index = input_step.black_key_distance_from_middle_c();
           next.octave = abs(next.key_index / num_keys);
           if (next.octave > seq_.arp_range) {
             return next; // Rest
@@ -671,15 +671,15 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
       {
         next.key_increment = 0; // These arp directions move before playing the note
         // Movement instructions derived from sequence step
-        uint8_t limit = seq_step.octave();
+        uint8_t limit = input_step.octave();
         uint8_t clock;
         uint8_t spacer;
-        if (seq_step.is_white()) {
-          clock = seq_step.white_key_value();
+        if (input_step.is_white()) {
+          clock = input_step.white_key_value();
           spacer = 1;
         } else {
           clock = 1;
-          spacer = seq_step.black_key_value() + 1;
+          spacer = input_step.black_key_value() + 1;
         }
         uint8_t old_pos = modulo(key_with_octave / spacer, limit);
         uint8_t new_pos = modulo(old_pos + clock, limit);
@@ -739,14 +739,14 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
     seq_.arp_direction == ARPEGGIATOR_DIRECTION_STEP_ROTATE ||
     seq_.arp_direction == ARPEGGIATOR_DIRECTION_STEP_SUBROTATE
   ) {
-    velocity = (velocity * seq_step.velocity()) >> 7;
+    velocity = (velocity * input_step.velocity()) >> 7;
   }
   note += 12 * next.octave;
   while (note > 127) {
     note -= 12;
   }
-  next.step.data[0] = note;
-  next.step.data[1] = velocity;
+  next.output_step.data[0] = note;
+  next.output_step.data[1] = velocity;
 
   return next;
 }
