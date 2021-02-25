@@ -598,12 +598,8 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep input_step) const {
   next.output_step.data[0] = SEQUENCER_STEP_REST;
 
   // Advance pattern
-  uint32_t pattern_mask;
-  uint32_t pattern;
-  uint8_t pattern_length;
   bool hit = false;
   if (seq_driven_arp()) {
-    pattern_length = seq_.num_steps;
     if (input_step.has_note()) {
       hit = true;
     } else { // Here, the output step can also be a TIE
@@ -614,23 +610,24 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep input_step) const {
     input_step.data[0] = kC4 + 1 + next.pattern_pos;
     input_step.data[1] = 0x7f; // Full velocity
 
+    uint32_t pattern;
+    uint8_t pattern_pos = next.pattern_pos;
+    uint8_t pattern_length;
     if (seq_.euclidean_length != 0) {
       pattern_length = seq_.euclidean_length;
-      pattern_mask = 1 << ((next.pattern_pos + seq_.euclidean_rotate) % seq_.euclidean_length);
+      pattern_pos = (pattern_pos + seq_.euclidean_rotate) % pattern_length);
       // Read euclidean pattern from ROM.
-      uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) * 32;
+      uint16_t offset = static_cast<uint16_t>(pattern_length - 1) * 32;
       pattern = lut_euclidean[offset + seq_.euclidean_fill];
-      hit = pattern_mask & pattern;
     } else {
       pattern_length = 16;
-      pattern_mask = 1 << next.pattern_pos;
       pattern = lut_arpeggiator_patterns[seq_.arp_pattern - 1];
-      hit = pattern_mask & pattern;
     }
-  }
-  ++next.pattern_pos;
-  if (next.pattern_pos >= pattern_length) {
-    next.pattern_pos = 0;
+    hit = pattern & (1 << pattern_pos);
+    ++next.pattern_pos;
+    if (next.pattern_pos >= pattern_length) {
+      next.pattern_pos = 0;
+    }
   }
 
   // If the pattern didn't hit a note, return a REST/TIE output step, and don't
