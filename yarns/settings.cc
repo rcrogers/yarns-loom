@@ -39,7 +39,21 @@
 namespace yarns {
 
 const char* const layout_values[] = {
-  "1M", "2M", "4M", "2P", "4P", "2>", "4>", "8>", "4T", "4V", "31", "22", "21", "*2"
+  "1M",
+  "2M",
+  "4M",
+  "2P",
+  "4P",
+  "2>",
+  "4>",
+  "8>",
+  "4T",
+  "4V",
+  "31",
+  "22",
+  "21",
+  "*2",
+  "6*"
 };
 
 const char* const midi_out_mode_values[] = {
