@@ -91,34 +91,19 @@ class Voice {
   void Init();
   void ResetAllControllers();
 
-  void Refresh(uint8_t voice_index);
+  void Refresh(
+    int16_t pitch_bend, uint16_t tremolo, int32_t timbre_15,
+    int16_t lfo, uint8_t vibrato_mod, int16_t vibrato_lfo, int16_t note_vibrato
+  );
+  void SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento);
   void NoteOn(int16_t note, uint8_t velocity, uint8_t portamento, bool trigger);
   void NoteOff();
   void ControlChange(uint8_t controller, uint8_t value);
-  void PitchBend(uint16_t pitch_bend) {
-    mod_pitch_bend_ = pitch_bend;
-  }
   void Aftertouch(uint8_t velocity) {
     mod_aux_[MOD_AUX_AFTERTOUCH] = velocity << 9;
   }
 
-  inline void Clock() {
-    if (!modulation_sync_ticks_) { return; }
-    synced_lfo_.Tap(modulation_sync_ticks_);
-  }
   void set_modulation_rate(uint8_t modulation_rate, uint8_t index);
-  inline void set_pitch_bend_range(uint8_t pitch_bend_range) {
-    pitch_bend_range_ = pitch_bend_range;
-  }
-  inline void set_vibrato_range(uint8_t vibrato_range) {
-    vibrato_range_ = vibrato_range;
-  }
-  inline void set_vibrato_mod(uint8_t n) { vibrato_mod_ = n; }
-  inline void set_tremolo_mod(uint8_t n) {
-    tremolo_mod_target_ = n << (16 - 7); }
-  inline void set_tremolo_shape(uint8_t n) {
-    tremolo_shape_ = static_cast<LFOShape>(n); }
-
   inline void set_trigger_duration(uint8_t trigger_duration) {
     trigger_duration_ = trigger_duration;
   }
@@ -154,12 +139,8 @@ class Voice {
   inline void set_oscillator_shape(uint8_t s) {
     oscillator_.set_shape(static_cast<OscillatorShape>(s));
   }
-  inline void set_timbre_init(uint8_t n) {
-    timbre_init_target_ = n << (16 - 7); }
-  inline void set_timbre_mod_lfo(uint8_t n) {
-    timbre_mod_lfo_target_ = n << (16 - 7); }
   inline void set_timbre_mod_envelope(int16_t n) {
-    timbre_mod_envelope_target_ = n;
+    timbre_mod_envelope_ = n;
   }
   
   inline void set_tuning(int8_t coarse, int8_t fine) {
@@ -196,7 +177,6 @@ class Voice {
   }
   
  private:
-  SyncedLFO synced_lfo_;
   Envelope envelope_;
   Oscillator oscillator_;
 
@@ -207,22 +187,14 @@ class Voice {
   int32_t tuning_;
   bool gate_;
   
-  int16_t mod_pitch_bend_;
   uint16_t mod_aux_[MOD_AUX_LAST];
   uint8_t mod_velocity_;
-  
-  uint8_t pitch_bend_range_;
-  uint32_t modulation_increment_;
-  uint16_t modulation_sync_ticks_;
-  uint8_t vibrato_range_;
-  uint8_t vibrato_mod_;
   
   uint8_t trigger_duration_;
   uint8_t trigger_shape_;
   bool trigger_scale_;
 
   uint8_t oscillator_mode_;
-  LFOShape tremolo_shape_;
   uint8_t aux_cv_source_;
   uint8_t aux_cv_source_2_;
   
@@ -240,15 +212,7 @@ class Voice {
   uint32_t trigger_phase_increment_;
   uint32_t trigger_phase_;
 
-  uint16_t tremolo_mod_target_;
-  uint16_t tremolo_mod_current_;
-
-  uint16_t timbre_mod_lfo_target_;
-  uint16_t timbre_mod_lfo_current_;
-  uint16_t timbre_init_target_;
-  uint16_t timbre_init_current_;
-  int16_t timbre_mod_envelope_target_;
-  int16_t timbre_mod_envelope_current_;
+  int16_t timbre_mod_envelope_;
 
   bool has_audio_listener_;
 

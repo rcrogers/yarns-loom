@@ -34,53 +34,39 @@
   - `TV (TIMBRE VEL MOD)` sets the bipolar modulation by velocity of the envelope modulation of timbre (e.g. velocity can polarize the timbre envelope)
 
 ### Oscillator synthesis models
-- Filtered noise
-  - `TIMBRE` sets filter cutoff
+- Filtered noise: `TIMBRE` sets filter cutoff
   - Voice pitch sets filter resonance
-  - Sub-shapes:
-    - Low-pass
-    - Notch
-    - Band-pass
-    - High-pass
-- Pulse-width modulation
-  - `TIMBRE` sets pulse width
-  - Sub-shapes:
-    - Pulse
-    - Saw
-- Hard-synced sine
-  - `TIMBRE` sets detuning of the secondary oscillator
-- Phase distortion
-  - `TIMBRE` sets filter cutoff
-  - Sub-shapes:
-    - Low-pass
-    - Peaking
-    - Band-pass
-    - High-pass
-- Wavefolder
-  - `TIMBRE` sets fold gain
-  - Sub-shapes:
-    - Sine
-    - Triangle
-- Dirac comb
-  - `TIMBRE` sets harmonic content
-- Frequency modulation
-  - `TIMBRE` sets the modulation depth
-  - Includes carrier frequency correction to maintain a consistent fundamental pitch
-  - Sub-shapes: [55 integer ratios, ordered from harmonic to inharmonic](./resources.cc#L943)
+  - Sub-shapes: low-pass, notch, band-pass, high-pass
+- Phase distortion, resonant saw: `TIMBRE` sets filter cutoff
+  - Sub-shapes: low-pass, peaking, band-pass, high-pass
+- Phase distortion, resonant pulse: `TIMBRE` sets filter cutoff
+  - Sub-shapes: low-pass, peaking, band-pass, high-pass
+- State-variable filter, low-pass: `TIMBRE` sets filter cutoff (resonance is fixed)
+  - Sub-shapes: pulse, saw
+- Pulse-width modulation: `TIMBRE` sets pulse width
+  - Sub-shapes: pulse, saw
+- Hard sync: `TIMBRE` sets detuning of the secondary oscillator
+  - Sub-shapes: sine, pulse, saw
+- Wavefolder: `TIMBRE` sets fold gain
+  - Sub-shapes: sine, triangle
+- Compressed sine (`tanh`): `TIMBRE` sets compression amount
+- Dirac comb: `TIMBRE` sets harmonic content
+- Frequency modulation: `TIMBRE` sets modulation index
+  - Sub-shapes: 15 integer ratios, ordered from harmonic to inharmonic
 
-### Amplitude dynamics: ADSR envelopes (with velocity modulation) and tremolo
+### Amplitude dynamics: envelope and tremolo
 - Configured via the `▽A (AMPLITUDE MENU)`
-- ADSR envelope with velocity modulation
-  - Envelope controls voice amplitude when the `OSCILLATOR MODE` is `ENVELOPED`
-  - Envelope is available as an assignable CV output (`ENVELOPE`) in all layouts
-  - Peak attack amplitude can be velocity-scaled via `PV (PEAK MOD VEL)`
-    - Positive values = damp on low velocity, negative values = damp on high velocity
-  - The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
-    - Segment times range from 1 ms (2 ticks) to 5 seconds
 - Tremolo can be applied to envelope and oscillator
   - Tremolo uses the same LFO frequency as vibrato
   - `TR (TREMOLO DEPTH)` sets the amount of tremolo
   - `TS (TREMOLO SHAPE)` applies a waveshaper to the LFO (triangle, down saw, up saw, square)
+- ADSR envelope with velocity modulation
+  - Envelope controls voice amplitude when the `OSCILLATOR MODE` is `ENVELOPED`
+  - Envelope is available as an assignable CV output (`ENVELOPE`) in all layouts
+  - Peak attack amplitude can be velocity-scaled via `PV (PEAK VEL MOD)`
+    - Positive values = damp on low velocity, negative values = damp on high velocity
+  - The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
+    - Segment times range from 1 ms (2 ticks) to 5 seconds
   
 # Sequencer
 
@@ -174,7 +160,7 @@
 
 ### Clock ratios
 - Added a variety of integer ratios for `O/` and `C/` (and for clock-synced `VS (VIBRATO SPEED)`)
-- [Includes 1/8, 3/7, 2/3, 6/5, 4/3, and more](./resources.cc#L959)
+- Includes 1/8, 3/7, 2/3, 6/5, 4/3, and more
   
 ### Other tweaks
 - Broadened portamento setting range from 51 to 64 values per curve shape

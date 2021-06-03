@@ -57,7 +57,7 @@ lookup_tables_32.append(
 # Create lookup table for portamento.
 num_values = 128
 max_time = 5.0  # seconds
-min_time = 1.9 / sample_rate
+min_time = 1.001 / sample_rate
 gamma = 0.25
 min_increment = excursion / (max_time * sample_rate)
 max_increment = excursion / (min_time * sample_rate)
@@ -474,8 +474,6 @@ Integer ratios for clock sync and FM
 
 lookup_tables_string = []
 
-factors = range(1, 10)
-
 # irrationals = [
 #   0.5 * 2 ** (16 / 1200.0),
 #   1.0 * 2 ** (16 / 1200.0),
@@ -485,15 +483,12 @@ factors = range(1, 10)
 #   numpy.pi,
 #   numpy.pi * 3 / 2,
 #   numpy.sqrt(2) / 2,
-#   numpy.sqrt(2),
+#   numpy.sqrt(2) * 1,
 #   numpy.sqrt(2) * 2,
 #   numpy.sqrt(2) * 3,
 #   numpy.sqrt(2) * 4,
 #   numpy.sqrt(3) * 2,
 # ]
-
-pairs = itertools.product(factors, factors)
-rationals = numpy.unique([Fraction(*x) for x in pairs])
 
 # Build normal form of carrier/modulator ratio, then use it to categorize
 # ratios, and calculate a correction factor for the carrier to keep a consistent
@@ -516,9 +511,14 @@ fm_ratio_names = []
 fm_carrier_corrections = []
 fm_modulator_intervals = []
 
-fms = map(make_fm, rationals)
+fms = map(make_fm, numpy.unique([Fraction(*x) for x in itertools.product(range(1, 10), range(1, 10))]))
 fms = sorted(fms, key=lambda (family, ratio, carrier_correction): (family.numerator, family.denominator, ratio))
+seen = {}
 for (family, ratio, carrier_correction) in fms:
+  family = str(family)
+  if seen.has_key(family):
+    continue
+  seen[family] = True
   fm_ratio_names.append(
     str(ratio.numerator) + str(ratio.denominator) + ' FM ' + str(ratio.numerator) + '/' + str(ratio.denominator)
   )
@@ -526,13 +526,13 @@ for (family, ratio, carrier_correction) in fms:
   fm_carrier_corrections.append(128 * 12 * numpy.log2(carrier_correction))
 
 lookup_tables_string.append(('fm_ratio_names', fm_ratio_names))
-lookup_tables_signed.append(('fm_carrier_corrections', fm_carrier_corrections))
+# lookup_tables_signed.append(('fm_carrier_corrections', fm_carrier_corrections))
 lookup_tables_signed.append(('fm_modulator_intervals', fm_modulator_intervals))
 
 
 clock_ratio_ticks = []
 clock_ratio_names = []
-for ratio in rationals:
+for ratio in numpy.unique([Fraction(*x) for x in itertools.product(range(1, 10), range(1, 10))]):
   ticks = (24.0 / ratio)
   if ticks % 1 != 0 or ratio < 1.0 / 8:
     continue

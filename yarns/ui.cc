@@ -340,6 +340,7 @@ void Ui::SetBrightnessFromSequencerPhase(const Part& part) {
   display_.set_brightness(phase);
 }
 
+const uint16_t kMasksNewLooperBeat[2] = { 0x1000 | 0x10, 0x1000 | 0x10 };
 void Ui::PrintLooperRecordingStatus() {
   if (
     recording_part().looper().overwrite_enabled() &&
@@ -352,7 +353,9 @@ void Ui::PrintLooperRecordingStatus() {
   uint8_t note_index = recording_part().LooperCurrentNoteIndex();
   if (note_index == looper::kNullIndex) {
     SetBrightnessFromSequencerPhase(recording_part());
-    display_.Print("__");
+    recording_part().new_beat()
+      ? display_.PrintMasks(kMasksNewLooperBeat)
+      : display_.Print("__");
     return;
   }
   const looper::Deck& looper_tape = recording_part().looper();

@@ -117,6 +117,10 @@ void Part::Init() {
   seq_.clock_quantization = 0;
   seq_.loop_length = 2; // 1 bar
 
+  tremolo_mod_current_ = 0;
+  timbre_mod_lfo_current_ = 0;
+  timbre_init_current_ = 0;
+
   StopRecording();
   DeleteSequence();
 }
@@ -330,10 +334,7 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
 }
 
 bool Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
-  for (uint8_t i = 0; i < num_voices_; ++i) {
-    voice_[i]->PitchBend(pitch_bend);
-  }
-  
+  mod_pitch_bend_ = pitch_bend;
   if (seq_recording_ &&
       (pitch_bend > 8192 + 2048 || pitch_bend < 8192 - 2048)) {
     seq_.step[seq_rec_step_].data[1] |= 0x80;
@@ -369,6 +370,45 @@ void Part::Reset() {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->NoteOff();
     voice_[i]->ResetAllControllers();
+  }
+}
+
+void Part::Refresh() {
+  looper_.Refresh();
+
+  if (voicing_.modulation_rate < LUT_LFO_INCREMENTS_SIZE) {
+    lfo_.Increment(lut_lfo_increments[voicing_.modulation_rate]);
+  } else {
+    lfo_.Refresh();
+  }
+
+  int32_t pitch_bend = static_cast<int32_t>(mod_pitch_bend_ - 8192) * voicing_.pitch_bend_range >> 6;
+
+  // Slew coarse inputs to avoid clicks
+  tremolo_mod_current_ = stmlib::slew(
+    tremolo_mod_current_, tremolo_mod_target_);
+  timbre_init_current_ = stmlib::slew(
+    timbre_init_current_, timbre_init_target_);
+  timbre_mod_lfo_current_ = stmlib::slew(
+    timbre_mod_lfo_current_, timbre_mod_lfo_target_);
+
+  uint16_t tremolo_lfo = 32767 - lfo_.shape(static_cast<LFOShape>(voicing_.tremolo_shape));
+  uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
+  uint16_t tremolo = UINT16_MAX - scaled_tremolo_lfo;
+
+  int16_t triangle_lfo = lfo_.shape(LFO_SHAPE_TRIANGLE);
+  int16_t timbre_15 =
+    (timbre_init_current_ >> (16 - 15)) +
+    (triangle_lfo * timbre_mod_lfo_current_ >> (31 - 15));
+
+  int16_t scaled_vibrato_lfo = triangle_lfo * voicing_.vibrato_mod >> 7;
+  int16_t note_vibrato = scaled_vibrato_lfo * voicing_.vibrato_range >> 8;
+
+  for (uint8_t v = 0; v < num_voices_; ++v) {
+    voice_[v]->Refresh(
+      pitch_bend, tremolo, timbre_15,
+      triangle_lfo, voicing_.vibrato_mod, scaled_vibrato_lfo, note_vibrato
+    );
   }
 }
 
@@ -436,12 +476,17 @@ void Part::Clock() {
   if (arp_seq_prescaler_ >= lut_clock_ratio_ticks[seq_.clock_division]) {
     arp_seq_prescaler_ = 0;
   }
-  
-  for (uint8_t i = 0; i < num_voices_; ++i) {
-    voice_[i]->Clock();
-  }
 
   looper_.Clock();
+  int16_t lfo_clock_ratio = voicing_.modulation_rate - LUT_LFO_INCREMENTS_SIZE;
+  if (lfo_clock_ratio >= 0) {
+    lfo_.Tap(lut_clock_ratio_ticks[lfo_clock_ratio]);
+  }
+}
+
+bool Part::new_beat() const {
+  return arp_seq_prescaler_ > 0 &&
+    arp_seq_prescaler_ <= (lut_clock_ratio_ticks[seq_.clock_division] >> 3);
 }
 
 void Part::Start() {
@@ -758,6 +803,8 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
 
 void Part::ResetAllControllers() {
   ResetLatch();
+  mod_pitch_bend_ = 8192;
+  voicing_.vibrato_mod = 0;
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->ResetAllControllers();
   }
@@ -857,12 +904,14 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
   CONSTRAIN(timbre_14, -1 << 13, (1 << 13) - 1)
   voice->set_timbre_mod_envelope(timbre_14 << 2);
 
-  uint16_t damping_13 = voicing_.amplitude_mod_velocity >= 0
-    ? voicing_.amplitude_mod_velocity * (127 - vel)
-    : -voicing_.amplitude_mod_velocity * vel;
+  uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
+  int32_t damping_22 = -voicing_.amplitude_mod_velocity * vel_concave_up;
+  if (voicing_.amplitude_mod_velocity >= 0) {
+    damping_22 += voicing_.amplitude_mod_velocity << 16;
+  }
 
   voice->envelope()->SetADSR(
-    UINT16_MAX - (damping_13 << 3),
+    UINT16_MAX - (damping_22 >> (22 - 16)),
     modulate_7bit(voicing_.env_init_attack, voicing_.env_mod_attack, vel),
     modulate_7bit(voicing_.env_init_decay, voicing_.env_mod_decay, vel),
     modulate_7bit(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel),
@@ -933,7 +982,7 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity) {
           legato = false;
         } else {
           // Begin portamento from the preceding priority note
-          voice_[voice_index]->NoteOn(Tune(before.note), velocity, 0, false);
+          voice_[voice_index]->SetPortamento(Tune(before.note), velocity, 0);
         }
       }
       // Prevent the same note from being simultaneously played on two channels.
@@ -1023,13 +1072,11 @@ void Part::TouchVoiceAllocation() {
 void Part::TouchVoices() {
   CONSTRAIN(voicing_.aux_cv, 0, MOD_AUX_LAST - 1);
   CONSTRAIN(voicing_.aux_cv_2, 0, MOD_AUX_LAST - 1);
+  tremolo_mod_target_ = voicing_.tremolo_mod << (16 - 7);
+  timbre_init_target_ = voicing_.timbre_initial << (16 - 7);
+  timbre_mod_lfo_target_ = UINT16_MAX - lut_env_expo[((127 - voicing_.timbre_mod_lfo) << 1)];
   for (uint8_t i = 0; i < num_voices_; ++i) {
-    voice_[i]->set_pitch_bend_range(voicing_.pitch_bend_range);
     voice_[i]->set_modulation_rate(voicing_.modulation_rate, i);
-    voice_[i]->set_vibrato_range(voicing_.vibrato_range);
-    voice_[i]->set_vibrato_mod(voicing_.vibrato_mod);
-    voice_[i]->set_tremolo_mod(voicing_.tremolo_mod);
-    voice_[i]->set_tremolo_shape(voicing_.tremolo_shape);
     voice_[i]->set_trigger_duration(voicing_.trigger_duration);
     voice_[i]->set_trigger_scale(voicing_.trigger_scale);
     voice_[i]->set_trigger_shape(voicing_.trigger_shape);
@@ -1038,8 +1085,6 @@ void Part::TouchVoices() {
     voice_[i]->set_oscillator_mode(voicing_.oscillator_mode);
     voice_[i]->set_oscillator_shape(voicing_.oscillator_shape);
     voice_[i]->set_tuning(voicing_.tuning_transpose, voicing_.tuning_fine);
-    voice_[i]->set_timbre_init(voicing_.timbre_initial);
-    voice_[i]->set_timbre_mod_lfo(voicing_.timbre_mod_lfo);
   }
 }
 

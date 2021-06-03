@@ -89,12 +89,12 @@ class SyncedLFO {
     } 
   }
 
-  void Tap(uint16_t num_ticks, uint32_t phase_offset = 0) {
-    if (num_ticks != period_ticks_) {
+  void Tap(uint16_t new_period_ticks, uint32_t phase_offset = 0) {
+    if (new_period_ticks != period_ticks_) {
       if (period_ticks_) {
-        counter_ = (counter_ * num_ticks + period_ticks_ - 1) / period_ticks_;
+        counter_ = (counter_ * new_period_ticks) / period_ticks_;
       }
-      period_ticks_ = num_ticks;
+      period_ticks_ = new_period_ticks;
       counter_ %= period_ticks_;
     }
 

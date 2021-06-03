@@ -34,28 +34,6 @@
 
 #include "yarns/resources.h"
 
-#define RENDER_LOOP(body) \
-  size_t size = kAudioBlockSize; \
-  timbre_.ComputeSlope(); gain_.ComputeSlope(); \
-  int32_t next_sample = next_sample_; \
-  uint32_t phase = phase_; \
-  uint32_t phase_increment = phase_increment_; \
-  uint32_t modulator_phase = modulator_phase_; \
-  uint32_t modulator_phase_increment = modulator_phase_increment_; \
-  while (size--) { \
-    int32_t this_sample = next_sample; \
-    next_sample = 0; \
-    phase += phase_increment; \
-    modulator_phase += modulator_phase_increment; \
-    timbre_.Tick(); gain_.Tick(); \
-    body \
-  } \
-  next_sample_ = next_sample; \
-  phase_ = phase; \
-  phase_increment_ = phase_increment; \
-  modulator_phase_ = modulator_phase; \
-  modulator_phase_increment_ = modulator_phase_increment;
-
 namespace yarns {
 
 using namespace stmlib;
@@ -66,11 +44,65 @@ static const uint16_t kHighestNote = 128 * 128;
 static const uint16_t kPitchTableStart = 116 * 128;
 static const uint16_t kOctave = 12 * 128;
 
+/* static */
+Oscillator::RenderFn Oscillator::fn_table_[] = {
+  &Oscillator::RenderFilteredNoise,
+  &Oscillator::RenderFilteredNoise,
+  &Oscillator::RenderFilteredNoise,
+  &Oscillator::RenderFilteredNoise,
+  &Oscillator::RenderPhaseDistortionPulse,
+  &Oscillator::RenderPhaseDistortionPulse,
+  &Oscillator::RenderPhaseDistortionPulse,
+  &Oscillator::RenderPhaseDistortionPulse,
+  &Oscillator::RenderPhaseDistortionSaw,
+  &Oscillator::RenderPhaseDistortionSaw,
+  &Oscillator::RenderPhaseDistortionSaw,
+  &Oscillator::RenderPhaseDistortionSaw,
+  // SVF LP
+  &Oscillator::RenderPulse,
+  &Oscillator::RenderSaw,
+  // Width mod
+  &Oscillator::RenderPulse,
+  &Oscillator::RenderSaw,
+  &Oscillator::RenderSyncSine,
+  &Oscillator::RenderSyncPulse,
+  &Oscillator::RenderSyncSaw,
+  &Oscillator::RenderFoldSine,
+  &Oscillator::RenderFoldTriangle,
+  &Oscillator::RenderTanhSine,
+  &Oscillator::RenderBuzz,
+  &Oscillator::RenderFM,
+  // &Oscillator::RenderAudioRatePWM,
+};
+
+void StateVariableFilter::Init(uint8_t interpolation_slope) {
+  cutoff.Init(interpolation_slope);
+  damp.Init(interpolation_slope);
+}
+
+// 15-bit params
+void StateVariableFilter::RenderInit(int16_t frequency, int16_t resonance) {
+  cutoff.SetTarget(Interpolate824(lut_svf_cutoff, frequency << 17) >> 1);
+  damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17) >> 1);
+  cutoff.ComputeSlope();
+  damp.ComputeSlope();
+}
+
+void StateVariableFilter::RenderSample(int16_t in) {
+  cutoff.Tick();
+  damp.Tick();
+  notch = (in >> 1) - (bp * damp.value() >> 15);
+  lp += cutoff.value() * bp >> 15;
+  CONSTRAIN(lp, -16384, 16383);
+  hp = notch - lp;
+  bp += cutoff.value() * hp >> 15;
+}
+
 void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t gain) {
     pitch_ = pitch;
-    if (shape_ >= OSC_SHAPE_FM) {
-      pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
-    }
+    // if (shape_ >= OSC_SHAPE_FM) {
+    //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
+    // }
     gain_.SetTarget((scale_ * gain) >> 17);
 
     int32_t strength = 32767;
@@ -125,8 +157,8 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
 void Oscillator::Render() {
   if (audio_buffer_.writable() < kAudioBlockSize) return;
   
-  if (pitch_ > kHighestNote) {
-    pitch_ = kHighestNote;
+  if (pitch_ >= kHighestNote) {
+    pitch_ = kHighestNote - 1;
   } else if (pitch_ < 0) {
     pitch_ = 0;
   }
@@ -138,58 +170,178 @@ void Oscillator::Render() {
   (this->*fn)();
 }
 
-void Oscillator::RenderVariablePulse() {
-  modulator_phase_increment_ = phase_increment_;
+#define RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(body) \
+  timbre_.ComputeSlope(); gain_.ComputeSlope(); \
+  int32_t next_sample = next_sample_; \
+  uint32_t phase = phase_; \
+  uint32_t phase_increment = phase_increment_; \
+  uint32_t modulator_phase = modulator_phase_; \
+  uint32_t modulator_phase_increment = modulator_phase_increment_; \
+  size_t size = kAudioBlockSize; \
+  while (size--) { \
+    int32_t this_sample = next_sample; \
+    next_sample = 0; \
+    phase += phase_increment; \
+    timbre_.Tick(); gain_.Tick(); \
+    body \
+    audio_buffer_.Overwrite(offset_ - ((gain_.value() * this_sample) >> 15)); \
+  } \
+  next_sample_ = next_sample; \
+  phase_ = phase; \
+  phase_increment_ = phase_increment; \
+  modulator_phase_ = modulator_phase; \
+  modulator_phase_increment_ = modulator_phase_increment;
+
+#define RENDER_LOOP(body) \
+  RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT( \
+    modulator_phase += modulator_phase_increment; \
+    body; \
+  )
+
+#define EDGES_SAW(ph, ph_incr) \
+  if (!high_) { \
+    if (ph < pw) break; \
+    uint32_t t = (ph - pw) / (ph_incr >> 16); \
+    this_sample -= ThisBlepSample(t) >> 1; \
+    next_sample -= NextBlepSample(t) >> 1; \
+    high_ = true; \
+  } \
+  if (high_) { \
+    if (!self_reset) break; \
+    self_reset = false; \
+    uint32_t t = ph / (ph_incr >> 16); \
+    this_sample -= ThisBlepSample(t) >> 1; \
+    next_sample -= NextBlepSample(t) >> 1; \
+    high_ = false; \
+  }
+
+#define EDGES_PULSE(ph, ph_incr) \
+  if (!high_) { \
+    if (ph < pw) break; \
+    uint32_t t = (ph - pw) / (ph_incr >> 16); \
+    this_sample += ThisBlepSample(t); \
+    next_sample += NextBlepSample(t); \
+    high_ = true; \
+  } \
+  if (high_) { \
+    if (!self_reset) break; \
+    self_reset = false; \
+    uint32_t t = ph / (ph_incr >> 16); \
+    this_sample -= ThisBlepSample(t); \
+    next_sample -= NextBlepSample(t); \
+    high_ = false; \
+  }
+
+#define SYNC(discontinuity_code, edges) \
+  bool sync_reset = false; \
+  bool self_reset = false; \
+  bool transition_during_reset = false; \
+  uint32_t reset_time = 0; \
+  if (phase < phase_increment) { \
+    sync_reset = true; \
+    uint8_t master_sync_time = phase / (phase_increment >> 7); \
+    reset_time = static_cast<uint32_t>(master_sync_time) << 9; \
+    uint32_t reset_modulator_phase = modulator_phase + \
+      (65535 - reset_time) * (modulator_phase_increment >> 16); \
+    if (reset_modulator_phase < modulator_phase) { \
+      transition_during_reset = true; \
+    } \
+    int32_t discontinuity = discontinuity_code; \
+    this_sample += discontinuity * ThisBlepSample(reset_time) >> 15; \
+    next_sample += discontinuity * NextBlepSample(reset_time) >> 15; \
+  } \
+  modulator_phase += modulator_phase_increment; \
+  self_reset = modulator_phase < modulator_phase_increment; \
+  while (transition_during_reset || !sync_reset) { \
+    edges; \
+  } \
+  if (sync_reset) { \
+    modulator_phase = reset_time * (modulator_phase_increment >> 16); \
+    high_ = false; \
+  }
+
+#define SET_TRACKING_FILTER_CUTOFF \
+  int32_t cutoff = (pitch_ >> 1) + (timbre_.target() >> 1); \
+  CONSTRAIN(cutoff, 0, 0x7fff);
+
+void Oscillator::RenderPulse() {
+  SET_TRACKING_FILTER_CUTOFF;
+  svf_.RenderInit(cutoff, 0x7fff);
+  uint32_t pw = 0x80000000;
   RENDER_LOOP(
-    bool self_reset = modulator_phase < modulator_phase_increment;
-    uint32_t pw = static_cast<uint32_t>(32768 - timbre_.value()) << 16;
-    while (true) {
-      if (!high_) {
-        if (modulator_phase < pw) break;
-        uint32_t t = (modulator_phase - pw) / (modulator_phase_increment >> 16);
-        this_sample += ThisBlepSample(t);
-        next_sample += NextBlepSample(t);
-        high_ = true;
-      }
-      if (high_) {
-        if (!self_reset) break;
-        self_reset = false;
-        uint32_t t = modulator_phase / (modulator_phase_increment >> 16);
-        this_sample -= ThisBlepSample(t);
-        next_sample -= NextBlepSample(t);
-        high_ = false;
-      }
+    if (shape_ == OSC_SHAPE_VARIABLE_PULSE) {
+      pw = static_cast<uint32_t>(32768 - timbre_.value()) << 16;
     }
-    next_sample += modulator_phase < pw ? 0 : 32767;
-    WriteSample((this_sample - 16384) << 1);
+    bool self_reset = phase < phase_increment;
+    while (true) { EDGES_PULSE(phase, phase_increment) }
+    next_sample += phase < pw ? 0 : 32767;
+    this_sample = (this_sample - 16384) << 1;
+    svf_.RenderSample(this_sample);
+    if (shape_ == OSC_SHAPE_LP_PULSE) this_sample = svf_.lp << 1;
   )
 }
 
-void Oscillator::RenderVariableSaw() {
-  modulator_phase_increment_ = phase_increment_;
+void Oscillator::RenderSaw() {
+  SET_TRACKING_FILTER_CUTOFF;
+  svf_.RenderInit(cutoff, 0x6000);
+  uint32_t pw = 0;
   RENDER_LOOP(
-    bool self_reset = modulator_phase < modulator_phase_increment;
-    uint32_t pw = static_cast<uint32_t>(timbre_.value()) << 16;
-    while (true) {
-      if (!high_) {
-        if (modulator_phase < pw) break;
-        uint32_t t = (modulator_phase - pw) / (modulator_phase_increment >> 16);
-        this_sample -= ThisBlepSample(t) >> 1;
-        next_sample -= NextBlepSample(t) >> 1;
-        high_ = true;
-      }
-      if (high_) {
-        if (!self_reset) break;
-        self_reset = false;
-        uint32_t t = modulator_phase / (modulator_phase_increment >> 16);
-        this_sample -= ThisBlepSample(t) >> 1;
-        next_sample -= NextBlepSample(t) >> 1;
-        high_ = false;
-      }
+    if (shape_ == OSC_SHAPE_VARIABLE_SAW) {
+      pw = static_cast<uint32_t>(timbre_.value()) << 16;
     }
+    bool self_reset = phase < phase_increment;
+    while (true) { EDGES_SAW(phase, phase_increment) }
+    next_sample += phase >> 18;
+    next_sample += (phase - pw) >> 18;
+    this_sample = (this_sample - 16384) << 1;
+    svf_.RenderSample(this_sample);
+    if (shape_ == OSC_SHAPE_LP_SAW) this_sample = svf_.lp << 1;
+  )
+}
+
+#define SET_SYNC_INCREMENT \
+  modulator_phase_increment_ = ComputePhaseIncrement( \
+    pitch_ + (timbre_.target() >> 4) \
+  );
+
+void Oscillator::RenderSyncSine() {
+  SET_SYNC_INCREMENT;
+  RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(
+    SYNC(
+      wav_sine[0] - Interpolate824(wav_sine, reset_modulator_phase),
+      break
+    );
+    (void) transition_during_reset; (void) sync_reset; (void) self_reset;
+    next_sample += Interpolate824(wav_sine, modulator_phase);
+  )
+}
+
+void Oscillator::RenderSyncPulse() {
+  SET_SYNC_INCREMENT;
+  uint32_t pw = 0x80000000;
+  RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(
+    SYNC(
+      0 - reset_modulator_phase < pw ? 0 : 32767,
+      EDGES_PULSE(modulator_phase, modulator_phase_increment)
+    );
+    next_sample += modulator_phase < pw ? 0 : 32767;
+    this_sample = (this_sample - 16384) << 1;
+  )
+}
+
+void Oscillator::RenderSyncSaw() {
+  SET_SYNC_INCREMENT;
+  uint32_t pw = 0;
+  RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(
+    SYNC(
+      0 - (
+        (reset_modulator_phase >> 18) + ((reset_modulator_phase - pw) >> 18)
+      ),
+      EDGES_SAW(modulator_phase, modulator_phase_increment)
+    );
     next_sample += modulator_phase >> 18;
     next_sample += (modulator_phase - pw) >> 18;
-    WriteSample((this_sample - 16384) << 1);
+    this_sample = (this_sample - 16384) << 1;
   )
 }
 
@@ -200,7 +352,6 @@ void Oscillator::RenderFoldTriangle() {
     this_sample += 32768;
     this_sample = this_sample * timbre_.value() >> 15;
     this_sample = Interpolate88(ws_tri_fold, this_sample + 32768);
-    WriteSample(this_sample);
   )
 }
 
@@ -209,7 +360,15 @@ void Oscillator::RenderFoldSine() {
     this_sample = Interpolate824(wav_sine, phase);
     this_sample = this_sample * timbre_.value() >> 15;
     this_sample = Interpolate88(ws_sine_fold, this_sample + 32768);
-    WriteSample(this_sample);
+  )
+}
+
+void Oscillator::RenderTanhSine() {
+  RENDER_LOOP(
+    this_sample = Interpolate824(wav_sine, phase);
+    int16_t baseline = this_sample >> 6;
+    this_sample = baseline + ((this_sample - baseline) * timbre_.value() >> 15);
+    this_sample = Interpolate88(ws_violent_overdrive, this_sample + 32768);
   )
 }
 
@@ -218,148 +377,115 @@ void Oscillator::RenderFM() {
   modulator_phase_increment_ = ComputePhaseIncrement(pitch_ + interval);
   RENDER_LOOP(
     int16_t modulator = Interpolate824(wav_sine, modulator_phase);
-    uint32_t phase_mod = (modulator * timbre_.value()) << 2;
+    uint32_t phase_mod = modulator * timbre_.value();
+    phase_mod = (phase_mod << 3) + (phase_mod << 2); // FM index 0-3
     this_sample = Interpolate824(wav_sine, phase + phase_mod);
-    WriteSample(this_sample);
   )
 }
 
-void Oscillator::RenderSineSync() {
-  modulator_phase_increment_ = ComputePhaseIncrement(
-    pitch_ + (timbre_.target() >> 4)
-  );
-  RENDER_LOOP(
-    if (phase < phase_increment) {
-      modulator_phase -= modulator_phase_increment; // Modulator resets instead
-      uint8_t master_sync_time = phase / (phase_increment >> 7);
-      uint32_t master_reset_time = static_cast<uint32_t>(master_sync_time) << 9;
-      uint32_t modulator_phase_at_reset = modulator_phase + \
-        (65535 - master_reset_time) * (modulator_phase_increment >> 16);
-      int32_t before = 0;
-      int32_t after = 0;
-      switch (shape_) {
-        case OSC_SHAPE_SYNC_SINE:
-          before = Interpolate824(wav_sine, modulator_phase_at_reset);
-          after = wav_sine[0];
-          break;
-        default: break;
-      }
-      int32_t discontinuity = after - before;
-      this_sample += discontinuity * ThisBlepSample(master_reset_time) >> 15;
-      next_sample += discontinuity * NextBlepSample(master_reset_time) >> 15;
-      modulator_phase = master_reset_time * (modulator_phase_increment >> 16);
-    }
-    switch (shape_) {
-      case OSC_SHAPE_SYNC_SINE:
-        next_sample += Interpolate824(wav_sine, modulator_phase);
-        break;
-      default: break;
-    }
-    WriteSample(this_sample);
-  )
-}
+#define SET_PHASE_DISTORTION_INCREMENT \
+  int16_t timbre_offset = timbre_.target() - 2048; \
+  int32_t shifted_pitch = pitch_ + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8); \
+  if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1; \
+  modulator_phase_increment_ = ComputePhaseIncrement(shifted_pitch);
 
-const uint32_t kPhaseReset[] = {
-  0,
-  0x80000000,
-  0x40000000,
-  0x80000000
+const uint32_t kPhaseResetSaw[] = {
+  0, // Low-pass: -cos
+  0x40000000, // Peaking: sin
+  0x40000000, // Band-pass: sin
+  0x80000000, // High-pass: cos
 };
 
-void Oscillator::RenderDigitalFilter() {
-  int16_t shifted_pitch = pitch_ + ((timbre_.target() - 2048) >> 2);
-  uint8_t filter_type = shape_ - OSC_SHAPE_CZ_LP;
-  uint32_t modulator_phase_increment_ = ComputePhaseIncrement(shifted_pitch);
+const uint32_t kPhaseResetPulse[] = {
+  0x40000000,
+  0x80000000,
+  0x40000000,
+  0x80000000,
+};
+
+void Oscillator::RenderPhaseDistortionPulse() {
+  SET_PHASE_DISTORTION_INCREMENT;
+  uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
+  int32_t integrator = pd_square_.integrator;
   RENDER_LOOP(
-    if (phase < phase_increment) {
-      modulator_phase = kPhaseReset[filter_type];
+    if ((phase << 1) < (phase_increment << 1)) {
+      pd_square_.polarity = !pd_square_.polarity;
+      modulator_phase = kPhaseResetPulse[filter_type];
     }
     int32_t carrier = Interpolate824(wav_sine, modulator_phase);
-    uint16_t saw = ~(phase >> 16);
-    // uint16_t triangle = (phase >> 15) ^ (phase & 0x80000000 ? 0xffff : 0x0000);
-    uint16_t window = saw; // aux_parameter_ < 16384 ? saw : triangle;
-    if (filter_type & 2) {
-      this_sample = (carrier * window) >> 16;
+    uint16_t window = ~(phase >> 15); // Double saw
+    int32_t pulse = (carrier * window) >> 16;
+    if (pd_square_.polarity) pulse = -pulse;
+    uint16_t integrator_gain = modulator_phase_increment >> 16; // Orig 14
+    integrator += (pulse * integrator_gain) >> 14; // Orig 16
+    CLIP(integrator)
+    int16_t output;
+    if (filter_type & 2) { // Band- or high-pass
+      output = pulse;
     } else {
-      this_sample = (window * (carrier + 32768) >> 16) - 32768;
+      // TODO HP is 2dB above LP, which is 2dB above PK
+      output = integrator;
+      if (filter_type == 1) { // Peaking
+        output = (pulse + integrator) >> 1;
+      }
     }
-    // uint16_t balance = (aux_parameter_ < 16384 ? 
-    //                     aux_parameter_ : ~aux_parameter_) << 2;
-    WriteSample(this_sample);
+    this_sample = output;
+  )
+  pd_square_.integrator = integrator;
+}
+
+void Oscillator::RenderPhaseDistortionSaw() {
+  SET_PHASE_DISTORTION_INCREMENT;
+  uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
+  RENDER_LOOP(
+    if (phase < phase_increment) {
+      modulator_phase = kPhaseResetSaw[filter_type];
+    }
+    int32_t carrier = Interpolate824(wav_sine, modulator_phase);
+    uint16_t window = ~(phase >> 16); // Saw
+    int16_t output;
+    if (filter_type & 2) { // Band- or high-pass
+      output = (window * carrier) >> 16;
+    } else {
+      output = (window * (carrier + 32768) >> 16) - 32768;
+    }
+    this_sample = output;
   )
 }
 
 void Oscillator::RenderBuzz() {
   RENDER_LOOP(
-    int32_t shifted_pitch = pitch_ + ((32767 - timbre_.value()) >> 1);
-    uint16_t crossfade = shifted_pitch << 6;
-    size_t index = (shifted_pitch >> 10);
-    if (index >= kNumZones) {
-      index = kNumZones - 1;
-    }
+    int32_t zone_14 = (pitch_ + ((32767 - timbre_.value()) >> 1));
+    uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
+    size_t index = zone_14 >> 10; // Use highest 4 bits
+    CONSTRAIN(index, 0, kNumZones - 1);
     const int16_t* wave_1 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
     index += 1;
-    if (index >= kNumZones) {
-      index = kNumZones - 1;
-    }
+    CONSTRAIN(index, 0, kNumZones - 1);
     const int16_t* wave_2 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
     this_sample = Crossfade(wave_1, wave_2, phase, crossfade);
-    WriteSample(this_sample);
   )
 }
 
 void Oscillator::RenderFilteredNoise() {
-  svf_.cutoff.SetTarget(Interpolate824(lut_svf_cutoff, timbre_.target() << 17) >> 1);
-  svf_.damp.SetTarget(Interpolate824(lut_svf_damp, pitch_ << 18) >> 1);
-  svf_.cutoff.ComputeSlope();
-  svf_.damp.ComputeSlope();
+  int32_t cutoff = 0x1000 + (timbre_.target() >> 1); // 1/4...1/2
+  svf_.RenderInit(cutoff, pitch_ << 1);
   // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
   // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;
-  int32_t bp = svf_.bp;
-  int32_t lp = svf_.lp;
-  int32_t notch, hp, in;
   RENDER_LOOP(
-    svf_.cutoff.Tick();
-    svf_.damp.Tick();
-    in = Random::GetSample() >> 1;
-    notch = in - (bp * svf_.damp.value() >> 15);
-    lp += svf_.cutoff.value() * bp >> 15;
-    CONSTRAIN(lp, -16384, 16383)
-    hp = notch - lp;
-    bp += svf_.cutoff.value() * hp >> 15;
+    svf_.RenderSample(Random::GetSample());
     switch (shape_) {
-      case OSC_SHAPE_NOISE_LP: this_sample = lp; break;
-      case OSC_SHAPE_NOISE_NOTCH: this_sample = notch; break;
-      case OSC_SHAPE_NOISE_BP: this_sample = bp; break;
-      case OSC_SHAPE_NOISE_HP: this_sample = hp; break;
+      case OSC_SHAPE_NOISE_LP: this_sample = svf_.lp; break;
+      case OSC_SHAPE_NOISE_NOTCH: this_sample = svf_.notch; break;
+      case OSC_SHAPE_NOISE_BP: this_sample = svf_.bp; break;
+      case OSC_SHAPE_NOISE_HP: this_sample = svf_.hp; break;
       default: break;
     }
-    CONSTRAIN(this_sample, -16384, 16383)
+    this_sample <<= 1;
+    // CLIP(this_sample);
     // result = result * gain_correction >> 15;
     // result = Interpolate88(ws_moderate_overdrive, result + 32768);
-    WriteSample(this_sample << 1);
   )
-  svf_.lp = lp;
-  svf_.bp = bp;
 }
-
-/* static */
-Oscillator::RenderFn Oscillator::fn_table_[] = {
-  &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderVariablePulse,
-  &Oscillator::RenderVariableSaw,
-  &Oscillator::RenderSineSync,
-  &Oscillator::RenderDigitalFilter,
-  &Oscillator::RenderDigitalFilter,
-  &Oscillator::RenderDigitalFilter,
-  &Oscillator::RenderDigitalFilter,
-  &Oscillator::RenderFoldSine,
-  &Oscillator::RenderFoldTriangle,
-  &Oscillator::RenderBuzz,
-  &Oscillator::RenderFM,
-};
 
 }  // namespace yarns

@@ -57,6 +57,14 @@ MASKS = {
   'p': 0x04,
 }
 
+CZ = 'afpkj'
+
+low_pass = 'pl'
+peaking = 'dnlm'
+notch = 'pmk'
+band_pass = 'nl'
+high_pass = 'nk'
+
 characters = {
   'A': 'afepkbc',
   'B': 'adhmbck',
@@ -160,7 +168,7 @@ characters = {
   '\x80': 'jlbc',
   '\x81': 'efgn',
   '\x82': 'agj',
-  '\x83': 'dnl',
+  '\x83': 'dnlm',
   
   # LRDU arrow
   '\x84': 'jkl',
@@ -169,9 +177,9 @@ characters = {
   '\x87': 'nml',
   
   # Waveforms
-  '\x88': 'njbc',  # Saw
+  '\x88': 'efgl',  # Saw
   '\x89': 'pjb',   # CSaw
-  '\x8A': 'mn',    # Baby saw
+  '\x8A': 'ml',    # Baby saw
   '\x8B': 'nl',    # Tri
   '\x8C': 'efabc', # Square
   '\x8D': 'epkc',   # Baby square
@@ -197,7 +205,16 @@ characters = {
   '\x9D': 'def',
   '\x9E': 'efa',
   '\x9F': 'fab',
-  '\xA0': 'abcdefghjklmnp',
+
+  '\xA0': low_pass,
+  '\xA1': high_pass,
+  '\xA2': notch,
+
+  # CZ
+  '\xB0': CZ + low_pass,
+  '\xB1': CZ + peaking,
+  '\xB2': CZ + band_pass,
+  '\xB3': CZ + high_pass,
   
   '\xFF': 'abcdefghjklmnp',
   
@@ -207,6 +224,6 @@ characters = {
 character_table = []
 for i in xrange(256):
   segments = characters.get(chr(i), '')
-  character_table.append(sum(MASKS[segment] for segment in segments))
+  character_table.append(sum(MASKS[segment] for segment in set(segments)))
   
 characters = [('characters', character_table)]

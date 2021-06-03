@@ -35,9 +35,9 @@ def scale(x, min=-32766, max=32766, center=True):
 
 x = ((numpy.arange(0, 257) / 128.0 - 1.0))
 x[-1] = x[-2]
-violent_overdrive = numpy.tanh(8.0 * x)
-overdrive = numpy.tanh(5.0 * x)
-moderate_overdrive = numpy.tanh(2.0 * x)
+violent_overdrive = numpy.tanh(16.0 * x)
+# overdrive = numpy.tanh(5.0 * x)
+# moderate_overdrive = numpy.tanh(2.0 * x)
 
 # Wavefolder curves from the first version
 # tri_fold = numpy.abs(4.0 * x - numpy.round(4.0 * x)) * numpy.sign(x)
@@ -47,7 +47,7 @@ tri_fold = numpy.sin(numpy.pi * (3 * x + (2 * x) ** 3))
 
 # In v1.4 RC
 window = numpy.exp(-x * x * 4) ** 1.5
-sine = numpy.sin(8 * numpy.pi * x)
+sine = numpy.sin(16 * numpy.pi * x)
 sine_fold = sine * window + numpy.arctan(3 * x) * (1 - window)
 sine_fold /= numpy.abs(sine_fold).max()
 
@@ -60,6 +60,6 @@ sine_fold /= numpy.abs(sine_fold).max()
 # sine_fold = sine + cubic + knee
 
 # waveshapers.append(('moderate_overdrive', scale(moderate_overdrive)))
-# waveshapers.append(('violent_overdrive', scale(violent_overdrive)))
+waveshapers.append(('violent_overdrive', scale(violent_overdrive)))
 waveshapers.append(('sine_fold', scale(sine_fold, center=False)))
 waveshapers.append(('tri_fold', scale(tri_fold)))

@@ -42,26 +42,44 @@ namespace yarns {
 
 const size_t kAudioBlockSize = 64;
 
-struct SvfState {
+class StateVariableFilter {
+ public:
+  void Init(uint8_t interpolation_slope);
+  void RenderInit(int16_t frequency, int16_t resonance);
+  void RenderSample(int16_t in);
+  int32_t bp, lp, notch, hp;
+ private:
   Interpolator cutoff, damp;
-  int32_t bp;
-  int32_t lp;
+};
+
+struct PhaseDistortionSquareModulator {
+  int32_t integrator;
+  bool polarity;
 };
 
 enum OscillatorShape {
-  OSC_SHAPE_NOISE_LP,
   OSC_SHAPE_NOISE_NOTCH,
+  OSC_SHAPE_NOISE_LP,
   OSC_SHAPE_NOISE_BP,
   OSC_SHAPE_NOISE_HP,
+  OSC_SHAPE_CZ_PULSE_LP,
+  OSC_SHAPE_CZ_PULSE_PK,
+  OSC_SHAPE_CZ_PULSE_BP,
+  OSC_SHAPE_CZ_PULSE_HP,
+  OSC_SHAPE_CZ_SAW_LP,
+  OSC_SHAPE_CZ_SAW_PK,
+  OSC_SHAPE_CZ_SAW_BP,
+  OSC_SHAPE_CZ_SAW_HP,
+  OSC_SHAPE_LP_PULSE,
+  OSC_SHAPE_LP_SAW,
   OSC_SHAPE_VARIABLE_PULSE,
   OSC_SHAPE_VARIABLE_SAW,
   OSC_SHAPE_SYNC_SINE,
-  OSC_SHAPE_CZ_LP,
-  OSC_SHAPE_CZ_PK,
-  OSC_SHAPE_CZ_BP,
-  OSC_SHAPE_CZ_HP,
+  OSC_SHAPE_SYNC_PULSE,
+  OSC_SHAPE_SYNC_SAW,
   OSC_SHAPE_FOLD_SINE,
   OSC_SHAPE_FOLD_TRIANGLE,
+  OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_BUZZ,
   OSC_SHAPE_FM,
 };
@@ -79,17 +97,12 @@ class Oscillator {
     offset_ = offset;
     timbre_.Init(64);
     gain_.Init(64);
-    svf_.cutoff.Init(64);
-    svf_.damp.Init(64);
+    svf_.Init(64);
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
     high_ = false;
     next_sample_ = 0;
-  }
-
-  inline void WriteSample(int16_t sample) {
-    audio_buffer_.Overwrite(offset_ - ((gain_.value() * sample) >> 15));
   }
 
   inline uint16_t ReadSample() {
@@ -105,14 +118,17 @@ class Oscillator {
   void Render();
   
  private:
-  void RenderVariablePulse();
-  void RenderVariableSaw();
-  void RenderCSaw();
+  void RenderPulse();
+  void RenderSaw();
   void RenderFoldTriangle();
   void RenderFoldSine();
   void RenderFM();
-  void RenderSineSync();
-  void RenderDigitalFilter();
+  void RenderSyncSine();
+  void RenderSyncPulse();
+  void RenderSyncSaw();
+  void RenderTanhSine();
+  void RenderPhaseDistortionPulse();
+  void RenderPhaseDistortionSaw();
   void RenderBuzz();
   void RenderFilteredNoise();
   
@@ -142,7 +158,9 @@ class Oscillator {
   uint32_t modulator_phase_;
   uint32_t modulator_phase_increment_;
   bool high_;
-  SvfState svf_;
+
+  StateVariableFilter svf_;
+  PhaseDistortionSquareModulator pd_square_;
   
   int32_t next_sample_;
   int32_t scale_;
