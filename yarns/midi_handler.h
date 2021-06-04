@@ -234,7 +234,7 @@ class MidiHandler {
   static void SysExSendPackets(const uint8_t* data, size_t size);
   
   static inline bool calibrating() {
-    return calibration_voice_ < kNumSystemVoices && calibration_note_ < kNumOctaves;
+    return calibration_voice_ < kNumCVOutputs && calibration_note_ < kNumOctaves;
   }
   static inline uint8_t calibration_voice() { return calibration_voice_; }
   static inline uint8_t calibration_note() { return calibration_note_; }
