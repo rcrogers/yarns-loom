@@ -39,21 +39,22 @@
 namespace yarns {
 
 const char* const layout_values[] = {
-  "1M",
-  "2M",
-  "4M",
-  "2P",
-  "4P",
-  "2>",
-  "4>",
-  "8>",
-  "4T",
-  "4V",
-  "31",
-  "22",
-  "21",
-  "*2",
-  "6*"
+  "1M MONOPHONIC",
+  "2M DUAL MONOPHONIC",
+  "4M QUAD MONOPHONIC",
+  "2P DUOPHONIC",
+  "4P QUADRAPHONIC",
+  "2> POLYCHAINED DUOPHONIC",
+  "4> POLYCHAINED QUADRAPHONIC",
+  "8> POLYCHAINED OCTOPHONIC",
+  "4T QUAD TRIGGERS",
+  "4V QUAD VOLTAGES",
+  "31 TRIPHONIC + MONOPHONIC",
+  "22 DUOPHONIC + DUAL MONOPHONIC",
+  "21 DUOPHONIC + MONOPHONIC",
+  "*2 PARA-TRIPHONIC + DUAL MONOPHONIC",
+  "*1 PARA-TRIPHONIC + MONOPHONIC",
+  "4* PARA-QUADRAPHONIC"
 };
 
 const char* const midi_out_mode_values[] = {

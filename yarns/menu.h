@@ -267,6 +267,30 @@ static const SettingIndex paraphonic_plus_two[] = {
   MENU_END
 };
 
+static const SettingIndex paraphonic_plus_one[] = {
+  MENU_LAYOUT_CLOCK,
+  SETTING_CLOCK_OVERRIDE,
+  MENU_MIDI,
+  MENU_VOICING_ALLOCATION_MIXED,
+  MENU_MODULATION,
+  SETTING_VOICING_CV_OUT_3,
+  SETTING_VOICING_CV_OUT_4,
+  MENU_TUNING,
+  MENU_END
+};
+
+static const SettingIndex paraphonic_only[] = {
+  MENU_LAYOUT_CLOCK,
+  SETTING_CLOCK_OVERRIDE,
+  MENU_MIDI,
+  MENU_VOICING_ALLOCATION_MIXED,
+  MENU_MODULATION,
+  SETTING_VOICING_CV_OUT_3,
+  SETTING_VOICING_CV_OUT_4,
+  MENU_TUNING,
+  MENU_END
+};
+
 static const SettingIndex two_one[] = {
   MENU_LAYOUT_CLOCK,
   MENU_MIDI,
@@ -285,7 +309,7 @@ static const SettingIndex quad_voltages[] = {
   MENU_END
 };
 
-static const SettingIndex* setup_setting_list_for_layout[] = {
+static const SettingIndex* setup_setting_list_for_layout[LAYOUT_LAST] = {
   mono,
   dual_mono,
   quad_mono,
@@ -300,6 +324,8 @@ static const SettingIndex* setup_setting_list_for_layout[] = {
   two_two,
   two_one,
   paraphonic_plus_two,
+  paraphonic_plus_one,
+  paraphonic_only,
 };
 
 class Menu {

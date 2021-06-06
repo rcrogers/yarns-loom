@@ -337,14 +337,21 @@ void Multi::AssignVoicesToCVOutputs() {
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
-      AssignOutputVoice(0, 0, DC_PITCH, kNumParaphonicVoices);
-      AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 1);
-      AssignOutputVoice(2, kNumParaphonicVoices, DC_AUX_1, 0);
-      AssignOutputVoice(3, kNumParaphonicVoices + 1, DC_PITCH, 1);
+      AssignOutputVoice(0, 0, DC_PITCH, kVoicesParaphonicPlusTwo);
+      AssignOutputVoice(1, kVoicesParaphonicPlusTwo, DC_PITCH, 1);
+      AssignOutputVoice(2, kVoicesParaphonicPlusTwo, DC_AUX_1, 0);
+      AssignOutputVoice(3, kVoicesParaphonicPlusTwo + 1, DC_PITCH, 1);
+      break;
+
+    case LAYOUT_PARAPHONIC_PLUS_ONE:
+      AssignOutputVoice(0, 0, DC_PITCH, kVoicesParaphonicPlusOne);
+      AssignOutputVoice(1, kVoicesParaphonicPlusOne, DC_PITCH, 1);
+      AssignOutputVoice(2, kVoicesParaphonicPlusOne, DC_AUX_1, 0);
+      AssignOutputVoice(3, kVoicesParaphonicPlusOne, DC_AUX_2, 0);
       break;
 
     case LAYOUT_PARAPHONIC_ONLY:
-      AssignOutputVoice(0, 0, DC_PITCH, kNumSystemVoices);
+      AssignOutputVoice(0, 0, DC_PITCH, kVoicesParaphonicOnly);
       break;
   }
 }
@@ -414,8 +421,15 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
     case LAYOUT_PARAPHONIC_PLUS_TWO:
       gate[0] = cv_outputs_[0].gate();
       gate[1] = cv_outputs_[1].gate();
-      gate[2] = settings_.clock_override ? clock() : voice_[kNumParaphonicVoices].trigger();
+      gate[2] = settings_.clock_override ? clock() : voice_[kVoicesParaphonicPlusTwo].trigger();
       gate[3] = cv_outputs_[3].gate();
+      break;
+
+    case LAYOUT_PARAPHONIC_PLUS_ONE:
+      gate[0] = cv_outputs_[0].gate();
+      gate[1] = cv_outputs_[1].gate();
+      gate[2] = settings_.clock_override ? clock() : voice_[kVoicesParaphonicPlusOne].trigger();
+      gate[3] = reset_or_playing_flag();
       break;
 
     case LAYOUT_PARAPHONIC_ONLY:
@@ -454,6 +468,12 @@ void Multi::GetLedsBrightness(uint8_t* brightness) {
     }
     return;
   }
+
+  const NoteEntry& last_note = part_[0].priority_note(NOTE_STACK_PRIORITY_LAST);
+  const uint8_t last_voice = part_[0].FindVoiceForNote(last_note.note);
+  bool last_voice_missing = \
+    last_note.note == NOTE_STACK_FREE_SLOT ||
+    last_voice == VOICE_ALLOCATION_NOT_FOUND;
   
   switch (settings_.layout) {
     case LAYOUT_MONO:
@@ -500,26 +520,26 @@ void Multi::GetLedsBrightness(uint8_t* brightness) {
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
       {
-        const NoteEntry& last_note = part_[0].priority_note(NOTE_STACK_PRIORITY_LAST);
-        const uint8_t last_voice = part_[0].FindVoiceForNote(last_note.note);
-        brightness[0] = (
-          last_note.note == NOTE_STACK_FREE_SLOT ||
-          last_voice == VOICE_ALLOCATION_NOT_FOUND
-        ) ? 0 : part_[0].voice(last_voice)->velocity() << 1;
-        brightness[1] = voice_[kNumParaphonicVoices].gate() ? (voice_[kNumParaphonicVoices].velocity() << 1) : 0;
-        brightness[2] = voice_[kNumParaphonicVoices].aux_cv();
-        brightness[3] = voice_[kNumParaphonicVoices + 1].gate() ? (voice_[kNumParaphonicVoices + 1].velocity() << 1) : 0;
+        brightness[0] = last_voice_missing ? 0 : part_[0].voice(last_voice)->velocity() << 1;
+        brightness[1] = voice_[kVoicesParaphonicPlusTwo].gate() ? (voice_[kVoicesParaphonicPlusTwo].velocity() << 1) : 0;
+        brightness[2] = voice_[kVoicesParaphonicPlusTwo].aux_cv();
+        brightness[3] = voice_[kVoicesParaphonicPlusTwo + 1].gate() ? (voice_[kVoicesParaphonicPlusTwo + 1].velocity() << 1) : 0;
+      }
+      break;
+
+    case LAYOUT_PARAPHONIC_PLUS_ONE:
+      {
+        brightness[0] = last_voice_missing ? 0 : part_[0].voice(last_voice)->velocity() << 1;
+        brightness[1] = voice_[kVoicesParaphonicPlusOne].gate() ? (voice_[kVoicesParaphonicPlusOne].velocity() << 1) : 0;
+        brightness[2] = voice_[kVoicesParaphonicPlusOne].aux_cv();
+        brightness[2] = voice_[kVoicesParaphonicPlusOne].aux_cv_2();
       }
       break;
 
     case LAYOUT_PARAPHONIC_ONLY:
       {
-        const NoteEntry& last_note = part_[0].priority_note(NOTE_STACK_PRIORITY_LAST);
-        const uint8_t last_voice_index = part_[0].FindVoiceForNote(last_note.note);
-        brightness[0] = (last_voice_index == VOICE_ALLOCATION_NOT_FOUND) ? 0 :
-          (part_[0].voice(last_voice_index)->mod_aux(MOD_AUX_ENVELOPE) >> 8);
-        brightness[1] = (last_voice_index == VOICE_ALLOCATION_NOT_FOUND) ? 0 :
-          (part_[0].voice(last_voice_index)->velocity() << 1);
+        brightness[0] = last_voice_missing ? 0 : part_[0].voice(last_voice)->velocity() << 1;
+        brightness[1] = last_voice_missing ? 0 : part_[0].voice(last_voice)->velocity() << 1;
         brightness[2] = clock() ? 255 : 0;
         brightness[3] = reset_or_playing_flag() ? 255 : 0;
       }
@@ -597,17 +617,26 @@ void Multi::AllocateParts() {
     case LAYOUT_PARAPHONIC_PLUS_TWO:
       {
         CONSTRAIN(part_[0].mutable_voicing_settings()->oscillator_mode, OSCILLATOR_MODE_OFF + 1, OSCILLATOR_MODE_LAST - 1);
-        part_[0].AllocateVoices(&voice_[0], kNumParaphonicVoices, false);
-        part_[1].AllocateVoices(&voice_[kNumParaphonicVoices], 1, false);
-        part_[2].AllocateVoices(&voice_[kNumParaphonicVoices + 1], 1, false);
+        part_[0].AllocateVoices(&voice_[0], kVoicesParaphonicPlusTwo, false);
+        part_[1].AllocateVoices(&voice_[kVoicesParaphonicPlusTwo], 1, false);
+        part_[2].AllocateVoices(&voice_[kVoicesParaphonicPlusTwo + 1], 1, false);
         num_active_parts_ = 3;
+      }
+      break;
+
+    case LAYOUT_PARAPHONIC_PLUS_ONE:
+      {
+        CONSTRAIN(part_[0].mutable_voicing_settings()->oscillator_mode, OSCILLATOR_MODE_OFF + 1, OSCILLATOR_MODE_LAST - 1);
+        part_[0].AllocateVoices(&voice_[0], kVoicesParaphonicPlusOne, false);
+        part_[1].AllocateVoices(&voice_[kVoicesParaphonicPlusOne], 1, false);
+        num_active_parts_ = 2;
       }
       break;
 
     case LAYOUT_PARAPHONIC_ONLY:
       {
         CONSTRAIN(part_[0].mutable_voicing_settings()->oscillator_mode, OSCILLATOR_MODE_OFF + 1, OSCILLATOR_MODE_LAST - 1);
-        part_[0].AllocateVoices(&voice_[0], kNumSystemVoices, false);
+        part_[0].AllocateVoices(&voice_[0], kVoicesParaphonicOnly, false);
         num_active_parts_ = 1;
       }
       break;
@@ -837,6 +866,7 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value
   if (
     (
       multi.layout() == LAYOUT_PARAPHONIC_PLUS_TWO ||
+      multi.layout() == LAYOUT_PARAPHONIC_PLUS_ONE ||
       multi.layout() == LAYOUT_PARAPHONIC_ONLY
     ) &&
     part == 0 &&
