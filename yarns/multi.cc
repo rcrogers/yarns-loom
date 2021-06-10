@@ -544,7 +544,7 @@ void Multi::GetLedsBrightness(uint8_t* brightness) {
     case LAYOUT_PARAPHONIC_ONLY:
       {
         brightness[0] = last_voice_missing ? 0 : part_[0].voice(last_voice)->velocity() << 1;
-        brightness[1] = last_voice_missing ? 0 : part_[0].voice(last_voice)->velocity() << 1;
+        brightness[1] = last_voice_missing ? 0 : part_[0].voice(last_voice)->velocity() << 1; // TODO
         brightness[2] = clock() ? 255 : 0;
         brightness[3] = reset_or_playing_flag() ? 255 : 0;
       }

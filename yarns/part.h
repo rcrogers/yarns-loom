@@ -43,11 +43,13 @@ namespace yarns {
 class Voice;
 
 const uint8_t kNumSteps = 30;
+
 const uint8_t kNumSystemVoices = 5;
 const uint8_t kVoicesParaphonicPlusTwo = 3;
 const uint8_t kVoicesParaphonicPlusOne = 3;
 const uint8_t kVoicesParaphonicOnly = 4;
 const uint8_t kNumMaxVoicesPerPart = 4;
+
 const uint8_t kNoteStackSize = 12;
 const uint8_t kNoteStackMapping = kNoteStackSize + 1; // 1-based
 
