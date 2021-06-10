@@ -335,7 +335,7 @@ void Ui::SetBrightnessFromSequencerPhase(const Part& part) {
   if (part.looped()) {
     phase = UINT16_MAX - part.looper().phase();
   } else {
-    phase = (1 + part.playing_step()) * (UINT16_MAX / part.sequencer_settings().num_steps);
+    phase = ((1 + part.playing_step()) << 16) / part.sequencer_settings().num_steps;
   }
   display_.set_brightness(phase);
 }
@@ -389,8 +389,8 @@ void Ui::PrintRecordingStatus() {
 }
 
 void Ui::PrintNote(int16_t note) {
-  buffer_[0] = notes_long[2 * (note % 12)];
-  buffer_[1] = notes_long[1 + 2 * (note % 12)];
+  buffer_[0] = notes_long[(note % 12) << 1];
+  buffer_[1] = notes_long[1 + ((note % 12) << 1)];
   buffer_[1] = buffer_[1] == ' ' ? octave[note / 12] : buffer_[1];
   buffer_[2] = '\0';
   display_.Print(buffer_, buffer_);
@@ -638,7 +638,7 @@ void Ui::OnIncrementCalibrationAdjustment(const stmlib::Event& e) {
 
 void Ui::OnIncrementRecording(const stmlib::Event& e) {
   if (recording_part().looped()) {
-    mutable_recording_part()->mutable_looper().pos_offset += e.data * (1 << 9);
+    mutable_recording_part()->mutable_looper().pos_offset += e.data << 9;
     SplashOn(SPLASH_LOOPER_PHASE_OFFSET);
     return;
   }
@@ -893,7 +893,7 @@ void Ui::DoEvents() {
 
   if (!tap_tempo_resolved_) {
     uint32_t delta = system_clock.milliseconds() - previous_tap_time_;
-    if (delta > (2 * kTapDeltaMax)) {
+    if (delta > (kTapDeltaMax << 1)) {
       // If we never got a second tap ... 
       SetTempo(TEMPO_EXTERNAL);
     }
@@ -1027,14 +1027,14 @@ void Ui::PrintLatch() {
   stmlib::NoteEntry note_entry;
   bool blink = system_clock.milliseconds() % 160 < 80;
   while (note_index) {
-    display_pos = note_ordinal / kNotesPerDisplayChar;
-    if (display_pos > kDisplayWidth) { break; }
+    if (note_ordinal >= (kNotesPerDisplayChar << 1)) break;
+    display_pos = note_ordinal < kNotesPerDisplayChar ? 0 : 1;
 
     note_entry = keys.stack.note(note_index);
     bool sustained = keys.IsSustained(note_entry);
     bool top;
     if (sustained) {
-      top = keys.release_latched_keys_on_next_note_on ? blink : true;
+      top = (keys.release_latched_keys_on_next_note_on && !keys.ignore_note_off_messages) ? blink : true;
     } else {
       top = keys.IsSustainable(note_index);
     }

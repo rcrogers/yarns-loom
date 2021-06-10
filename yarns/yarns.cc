@@ -68,7 +68,6 @@ bool gate[4];
 bool has_audio_source[4];
 bool has_envelope[4];
 uint16_t factory_testing_counter;
-uint8_t refresh_counter;
 
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
@@ -99,54 +98,54 @@ void SysTick_Handler() {
     }
   }
 
-  // Observe that the gate output is written with a systick * 4 (0.5 ms) delay
-  // compared to the CV output. This ensures that the CV output will have been
-  // refreshed to the right value when the trigger/gate is sent.
-  refresh_counter = (refresh_counter + 1) % 4; // Sample rate = 2 kHz
-  bool refresh = refresh_counter == 0;
+  bool refresh = (counter & 1) == 0; // Sample rate = 4 kHz
   if (refresh) {
+    // Observe that the gate output is written with a systick * 2 (0.25 ms) delay
+    // compared to the CV output. This ensures that the CV output will have been
+    // refreshed to the right value when the trigger/gate is sent.
     gate_output.Write(gate);
   }
   multi.ClockFast();
   if (refresh) {
     multi.Refresh();
     multi.GetCvGate(cv, gate);
+
+    has_audio_source[0] = multi.cv_output(0).is_audio();
+    has_audio_source[1] = multi.cv_output(1).is_audio();
+    has_audio_source[2] = multi.cv_output(2).is_audio();
+    has_audio_source[3] = multi.cv_output(3).is_audio();
+    has_envelope[0] = multi.cv_output(0).is_envelope();
+    has_envelope[1] = multi.cv_output(1).is_envelope();
+    has_envelope[2] = multi.cv_output(2).is_envelope();
+    has_envelope[3] = multi.cv_output(3).is_envelope();
+    
+    // In calibration mode, overrides the DAC outputs with the raw calibration
+    // table values.
+    if (ui.calibrating()) {
+      const CVOutput& voice = multi.cv_output(ui.calibration_voice());
+      cv[ui.calibration_voice()] = voice.calibration_dac_code(
+          ui.calibration_note());
+    } else if (midi_handler.calibrating()) {
+      const CVOutput& voice = multi.cv_output(midi_handler.calibration_voice());
+      cv[midi_handler.calibration_voice()] = voice.calibration_dac_code(
+          midi_handler.calibration_note());
+    }
+    
+    // In UI testing mode, overrides the GATE values with timers
+    if (ui.factory_testing()) {
+      gate[0] = (factory_testing_counter % 800) < 400;
+      gate[1] = (factory_testing_counter % 400) < 200;
+      gate[2] = (factory_testing_counter % 266) < 133;
+      gate[3] = (factory_testing_counter % 200) < 100;
+      ++factory_testing_counter;
+    }
+    
+    dac.Write(cv);
   }
-  has_audio_source[0] = multi.cv_output(0).is_audio();
-  has_audio_source[1] = multi.cv_output(1).is_audio();
-  has_audio_source[2] = multi.cv_output(2).is_audio();
-  has_audio_source[3] = multi.cv_output(3).is_audio();
-  has_envelope[0] = multi.cv_output(0).is_envelope();
-  has_envelope[1] = multi.cv_output(1).is_envelope();
-  has_envelope[2] = multi.cv_output(2).is_envelope();
-  has_envelope[3] = multi.cv_output(3).is_envelope();
-  
-  // In calibration mode, overrides the DAC outputs with the raw calibration
-  // table values.
-  if (ui.calibrating()) {
-    const CVOutput& voice = multi.cv_output(ui.calibration_voice());
-    cv[ui.calibration_voice()] = voice.calibration_dac_code(
-        ui.calibration_note());
-  } else if (midi_handler.calibrating()) {
-    const CVOutput& voice = multi.cv_output(midi_handler.calibration_voice());
-    cv[midi_handler.calibration_voice()] = voice.calibration_dac_code(
-        midi_handler.calibration_note());
-  }
-  
-  // In UI testing mode, overrides the GATE values with timers
-  if (ui.factory_testing()) {
-    gate[0] = (factory_testing_counter % 800) < 400;
-    gate[1] = (factory_testing_counter % 400) < 200;
-    gate[2] = (factory_testing_counter % 266) < 133;
-    gate[3] = (factory_testing_counter % 200) < 100;
-    ++factory_testing_counter;
-  }
-  
-  dac.Write(cv);
 }
 
 void TIM1_UP_IRQHandler(void) {
-  // DAC refresh at 4x 48kHz.
+  // DAC refresh at 4x 40kHz.
   if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
     return;
   }
@@ -163,7 +162,7 @@ void TIM1_UP_IRQHandler(void) {
   }
   
   if (dac.channel() == 0) {
-    // Internal clock refresh at 48kHz
+    // Internal clock refresh at 40kHz
     multi.RefreshInternalClock();
   }
 }
@@ -187,8 +186,6 @@ void Init() {
   midi_io.Init();
   midi_handler.Init();
   sys.StartTimers();
-
-  refresh_counter = 0;
 }
 
 int main(void) {

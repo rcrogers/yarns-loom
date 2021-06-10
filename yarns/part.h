@@ -696,7 +696,6 @@ class Part {
   void StartRecording();
   void DeleteSequence();
   bool new_beat() const;
-  void Refresh();
 
   inline void NewLayout() {
     midi_.min_note = 0;
@@ -1019,16 +1018,6 @@ class Part {
   PressedKeys arp_keys_;
   bool hold_pedal_engaged_;
 
-  int16_t mod_pitch_bend_;
-
-  uint16_t tremolo_mod_target_;
-  uint16_t tremolo_mod_current_;
-
-  uint16_t timbre_init_target_;
-  uint16_t timbre_init_current_;
-  uint16_t timbre_mod_lfo_target_;
-  uint16_t timbre_mod_lfo_current_;
-
   stmlib::NoteStack<kNoteStackSize> generated_notes_;  // by sequencer or arpeggiator.
   stmlib::NoteStack<kNoteStackSize> mono_allocator_;
   stmlib::VoiceAllocator<kNumMaxVoicesPerPart * 2> poly_allocator_;
@@ -1045,7 +1034,6 @@ class Part {
   uint8_t seq_rec_step_;
   
   looper::Deck looper_;
-  SyncedLFO lfo_;
 
   // Tracks which looper notes are currently being recorded
   uint8_t looper_note_recording_pressed_key_[kNoteStackMapping];

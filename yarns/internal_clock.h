@@ -51,8 +51,8 @@ class InternalClock {
   }
   
   inline void set_tempo(uint32_t tempo) {
-    phase_increment_ = 178957UL * tempo / 10;  // For 48kHz
-    // phase_increment_ = 128849UL * tempo / 6;  // For 40kHz
+    // phase_increment_ = 178957UL * tempo / 10;  // For 48kHz
+    phase_increment_ = 128849UL * tempo / 6;  // For 40kHz
   }
   
   inline void set_swing(uint32_t swing) {

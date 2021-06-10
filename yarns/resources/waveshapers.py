@@ -35,7 +35,7 @@ def scale(x, min=-32766, max=32766, center=True):
 
 x = ((numpy.arange(0, 257) / 128.0 - 1.0))
 x[-1] = x[-2]
-violent_overdrive = numpy.tanh(16.0 * x)
+violent_overdrive = numpy.tanh(32.0 * x)
 # overdrive = numpy.tanh(5.0 * x)
 # moderate_overdrive = numpy.tanh(2.0 * x)
 

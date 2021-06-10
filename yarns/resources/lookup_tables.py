@@ -38,7 +38,7 @@ LFO and portamento increments.
 
 lookup_tables_32 = []
 
-sample_rate = 2000
+sample_rate = 4000
 min_frequency = 1.0 / 8.0  # Hertz
 max_frequency = 16.0  # Hertz
 
@@ -71,7 +71,7 @@ lookup_tables_32.append(
 )
 
 
-sample_rate = 48000
+sample_rate = 40000
 
 # Create table for pitch.
 a4_midi = 69

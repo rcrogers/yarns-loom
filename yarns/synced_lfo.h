@@ -98,7 +98,7 @@ class SyncedLFO {
       counter_ %= period_ticks_;
     }
 
-    uint32_t target_phase = (counter_ * 65536 / period_ticks_) << 16;
+    uint32_t target_phase = ((counter_ << 16) / period_ticks_) << 16;
     target_phase += phase_offset;
     uint32_t target_increment = target_phase - previous_target_phase_;
 

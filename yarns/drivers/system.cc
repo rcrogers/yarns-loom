@@ -43,7 +43,7 @@ void System::Init() {
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI2, ENABLE);
 
   TIM_TimeBaseInitTypeDef timer_init;
-  timer_init.TIM_Period = F_CPU / (48000 * 4) - 1;
+  timer_init.TIM_Period = F_CPU / (40000 * 4) - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;

@@ -47,7 +47,6 @@ const uint16_t kBlinkMask = 128;
 // PWM >6 bits causes visible flickering due to over-long PWM cycle at 8kHz
 const uint8_t kDisplayBrightnessPWMBits = 6;
 const uint8_t kDisplayBrightnessPWMMax = 1 << kDisplayBrightnessPWMBits;
-const uint8_t kDisplayBrightnessPWMMaxPerChar = kDisplayBrightnessPWMMax / kDisplayWidth;
 
 const uint16_t kCharacterEnablePins[] = {
   GPIO_Pin_6,
@@ -125,7 +124,7 @@ void Display::RefreshSlow() {
   } else {
     actual_brightness_ = brightness_;
   }
-  blink_counter_ = (blink_counter_ + 1) % (kBlinkMask * 2);
+  blink_counter_ = (blink_counter_ + 1) % (kBlinkMask << 1);
   std::fill(&redraw_[0], &redraw_[kDisplayWidth], true); // Force redraw
 
 #else
