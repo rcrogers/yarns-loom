@@ -131,6 +131,7 @@ class Oscillator {
   void RenderPhaseDistortionSaw();
   void RenderBuzz();
   void RenderFilteredNoise();
+  void RenderResonator();
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   

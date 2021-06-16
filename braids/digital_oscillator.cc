@@ -2126,6 +2126,8 @@ void DigitalOscillator::RenderParticleNoise(
       c2 = c2 * kResonanceFactor >> 15;
       c3 = c3 * kResonanceFactor >> 15;
     }
+    // How does a single amplitude work here for 3 voices?
+    // Amplitude is the excitation pulse, maybe filter state can accomodate more than one simultaneous pulse?
     sample = (static_cast<int16_t>(noise) * amplitude) >> 16;
     amplitude = (amplitude * kParticleNoiseDecay) >> 16;
     
@@ -2157,6 +2159,7 @@ void DigitalOscillator::RenderParticleNoise(
     y32 = y31;
     y31 = y30;
     
+    // Render freq is half normal?
     y10 += y20 + y30;
     CLIP(y10)
     *buffer++ = y10;

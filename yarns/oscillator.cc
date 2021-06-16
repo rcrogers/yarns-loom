@@ -493,4 +493,57 @@ void Oscillator::RenderFilteredNoise() {
   )
 }
 
+// void Oscillator::RenderResonator() {
+//   uint16_t amplitude = state_.pno.amplitude;
+//   uint32_t density = 1024 + parameter_[0];
+//   int32_t sample;
+  
+//   int32_t y10;
+//   int32_t y11 = state_.pno.filter_state[0][0];
+//   int32_t y12 = state_.pno.filter_state[0][1];
+//   int32_t s1 = state_.pno.filter_scale[0];
+//   int32_t c1 = state_.pno.filter_coefficient[0];
+
+//   while (size) {
+//     uint32_t noise = Random::GetWord();
+//     if ((noise & 0x7fffff) < density) { // Strike
+//       amplitude = 65535;
+//       int16_t noise_a = (noise & 0x0fff) - 0x800;
+//       int16_t noise_b = ((noise >> 15) & 0x1fff) - 0x1000;
+//       int16_t p1 = pitch_ + (3 * noise_a * parameter_[1] >> 17) + 0x600;
+
+//       CONSTRAIN(p1, 0, 16383)
+//       c1 = Interpolate824(lut_resonator_coefficient, p1 << 17);
+//       s1 = Interpolate824(lut_resonator_scale, p1 << 17);
+      
+//       c1 = c1 * kResonanceFactor >> 15;
+//     }
+//     sample = (static_cast<int16_t>(noise) * amplitude) >> 16;
+//     amplitude = (amplitude * kParticleNoiseDecay) >> 16;
+    
+//     if (sample > 0) {
+//       y10 = sample * s1 >> 16;
+//     } else {
+//       y10 = -((-sample) * s1 >> 16);
+//     }
+    
+//     y10 += y11 * c1 >> 15;
+//     y10 -= y12 * kResonanceSquared >> 15;
+//     CLIP(y10);
+//     y12 = y11;
+//     y11 = y10;
+    
+//     CLIP(y10)
+//     *buffer++ = y10;
+//     *buffer++ = y10;
+//     size -= 2;
+//   }
+  
+//   state_.pno.amplitude = amplitude;
+//   state_.pno.filter_state[0][0] = y11;
+//   state_.pno.filter_state[0][1] = y12;
+//   state_.pno.filter_scale[0] = s1;
+//   state_.pno.filter_coefficient[0] = c1;
+// }
+
 }  // namespace yarns
