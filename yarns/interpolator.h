@@ -49,11 +49,20 @@ class Interpolator {
     y_.i = 0;
     m_ = 0;
   }
-  void SetTarget(int16_t y) { y_target_ = y; } // 15-bit
+  void SetTarget(int16_t y) { // 15-bit
+    y_target_ = y;
+    dirty_ = true;
+  }
   void ComputeSlope() {
     m_ = static_cast<int32_t>((y_target_ - y_.hi) << 16) / x_delta_;
+    dirty_ = false;
   }
-  void Tick() { y_.i += m_; }
+  void ComputeSlopeIfDirty() { if (dirty_) ComputeSlope(); }
+  void Tick() {
+    if (m_ > 0 && y_.i > INT32_MAX - m_) y_.i = INT32_MAX;
+    else if (m_ < 0 && y_.i < INT32_MIN - m_) y_.i = INT32_MIN;
+    else y_.i += m_;
+  }
   int16_t value() const { return y_.hi; }
   int16_t target() const { return y_target_; }
 
@@ -62,6 +71,7 @@ private:
   fixed_point y_;
   int16_t y_target_;
   int32_t m_;
+  bool dirty_;
 };
 
 }  // namespace yarns

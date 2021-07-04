@@ -171,7 +171,6 @@ void Oscillator::Render() {
 }
 
 #define RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(body) \
-  timbre_.ComputeSlope(); gain_.ComputeSlope(); \
   int32_t next_sample = next_sample_; \
   uint32_t phase = phase_; \
   uint32_t phase_increment = phase_increment_; \
@@ -182,8 +181,8 @@ void Oscillator::Render() {
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     phase += phase_increment; \
-    timbre_.Tick(); gain_.Tick(); \
     body \
+    gain_.ComputeSlopeIfDirty(); gain_.Tick(); \
     audio_buffer_.Overwrite(offset_ + ((gain_.value() * this_sample) >> 15)); \
   } \
   next_sample_ = next_sample; \
@@ -197,6 +196,10 @@ void Oscillator::Render() {
     modulator_phase += modulator_phase_increment; \
     body; \
   )
+
+// TODO is this enough to fix CPU issues on filtered shapes?
+#define TIMBRE_TICK \
+  timbre_.ComputeSlopeIfDirty(); timbre_.Tick();
 
 #define EDGES_SAW(ph, ph_incr) \
   if (!high_) { \
@@ -270,6 +273,7 @@ void Oscillator::RenderPulse() {
   uint32_t pw = 0x80000000;
   RENDER_LOOP(
     if (shape_ == OSC_SHAPE_VARIABLE_PULSE) {
+      TIMBRE_TICK;
       pw = static_cast<uint32_t>(32768 - timbre_.value()) << 16;
     }
     bool self_reset = phase < phase_increment;
@@ -289,6 +293,7 @@ void Oscillator::RenderSaw() {
   uint32_t pw = 0;
   RENDER_LOOP(
     if (shape_ == OSC_SHAPE_VARIABLE_SAW) {
+      TIMBRE_TICK;
       pw = static_cast<uint32_t>(timbre_.value()) << 16;
     }
     bool self_reset = phase < phase_increment;
@@ -354,6 +359,7 @@ void Oscillator::RenderFoldTriangle() {
     uint16_t phase_16 = phase >> 16;
     this_sample = (phase_16 << 1) ^ (phase_16 & 0x8000 ? 0xffff : 0x0000);
     this_sample += 32768;
+    TIMBRE_TICK;
     this_sample = this_sample * timbre_.value() >> 15;
     this_sample = Interpolate88(ws_tri_fold, this_sample + 32768);
   )
@@ -362,6 +368,7 @@ void Oscillator::RenderFoldTriangle() {
 void Oscillator::RenderFoldSine() {
   RENDER_LOOP(
     this_sample = Interpolate824(wav_sine, phase);
+    TIMBRE_TICK;
     this_sample = this_sample * timbre_.value() >> 15;
     this_sample = Interpolate88(ws_sine_fold, this_sample + 32768);
   )
@@ -371,6 +378,7 @@ void Oscillator::RenderTanhSine() {
   RENDER_LOOP(
     this_sample = Interpolate824(wav_sine, phase);
     int16_t baseline = this_sample >> 6;
+    TIMBRE_TICK;
     this_sample = baseline + ((this_sample - baseline) * timbre_.value() >> 15);
     this_sample = Interpolate88(ws_violent_overdrive, this_sample + 32768);
   )
@@ -381,6 +389,7 @@ void Oscillator::RenderFM() {
   modulator_phase_increment_ = ComputePhaseIncrement(pitch_ + interval);
   RENDER_LOOP(
     int16_t modulator = Interpolate824(wav_sine, modulator_phase);
+    TIMBRE_TICK;
     uint32_t phase_mod = modulator * timbre_.value();
     // phase_mod = (phase_mod << 3) + (phase_mod << 2); // FM index 0-3
     phase_mod <<= 3; // FM index 0-2
@@ -461,6 +470,7 @@ void Oscillator::RenderPhaseDistortionSaw() {
 
 void Oscillator::RenderBuzz() {
   RENDER_LOOP(
+    TIMBRE_TICK;
     int32_t zone_14 = (pitch_ + ((32767 - timbre_.value()) >> 1));
     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
     size_t index = zone_14 >> 10; // Use highest 4 bits
