@@ -362,9 +362,9 @@ void Ui::PrintLooperRecordingStatus() {
   uint16_t note_fraction_completed = looper_tape.NoteFractionCompleted(note_index);
   display_.set_brightness(UINT16_MAX - note_fraction_completed);
   if (recording_mode_is_displaying_pitch_) {
-    PrintNote(looper_tape.NotePitch(note_index));
+    PrintNote(looper_tape.note_at(note_index).pitch);
   } else {
-    Settings::PrintInteger(buffer_, looper_tape.NoteAgeOrdinal(note_index) + 1);
+    Settings::PrintInteger(buffer_, looper_tape.note_at(note_index).age_ordinal + 1);
     display_.Print(buffer_);
   }
 }

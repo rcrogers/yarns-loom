@@ -63,6 +63,7 @@ struct Note {
   uint16_t off_pos;
   uint8_t pitch;
   uint8_t velocity;
+  uint8_t age_ordinal;
 };
 
 const uint8_t kBitsPos = 13;
@@ -126,9 +127,6 @@ class Deck {
   uint8_t PeekNextOff() const;
 
   uint16_t NoteFractionCompleted(uint8_t index) const;
-  uint8_t NotePitch(uint8_t index) const;
-  uint8_t NoteAgeOrdinal(uint8_t index) const;
-
   inline const Note& note_at(uint8_t index) const {
     return notes_[index];
   }
@@ -144,18 +142,26 @@ class Deck {
   bool Passed(uint16_t target, uint16_t before, uint16_t after) const;
   void LinkOn(uint8_t index);
   void LinkOff(uint8_t index);
-  void RemoveNote(uint8_t index);
+  void RemoveNoteByAge(uint8_t target_age);
   void KillNote(uint8_t index);
 
   Part* part_;
 
   Note notes_[kMaxNotes];
-  uint8_t oldest_index_;
   uint8_t size_;
   // Linked lists track current and upcoming notes
   Link head_; // Points to the latest on/off
   Link next_link_[kMaxNotes];
   bool overwrite_;
+
+  uint8_t next_free_[kMaxNotes];
+  uint8_t free_head_;
+
+  inline uint8_t Allocate() {
+    uint8_t free = free_head_;
+    free_head_ = next_free_[free_head_];
+    return free;
+  }
 
   // Phase tracking
   SyncedLFO lfo_;

@@ -42,9 +42,12 @@ void Deck::Init(Part* part) {
 }
 
 void Deck::RemoveAll() {
-  for (uint8_t i = 0; i < size_; ++i) {
-    KillNote(index_mod(oldest_index_ + i));
+  for (uint8_t i = 0; i < kMaxNotes; ++i) {
+    next_free_[i] = i == 0 ? kNullIndex : i - 1;
+    if (!notes_[i].on_pos) continue;
+    KillNote(i);
   }
+  free_head_ = 0;
 
   std::fill(
     &notes_[0],
@@ -53,7 +56,6 @@ void Deck::RemoveAll() {
   );
   head_.on = kNullIndex;
   head_.off = kNullIndex;
-  oldest_index_ = 0;
   size_ = 0;
   overwrite_ = false;
 
@@ -71,34 +73,33 @@ void Deck::Rewind() {
 
 void Deck::Unpack(PackedPart& storage) {
   RemoveAll();
-  oldest_index_ = storage.looper_oldest_index;
   size_ = storage.looper_size;
   for (uint8_t ordinal = 0; ordinal < kMaxNotes; ++ordinal) {
-    uint8_t index = index_mod(oldest_index_ + ordinal);
-    PackedNote& packed_note = storage.looper_notes[index];
+    uint8_t packed_index = index_mod(storage.looper_oldest_index + ordinal);
+    PackedNote& packed_note = storage.looper_notes[packed_index];
+    if (packed_note.pitch == kNullIndex) continue;
+    uint8_t index = Allocate();
     Note& note = notes_[index];
 
     note.on_pos   = packed_note.on_pos  << (16 - kBitsPos);
     note.off_pos  = packed_note.off_pos << (16 - kBitsPos);
     note.pitch    = packed_note.pitch;
     note.velocity = packed_note.velocity;
+    note.age_ordinal      = ordinal;
 
-    if (ordinal < size_) {
-      Advance(note.on_pos, false);
-      LinkOn(index);
-      Advance(note.off_pos, false);
-      LinkOff(index);
-    }
+    Advance(note.on_pos, false);
+    LinkOn(index);
+    Advance(note.off_pos, false);
+    LinkOff(index);
   }
 }
 
 void Deck::Pack(PackedPart& storage) const {
-  storage.looper_oldest_index = oldest_index_;
+  storage.looper_oldest_index = 0; // TODO for compat
   storage.looper_size = size_;
-  for (uint8_t ordinal = 0; ordinal < kMaxNotes; ++ordinal) {
-    uint8_t index = index_mod(oldest_index_ + ordinal);
-    PackedNote& packed_note = storage.looper_notes[index];
-    const Note& note = notes_[index];
+  for (uint8_t i = 0; i < kMaxNotes; ++i) {
+    const Note& note = notes_[i];
+    PackedNote& packed_note = storage.looper_notes[note.age_ordinal];
 
     packed_note.on_pos    = (note.on_pos  - pos_offset) >> (16 - kBitsPos);
     packed_note.off_pos   = (note.off_pos - pos_offset) >> (16 - kBitsPos);
@@ -114,14 +115,11 @@ void Deck::Clock() {
 }
 
 void Deck::RemoveOldestNote() {
-  RemoveNote(oldest_index_);
-  if (size_) {
-    oldest_index_ = index_mod(oldest_index_ + 1);
-  }
+  RemoveNoteByAge(0);
 }
 
 void Deck::RemoveNewestNote() {
-  RemoveNote(index_mod(oldest_index_ + size_ - 1));
+  RemoveNoteByAge(size_ - 1);
 }
 
 uint8_t Deck::PeekNextOn() const {
@@ -141,6 +139,13 @@ uint8_t Deck::PeekNextOff() const {
 void Deck::Advance(uint16_t new_pos, bool play) {
   uint8_t seen_index;
   uint8_t next_index;
+
+/* TODO prog erase
+  - Should be able to truncate notes that are about to start?  Cannot actually change note order, so maybe pretty simple?  Unless it deletes them completely!
+  - What about deleting from the tail end of notes?  Split notes in the middle?
+    - If we split notes, there should never be notes playing while in this mode
+    - Create a new note IFF there are empty slots
+*/
 
   seen_index = looper::kNullIndex;
   while (true) {
@@ -199,7 +204,7 @@ uint8_t Deck::RecordNoteOn(uint8_t pitch, uint8_t velocity) {
   if (size_ == kMaxNotes) {
     RemoveOldestNote();
   }
-  uint8_t index = index_mod(oldest_index_ + size_);
+  uint8_t index = Allocate();
 
   LinkOn(index);
   Note& note = notes_[index];
@@ -207,6 +212,7 @@ uint8_t Deck::RecordNoteOn(uint8_t pitch, uint8_t velocity) {
   note.velocity = velocity;
   note.on_pos = pos_;
   note.off_pos = pos_;
+  note.age_ordinal = size_;
   next_link_[index].off = kNullIndex;
   size_++;
 
@@ -233,14 +239,6 @@ uint16_t Deck::NoteFractionCompleted(uint8_t index) const {
   uint16_t completed = pos_ - note.on_pos;
   uint16_t length = note.off_pos - 1 - note.on_pos;
   return (static_cast<uint32_t>(completed) << 16) / length;
-}
-
-uint8_t Deck::NotePitch(uint8_t index) const {
-  return notes_[index].pitch;
-}
-
-uint8_t Deck::NoteAgeOrdinal(uint8_t index) const {
-  return index_mod(index - oldest_index_);
 }
 
 bool Deck::Passed(uint16_t target, uint16_t before, uint16_t after) const {
@@ -285,17 +283,27 @@ void Deck::KillNote(uint8_t target_index) {
   }
 }
 
-void Deck::RemoveNote(uint8_t target_index) {
+void Deck::RemoveNoteByAge(uint8_t target_age) {
   // Though this takes an arbitrary index, other methods like NoteAgeOrdinal
-  // assume that notes are stored sequentially in memory, so removing a "middle"
-  // note will cause problems
+  // assume that notes are stored sequentially in memory, so removing a
+  // "middle-aged" note will cause problems
   if (!size_) {
     return;
   }
 
+  uint8_t target_index;
+  for (uint8_t i = 0; i < size_; i++) {
+    if (notes_[i].age_ordinal == target_age) target_index = i;
+    else if (notes_[i].age_ordinal > target_age) notes_[i].age_ordinal--;
+    // TODO do prev searches here?  but need a target index
+    // Could check e.g. notes_[next_link_[i]].age_ordinal == target_age
+  }
   KillNote(target_index);
 
   size_--;
+  next_free_[target_index] = free_head_;
+  free_head_ = target_index;
+
   uint8_t search_prev_index;
   uint8_t search_next_index;
 
@@ -310,7 +318,7 @@ void Deck::RemoveNote(uint8_t target_index) {
   next_link_[search_prev_index].on = next_link_[target_index].on;
   next_link_[target_index].on = kNullIndex; // unneeded?
   if (target_index == search_prev_index) {
-    // If this was the last note
+    // If this was linked to itself, and was therefore the last note
     head_.on = kNullIndex;
   } else if (target_index == head_.on) {
     head_.on = search_prev_index;
@@ -337,6 +345,8 @@ void Deck::RemoveNote(uint8_t target_index) {
   } else if (target_index == head_.off) {
     head_.off = search_prev_index;
   }
+
+  notes_[target_index].pitch = kNullIndex;
 }
 
 } // namespace looper
