@@ -291,11 +291,6 @@ void Ui::PrintCalibrationNote() {
 
 void Ui::PrintActivePartAndPlayMode() {
   uint8_t play_mode = active_part().midi_settings().play_mode;
-  if (multi.running()) {
-    SetBrightnessFromSequencerPhase(active_part());
-  } else {
-    display_.set_brightness(UINT16_MAX);
-  }
   strcpy(buffer_, "1x");
   buffer_[0] += active_part_;
   buffer_[1] = setting_defs.get(SETTING_SEQUENCER_PLAY_MODE).values[play_mode][0];
@@ -342,19 +337,15 @@ void Ui::SetBrightnessFromSequencerPhase(const Part& part) {
 
 const uint16_t kMasksNewLooperBeat[kDisplayWidth] = { 0x8000, 0x8000 };
 void Ui::PrintLooperRecordingStatus() {
-  if (
-    recording_part().looper().overwrite_armed() &&
-    system_clock.milliseconds() % 320 < 40
-  ) {
-    display_.set_brightness(UINT16_MAX);
-    display_.Print("//");
-    return;
-  }
   uint8_t note_index = recording_part().LooperCurrentNoteIndex();
   if (note_index == looper::kNullIndex) {
     if (recording_part().new_beat()) {
       display_.set_brightness(UINT16_MAX);
-      display_.PrintMasks(kMasksNewLooperBeat);
+      if (recording_part().looper().overwrite_armed()) {
+        display_.Print("//");
+      } else {
+        display_.PrintMasks(kMasksNewLooperBeat);
+      }
     } else {
       SetBrightnessFromSequencerPhase(recording_part());
       display_.Print("__");
@@ -911,9 +902,6 @@ void Ui::DoEvents() {
   }
 
   if (splash_) {
-    if (splash_ == SPLASH_ACTIVE_PART && multi.running()) {
-      SetBrightnessFromSequencerPhase(active_part());
-    }
     if (queue_.idle_time() < kRefreshPeriod || display_.scrolling()) {
       return; // Splash isn't over yet
     }
@@ -988,6 +976,11 @@ void Ui::DoEvents() {
     if (print_part) {
       display_.set_fade(0);
       PrintActivePartAndPlayMode();
+      if (multi.running()) {
+        SetBrightnessFromSequencerPhase(active_part());
+      } else {
+        display_.set_brightness(UINT16_MAX);
+      }
     } else if (print_latch) {
       PrintLatch();
     }

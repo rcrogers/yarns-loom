@@ -760,6 +760,7 @@ void Multi::StopRecording(uint8_t part) {
   if (recording_ && recording_part_ == part) {
     part_[part].StopRecording();
     recording_ = false;
+    part_[part].mutable_looper().set_overwrite_armed(false);
   }
 }
 
