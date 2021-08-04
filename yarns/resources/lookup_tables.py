@@ -559,7 +559,7 @@ seen_family = {}
 used_ratios = []
 for (family, cm_ratio, carrier_correction) in fms:
   family = str(family)
-  print((family, cm_ratio, carrier_correction))
+  # print((family, cm_ratio, carrier_correction))
   if seen_family.has_key(family):
     # Among the ratios that share a given normal form, the set of sidebands is shared, but the energy skews toward higher sidebands as the carrier frequency increases.  This is timbrally interesting, but the effect is broadly similar to increasing the FM index.  Additionally, the carrier correction required by non-normal-form ratios only works when the FM index is greater than zero.  Finally, there are 15 normal-form ratios, plus 40 non-normal-form ratios.  There's more bang for the buck in using normal forms only.
     continue
@@ -581,9 +581,9 @@ for cm_ratio in reversed(used_ratios):
   if ((inv_mink * 10) % 1 == 0):
     continue
   inv_minkowski_count += 1
-  print([str(cm_ratio), 'inv_mink', inv_mink])
-  print([str(cm_ratio), '1 / inv_mink', 1 / inv_mink])
-  print('\n')
+  # print([str(cm_ratio), 'inv_mink', inv_mink])
+  # print([str(cm_ratio), '1 / inv_mink', 1 / inv_mink])
+  # print('\n')
   fm_modulator_intervals.append(128 * 12 * numpy.log2(1 / inv_mink))
   fm_ratio_names.append('?' + str(inv_minkowski_count) + ' FM ?^-1(' + str(cm_ratio.numerator) + '/' + str(cm_ratio.denominator) + ')')
 

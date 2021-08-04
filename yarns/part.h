@@ -197,7 +197,7 @@ struct PackedPart {
     vibrato_shape: 3,
     vibrato_range : 4,
     vibrato_mod : 7,
-    modulation_rate : 7,
+    lfo_rate : 7,
     tuning_root : 4,
     tuning_system : 6,
     trigger_duration : 7, // probably excessive
@@ -287,7 +287,7 @@ struct VoicingSettings {
   uint8_t vibrato_mod;
   uint8_t tremolo_mod;
   uint8_t tremolo_shape;
-  uint8_t modulation_rate;
+  uint8_t lfo_rate;
   int8_t tuning_transpose;
   int8_t tuning_fine;
   int8_t tuning_root;
@@ -325,7 +325,7 @@ struct VoicingSettings {
     packed.vibrato_mod = vibrato_mod;
     packed.tremolo_mod = tremolo_mod;
     packed.tremolo_shape = tremolo_shape;
-    packed.modulation_rate = modulation_rate;
+    packed.lfo_rate = lfo_rate;
     packed.tuning_transpose = tuning_transpose;
     packed.tuning_fine = tuning_fine;
     packed.tuning_root = tuning_root;
@@ -363,7 +363,7 @@ struct VoicingSettings {
     vibrato_mod = packed.vibrato_mod;
     tremolo_mod = packed.tremolo_mod;
     tremolo_shape = packed.tremolo_shape;
-    modulation_rate = packed.modulation_rate;
+    lfo_rate = packed.lfo_rate;
     tuning_transpose = packed.tuning_transpose;
     tuning_fine = packed.tuning_fine;
     tuning_root = packed.tuning_root;
@@ -416,7 +416,7 @@ enum PartSetting {
   PART_VOICING_VIBRATO_MOD,
   PART_VOICING_TREMOLO_MOD,
   PART_VOICING_TREMOLO_SHAPE,
-  PART_VOICING_MODULATION_RATE,
+  PART_VOICING_LFO_RATE,
   PART_VOICING_TUNING_TRANSPOSE,
   PART_VOICING_TUNING_FINE,
   PART_VOICING_TUNING_ROOT,

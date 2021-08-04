@@ -343,7 +343,7 @@ void Ui::SetBrightnessFromSequencerPhase(const Part& part) {
 const uint16_t kMasksNewLooperBeat[kDisplayWidth] = { 0x8000, 0x8000 };
 void Ui::PrintLooperRecordingStatus() {
   if (
-    recording_part().looper().overwrite_enabled() &&
+    recording_part().looper().overwrite_armed() &&
     system_clock.milliseconds() % 320 < 40
   ) {
     display_.set_brightness(UINT16_MAX);
@@ -795,7 +795,7 @@ void Ui::OnSwitchHeld(const Event& e) {
     case UI_SWITCH_TAP_TEMPO:
       if (recording_any) {
         if (recording_part().looped()) {
-          mutable_recording_part()->mutable_looper().ToggleOverwrite();
+          mutable_recording_part()->mutable_looper().toggle_overwrite_armed();
         } // Else, set last step for sequencer?
       } else {
         multi.ApplySettingAndSplash(

@@ -43,6 +43,14 @@ namespace yarns {
 using namespace std;
 using namespace stmlib;
 
+const uint8_t kCCMacroRecord = 116;
+enum MacroRecord {
+  MACRO_RECORD_OFF        = 0,
+  MACRO_RECORD_NORMAL     = 32,
+  MACRO_RECORD_OVERWRITE  = 64,
+  MACRO_RECORD_DELETE     = 96,
+};
+
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
   
@@ -132,6 +140,17 @@ void Multi::Clock() {
   
   if (!clock_input_prescaler_) {
     midi_handler.OnClock();
+
+    // Sync LFOs
+    ++tick_counter_;
+    for (uint8_t p = 0; p < num_active_parts_; ++p) {
+      part_[p].mutable_looper().Clock(tick_counter_);
+      uint8_t lfo_rate = part_[p].voicing_settings().lfo_rate;
+      if (lfo_rate < LUT_LFO_INCREMENTS_SIZE) continue;
+      for (uint8_t v = 0; v < part_[p].num_voices(); ++v) {
+        part_[p].voice(v)->lfo()->Tap(tick_counter_, lut_clock_ratio_ticks[lfo_rate - LUT_LFO_INCREMENTS_SIZE]);
+      }
+    }
     
     ++swing_counter_;
     if (swing_counter_ >= 12) {
@@ -203,6 +222,7 @@ void Multi::Start(bool started_by_keyboard) {
   clock_input_prescaler_ = 0;
   clock_output_prescaler_ = 0;
   stop_count_down_ = 0;
+  tick_counter_ = -1;
   bar_position_ = -1;
   swing_counter_ = -1;
   previous_output_division_ = 0;
@@ -664,6 +684,7 @@ void Multi::AfterDeserialize() {
   
   for (uint8_t i = 0; i < kNumParts; ++i) {
     part_[i].AfterDeserialize();
+    macro_record_last_value_[i] = 127;
   }
 }
 
@@ -761,6 +782,20 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
         part_[i].DeleteRecording();
         ui.SetSplashPart(i);
         ui.SplashOn(SPLASH_DELETE_RECORDING);
+      } else if (controller == kCCMacroRecord) {
+        value >= MACRO_RECORD_NORMAL ? StartRecording(i) : StopRecording(i);
+        if (
+          // Only on increasing value, so that leaving the knob in the delete zone doesn't doom any subsequent recordings
+          value >= MACRO_RECORD_DELETE && value > macro_record_last_value_[i])
+        {
+          part_[i].DeleteRecording();
+          ui.SetSplashPart(i);
+          ui.SplashOn(SPLASH_DELETE_RECORDING);
+        } else {
+          part_[i].mutable_looper().set_overwrite_armed(value >= MACRO_RECORD_OVERWRITE);
+          ui.SplashOn(SPLASH_ACTIVE_PART);
+        }
+        macro_record_last_value_[i] = value;
       } else {
         thru = part_[i].ControlChange(channel, controller, value) && thru;
         SetFromCC(i, controller, value);

@@ -80,7 +80,7 @@ void Part::Init() {
   voicing_.pitch_bend_range = 2;
   voicing_.vibrato_range = 1;
   voicing_.vibrato_mod = 0;
-  voicing_.modulation_rate = 50;
+  voicing_.lfo_rate = 50;
   voicing_.trigger_duration = 2;
   voicing_.aux_cv = MOD_AUX_ENVELOPE;
   voicing_.aux_cv_2 = MOD_AUX_ENVELOPE;
@@ -436,12 +436,6 @@ void Part::Clock() {
   if (arp_seq_prescaler_ >= lut_clock_ratio_ticks[seq_.clock_division]) {
     arp_seq_prescaler_ = 0;
   }
-  
-  for (uint8_t i = 0; i < num_voices_; ++i) {
-    voice_[i]->Clock();
-  }
-
-  looper_.Clock();
 }
 
 bool Part::new_beat() const {
@@ -1032,7 +1026,7 @@ void Part::TouchVoices() {
   CONSTRAIN(voicing_.aux_cv_2, 0, MOD_AUX_LAST - 1);
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->set_pitch_bend_range(voicing_.pitch_bend_range);
-    voice_[i]->set_modulation_rate(voicing_.modulation_rate, i);
+    voice_[i]->set_lfo_rate(voicing_.lfo_rate, i);
     voice_[i]->set_vibrato_range(voicing_.vibrato_range);
     voice_[i]->set_vibrato_mod(voicing_.vibrato_mod);
     voice_[i]->set_tremolo_mod(voicing_.tremolo_mod);
@@ -1075,7 +1069,7 @@ bool Part::Set(uint8_t address, uint8_t value) {
       break;
       
     case PART_VOICING_PITCH_BEND_RANGE:
-    case PART_VOICING_MODULATION_RATE:
+    case PART_VOICING_LFO_RATE:
     case PART_VOICING_VIBRATO_RANGE:
     case PART_VOICING_VIBRATO_MOD:
     case PART_VOICING_TREMOLO_MOD:

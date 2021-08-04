@@ -520,6 +520,7 @@ class Multi {
   bool started_by_keyboard_;
   bool recording_;
   uint8_t recording_part_;
+  uint8_t macro_record_last_value_[kNumParts];
   
   InternalClock internal_clock_;
   uint8_t internal_clock_ticks_;
@@ -528,6 +529,9 @@ class Multi {
   int16_t swing_predelay_[12];
   uint8_t swing_counter_;
   
+  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 517 days -- acceptable
+  uint32_t tick_counter_;
+
   uint8_t clock_input_prescaler_;
   uint16_t clock_output_prescaler_;
   uint16_t bar_position_;
