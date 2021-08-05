@@ -57,7 +57,6 @@ class Envelope {
     if (!gate_) {
       gate_ = true;
       Trigger(ENV_SEGMENT_ATTACK);
-      samples_.Flush();
     }
   }
 
@@ -69,7 +68,6 @@ class Envelope {
         break;
       case ENV_SEGMENT_SUSTAIN:
         Trigger(ENV_SEGMENT_RELEASE);
-        samples_.Flush();
         break;
       default:
         break;
@@ -107,27 +105,18 @@ class Envelope {
     phase_ = 0;
   }
 
-  inline void RenderSamples(size_t size = kEnvBlockSize) {
-    if (samples_.writable() < size) return;
-
-    while (size--) {
-      phase_ += phase_increment_;
-      if (phase_ < phase_increment_) {
-        value_ = b_;
-        Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-      }
-      if (phase_increment_) {
-        value_ = Mix(a_, b_, Interpolate824(lut_env_expo, phase_));
-      }
-      samples_.Overwrite(value_);
+  inline void Render() {
+    phase_ += phase_increment_;
+    if (phase_ < phase_increment_) {
+      value_ = b_;
+      Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
+    }
+    if (phase_increment_) {
+      value_ = Mix(a_, b_, lut_env_expo[phase_ >> 24]);
     }
   }
 
-  inline void ReadSample() {
-    value_read_ = samples_.ImmediateRead();
-  }
-
-  inline uint16_t value() const { return value_read_; }
+  inline uint16_t value() const { return value_; }
 
  private:
   bool gate_;
@@ -148,8 +137,6 @@ class Envelope {
   uint16_t value_read_;
   uint32_t phase_;
   uint32_t phase_increment_;
-
-  stmlib::RingBuffer<uint16_t, kEnvBlockSize * 2> samples_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

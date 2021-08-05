@@ -188,7 +188,6 @@ class Voice {
   }
 
   inline void RenderSamples() {
-    envelope_.RenderSamples();
     if (uses_audio()) oscillator_.Render();
   }
   inline uint16_t ReadSample() {

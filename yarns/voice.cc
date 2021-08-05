@@ -179,7 +179,7 @@ void Voice::Refresh(uint8_t voice_index) {
   note += tuning_;
   
   // Render modulation sources
-  envelope_.ReadSample();
+  envelope_.Render();
   if (lfo_phase_increment_) {
     synced_lfo_.Increment(lfo_phase_increment_);
   } else {
