@@ -66,6 +66,7 @@ enum UiMode {
 enum Splash {
   SPLASH_NONE = 0,
   SPLASH_VERSION,
+  SPLASH_PART_STRING,
   SPLASH_SETTING_VALUE,
   SPLASH_SETTING_NAME,
   SPLASH_SETTING_PART,
@@ -122,13 +123,16 @@ class Ui {
   void DoEvents();
   void FlushEvents();
   void SplashOn(Splash s);
-  inline void SetSplashPart(uint8_t part) {
-    splash_part_ = part;
+  void SplashPartString(const char* text, uint8_t part) {
+    strcpy(buffer_, text);
+    buffer_[2] = '\0';
+    display_.Print(buffer_);
+    SplashOn(SPLASH_PART_STRING, part);
   }
+  void SplashOn(Splash s, uint8_t part) { splash_part_ = part; SplashOn(s); }
   inline void SplashSetting(const Setting& s, uint8_t part) {
     splash_setting_def_ = &s;
-    SetSplashPart(part);
-    SplashOn(SPLASH_SETTING_VALUE);
+    SplashOn(SPLASH_SETTING_VALUE, part);
   }
 
   inline bool in_recording_mode() const {
@@ -225,7 +229,7 @@ class Ui {
   void PrintFactoryTesting();
   void PrintRecordingStep();
   void PrintArpeggiatorMovementStep(SequencerStep step);
-  void PrintActivePartAndPlayMode();
+  void PrintPartAndPlayMode(uint8_t part);
   void PrintLatch();
   void SetFadeForSetting(const Setting& setting);
 

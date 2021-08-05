@@ -44,12 +44,7 @@ using namespace std;
 using namespace stmlib;
 
 const uint8_t kCCMacroRecord = 116;
-enum MacroRecord {
-  MACRO_RECORD_OFF        = 0,
-  MACRO_RECORD_NORMAL     = 32,
-  MACRO_RECORD_OVERWRITE  = 64,
-  MACRO_RECORD_DELETE     = 96,
-};
+const uint8_t kCCMacroPlayMode = 117;
 
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
@@ -774,32 +769,49 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
   } else {
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       if (!part_accepts_channel(i, channel)) { continue; }
-      if (controller == kCCRecordOffOn) {
+      int8_t macro_zone;
+      switch (controller) {
+      case kCCRecordOffOn:
         // Intercept this CC so multi can update its own recording state
         value >= 64 ? StartRecording(i) : StopRecording(i);
-        ui.SplashOn(SPLASH_ACTIVE_PART);
-      } else if (controller == kCCDeleteRecording) {
-        // Splash needs part index
+        ui.SplashOn(SPLASH_ACTIVE_PART, i);
+        break;
+      case kCCDeleteRecording:
         part_[i].DeleteRecording();
-        ui.SetSplashPart(i);
-        ui.SplashOn(SPLASH_DELETE_RECORDING);
-      } else if (controller == kCCMacroRecord) {
-        value >= MACRO_RECORD_NORMAL ? StartRecording(i) : StopRecording(i);
+        ui.SplashPartString("RX", i);
+        break;
+      case kCCMacroRecord:
+        // 0..3: record off, record on, overwrite, delete
+        macro_zone = value >> 5; // 0..3
+        macro_zone >= 1 ? StartRecording(i) : StopRecording(i);
         if (
           // Only on increasing value, so that leaving the knob in the delete zone doesn't doom any subsequent recordings
-          value >= MACRO_RECORD_DELETE && value > macro_record_last_value_[i])
+          macro_zone == 3 && value > macro_record_last_value_[i])
         {
           part_[i].DeleteRecording();
-          ui.SetSplashPart(i);
-          ui.SplashOn(SPLASH_DELETE_RECORDING);
+          ui.SplashPartString("RX", i);
         } else {
-          part_[i].mutable_looper().set_overwrite_armed(value >= MACRO_RECORD_OVERWRITE);
-          ui.SplashOn(SPLASH_ACTIVE_PART);
+          part_[i].mutable_looper().set_overwrite_armed(macro_zone == 2);
+          ui.SplashPartString(macro_zone == 2 ? "R*" : (macro_zone ? "R+" : "--"), i);
         }
         macro_record_last_value_[i] = value;
-      } else {
+        break;
+      case kCCMacroPlayMode:
+        // -2..2: step seq, step arp, manual, loop arp, loop seq
+        macro_zone = (5 * value >> 7) - 2;
+        ApplySetting(SETTING_SEQUENCER_CLOCK_QUANTIZATION, i, macro_zone < 0);
+        ApplySetting(SETTING_SEQUENCER_PLAY_MODE, i, abs(macro_zone));
+        char label[2];
+        if (macro_zone == 0) strcpy(label, "--"); else {
+          label[0] = macro_zone < 0 ? 'S' : 'L';
+          label[1] = abs(macro_zone) == 1 ? 'A' : 'S';
+        }
+        ui.SplashPartString(label, i);
+        break;
+      default:
         thru = part_[i].ControlChange(channel, controller, value) && thru;
         SetFromCC(i, controller, value);
+        break;
       }
     }
   }

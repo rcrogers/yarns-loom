@@ -289,10 +289,10 @@ void Ui::PrintCalibrationNote() {
       calibration_strings[calibration_note_]);
 }
 
-void Ui::PrintActivePartAndPlayMode() {
-  uint8_t play_mode = active_part().midi_settings().play_mode;
+void Ui::PrintPartAndPlayMode(uint8_t part) {
+  uint8_t play_mode = multi.part(part).midi_settings().play_mode;
   strcpy(buffer_, "1x");
-  buffer_[0] += active_part_;
+  buffer_[0] += part;
   buffer_[1] = setting_defs.get(SETTING_SEQUENCER_PLAY_MODE).values[play_mode][0];
   buffer_[2] = '\0';
   display_.Print(buffer_);
@@ -436,14 +436,18 @@ void Ui::SplashOn(Splash s) {
   display_.set_fade(0);
   display_.set_blink(false);
   switch (splash_) {
+    case SPLASH_NONE:
+    case SPLASH_PART_STRING:
+      break;
+
     case SPLASH_ACTIVE_PART:
       if (multi.recording()) {
         strcpy(buffer_, "1R");
-        buffer_[0] += multi.recording_part();
+        buffer_[0] += splash_part_;
         buffer_[2] = '\0';
         display_.Print(buffer_);
       } else {
-        PrintActivePartAndPlayMode();
+        PrintPartAndPlayMode(splash_part_);
       }
       break;
 
@@ -493,9 +497,6 @@ void Ui::SplashOn(Splash s) {
       strcpy(buffer_, "S1");
       buffer_[1] += program_index_;
       display_.Print(buffer_);
-      break;
-
-    default:
       break;
   }
 }
@@ -753,8 +754,7 @@ void Ui::OnSwitchHeld(const Event& e) {
     case UI_SWITCH_REC:
       if (recording_any) {
         mutable_recording_part()->DeleteRecording();
-        SetSplashPart(active_part_);
-        SplashOn(SPLASH_DELETE_RECORDING);
+        SplashOn(SPLASH_DELETE_RECORDING, active_part_);
       } else {
         PressedKeys &keys = LatchableKeys();
         if (keys.ignore_note_off_messages) {
@@ -787,7 +787,7 @@ void Ui::OnSwitchHeld(const Event& e) {
       if (recording_any) {
         multi.StartRecording(active_part_);
       }
-      SplashOn(SPLASH_ACTIVE_PART);
+      SplashOn(SPLASH_ACTIVE_PART, active_part_);
       break;
 
     case UI_SWITCH_TAP_TEMPO:
@@ -916,7 +916,7 @@ void Ui::DoEvents() {
     if (splash_ == SPLASH_SETTING_VALUE) {
       SplashOn(SPLASH_SETTING_NAME);
       return;
-    } else if (splash_ == SPLASH_SETTING_NAME) {
+    } else if (splash_ == SPLASH_SETTING_NAME || splash_ == SPLASH_PART_STRING) {
       SplashOn(SPLASH_SETTING_PART);
       return;
     }
@@ -984,7 +984,7 @@ void Ui::DoEvents() {
   if (queue_.idle_time() > kRefreshTwoThirds) {
     if (print_part) {
       display_.set_fade(0);
-      PrintActivePartAndPlayMode();
+      PrintPartAndPlayMode(active_part_);
       if (multi.running()) {
         SetBrightnessFromSequencerPhase(active_part());
       } else {
