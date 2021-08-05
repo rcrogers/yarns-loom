@@ -66,7 +66,9 @@ enum UiMode {
 enum Splash {
   SPLASH_NONE = 0,
   SPLASH_VERSION,
-  SPLASH_SETTING,
+  SPLASH_SETTING_VALUE,
+  SPLASH_SETTING_NAME,
+  SPLASH_SETTING_PART,
   SPLASH_ACTIVE_PART,
   SPLASH_DELETE_RECORDING,
   SPLASH_LOOPER_PHASE_OFFSET,
@@ -120,14 +122,13 @@ class Ui {
   void DoEvents();
   void FlushEvents();
   void SplashOn(Splash s);
-  static const uint8_t kNoSplashPart = 0xff;
   inline void SetSplashPart(uint8_t part) {
     splash_part_ = part;
   }
   inline void SplashSetting(const Setting& s, uint8_t part) {
     splash_setting_def_ = &s;
     SetSplashPart(part);
-    SplashOn(SPLASH_SETTING);
+    SplashOn(SPLASH_SETTING_VALUE);
   }
 
   inline bool in_recording_mode() const {

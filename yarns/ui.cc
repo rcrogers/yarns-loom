@@ -452,15 +452,22 @@ void Ui::SplashOn(Splash s) {
       display_.Scroll();
       break;
 
-    case SPLASH_SETTING:
+    case SPLASH_SETTING_VALUE:
       SetFadeForSetting(*splash_setting_def_);
-      if (splash_part_ == kNoSplashPart) {
-        display_.Print(splash_setting_def_->short_name, splash_setting_def_->name);
-      } else {
-        setting_defs.Print(*splash_setting_def_, multi.GetSetting(*splash_setting_def_, splash_part_), buffer_);
-        display_.Print(buffer_);
-      }
+      setting_defs.Print(*splash_setting_def_, multi.GetSetting(*splash_setting_def_, splash_part_), buffer_);
+      display_.Print(buffer_);
       display_.Scroll();
+      break;
+
+    case SPLASH_SETTING_NAME:
+      display_.Print(splash_setting_def_->short_name);
+      break;
+
+    case SPLASH_SETTING_PART:
+      strcpy(buffer_, "1C");
+      buffer_[0] += splash_part_;
+      buffer_[2] = '\0';
+      display_.Print(buffer_);
       break;
 
     case SPLASH_DELETE_RECORDING:
@@ -905,10 +912,12 @@ void Ui::DoEvents() {
     if (queue_.idle_time() < kRefreshPeriod || display_.scrolling()) {
       return; // Splash isn't over yet
     }
-    if (splash_ == SPLASH_SETTING && splash_part_ != kNoSplashPart) {
-      // If done displaying setting value, switch to displaying setting name
-      SetSplashPart(kNoSplashPart);
-      SplashOn(SPLASH_SETTING);
+    // Chaining
+    if (splash_ == SPLASH_SETTING_VALUE) {
+      SplashOn(SPLASH_SETTING_NAME);
+      return;
+    } else if (splash_ == SPLASH_SETTING_NAME) {
+      SplashOn(SPLASH_SETTING_PART);
       return;
     }
     // Exit splash
