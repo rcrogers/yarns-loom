@@ -734,12 +734,8 @@ class Part {
   inline bool looper_in_use() const {
     return looped() && (
       midi_.play_mode == PLAY_MODE_SEQUENCER ||
-      (midi_.play_mode == PLAY_MODE_ARPEGGIATOR && seq_driven_arp())
+      midi_.play_mode == PLAY_MODE_ARPEGGIATOR
     );
-  }
-
-  inline bool seq_driven_arp() const {
-    return seq_.arp_pattern == 0;
   }
 
   inline bool uses_poly_allocator() const {

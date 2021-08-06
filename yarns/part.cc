@@ -376,11 +376,7 @@ void Part::Clock() {
   SequencerStep step;
 
   bool clock = !arp_seq_prescaler_;
-  bool play = midi_.play_mode != PLAY_MODE_MANUAL && (
-    !looped() || (
-      midi_.play_mode == PLAY_MODE_ARPEGGIATOR && !seq_driven_arp()
-    )
-  );
+  bool play = midi_.play_mode != PLAY_MODE_MANUAL && !looper_in_use();
 
   if (clock && play) {
     step = BuildSeqStep();
@@ -409,12 +405,7 @@ void Part::Clock() {
   }
 
   if (play) {
-    if (num_voices_ > 1) {
-      while (generated_notes_.size() > num_voices_) {
-        const NoteEntry note = generated_notes_.played_note(0);
-        generated_notes_.NoteOff(note.note);
-      }
-    } else if (gate_length_counter_) {
+    if (gate_length_counter_) {
       --gate_length_counter_;
     } else if (generated_notes_.most_recent_note_index()) {
       // Peek at next step to see if it's a continuation
@@ -603,7 +594,7 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
   uint32_t pattern;
   uint8_t pattern_length;
   bool hit = false;
-  if (seq_driven_arp()) {
+  if (seq_.arp_pattern == 0) {
     pattern_length = seq_.num_steps;
     if (seq_step.has_note()) {
       hit = true;
