@@ -372,10 +372,10 @@ void Part::Reset() {
   }
 }
 
-void Part::Clock() {
+void Part::Clock(uint32_t tick_counter) {
   SequencerStep step;
 
-  bool clock = !arp_seq_prescaler_;
+  bool clock = tick_counter % lut_clock_ratio_ticks[seq_.clock_division] == 0;
   bool play = midi_.play_mode != PLAY_MODE_MANUAL && !looper_in_use();
 
   if (clock && play) {
@@ -422,21 +422,9 @@ void Part::Clock() {
       }
     }
   }
-  
-  ++arp_seq_prescaler_;
-  if (arp_seq_prescaler_ >= lut_clock_ratio_ticks[seq_.clock_division]) {
-    arp_seq_prescaler_ = 0;
-  }
-}
-
-bool Part::new_beat() const {
-  return arp_seq_prescaler_ > 0 &&
-    arp_seq_prescaler_ <= (lut_clock_ratio_ticks[seq_.clock_division] >> 3);
 }
 
 void Part::Start() {
-  arp_seq_prescaler_ = 0;
-
   seq_step_ = 0;
   
   arp_.ResetKey();
@@ -534,7 +522,7 @@ void Part::StopSequencerArpeggiatorNotes() {
         pitch = output_pitch_for_looper_note_[looper_note_index];
       }
       if (!looper_can_control(pitch)) { continue; }
-    }
+    } else if (manual_keys_.stack.Find(pitch)) continue;
     InternalNoteOff(pitch);
   }
 }

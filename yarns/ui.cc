@@ -339,7 +339,8 @@ const uint16_t kMasksNewLooperBeat[kDisplayWidth] = { 0x8000, 0x8000 };
 void Ui::PrintLooperRecordingStatus() {
   uint8_t note_index = recording_part().LooperCurrentNoteIndex();
   if (note_index == looper::kNullIndex) {
-    if (recording_part().new_beat()) {
+    uint16_t ticks = lut_clock_ratio_ticks[recording_part().sequencer_settings().clock_division];
+    if (static_cast<uint16_t>(multi.tick_counter() % ticks) <= (ticks >> 3)) {
       display_.set_brightness(UINT16_MAX);
       if (recording_part().looper().overwrite_armed()) {
         display_.Print("//");

@@ -686,7 +686,7 @@ class Part {
   void AllNotesOff();
   void StopSequencerArpeggiatorNotes();
   void Reset();
-  void Clock();
+  void Clock(uint32_t tick_counter);
   void Start();
   void Stop();
   void StopRecording();
@@ -1016,8 +1016,6 @@ class Part {
   stmlib::VoiceAllocator<kNumMaxVoicesPerPart * 2> poly_allocator_;
   uint8_t active_note_[kNumMaxVoicesPerPart];
   uint8_t cyclic_allocation_note_counter_;
-  
-  uint16_t arp_seq_prescaler_;
   
   ArpeggiatorState arp_;
   
