@@ -260,7 +260,7 @@ void Multi::ClockFast() {
   for (int i = 0; i < 12; ++i) {
     if (swing_predelay_[i] == 0) {
       for (uint8_t j = 0; j < num_active_parts_; ++j) {
-        part_[j].Clock(tick_counter_);
+        part_[j].Clock();
       }
     }
     if (swing_predelay_[i] >= 0) {

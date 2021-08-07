@@ -340,7 +340,7 @@ void Ui::PrintLooperRecordingStatus() {
   uint8_t note_index = recording_part().LooperCurrentNoteIndex();
   if (note_index == looper::kNullIndex) {
     uint16_t ticks = lut_clock_ratio_ticks[recording_part().sequencer_settings().clock_division];
-    if (static_cast<uint16_t>(multi.tick_counter() % ticks) <= (ticks >> 3)) {
+    if (static_cast<uint16_t>(multi.tick_counter() % ticks) <= (ticks >> 4)) {
       display_.set_brightness(UINT16_MAX);
       if (recording_part().looper().overwrite_armed()) {
         display_.Print("//");

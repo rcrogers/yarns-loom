@@ -686,7 +686,7 @@ class Part {
   void AllNotesOff();
   void StopSequencerArpeggiatorNotes();
   void Reset();
-  void Clock(uint32_t tick_counter);
+  void Clock();
   void Start();
   void Stop();
   void StopRecording();
