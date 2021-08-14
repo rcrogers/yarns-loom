@@ -58,6 +58,7 @@ void Multi::Init(bool reset_calibration) {
     part_[i].Init();
     part_[i].set_custom_pitch_table(settings_.custom_pitch_table);
   }
+  fill(&swing_predelay_[0], &swing_predelay_[12], -1);
   for (uint8_t i = 0; i < kNumSystemVoices; ++i) {
     voice_[i].Init();
   }
