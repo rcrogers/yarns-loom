@@ -831,12 +831,13 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
     damping_22 += voicing_.amplitude_mod_velocity << 16;
   }
 
-  voice->envelope()->SetADSR(
-    UINT16_MAX - (damping_22 >> (22 - 16)),
-    modulate_7bit(voicing_.env_init_attack, voicing_.env_mod_attack, vel),
-    modulate_7bit(voicing_.env_init_decay, voicing_.env_mod_decay, vel),
-    modulate_7bit(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel),
-    modulate_7bit(voicing_.env_init_release, voicing_.env_mod_release, vel)
+  int32_t peak_level = INT32_MAX - (damping_22 << (31 - 22));
+  int32_t sustain_level = modulate_7bit(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (31 - 7);
+  uint8_t attack_time = modulate_7bit(voicing_.env_init_attack, voicing_.env_mod_attack, vel);
+  uint8_t decay_time = modulate_7bit(voicing_.env_init_decay, voicing_.env_mod_decay, vel);
+  uint8_t release_time = modulate_7bit(voicing_.env_init_release, voicing_.env_mod_release, vel);
+  voice->envelope()->Config(
+    peak_level, sustain_level, attack_time, decay_time, release_time
   );
 
   voice->NoteOn(Tune(pitch), vel, portamento, trigger);

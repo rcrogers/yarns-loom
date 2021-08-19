@@ -77,13 +77,16 @@ class Envelope {
   }
 
   // All params 7-bit
-  inline void SetADSR(uint16_t peak, uint8_t a, uint8_t d, uint8_t s, uint8_t r) {
-    segment_target_[ENV_SEGMENT_ATTACK] = peak << 15;
+  inline void Config(
+    int32_t peak_target, int32_t sustain_target,
+    uint8_t attack_time, uint8_t decay_time, uint8_t release_time
+  ) {
+    segment_target_[ENV_SEGMENT_ATTACK] = peak_target;
+    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = sustain_target;
     // TODO could interpolate these from 16-bit parameters
-    increment_[ENV_SEGMENT_ATTACK] = lut_portamento_increments[a];
-    increment_[ENV_SEGMENT_DECAY] = lut_portamento_increments[d];
-    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = s << (9 + 15);
-    increment_[ENV_SEGMENT_RELEASE] = lut_portamento_increments[r];
+    increment_[ENV_SEGMENT_ATTACK] = lut_portamento_increments[attack_time];
+    increment_[ENV_SEGMENT_DECAY] = lut_portamento_increments[decay_time];
+    increment_[ENV_SEGMENT_RELEASE] = lut_portamento_increments[release_time];
   }
   
   inline void Trigger(EnvelopeSegment segment) {
