@@ -29,6 +29,7 @@
 # Lookup table definitions.
 
 import numpy
+import math
 from fractions import Fraction
 import itertools
 
@@ -100,6 +101,49 @@ env_linear = numpy.arange(0, 257.0) / 256.0
 env_linear[-1] = env_linear[-2]
 env_expo = 1.0 - numpy.exp(-4 * env_linear)
 lookup_tables.append(('env_expo', env_expo / env_expo.max() * 65535.0))
+
+
+env_linear = numpy.arange(1, 257.0) / 256.0
+env_expo = 1.0 - numpy.exp(-4 * env_linear)
+env_expo /= env_expo.max()
+dx = 1 / 256.0
+y_approx = 0
+slope_power = None
+errors = []
+expo_slope_shift = []
+print(env_expo)
+assert(len(env_expo) == 256)
+for idx, y in enumerate(env_expo):
+  dy = y - (0 if idx == 0 else env_expo[idx - 1])
+  slope = dy / dx
+  # slope **= 0.915 # avg -1.22%, final 0.05%
+  slope = (slope ** 0.98) * 0.97 # avg 0.66%, final 0.000%
+  ideal_slope_power = math.log(slope, 2)
+  # ideal_slope_power -= 0.05 # avg 1.38%, final 0.17%
+  # ideal_slope_power *= 0.91 # avg -1.21%, final 0.1%
+  slope_power = round(ideal_slope_power)
+  expo_slope_shift.append(slope_power)
+  y_approx += 2 ** slope_power * dx
+  print(y_approx, y)
+  error = 100 * (y_approx - y) / y
+  errors.append(error)
+  print(
+    'idx',
+    str.rjust(str(idx), 4),
+    'slope power',
+    str.rjust(str(slope_power), 3),
+    'error %',
+    str.rjust(format(
+      round(error, 3)
+    , '.3f'), 6)
+  )
+
+print('\navg error', sum(errors) / len(errors))
+
+lookup_tables_8 = []
+lookup_tables_8.append(
+    ('expo_slope_shift', expo_slope_shift)
+)
 
 
 """----------------------------------------------------------------------------

@@ -25,8 +25,6 @@
 
 namespace yarns {
 
-const size_t kEnvBlockSize = 2;
-
 using namespace stmlib;
 
 enum EnvelopeSegment {
@@ -46,8 +44,8 @@ class Envelope {
   void Init() {
     gate_ = false;
 
-    target_[ENV_SEGMENT_RELEASE] = 0;
-    target_[ENV_SEGMENT_DEAD] = 0;
+    segment_target_[ENV_SEGMENT_RELEASE] = 0;
+    segment_target_[ENV_SEGMENT_DEAD] = 0;
 
     increment_[ENV_SEGMENT_SUSTAIN] = 0;
     increment_[ENV_SEGMENT_DEAD] = 0;
@@ -80,11 +78,11 @@ class Envelope {
 
   // All params 7-bit
   inline void SetADSR(uint16_t peak, uint8_t a, uint8_t d, uint8_t s, uint8_t r) {
-    target_[ENV_SEGMENT_ATTACK] = peak;
+    segment_target_[ENV_SEGMENT_ATTACK] = peak << 15;
     // TODO could interpolate these from 16-bit parameters
     increment_[ENV_SEGMENT_ATTACK] = lut_portamento_increments[a];
     increment_[ENV_SEGMENT_DECAY] = lut_portamento_increments[d];
-    target_[ENV_SEGMENT_DECAY] = target_[ENV_SEGMENT_SUSTAIN] = s << 9;
+    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = s << (9 + 15);
     increment_[ENV_SEGMENT_RELEASE] = lut_portamento_increments[r];
   }
   
@@ -92,31 +90,41 @@ class Envelope {
     if (segment == ENV_SEGMENT_DEAD) {
       value_ = 0;
     }
-    if (!gate_) {
-      CONSTRAIN(target_[segment], 0, value_); // No rise without gate
-      if (segment == ENV_SEGMENT_SUSTAIN) {
-        segment = ENV_SEGMENT_RELEASE; // Skip sustain
+    if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
+      segment = ENV_SEGMENT_RELEASE; // Skip sustain
+    }
+    target_ = segment_target_[segment];
+    if (!gate_) { // Moving away from 0 ("rising") requires a gate
+      if (target_ >= 0) {
+        CONSTRAIN(target_, 0, value_);
+      } else {
+        CONSTRAIN(target_, value_, 0);
       }
     }
-    a_ = value_;
-    b_ = target_[segment];
     phase_increment_ = increment_[segment];
+    linear_slope_ = static_cast<int64_t>(target_ - value_) * phase_increment_ >> 32;
     segment_ = segment;
     phase_ = 0;
   }
 
   inline void Render() {
     phase_ += phase_increment_;
-    if (phase_ < phase_increment_) {
-      value_ = b_;
+    int8_t shift = lut_expo_slope_shift[phase_ >> 24];
+    // TODO detect overflow on shift up?
+    int32_t slope = shift >= 0 ? linear_slope_ << shift : linear_slope_ >> -shift;
+    if (
+      (slope > 0 && value_ >= target_ - slope) ||
+      (slope < 0 && value_ <= target_ - slope) ||
+      phase_ < phase_increment_
+    ) {
+      value_ = target_;
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-    }
-    if (phase_increment_) {
-      value_ = Mix(a_, b_, lut_env_expo[phase_ >> 24]);
+    } else {
+      value_ += slope;
     }
   }
 
-  inline uint16_t value() const { return value_; }
+  inline uint16_t value() const { return value_ >> 15; }
 
  private:
   bool gate_;
@@ -125,16 +133,18 @@ class Envelope {
   uint32_t increment_[ENV_NUM_SEGMENTS];
   
   // Value that needs to be reached at the end of each segment.
-  uint16_t target_[ENV_NUM_SEGMENTS];
+  int32_t segment_target_[ENV_NUM_SEGMENTS];
   
   // Current segment.
   size_t segment_;
   
-  // Start and end value of the current segment.
-  uint16_t a_;
-  uint16_t b_;
-  uint16_t value_;
-  uint16_t value_read_;
+  // Target and current value of the current segment.
+  int32_t target_;
+  int32_t value_;
+
+  // The naive value increment per tick, before exponential conversion
+  int32_t linear_slope_;
+
   uint32_t phase_;
   uint32_t phase_increment_;
 
