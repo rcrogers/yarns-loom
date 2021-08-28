@@ -33,6 +33,7 @@
 #include "stmlib/stmlib.h"
 #include "stmlib/utils/ring_buffer.h"
 
+#include "yarns/envelope.h"
 #include "yarns/interpolator.h"
 
 #include <cstring>
@@ -91,10 +92,14 @@ class Oscillator {
   Oscillator() { }
   ~Oscillator() { }
 
+  Envelope gain_envelope, timbre_envelope;
+
   inline void Init(uint16_t scale, uint16_t offset) {
     audio_buffer_.Init();
     scale_ = scale;
     offset_ = offset;
+    gain_envelope.Init();
+    timbre_envelope.Init();
     timbre_.Init(64);
     gain_.Init(64);
     svf_.Init(64);

@@ -127,7 +127,7 @@ class Envelope {
     }
   }
 
-  inline uint16_t value() const { return value_ >> 15; }
+  inline int32_t value() const { return value_; }
 
  private:
   bool gate_;

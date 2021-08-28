@@ -823,7 +823,6 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
 
   int32_t timbre_14 = (voicing_.timbre_mod_envelope << 7) + vel * voicing_.timbre_mod_velocity;
   CONSTRAIN(timbre_14, -1 << 13, (1 << 13) - 1)
-  voice->set_timbre_mod_envelope(timbre_14 << 2);
 
   uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
   int32_t damping_22 = -voicing_.amplitude_mod_velocity * vel_concave_up;
@@ -836,8 +835,18 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
   uint8_t attack_time = modulate_7bit(voicing_.env_init_attack, voicing_.env_mod_attack, vel);
   uint8_t decay_time = modulate_7bit(voicing_.env_init_decay, voicing_.env_mod_decay, vel);
   uint8_t release_time = modulate_7bit(voicing_.env_init_release, voicing_.env_mod_release, vel);
-  voice->envelope()->Config(
-    peak_level, sustain_level, attack_time, decay_time, release_time
+
+  voice->oscillator()->gain_envelope.Config(
+    peak_level, sustain_level,
+    attack_time, decay_time, release_time
+  );
+  voice->cv_envelope.Config(
+    peak_level, sustain_level, // TODO DacCodeFrom16BitValue
+    attack_time, decay_time, release_time
+  );
+  voice->oscillator()->timbre_envelope.Config(
+    (peak_level >> 13) * timbre_14, (sustain_level >> 13) * timbre_14,
+    attack_time, decay_time, release_time
   );
 
   voice->NoteOn(Tune(pitch), vel, portamento, trigger);

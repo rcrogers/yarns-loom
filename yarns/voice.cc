@@ -72,11 +72,11 @@ void Voice::Init() {
   scaled_vibrato_lfo_interpolator_.Init(kLowFreqRefresh);
   
   synced_lfo_.Init();
-  envelope_.Init();
+  cv_envelope.Init();
   portamento_phase_ = 0;
   portamento_phase_increment_ = 1U << 31;
   portamento_exponential_shape_ = false;
-  
+
   trigger_duration_ = 2;
 }
 
@@ -179,7 +179,6 @@ void Voice::Refresh(uint8_t voice_index) {
   note += tuning_;
   
   // Render modulation sources
-  envelope_.Render();
   if (lfo_phase_increment_) {
     synced_lfo_.Increment(lfo_phase_increment_);
   } else {
@@ -212,15 +211,20 @@ void Voice::Refresh(uint8_t voice_index) {
 
   note += pitch_lfo_interpolator_.value();
 
-  int32_t timbre_envelope_31 = envelope_.value() * timbre_mod_envelope_;
+  cv_envelope.Render();
+  oscillator_.gain_envelope.Render();
+  oscillator_.timbre_envelope.Render();
+
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
-    (timbre_envelope_31 >> (31 - 15)) +
+    (oscillator_.timbre_envelope.value() >> (31 - 15)) +
     timbre_lfo_interpolator_.value();
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
   uint16_t tremolo_drone = amplitude_lfo_interpolator_.value() << 1;
-  uint16_t tremolo_envelope = envelope_.value() * tremolo_drone >> 16;
+  uint16_t tremolo_envelope = (cv_envelope.value() >> 15) * tremolo_drone >> 16;
+  // TODO how is tremolo gonna work with osc gain envelope?
+  // In here, compute the tremolo ducking amount based on latest envelope value, then send it to oscillator to be summed with envelope
   uint16_t gain = oscillator_mode_ == OSCILLATOR_MODE_ENVELOPED ?
     tremolo_envelope : tremolo_drone;
 
@@ -295,15 +299,21 @@ void Voice::NoteOn(
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
     trigger_phase_increment_ = lut_portamento_increments[trigger_duration_];
-    envelope_.GateOff();
+    cv_envelope.GateOff();
+    oscillator_.gain_envelope.GateOff();
+    oscillator_.timbre_envelope.GateOff();
   }
   gate_ = true;
-  envelope_.GateOn();
+  cv_envelope.GateOn();
+  oscillator_.gain_envelope.GateOn();
+  oscillator_.timbre_envelope.GateOn();
 }
 
 void Voice::NoteOff() {
   gate_ = false;
-  envelope_.GateOff();
+  cv_envelope.GateOff();
+  oscillator_.gain_envelope.GateOff();
+  oscillator_.timbre_envelope.GateOff();
 }
 
 void Voice::ControlChange(uint8_t controller, uint8_t value) {
