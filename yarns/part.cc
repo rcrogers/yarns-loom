@@ -830,22 +830,36 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
     damping_22 += voicing_.amplitude_mod_velocity << 16;
   }
 
-  int32_t peak_level = INT32_MAX - (damping_22 << (31 - 22));
-  int32_t sustain_level = modulate_7bit(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (31 - 7);
-  uint8_t attack_time = modulate_7bit(voicing_.env_init_attack, voicing_.env_mod_attack, vel);
-  uint8_t decay_time = modulate_7bit(voicing_.env_init_decay, voicing_.env_mod_decay, vel);
-  uint8_t release_time = modulate_7bit(voicing_.env_init_release, voicing_.env_mod_release, vel);
+  uint16_t peak_level = UINT16_MAX - (damping_22 >> (22 - 16));
+  uint16_t sustain_level = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
+  // 7-bit
+  uint8_t attack_time = modulate_7_13(voicing_.env_init_attack, voicing_.env_mod_attack, vel) >> (13 - 7);
+  uint8_t decay_time = modulate_7_13(voicing_.env_init_decay, voicing_.env_mod_decay, vel) >> (13 - 7);
+  uint8_t release_time = modulate_7_13(voicing_.env_init_release, voicing_.env_mod_release, vel) >> (13 - 7);
 
-  voice->oscillator()->gain_envelope.Config(
+  if (voice->aux_1_envelope()) voice->dc_output(DC_AUX_1)->envelope()->Set(
     peak_level, sustain_level,
+    voice->dc_output(DC_AUX_1)->volts_dac_code(0),
+    voice->dc_output(DC_AUX_1)->volts_dac_code(7),
     attack_time, decay_time, release_time
   );
-  voice->cv_envelope.Config(
-    peak_level, sustain_level, // TODO DacCodeFrom16BitValue
+  if (voice->aux_2_envelope()) voice->dc_output(DC_AUX_2)->envelope()->Set(
+    peak_level, sustain_level,
+    voice->dc_output(DC_AUX_2)->volts_dac_code(0),
+    voice->dc_output(DC_AUX_2)->volts_dac_code(7),
     attack_time, decay_time, release_time
   );
-  voice->oscillator()->timbre_envelope.Config(
-    (peak_level >> 13) * timbre_14, (sustain_level >> 13) * timbre_14,
+
+  Oscillator* osc = voice->oscillator();
+  osc->gain_envelope.Set(
+    peak_level, sustain_level,
+    voicing_.oscillator_mode == OSCILLATOR_MODE_ENVELOPED ? 0 : osc->scale_,
+    osc->scale_,
+    attack_time, decay_time, release_time
+  );
+  osc->timbre_envelope.Set(
+    peak_level, sustain_level,
+    0, timbre_14 << 2,
     attack_time, decay_time, release_time
   );
 

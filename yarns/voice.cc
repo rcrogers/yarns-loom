@@ -72,7 +72,6 @@ void Voice::Init() {
   scaled_vibrato_lfo_interpolator_.Init(kLowFreqRefresh);
   
   synced_lfo_.Init();
-  cv_envelope.Init();
   portamento_phase_ = 0;
   portamento_phase_increment_ = 1U << 31;
   portamento_exponential_shape_ = false;
@@ -82,7 +81,7 @@ void Voice::Init() {
 
 /* static */
 CVOutput::DCFn CVOutput::dc_fn_table_[] = {
-  &CVOutput::note_dac_code,
+  &CVOutput::NoteToDacCode,
   &CVOutput::velocity_dac_code,
   &CVOutput::aux_cv_dac_code,
   &CVOutput::aux_cv_dac_code_2,
@@ -97,7 +96,7 @@ void CVOutput::Init(bool reset_calibration) {
   }
   dirty_ = false;
 
-  dac_interpolator_.Init(10); // 40 kHz / 4 kHz
+  envelope_.Init();
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
@@ -107,9 +106,9 @@ void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
       &calibrated_dac_code_[0]);
 }
 
-void CVOutput::NoteToDacCode() {
+uint16_t CVOutput::NoteToDacCode() {
   int32_t note = dc_voice_->note();
-  if (note_ == note && !dirty_) return;
+  if (note_ == note && !dirty_) return dac_code_;
   dirty_ = false;
   note_ = note;
 
@@ -129,7 +128,7 @@ void CVOutput::NoteToDacCode() {
   // Octave indicates the octave. Look up in the DAC code table.
   int32_t a = calibrated_dac_code_[octave];
   int32_t b = calibrated_dac_code_[octave + 1];
-  note_dac_code_ = a + ((b - a) * note / kOctave);
+  return a + ((b - a) * note / kOctave);
 }
 
 void Voice::ResetAllControllers() {
@@ -191,7 +190,7 @@ void Voice::Refresh(uint8_t voice_index) {
   if (refresh_counter_ == 0) {
     uint16_t tremolo_lfo = 32767 - synced_lfo_.shape(tremolo_shape_);
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
-    amplitude_lfo_interpolator_.SetTarget((UINT16_MAX - scaled_tremolo_lfo) >> 1);
+    amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
 
     timbre_lfo_interpolator_.SetTarget(triangle_lfo * timbre_mod_lfo_current_ >> (31 - 15));
@@ -211,31 +210,31 @@ void Voice::Refresh(uint8_t voice_index) {
 
   note += pitch_lfo_interpolator_.value();
 
-  cv_envelope.Render();
-  oscillator_.gain_envelope.Render();
-  oscillator_.timbre_envelope.Render();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->Tick();
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->Tick();
+  oscillator_.gain_envelope.Tick();
+  oscillator_.timbre_envelope.Tick();
 
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
-    (oscillator_.timbre_envelope.value() >> (31 - 15)) +
     timbre_lfo_interpolator_.value();
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
-  uint16_t tremolo_drone = amplitude_lfo_interpolator_.value() << 1;
-  uint16_t tremolo_envelope = (cv_envelope.value() >> 15) * tremolo_drone >> 16;
-  // TODO how is tremolo gonna work with osc gain envelope?
-  // In here, compute the tremolo ducking amount based on latest envelope value, then send it to oscillator to be summed with envelope
-  uint16_t gain = oscillator_mode_ == OSCILLATOR_MODE_ENVELOPED ?
-    tremolo_envelope : tremolo_drone;
-
-  oscillator_.Refresh(note, timbre_15, gain);
+  uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
+  if (aux_1_envelope())
+    dc_output(DC_AUX_1)->set_envelope_offset(dc_output(DC_AUX_1)->envelope()->tremolo(tremolo));
+  if (aux_2_envelope())
+    dc_output(DC_AUX_2)->set_envelope_offset(dc_output(DC_AUX_2)->envelope()->tremolo(tremolo));
+  oscillator_.Refresh(note, timbre_15, oscillator_.gain_envelope.tremolo(tremolo));
+  // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
+  // this will likely be jagged in general -- may need to clock the LFO interpolators (both gain and timbre) inside the render loop
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = triangle_lfo + 32768;
-  mod_aux_[MOD_AUX_ENVELOPE] = tremolo_envelope;
+  mod_aux_[MOD_AUX_ENVELOPE] = 0; // TODO need a vanilla unscaled one for LED
 
   if (retrigger_delay_) {
     --retrigger_delay_;
@@ -258,9 +257,11 @@ void Voice::Refresh(uint8_t voice_index) {
 
 void CVOutput::Refresh() {
   if (is_audio()) return;
-  if (dc_role_ == DC_PITCH) NoteToDacCode();
-  dac_interpolator_.SetTarget((this->*dc_fn_table_[dc_role_])() >> 1);
-  if (is_envelope()) dac_interpolator_.ComputeSlope();
+  if (is_envelope()) {
+    dac_code_ = envelope_.value();
+  } else {
+    dac_code_ = (this->*dc_fn_table_[dc_role_])();
+  }
 }
 
 void Voice::SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento) {
@@ -299,19 +300,19 @@ void Voice::NoteOn(
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
     trigger_phase_increment_ = lut_portamento_increments[trigger_duration_];
-    cv_envelope.GateOff();
-    oscillator_.gain_envelope.GateOff();
-    oscillator_.timbre_envelope.GateOff();
+    NoteOff();
   }
   gate_ = true;
-  cv_envelope.GateOn();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->GateOn();
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->GateOn();
   oscillator_.gain_envelope.GateOn();
   oscillator_.timbre_envelope.GateOn();
 }
 
 void Voice::NoteOff() {
   gate_ = false;
-  cv_envelope.GateOff();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->GateOff();
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->GateOff();
   oscillator_.gain_envelope.GateOff();
   oscillator_.timbre_envelope.GateOff();
 }

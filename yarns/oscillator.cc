@@ -98,12 +98,12 @@ void StateVariableFilter::RenderSample(int16_t in) {
   bp += cutoff.value() * hp >> 15;
 }
 
-void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t gain) {
+void Oscillator::Refresh(int16_t pitch, int32_t timbre, int32_t gain) {
     pitch_ = pitch;
     // if (shape_ >= OSC_SHAPE_FM) {
     //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
     // }
-    gain_.SetTarget((scale_ * gain) >> 17);
+    gain_ = gain;
 
     int32_t strength = 32767;
     if (shape_ == OSC_SHAPE_FOLD_SINE || shape_ >= OSC_SHAPE_FM) {
@@ -124,7 +124,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t gain) {
           break;
       }
     }
-    timbre_.SetTarget(timbre);
+    timbre_ = timbre;
   }
 
 uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
@@ -170,6 +170,10 @@ void Oscillator::Render() {
   (this->*fn)();
 }
 
+#define SET_TIMBRE \
+  int32_t timbre = timbre_ + timbre_envelope.value(); \
+  CONSTRAIN(timbre, 0, 32767); \
+
 #define RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(body) \
   int32_t next_sample = next_sample_; \
   uint32_t phase = phase_; \
@@ -181,9 +185,11 @@ void Oscillator::Render() {
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     phase += phase_increment; \
+    SET_TIMBRE; \
     body \
-    gain_.ComputeSlopeIfDirty(); gain_.Tick(); \
-    audio_buffer_.Overwrite(offset_ + ((gain_.value() * this_sample) >> 15)); \
+    int32_t gain = gain_ + gain_envelope.value(); \
+    CONSTRAIN(gain, 0, UINT16_MAX); \
+    audio_buffer_.Overwrite(offset_ + ((gain * this_sample) >> 16)); \
   } \
   next_sample_ = next_sample; \
   phase_ = phase; \
@@ -196,10 +202,6 @@ void Oscillator::Render() {
     modulator_phase += modulator_phase_increment; \
     body; \
   )
-
-// TODO is this enough to fix CPU issues on filtered shapes?
-#define TIMBRE_TICK \
-  timbre_.ComputeSlopeIfDirty(); timbre_.Tick();
 
 #define EDGES_SAW(ph, ph_incr) \
   if (!high_) { \
@@ -264,7 +266,8 @@ void Oscillator::Render() {
   }
 
 #define SET_TRACKING_FILTER_CUTOFF \
-  int32_t cutoff = (pitch_ >> 1) + (timbre_.target() >> 1); \
+  SET_TIMBRE; \
+  int32_t cutoff = (pitch_ >> 1) + (timbre >> 1); \
   CONSTRAIN(cutoff, 0, 0x7fff);
 
 void Oscillator::RenderPulse() {
@@ -273,8 +276,7 @@ void Oscillator::RenderPulse() {
   uint32_t pw = 0x80000000;
   RENDER_LOOP(
     if (shape_ == OSC_SHAPE_VARIABLE_PULSE) {
-      TIMBRE_TICK;
-      pw = static_cast<uint32_t>(32768 - timbre_.value()) << 16;
+      pw = static_cast<uint32_t>(32767 - timbre) << 16;
     }
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_PULSE(phase, phase_increment) }
@@ -293,8 +295,7 @@ void Oscillator::RenderSaw() {
   uint32_t pw = 0;
   RENDER_LOOP(
     if (shape_ == OSC_SHAPE_VARIABLE_SAW) {
-      TIMBRE_TICK;
-      pw = static_cast<uint32_t>(timbre_.value()) << 16;
+      pw = static_cast<uint32_t>(timbre) << 16;
     }
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_SAW(phase, phase_increment) }
@@ -309,7 +310,8 @@ void Oscillator::RenderSaw() {
 }
 
 #define SET_SYNC_INCREMENT \
-  int32_t modulator_pitch = pitch_ + (timbre_.target() >> 3); \
+  SET_TIMBRE; \
+  int32_t modulator_pitch = pitch_ + (timbre >> 3); \
   CONSTRAIN(modulator_pitch, 0, kHighestNote - 1); \
   modulator_phase_increment_ = ComputePhaseIncrement(modulator_pitch);
 
@@ -359,8 +361,7 @@ void Oscillator::RenderFoldTriangle() {
     uint16_t phase_16 = phase >> 16;
     this_sample = (phase_16 << 1) ^ (phase_16 & 0x8000 ? 0xffff : 0x0000);
     this_sample += 32768;
-    TIMBRE_TICK;
-    this_sample = this_sample * timbre_.value() >> 15;
+    this_sample = this_sample * timbre >> 15;
     this_sample = Interpolate88(ws_tri_fold, this_sample + 32768);
   )
 }
@@ -368,8 +369,7 @@ void Oscillator::RenderFoldTriangle() {
 void Oscillator::RenderFoldSine() {
   RENDER_LOOP(
     this_sample = Interpolate824(wav_sine, phase);
-    TIMBRE_TICK;
-    this_sample = this_sample * timbre_.value() >> 15;
+    this_sample = this_sample * timbre >> 15;
     this_sample = Interpolate88(ws_sine_fold, this_sample + 32768);
   )
 }
@@ -378,8 +378,7 @@ void Oscillator::RenderTanhSine() {
   RENDER_LOOP(
     this_sample = Interpolate824(wav_sine, phase);
     int16_t baseline = this_sample >> 6;
-    TIMBRE_TICK;
-    this_sample = baseline + ((this_sample - baseline) * timbre_.value() >> 15);
+    this_sample = baseline + ((this_sample - baseline) * timbre >> 15);
     this_sample = Interpolate88(ws_violent_overdrive, this_sample + 32768);
   )
 }
@@ -389,8 +388,7 @@ void Oscillator::RenderFM() {
   modulator_phase_increment_ = ComputePhaseIncrement(pitch_ + interval);
   RENDER_LOOP(
     int16_t modulator = Interpolate824(wav_sine, modulator_phase);
-    TIMBRE_TICK;
-    uint32_t phase_mod = modulator * timbre_.value();
+    uint32_t phase_mod = modulator * timbre;
     // phase_mod = (phase_mod << 3) + (phase_mod << 2); // FM index 0-3
     phase_mod <<= 3; // FM index 0-2
     if (interval == 0) phase_mod <<= 1; // Double index range for 1:1 FM ratio
@@ -399,7 +397,8 @@ void Oscillator::RenderFM() {
 }
 
 #define SET_PHASE_DISTORTION_INCREMENT \
-  int16_t timbre_offset = timbre_.target() - 2048; \
+  SET_TIMBRE; \
+  int16_t timbre_offset = timbre - 2048; \
   int32_t shifted_pitch = pitch_ + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8); \
   if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1; \
   modulator_phase_increment_ = ComputePhaseIncrement(shifted_pitch);
@@ -470,8 +469,7 @@ void Oscillator::RenderPhaseDistortionSaw() {
 
 void Oscillator::RenderBuzz() {
   RENDER_LOOP(
-    TIMBRE_TICK;
-    int32_t zone_14 = (pitch_ + ((32767 - timbre_.value()) >> 1));
+    int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
     size_t index = zone_14 >> 10; // Use highest 4 bits
     CONSTRAIN(index, 0, kNumZones - 1);
@@ -484,7 +482,8 @@ void Oscillator::RenderBuzz() {
 }
 
 void Oscillator::RenderFilteredNoise() {
-  int32_t cutoff = 0x1000 + (timbre_.target() >> 1); // 1/4...1/2
+  SET_TIMBRE;
+  int32_t cutoff = 0x1000 + (timbre >> 1); // 1/4...1/2
   svf_.RenderInit(cutoff, pitch_ << 1);
   // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
   // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;

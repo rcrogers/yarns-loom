@@ -85,6 +85,8 @@ enum DCRole {
   DC_LAST
 };
 
+class CVOutput;
+
 class Voice {
  public:
   Voice() { }
@@ -169,11 +171,12 @@ class Voice {
   inline bool aux_2_envelope() const {
     return aux_cv_source_2_ == MOD_AUX_ENVELOPE;
   }
-  inline void set_has_audio_listener(bool b) {
-    has_audio_listener_ = b;
-  }
+  inline void set_dc_output(DCRole r, CVOutput* cvo) { dc_outputs_[r] = cvo; }
+  inline CVOutput* dc_output(DCRole r) { return dc_outputs_[r]; }
+  inline void set_audio_output(CVOutput* cvo) { audio_output_ = cvo; }
+  inline CVOutput* audio_output() { return audio_output_; }
   inline bool uses_audio() const {
-    return has_audio_listener_ && oscillator_mode_ != OSCILLATOR_MODE_OFF;
+    return audio_output_ && oscillator_mode_ != OSCILLATOR_MODE_OFF;
   }
 
   inline Oscillator* oscillator() {
@@ -187,8 +190,6 @@ class Voice {
   inline uint16_t ReadSample() {
     return oscillator_.ReadSample();
   }
-
-  Envelope cv_envelope;
   
  private:
   SyncedLFO synced_lfo_;
@@ -244,7 +245,8 @@ class Voice {
   uint16_t timbre_init_target_;
   uint16_t timbre_init_current_;
 
-  bool has_audio_listener_;
+  CVOutput* audio_output_;
+  CVOutput* dc_outputs_[DC_LAST];
 
   DISALLOW_COPY_AND_ASSIGN(Voice);
 };
@@ -254,7 +256,7 @@ class CVOutput {
   CVOutput() { }
   ~CVOutput() { }
 
-  typedef uint16_t (CVOutput::*DCFn)() const;
+  typedef uint16_t (CVOutput::*DCFn)();
   static DCFn dc_fn_table_[];
 
   void Init(bool reset_calibration);
@@ -265,6 +267,7 @@ class CVOutput {
   inline void assign(Voice* dc, DCRole dc_role, uint8_t num_audio) {
     dc_voice_ = dc;
     dc_role_ = dc_role;
+    dc_voice_->set_dc_output(dc_role, this);
 
     num_audio_voices_ = num_audio;
     uint16_t offset = volts_dac_code(0);
@@ -273,7 +276,7 @@ class CVOutput {
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
       Voice* audio_voice = audio_voices_[i] = dc_voice_ + i;
       audio_voice->oscillator()->Init(scale, offset);
-      audio_voice->set_has_audio_listener(true);
+      audio_voice->set_audio_output(this);
     }
   }
 
@@ -297,6 +300,8 @@ class CVOutput {
       (dc_role_ == DC_AUX_1 && dc_voice_->aux_1_envelope()) ||
       (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope());
   }
+  Envelope* envelope() { return &envelope_; }
+  inline void set_envelope_offset(uint16_t n) { envelope_offset_ = n; }
 
   inline uint16_t GetAudioSample() {
     uint16_t mix = 0;
@@ -307,36 +312,30 @@ class CVOutput {
   }
 
   inline uint16_t GetEnvelopeSample() {
-    dac_interpolator_.Tick();
-    return dac_interpolator_.value() << 1;
+    // TODO fast envelope clocking goes here
+    return envelope_offset_ + envelope_.value();
   }
 
   void Refresh();
 
-  inline uint16_t dc_dac_code() const {
-    return dac_interpolator_.target() << 1;
-  }
+  inline uint16_t dc_dac_code() const { return dac_code_; }
 
   inline uint16_t DacCodeFrom16BitValue(uint16_t value) const {
     uint32_t v = static_cast<uint32_t>(value);
-    int32_t scale = volts_dac_code(7) - volts_dac_code(0);
-    return static_cast<uint16_t>(volts_dac_code(0) + (scale * v >> 16));
+    uint16_t scale = volts_dac_code(0) - volts_dac_code(7);
+    return static_cast<uint16_t>(volts_dac_code(0) - (scale * v >> 16));
   }
 
-  inline uint16_t note_dac_code() const {
-    return note_dac_code_;
-  }
-
-  inline uint16_t velocity_dac_code() const {
+  inline uint16_t velocity_dac_code() {
     return DacCodeFrom16BitValue(dc_voice_->velocity() << 9);
   }
-  inline uint16_t aux_cv_dac_code() const {
+  inline uint16_t aux_cv_dac_code() {
     return DacCodeFrom16BitValue(dc_voice_->aux_cv_16bit());
   }
-  inline uint16_t aux_cv_dac_code_2() const {
+  inline uint16_t aux_cv_dac_code_2() {
     return DacCodeFrom16BitValue(dc_voice_->aux_cv_2_16bit());
   }
-  inline uint16_t trigger_dac_code() const {
+  inline uint16_t trigger_dac_code() {
     int32_t max = volts_dac_code(5);
     int32_t min = volts_dac_code(0);
     return min + ((max - min) * dc_voice_->trigger_value() >> 15);
@@ -356,7 +355,7 @@ class CVOutput {
   }
 
  private:
-  void NoteToDacCode();
+  uint16_t NoteToDacCode();
 
   Voice* dc_voice_;
   Voice* audio_voices_[kNumMaxVoicesPerPart];
@@ -364,10 +363,11 @@ class CVOutput {
   DCRole dc_role_;
 
   int32_t note_;
-  uint16_t note_dac_code_;
+  uint16_t dac_code_;
   bool dirty_;  // Set to true when the calibration settings have changed.
   uint16_t calibrated_dac_code_[kNumOctaves];
-  Interpolator dac_interpolator_;
+  Envelope envelope_;
+  uint16_t envelope_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };

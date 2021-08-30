@@ -44,9 +44,6 @@ class Envelope {
   void Init() {
     gate_ = false;
 
-    segment_target_[ENV_SEGMENT_RELEASE] = 0;
-    segment_target_[ENV_SEGMENT_DEAD] = 0;
-
     increment_[ENV_SEGMENT_SUSTAIN] = 0;
     increment_[ENV_SEGMENT_DEAD] = 0;
   }
@@ -76,22 +73,30 @@ class Envelope {
     return static_cast<EnvelopeSegment>(segment_);
   }
 
-  // All params 7-bit
-  inline void Config(
-    int32_t peak_target, int32_t sustain_target,
-    uint8_t attack_time, uint8_t decay_time, uint8_t release_time
+  inline void Set(
+    uint16_t peak_level, uint16_t sustain_level, // Platonic, unscaled targets
+    int32_t min_target, int32_t max_target, // Actual bounds
+    uint8_t attack_time, uint8_t decay_time, uint8_t release_time // 7-bit
   ) {
-    segment_target_[ENV_SEGMENT_ATTACK] = peak_target;
-    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = sustain_target;
+    int32_t scale = max_target - min_target;
+    segment_target_[ENV_SEGMENT_ATTACK] = min_target + (scale >> 16) * peak_level;
+    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + (scale >> 16) * sustain_level;
+    segment_target_[ENV_SEGMENT_RELEASE] = segment_target_[ENV_SEGMENT_DEAD] =
+    min_target;
     // TODO could interpolate these from 16-bit parameters
     increment_[ENV_SEGMENT_ATTACK] = lut_portamento_increments[attack_time];
     increment_[ENV_SEGMENT_DECAY] = lut_portamento_increments[decay_time];
     increment_[ENV_SEGMENT_RELEASE] = lut_portamento_increments[release_time];
   }
+
+  inline int32_t tremolo(uint16_t t) const {
+    int32_t relative_value = value_ - segment_target_[ENV_SEGMENT_DEAD];
+    return relative_value * -t >> 16;
+  }
   
   inline void Trigger(EnvelopeSegment segment) {
     if (segment == ENV_SEGMENT_DEAD) {
-      value_ = 0;
+      value_ = segment_target_[ENV_SEGMENT_DEAD];
     }
     if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
@@ -99,9 +104,9 @@ class Envelope {
     target_ = segment_target_[segment];
     if (!gate_) { // Moving away from 0 ("rising") requires a gate
       if (target_ >= 0) {
-        CONSTRAIN(target_, 0, value_);
+        CONSTRAIN(target_, segment_target_[ENV_SEGMENT_RELEASE], value_);
       } else {
-        CONSTRAIN(target_, value_, 0);
+        CONSTRAIN(target_, value_, segment_target_[ENV_SEGMENT_RELEASE]);
       }
     }
     phase_increment_ = increment_[segment];
@@ -110,11 +115,12 @@ class Envelope {
     phase_ = 0;
   }
 
-  inline void Render() {
+  inline void Tick() {
     phase_ += phase_increment_;
     int8_t shift = lut_expo_slope_shift[phase_ >> 24];
-    // TODO detect overflow on shift up?
-    int32_t slope = shift >= 0 ? linear_slope_ << shift : linear_slope_ >> -shift;
+    int32_t slope = shift >= 0
+      ? linear_slope_ << std::min(static_cast<int>(shift), __builtin_clz(linear_slope_))
+      : linear_slope_ >> -shift;
     if (
       (slope > 0 && value_ >= target_ - slope) ||
       (slope < 0 && value_ <= target_ - slope) ||
