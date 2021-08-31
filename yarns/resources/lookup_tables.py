@@ -39,15 +39,16 @@ LFO and portamento increments.
 
 lookup_tables_32 = []
 
-sample_rate = 4000
+refresh_rate = 4000
+audio_rate = 40000
+
+
 min_frequency = 1.0 / 8.0  # Hertz
 max_frequency = 16.0  # Hertz
-
 excursion = 1 << 32
 num_values = 96
-min_increment = excursion * min_frequency / sample_rate
-max_increment = excursion * max_frequency / sample_rate
-
+min_increment = excursion * min_frequency / refresh_rate
+max_increment = excursion * max_frequency / refresh_rate
 rates = numpy.linspace(numpy.log(min_increment),
                        numpy.log(max_increment), num_values)
 lookup_tables_32.append(
@@ -55,24 +56,32 @@ lookup_tables_32.append(
 )
 
 
+
 # Create lookup table for portamento.
 num_values = 128
 max_time = 5.0  # seconds
-min_time = 1.001 / sample_rate
 gamma = 0.25
-min_increment = excursion / (max_time * sample_rate)
-max_increment = excursion / (min_time * sample_rate)
 
+min_time = 1.001 / refresh_rate
+min_increment = excursion / (max_time * refresh_rate)
+max_increment = excursion / (min_time * refresh_rate)
 rates = numpy.linspace(numpy.power(max_increment, -gamma),
                        numpy.power(min_increment, -gamma), num_values)
-
 values = numpy.power(rates, -1/gamma).astype(int)
 lookup_tables_32.append(
     ('portamento_increments', values)
 )
 
+min_time = 5.0 / audio_rate
+min_increment = excursion / (max_time * audio_rate)
+max_increment = excursion / (min_time * audio_rate)
+rates = numpy.linspace(numpy.power(max_increment, -gamma),
+                       numpy.power(min_increment, -gamma), num_values)
+values = numpy.power(rates, -1/gamma).astype(int)
+lookup_tables_32.append(
+    ('envelope_phase_increments', values)
+)
 
-sample_rate = 40000
 
 # Create table for pitch.
 a4_midi = 69
@@ -83,7 +92,7 @@ notes = numpy.arange(
     (highest_octave + 12) * 128.0 + 16,
     16)
 pitches = a4_pitch * 2 ** ((notes - a4_midi * 128) / (128 * 12))
-increments = excursion / sample_rate * pitches
+increments = excursion / audio_rate * pitches
 
 lookup_tables_32.append(
     ('oscillator_increments', increments.astype(int)))
@@ -111,7 +120,6 @@ y_approx = 0
 slope_power = None
 errors = []
 expo_slope_shift = []
-print(env_expo)
 assert(len(env_expo) == 256)
 for idx, y in enumerate(env_expo):
   dy = y - (0 if idx == 0 else env_expo[idx - 1])
@@ -124,19 +132,19 @@ for idx, y in enumerate(env_expo):
   slope_power = round(ideal_slope_power)
   expo_slope_shift.append(slope_power)
   y_approx += 2 ** slope_power * dx
-  print(y_approx, y)
+  # print(y_approx, y)
   error = 100 * (y_approx - y) / y
   errors.append(error)
-  print(
-    'idx',
-    str.rjust(str(idx), 4),
-    'slope power',
-    str.rjust(str(slope_power), 3),
-    'error %',
-    str.rjust(format(
-      round(error, 3)
-    , '.3f'), 6)
-  )
+  # print(
+  #   'idx',
+  #   str.rjust(str(idx), 4),
+  #   'slope power',
+  #   str.rjust(str(slope_power), 3),
+  #   'error %',
+  #   str.rjust(format(
+  #     round(error, 3)
+  #   , '.3f'), 6)
+  # )
 
 print('\navg error', sum(errors) / len(errors))
 
@@ -683,7 +691,7 @@ SVF coefficients
 ----------------------------------------------------------------------------"""
 
 cutoff = 440.0 * 2 ** ((numpy.arange(0, 257) - 69) / 12.0)
-f = cutoff / sample_rate
+f = cutoff / audio_rate
 f[f > 1 / 8.0] = 1 / 8.0
 f = 2 * numpy.sin(numpy.pi * f)
 resonance = numpy.arange(0, 257) / 260.0

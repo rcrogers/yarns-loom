@@ -210,11 +210,6 @@ void Voice::Refresh(uint8_t voice_index) {
 
   note += pitch_lfo_interpolator_.value();
 
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->Tick();
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->Tick();
-  oscillator_.gain_envelope.Tick();
-  oscillator_.timbre_envelope.Tick();
-
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
     timbre_lfo_interpolator_.value();
@@ -234,7 +229,7 @@ void Voice::Refresh(uint8_t voice_index) {
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = triangle_lfo + 32768;
-  mod_aux_[MOD_AUX_ENVELOPE] = 0; // TODO need a vanilla unscaled one for LED
+  mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->volts_dac_code(0) - dc_output(DC_AUX_1)->envelope()->value(); // For LED
 
   if (retrigger_delay_) {
     --retrigger_delay_;

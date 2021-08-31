@@ -185,8 +185,10 @@ void Oscillator::Render() {
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     phase += phase_increment; \
+    timbre_envelope.Tick(); \
     SET_TIMBRE; \
     body \
+    gain_envelope.Tick(); \
     int32_t gain = gain_ + gain_envelope.value(); \
     CONSTRAIN(gain, 0, UINT16_MAX); \
     audio_buffer_.Overwrite(offset_ + ((gain * this_sample) >> 16)); \
