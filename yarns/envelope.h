@@ -117,10 +117,7 @@ class Envelope {
 
   inline void Tick() {
     phase_ += phase_increment_;
-    int8_t shift = lut_expo_slope_shift[phase_ >> 24];
-    int32_t slope = shift >= 0
-      ? linear_slope_ << std::min(static_cast<int>(shift), __builtin_clz(linear_slope_))
-      : linear_slope_ >> -shift;
+    int32_t slope = stmlib::exponentialize(linear_slope_, lut_expo_slope_shift[phase_ >> 24]);
     if (
       (slope > 0 && value_ >= target_ - slope) ||
       (slope < 0 && value_ <= target_ - slope) ||

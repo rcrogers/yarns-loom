@@ -51,7 +51,7 @@ const uint8_t kLowFreqRefresh = 32; // 4 kHz / 32 = 125 Hz (the ~minimum that do
 
 void Voice::Init() {
   note_ = -1;
-  note_source_ = note_target_ = note_portamento_ = 60 << 7;
+  note_target_ = note_portamento_ = 60 << 7;
   gate_ = false;
   
   mod_velocity_ = 0x7f;
@@ -161,15 +161,14 @@ void Voice::Refresh(uint8_t voice_index) {
   if (portamento_phase_ < portamento_phase_increment_) {
     portamento_phase_ = 0;
     portamento_phase_increment_ = 0;
-    note_source_ = note_target_;
+    note_portamento_ = note_target_;
+  } else {
+    int32_t slope = portamento_linear_slope_;
+    if (portamento_exponential_shape_)
+      slope = exponentialize(slope, lut_expo_slope_shift[portamento_phase_increment_ >> 24]);
+    note_portamento_ += slope;
   }
-  uint16_t portamento_level = portamento_exponential_shape_
-      ? Interpolate824(lut_env_expo, portamento_phase_)
-      : portamento_phase_ >> 16;
-  int32_t note = note_source_ + \
-      ((note_target_ - note_source_) * portamento_level >> 16);
-
-  note_portamento_ = note;
+  int32_t note = note_portamento_;
   
   // Add pitch-bend.
   note += static_cast<int32_t>(mod_pitch_bend_ - 8192) * pitch_bend_range_ >> 6;
@@ -259,20 +258,13 @@ void CVOutput::Refresh() {
   }
 }
 
-void Voice::SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento) {
-  note_source_ = note_portamento_;  
-  note_target_ = note;
-  if (!portamento) {
-    note_source_ = note_target_;
-  }
-}
-
 void Voice::NoteOn(
     int16_t note,
     uint8_t velocity,
     uint8_t portamento,
     bool trigger) {
-  SetPortamento(note, velocity, portamento);
+  note_target_ = note;
+  if (!portamento) note_portamento_ = note_target_;
   portamento_phase_ = 0;
   uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE >> 1;
   if (portamento < split_point) {
@@ -280,11 +272,13 @@ void Voice::NoteOn(
     portamento_exponential_shape_ = true;
   } else {
     uint32_t base_increment = lut_portamento_increments[(portamento - split_point) << 1];
-    uint32_t delta = abs(note_target_ - note_source_) + 1;
+    uint32_t delta = abs(note_target_ - note_portamento_) + 1;
     portamento_phase_increment_ = (1536 * (base_increment >> 11) / delta) << 11;
     CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
     portamento_exponential_shape_ = false;
   }
+  // TODO prob redundant for non-expo?
+  portamento_linear_slope_ = static_cast<int64_t>(note_target_ - note_portamento_) * portamento_phase_increment_ >> 32;
 
   mod_velocity_ = velocity;
 
