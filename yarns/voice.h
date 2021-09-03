@@ -171,10 +171,10 @@ class Voice {
   inline bool aux_2_envelope() const {
     return aux_cv_source_2_ == MOD_AUX_ENVELOPE;
   }
+  __attribute__((nonnull))
   inline void set_dc_output(DCRole r, CVOutput* cvo) { dc_outputs_[r] = cvo; }
   inline CVOutput* dc_output(DCRole r) { return dc_outputs_[r]; }
   inline void set_audio_output(CVOutput* cvo) { audio_output_ = cvo; }
-  inline CVOutput* audio_output() { return audio_output_; }
   inline bool uses_audio() const {
     return audio_output_ && oscillator_mode_ != OSCILLATOR_MODE_OFF;
   }

@@ -50,6 +50,7 @@ const int32_t kQuadrature = 0x40000000;
 const uint8_t kLowFreqRefresh = 32; // 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
 
 void Voice::Init() {
+  audio_output_ = NULL;
   note_ = -1;
   note_target_ = note_portamento_ = 60 << 7;
   gate_ = false;
@@ -95,7 +96,7 @@ void CVOutput::Init(bool reset_calibration) {
     }
   }
   dirty_ = false;
-
+  dc_role_ = DC_PITCH;
   envelope_.Init();
 }
 
@@ -215,10 +216,14 @@ void Voice::Refresh(uint8_t voice_index) {
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
   uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
-  if (aux_1_envelope())
+  if (aux_1_envelope()) {
     dc_output(DC_AUX_1)->set_envelope_offset(dc_output(DC_AUX_1)->envelope()->tremolo(tremolo));
-  if (aux_2_envelope())
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->volts_dac_code(0) - dc_output(DC_AUX_1)->envelope()->value();
+  }
+  if (aux_2_envelope()) {
     dc_output(DC_AUX_2)->set_envelope_offset(dc_output(DC_AUX_2)->envelope()->tremolo(tremolo));
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->volts_dac_code(0) - dc_output(DC_AUX_2)->envelope()->value();
+  }
   oscillator_.Refresh(note, timbre_15, oscillator_.gain_envelope.tremolo(tremolo));
   // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
   // this will likely be jagged in general -- may need to clock the LFO interpolators (both gain and timbre) inside the render loop
@@ -228,7 +233,6 @@ void Voice::Refresh(uint8_t voice_index) {
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = triangle_lfo + 32768;
-  mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->volts_dac_code(0) - dc_output(DC_AUX_1)->envelope()->value(); // For LED
 
   if (retrigger_delay_) {
     --retrigger_delay_;
