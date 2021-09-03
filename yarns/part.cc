@@ -927,7 +927,7 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity) {
           legato = false;
         } else {
           // Begin portamento from the preceding priority note
-          voice_[voice_index]->set_note_portamento(Tune(before.note));
+          voice_[voice_index]->SetPortamento(Tune(before.note), velocity, 0);
         }
       }
       // Prevent the same note from being simultaneously played on two channels.

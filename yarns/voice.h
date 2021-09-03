@@ -96,7 +96,7 @@ class Voice {
   void ResetAllControllers();
 
   void Refresh(uint8_t voice_index);
-  void set_note_portamento(int16_t note) { note_portamento_ = note; };
+  void SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento);
   void NoteOn(int16_t note, uint8_t velocity, uint8_t portamento, bool trigger);
   void NoteOff();
   void ControlChange(uint8_t controller, uint8_t value);
@@ -195,6 +195,7 @@ class Voice {
   SyncedLFO synced_lfo_;
   Oscillator oscillator_;
 
+  int32_t note_source_;
   int32_t note_target_;
   int32_t note_portamento_;
   int32_t note_;
@@ -222,7 +223,6 @@ class Voice {
   uint32_t portamento_phase_;
   uint32_t portamento_phase_increment_;
   bool portamento_exponential_shape_;
-  int32_t portamento_linear_slope_;
   
   // This counter is used to artificially create a 750µs (3-systick) dip at LOW
   // level when the gate is currently HIGH and a new note arrive with a
