@@ -78,9 +78,9 @@ class Envelope {
     int32_t min_target, int32_t max_target, // Actual bounds
     uint8_t attack_time, uint8_t decay_time, uint8_t release_time // 7-bit
   ) {
-    int32_t scale = max_target - min_target;
-    segment_target_[ENV_SEGMENT_ATTACK] = min_target + (scale >> 16) * peak_level;
-    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + (scale >> 16) * sustain_level;
+    scale_ = max_target - min_target;
+    segment_target_[ENV_SEGMENT_ATTACK] = min_target + (scale_ >> 16) * peak_level;
+    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + (scale_ >> 16) * sustain_level;
     segment_target_[ENV_SEGMENT_RELEASE] = segment_target_[ENV_SEGMENT_DEAD] =
     min_target;
     // TODO could interpolate these from 16-bit parameters
@@ -102,12 +102,9 @@ class Envelope {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
     target_ = segment_target_[segment];
-    if (!gate_) { // Moving away from 0 ("rising") requires a gate
-      if (target_ - value_ >= 0) {
-        CONSTRAIN(target_, segment_target_[ENV_SEGMENT_RELEASE], value_);
-      } else {
-        CONSTRAIN(target_, value_, segment_target_[ENV_SEGMENT_RELEASE]);
-      }
+    if (!gate_ && (scale_ >= 0) == (target_ >= value_)) {
+      // Moving away from minimum requires a gate -- to prevent e.g. an aborted attack from decaying upward
+      target_ = value_;
     }
     phase_increment_ = increment_[segment];
     linear_slope_ = static_cast<int64_t>(target_ - value_) * phase_increment_ >> 32;
@@ -119,9 +116,10 @@ class Envelope {
     phase_ += phase_increment_;
     int32_t slope = stmlib::exponentialize(linear_slope_, lut_expo_slope_shift[phase_ >> 24]);
     if (
-      (slope > 0 && value_ >= target_ - slope) ||
-      (slope < 0 && value_ <= target_ - slope) ||
-      phase_ < phase_increment_
+      phase_ < phase_increment_ ||
+      // The slope is about to overshoot the target
+      (linear_slope_ >= 0 && value_ > target_ - slope) ||
+      (linear_slope_ < 0 && value_ < target_ - slope)
     ) {
       value_ = target_;
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
@@ -140,6 +138,7 @@ class Envelope {
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_NUM_SEGMENTS];
+  int32_t scale_;
   
   // Current segment.
   size_t segment_;
