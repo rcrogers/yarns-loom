@@ -312,7 +312,7 @@ class CVOutput {
   }
 
   inline uint16_t GetEnvelopeSample() {
-    envelope_.Tick();
+    // TODO fast envelope clocking goes here
     return envelope_offset_ + envelope_.value();
   }
 

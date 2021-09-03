@@ -84,9 +84,9 @@ class Envelope {
     segment_target_[ENV_SEGMENT_RELEASE] = segment_target_[ENV_SEGMENT_DEAD] =
     min_target;
     // TODO could interpolate these from 16-bit parameters
-    increment_[ENV_SEGMENT_ATTACK] = lut_envelope_phase_increments[attack_time];
-    increment_[ENV_SEGMENT_DECAY] = lut_envelope_phase_increments[decay_time];
-    increment_[ENV_SEGMENT_RELEASE] = lut_envelope_phase_increments[release_time];
+    increment_[ENV_SEGMENT_ATTACK] = lut_portamento_increments[attack_time];
+    increment_[ENV_SEGMENT_DECAY] = lut_portamento_increments[decay_time];
+    increment_[ENV_SEGMENT_RELEASE] = lut_portamento_increments[release_time];
   }
 
   inline int32_t tremolo(uint16_t t) const {
