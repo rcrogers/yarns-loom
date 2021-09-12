@@ -839,22 +839,22 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
 
   if (voice->aux_1_envelope()) voice->dc_output(DC_AUX_1)->envelope()->Set(
     peak_level, sustain_level,
-    voice->dc_output(DC_AUX_1)->volts_dac_code(0),
-    voice->dc_output(DC_AUX_1)->volts_dac_code(7),
+    voice->dc_output(DC_AUX_1)->volts_dac_code(0) >> 1,
+    voice->dc_output(DC_AUX_1)->volts_dac_code(7) >> 1,
     attack_time, decay_time, release_time
   );
   if (voice->aux_2_envelope()) voice->dc_output(DC_AUX_2)->envelope()->Set(
     peak_level, sustain_level,
-    voice->dc_output(DC_AUX_2)->volts_dac_code(0),
-    voice->dc_output(DC_AUX_2)->volts_dac_code(7),
+    voice->dc_output(DC_AUX_2)->volts_dac_code(0) >> 1,
+    voice->dc_output(DC_AUX_2)->volts_dac_code(7) >> 1,
     attack_time, decay_time, release_time
   );
 
   Oscillator* osc = voice->oscillator();
   osc->gain_envelope.Set(
     peak_level, sustain_level,
-    voicing_.oscillator_mode == OSCILLATOR_MODE_ENVELOPED ? 0 : osc->scale_,
-    osc->scale_,
+    voicing_.oscillator_mode == OSCILLATOR_MODE_ENVELOPED ? 0 : osc->scale_ >> 1,
+    osc->scale_ >> 1,
     attack_time, decay_time, release_time
   );
   osc->timbre_envelope.Set(

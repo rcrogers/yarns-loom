@@ -98,7 +98,7 @@ void StateVariableFilter::RenderSample(int16_t in) {
   bp += cutoff.value() * hp >> 15;
 }
 
-void Oscillator::Refresh(int16_t pitch, int32_t timbre, int32_t gain) {
+void Oscillator::Refresh(int16_t pitch, int16_t timbre, int16_t gain) {
     pitch_ = pitch;
     // if (shape_ >= OSC_SHAPE_FM) {
     //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
@@ -187,9 +187,9 @@ void Oscillator::Render() {
     phase += phase_increment; \
     SET_TIMBRE; \
     body \
-    int32_t gain = gain_ + gain_envelope.value(); \
+    int32_t gain = (gain_ + gain_envelope.value()) << 1; \
     CONSTRAIN(gain, 0, UINT16_MAX); \
-    audio_buffer_.Overwrite(offset_ + ((gain * this_sample) >> 16)); \
+    audio_buffer_.Overwrite(offset_ - ((gain * this_sample) >> 16)); \
   } \
   next_sample_ = next_sample; \
   phase_ = phase; \

@@ -75,12 +75,13 @@ class Envelope {
 
   inline void Set(
     uint16_t peak_level, uint16_t sustain_level, // Platonic, unscaled targets
-    int32_t min_target, int32_t max_target, // Actual bounds
+    int32_t min_target, int32_t max_target, // Actual bounds, 16-bit signed
     uint8_t attack_time, uint8_t decay_time, uint8_t release_time // 7-bit
   ) {
     scale_ = max_target - min_target;
-    segment_target_[ENV_SEGMENT_ATTACK] = min_target + (scale_ >> 16) * peak_level;
-    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + (scale_ >> 16) * sustain_level;
+    min_target <<= 16;
+    segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale_ * peak_level;
+    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale_ * sustain_level;
     segment_target_[ENV_SEGMENT_RELEASE] = segment_target_[ENV_SEGMENT_DEAD] =
     min_target;
     // TODO could interpolate these from 16-bit parameters
@@ -89,9 +90,9 @@ class Envelope {
     increment_[ENV_SEGMENT_RELEASE] = lut_portamento_increments[release_time];
   }
 
-  inline int32_t tremolo(uint16_t t) const {
-    int32_t relative_value = value_ - segment_target_[ENV_SEGMENT_DEAD];
-    return relative_value * -t >> 16;
+  inline int16_t tremolo(uint16_t strength) const {
+    int32_t relative_value = (value_ - segment_target_[ENV_SEGMENT_DEAD]) >> 16;
+    return relative_value * -strength >> 16;
   }
   
   inline void Trigger(EnvelopeSegment segment) {
@@ -115,9 +116,10 @@ class Envelope {
   inline void Tick() {
     phase_ += phase_increment_;
     int8_t shift = lut_expo_slope_shift[phase_ >> 24];
-    int32_t slope = shift >= 0
-      ? linear_slope_ << std::min(static_cast<int>(shift), __builtin_clz(linear_slope_))
-      : linear_slope_ >> -shift;
+    int32_t slope = 0;
+    if (linear_slope_ != 0) slope = shift >= 0
+      ? linear_slope_ << std::min(static_cast<int>(shift), __builtin_clz(abs(linear_slope_)))
+      : linear_slope_ >> static_cast<uint8_t>(-shift);
     if (
       phase_ < phase_increment_ ||
       // The slope is about to overshoot the target
@@ -126,12 +128,12 @@ class Envelope {
     ) {
       value_ = target_;
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-    } else {
+    } else if (phase_increment_) {
       value_ += slope;
     }
   }
 
-  inline int32_t value() const { return value_; }
+  inline int16_t value() const { return value_ >> 16; }
 
  private:
   bool gate_;
@@ -141,7 +143,7 @@ class Envelope {
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_NUM_SEGMENTS];
-  int32_t scale_;
+  int16_t scale_;
   
   // Current segment.
   size_t segment_;

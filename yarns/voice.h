@@ -313,7 +313,7 @@ class CVOutput {
 
   inline uint16_t GetEnvelopeSample() {
     // TODO fast envelope clocking goes here
-    return envelope_offset_ + envelope_.value();
+    return envelope_offset_ + (envelope_.value() << 1);
   }
 
   void Refresh();

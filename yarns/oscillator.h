@@ -113,7 +113,7 @@ class Oscillator {
     return audio_buffer_.ImmediateRead();
   }
 
-  void Refresh(int16_t pitch, int32_t timbre, int32_t gain);
+  void Refresh(int16_t pitch, int16_t timbre, int16_t gain);
   
   inline void set_shape(OscillatorShape shape) {
     shape_ = shape;
@@ -154,8 +154,7 @@ class Oscillator {
   }
 
   OscillatorShape shape_;
-  int32_t gain_, timbre_;
-  int16_t pitch_;
+  int16_t pitch_, timbre_, gain_;
 
   uint32_t phase_;
   uint32_t phase_increment_;
