@@ -211,11 +211,6 @@ void Voice::Refresh(uint8_t voice_index) {
 
   note += pitch_lfo_interpolator_.value();
 
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->Tick();
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->Tick();
-  oscillator_.gain_envelope.Tick();
-  oscillator_.timbre_envelope.Tick();
-
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
     timbre_lfo_interpolator_.value();
