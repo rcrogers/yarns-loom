@@ -152,16 +152,18 @@
 - `UNISON 2` and `SORTED` reassign voices on `NoteOff` if there are held notes that don't yet have a voice
   
 ### Expanded support for Control Change events
-- The result of a received CC is briefly displayed
+- The result of a received CC is briefly displayed (value, setting abbreviation, and receiving part)
 - Recording control: start/stop recording mode, delete a recording
 - CC support for all new settings
 - Fixed settings to accept a negative value via CC
 - [Implementation Chart](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 
-### Clock ratios
+### Clocking
 - Added a variety of integer ratios for `O/` and `C/` (and for clock-synced `VS (VIBRATO SPEED)`)
-- Includes 1/8, 3/7, 2/3, 6/5, 4/3, and more
+  - Includes 1/8, 3/7, 2/3, 6/5, 4/3, and more
+- Sequencers' phases are based on a master clock, to allow returning to predictable phase relationships between sequences even after a stint in disparate time signatures
   
 ### Other tweaks
 - Broadened portamento setting range from 51 to 64 values per curve shape
 - Allow an explicit clock start (from panel switch or MIDI) to supersede an implicit clock start (from keyboard)
+- Change 'split' controls (portamento and vibrato speed) to have a common zero at the split point, increasing both CCW and CW of this point
