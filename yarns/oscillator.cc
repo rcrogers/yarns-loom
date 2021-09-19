@@ -171,8 +171,9 @@ void Oscillator::Render() {
 }
 
 #define SET_TIMBRE \
-  int32_t timbre = timbre_ + timbre_envelope.value(); \
-  CONSTRAIN(timbre, 0, 32767); \
+  int16_t timbre = timbre_envelope.value(); \
+  CONSTRAIN(timbre, 0 - timbre_, 32767 - timbre_); \
+  timbre += timbre_; \
 
 #define RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(body) \
   int32_t next_sample = next_sample_; \
