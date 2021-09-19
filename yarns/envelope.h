@@ -110,7 +110,6 @@ class Envelope {
     phase_increment_ = increment_[segment];
     int8_t delta = (target_ - value_) >> 24; // Take the brunt of the 32-bit shift here to minimize error
     linear_slope_ = (phase_increment_ >> 8) * delta;
-    expo_dirty_ = true;
     segment_ = segment;
     phase_ = 0;
   }
@@ -118,27 +117,17 @@ class Envelope {
   inline void Tick() {
     if (!phase_increment_) return;
     phase_ += phase_increment_;
-    int8_t shift = lut_expo_slope_shift[phase_ >> 24];
-    if (shift != expo_slope_shift_) expo_dirty_ = true;
-    if (expo_dirty_) {
-      expo_dirty_ = false;
-      expo_slope_shift_ = shift;
-      expo_slope_ = 0;
-      if (linear_slope_ != 0) expo_slope_ = shift >= 0
-        ? linear_slope_ << std::min(static_cast<int>(shift), __builtin_clz(abs(linear_slope_)))
-        : linear_slope_ >> static_cast<uint8_t>(-shift);
-      target_overshoot_threshold_ = target_ - expo_slope_;
-    }
+    int32_t expo_slope = stmlib::shift_by_signed(linear_slope_, lut_expo_slope_shift[phase_ >> 24]);
     if (
       phase_ < phase_increment_ ||
       // The slope is about to overshoot the target
-      (linear_slope_ >= 0 && value_ > target_overshoot_threshold_) ||
-      (linear_slope_ < 0 && value_ < target_overshoot_threshold_)
+      (linear_slope_ >= 0 && value_ > target_ - expo_slope) ||
+      (linear_slope_ < 0 && value_ < target_ - expo_slope)
     ) {
       value_ = target_;
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
     } else {
-      value_ += expo_slope_;
+      value_ += expo_slope;
     }
   }
 
@@ -161,10 +150,6 @@ class Envelope {
   int32_t target_;
   int32_t value_;
 
-  int8_t expo_slope_shift_;
-  int32_t expo_slope_;
-  bool expo_dirty_;
-  int32_t target_overshoot_threshold_;
   // The naive value increment per tick, before exponential conversion
   int32_t linear_slope_;
 
