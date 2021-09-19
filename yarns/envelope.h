@@ -95,7 +95,6 @@ class Envelope {
     return relative_value * -strength >> 16;
   }
   
-  __attribute__ ((__always_inline__))
   inline void Trigger(EnvelopeSegment segment) {
     if (segment == ENV_SEGMENT_DEAD) {
       value_ = segment_target_[ENV_SEGMENT_DEAD];
@@ -116,7 +115,6 @@ class Envelope {
     phase_ = 0;
   }
 
-  __attribute__ ((__always_inline__))
   inline void Tick() {
     if (!phase_increment_) return;
     phase_ += phase_increment_;
@@ -125,7 +123,10 @@ class Envelope {
     if (expo_dirty_) {
       expo_dirty_ = false;
       expo_slope_shift_ = shift;
-      expo_slope_ = stmlib::shift_slope(linear_slope_, shift);
+      expo_slope_ = 0;
+      if (linear_slope_ != 0) expo_slope_ = shift >= 0
+        ? linear_slope_ << std::min(static_cast<int>(shift), __builtin_clz(abs(linear_slope_)))
+        : linear_slope_ >> static_cast<uint8_t>(-shift);
       target_overshoot_threshold_ = target_ - expo_slope_;
     }
     if (
@@ -141,7 +142,6 @@ class Envelope {
     }
   }
 
-  __attribute__ ((__always_inline__))
   inline int16_t value() const { return value_ >> 16; }
 
  private:
