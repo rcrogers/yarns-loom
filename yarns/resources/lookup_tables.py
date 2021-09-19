@@ -72,15 +72,6 @@ lookup_tables_32.append(
     ('portamento_increments', values)
 )
 
-min_time = 5.0 / audio_rate
-min_increment = excursion / (max_time * audio_rate)
-max_increment = excursion / (min_time * audio_rate)
-rates = numpy.linspace(numpy.power(max_increment, -gamma),
-                       numpy.power(min_increment, -gamma), num_values)
-values = numpy.power(rates, -1/gamma).astype(int)
-lookup_tables_32.append(
-    ('envelope_phase_increments', values)
-)
 
 
 # Create table for pitch.

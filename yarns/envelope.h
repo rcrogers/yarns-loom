@@ -85,9 +85,9 @@ class Envelope {
     segment_target_[ENV_SEGMENT_RELEASE] = segment_target_[ENV_SEGMENT_DEAD] =
     min_target;
     // TODO could interpolate these from 16-bit parameters
-    increment_[ENV_SEGMENT_ATTACK] = lut_envelope_phase_increments[attack_time];
-    increment_[ENV_SEGMENT_DECAY] = lut_envelope_phase_increments[decay_time];
-    increment_[ENV_SEGMENT_RELEASE] = lut_envelope_phase_increments[release_time];
+    increment_[ENV_SEGMENT_ATTACK] = lut_portamento_increments[attack_time];
+    increment_[ENV_SEGMENT_DECAY] = lut_portamento_increments[decay_time];
+    increment_[ENV_SEGMENT_RELEASE] = lut_portamento_increments[release_time];
   }
 
   inline int16_t tremolo(uint16_t strength) const {
@@ -112,10 +112,13 @@ class Envelope {
     linear_slope_ = (phase_increment_ >> 8) * delta;
     segment_ = segment;
     phase_ = 0;
+    tick_counter_ = 0;
   }
 
   inline void Tick() {
     if (!phase_increment_) return;
+    tick_counter_++;
+    if (tick_counter_ >= 10) tick_counter_ = 0; else return;
     phase_ += phase_increment_;
     int32_t expo_slope = stmlib::shift_by_signed(linear_slope_, lut_expo_slope_shift[phase_ >> 24]);
     if (
@@ -150,6 +153,7 @@ class Envelope {
   int32_t target_;
   int32_t value_;
 
+  uint8_t tick_counter_;
   // The naive value increment per tick, before exponential conversion
   int32_t linear_slope_;
 
