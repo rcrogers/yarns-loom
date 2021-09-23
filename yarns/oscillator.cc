@@ -170,12 +170,14 @@ void Oscillator::Render() {
   (this->*fn)();
 }
 
-#define SET_TIMBRE \
-  int16_t timbre = timbre_envelope.value(); \
+#define SET_TIMBRE(env) \
+  int16_t timbre = env.value(); \
   CONSTRAIN(timbre, 0 - timbre_, 32767 - timbre_); \
   timbre += timbre_; \
 
 #define RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(body) \
+  Envelope gain_env = gain_envelope; \
+  Envelope timbre_env = timbre_envelope; \
   int32_t next_sample = next_sample_; \
   uint32_t phase = phase_; \
   uint32_t phase_increment = phase_increment_; \
@@ -186,14 +188,16 @@ void Oscillator::Render() {
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     phase += phase_increment; \
-    timbre_envelope.Tick(); \
-    SET_TIMBRE; \
+    timbre_env.Tick(); \
+    SET_TIMBRE(timbre_env); \
     body \
-    gain_envelope.Tick(); \
-    int32_t gain = (gain_ + gain_envelope.value()) << 1; \
+    gain_env.Tick(); \
+    int32_t gain = (gain_ + gain_env.value()) << 1; \
     CONSTRAIN(gain, 0, UINT16_MAX); \
     audio_buffer_.Overwrite(offset_ - ((gain * this_sample) >> 16)); \
   } \
+  gain_envelope = gain_env; \
+  timbre_envelope = timbre_env; \
   next_sample_ = next_sample; \
   phase_ = phase; \
   phase_increment_ = phase_increment; \
@@ -269,7 +273,7 @@ void Oscillator::Render() {
   }
 
 #define SET_TRACKING_FILTER_CUTOFF \
-  SET_TIMBRE; \
+  SET_TIMBRE(timbre_envelope); \
   int32_t cutoff = (pitch_ >> 1) + (timbre >> 1); \
   CONSTRAIN(cutoff, 0, 0x7fff);
 
@@ -313,7 +317,7 @@ void Oscillator::RenderSaw() {
 }
 
 #define SET_SYNC_INCREMENT \
-  SET_TIMBRE; \
+  SET_TIMBRE(timbre_envelope); \
   int32_t modulator_pitch = pitch_ + (timbre >> 3); \
   CONSTRAIN(modulator_pitch, 0, kHighestNote - 1); \
   modulator_phase_increment_ = ComputePhaseIncrement(modulator_pitch);
@@ -400,7 +404,7 @@ void Oscillator::RenderFM() {
 }
 
 #define SET_PHASE_DISTORTION_INCREMENT \
-  SET_TIMBRE; \
+  SET_TIMBRE(timbre_envelope); \
   int16_t timbre_offset = timbre - 2048; \
   int32_t shifted_pitch = pitch_ + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8); \
   if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1; \
@@ -485,7 +489,7 @@ void Oscillator::RenderBuzz() {
 }
 
 void Oscillator::RenderFilteredNoise() {
-  SET_TIMBRE;
+  SET_TIMBRE(timbre_envelope);
   int32_t cutoff = 0x1000 + (timbre >> 1); // 1/4...1/2
   svf_.RenderInit(cutoff, pitch_ << 1);
   // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
