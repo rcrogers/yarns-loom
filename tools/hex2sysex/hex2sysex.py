@@ -69,7 +69,9 @@ def CreateMidifile(
   # first SysEx block everytime stop/play is pressed.
   time = 1
   syx_data = []
-  for i in xrange(0, size, page_size):
+  pages = xrange(0, size, page_size)
+  print('pages', len(pages))
+  for i in pages:
     block = ''.join(map(chr, data[i:i+page_size]))
     padding = page_size - len(block)
     block += '\x00' * padding

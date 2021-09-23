@@ -178,7 +178,7 @@ void Init() {
 
   // Load multi 0 on boot.
   storage_manager.LoadMulti(0);
-  storage_manager.LoadCalibration();
+  storage_manager.LoadCalibration(); // Can disable to reset calibration
   
   system_clock.Init();
   gate_output.Init();
