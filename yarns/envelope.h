@@ -83,8 +83,7 @@ class Envelope {
     min_target <<= 16;
     segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * peak_level;
     segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * sustain_level;
-    segment_target_[ENV_SEGMENT_RELEASE] = segment_target_[ENV_SEGMENT_DEAD] =
-    min_target;
+    segment_target_[ENV_SEGMENT_RELEASE] = min_target;
     // TODO could interpolate these from 16-bit parameters
     increment_[ENV_SEGMENT_ATTACK] = lut_envelope_phase_increments[attack_time];
     increment_[ENV_SEGMENT_DECAY] = lut_envelope_phase_increments[decay_time];
@@ -92,28 +91,29 @@ class Envelope {
   }
 
   inline int16_t tremolo(uint16_t strength) const {
-    int32_t relative_value = (value_ - segment_target_[ENV_SEGMENT_DEAD]) >> 16;
+    int32_t relative_value = (value_ - segment_target_[ENV_SEGMENT_RELEASE]) >> 16;
     return relative_value * -strength >> 16;
   }
   
   __attribute__ ((__always_inline__))
   inline void Trigger(EnvelopeSegment segment) {
+    segment_ = segment;
     if (segment == ENV_SEGMENT_DEAD) {
-      value_ = segment_target_[ENV_SEGMENT_DEAD];
+      value_ = segment_target_[ENV_SEGMENT_RELEASE];
     }
     if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
+    phase_increment_ = increment_[segment];
+    if (!phase_increment_) return;
     target_ = segment_target_[segment];
     if (!gate_ && positive_ == (target_ >= value_)) {
       // Moving away from minimum requires a gate -- to prevent e.g. an aborted attack from decaying upward
       target_ = value_;
     }
-    phase_increment_ = increment_[segment];
     int8_t delta = (target_ - value_) >> 24; // Take the brunt of the 32-bit shift here to minimize error
     linear_slope_ = (phase_increment_ >> 8) * delta;
     expo_dirty_ = true;
-    segment_ = segment;
     phase_ = 0;
     tick_counter_ = -1;
   }
@@ -160,7 +160,7 @@ class Envelope {
   uint32_t increment_[ENV_NUM_SEGMENTS];
   
   // Value that needs to be reached at the end of each segment.
-  int32_t segment_target_[ENV_NUM_SEGMENTS];
+  int32_t segment_target_[ENV_SEGMENT_DEAD];
   bool positive_;
   
   // Current segment.
