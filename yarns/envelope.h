@@ -36,7 +36,7 @@ enum EnvelopeSegment {
   ENV_NUM_SEGMENTS,
 };
 
-struct PhaseIncrements {
+struct EnvelopeTiming {
   uint32_t attack, decay, release;
 };
 
@@ -77,7 +77,7 @@ class Envelope {
   inline void Set(
     uint16_t peak_level, uint16_t sustain_level, // Platonic, unscaled targets
     int32_t min_target, int32_t max_target, // Actual bounds, 16-bit signed
-    uint8_t attack_time, uint8_t decay_time, uint8_t release_time // 7-bit
+    EnvelopeTiming& timing
   ) {
     int16_t scale = max_target - min_target;
     positive_ = scale >= 0;
@@ -85,10 +85,7 @@ class Envelope {
     segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * peak_level;
     segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * sustain_level;
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
-    // TODO could interpolate these from 16-bit parameters
-    phase_increments_.attack = lut_envelope_phase_increments[attack_time];
-    phase_increments_.decay = lut_envelope_phase_increments[decay_time];
-    phase_increments_.release = lut_envelope_phase_increments[release_time];
+    timing_ = &timing;
   }
 
   inline int16_t tremolo(uint16_t strength) const {
@@ -106,9 +103,9 @@ class Envelope {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
     switch (segment) {
-      case ENV_SEGMENT_ATTACK: phase_increment_ = phase_increments_.attack; break;
-      case ENV_SEGMENT_DECAY: phase_increment_ = phase_increments_.decay; break;
-      case ENV_SEGMENT_RELEASE: phase_increment_ = phase_increments_.release; break;
+      case ENV_SEGMENT_ATTACK: phase_increment_ = timing_->attack; break;
+      case ENV_SEGMENT_DECAY: phase_increment_ = timing_->decay; break;
+      case ENV_SEGMENT_RELEASE: phase_increment_ = timing_->release; break;
       default: phase_increment_ = 0; return;
     }
     target_ = segment_target_[segment];
@@ -161,7 +158,7 @@ class Envelope {
  private:
   bool gate_;
 
-  PhaseIncrements phase_increments_;
+  EnvelopeTiming* timing_;
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_SEGMENT_DEAD];

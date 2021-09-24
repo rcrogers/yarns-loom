@@ -89,6 +89,7 @@ class CVOutput;
 
 class Voice {
  public:
+  EnvelopeTiming envelope_timing;
   Voice() { }
   ~Voice() { }
 

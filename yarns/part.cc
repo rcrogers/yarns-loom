@@ -833,21 +833,21 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
   uint16_t peak_level = UINT16_MAX - (damping_22 >> (22 - 16));
   uint16_t sustain_level = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
   // 7-bit
-  uint8_t attack_time = modulate_7_13(voicing_.env_init_attack, voicing_.env_mod_attack, vel) >> (13 - 7);
-  uint8_t decay_time = modulate_7_13(voicing_.env_init_decay, voicing_.env_mod_decay, vel) >> (13 - 7);
-  uint8_t release_time = modulate_7_13(voicing_.env_init_release, voicing_.env_mod_release, vel) >> (13 - 7);
+  voice->envelope_timing.attack = lut_envelope_phase_increments[modulate_7_13(voicing_.env_init_attack, voicing_.env_mod_attack, vel) >> (13 - 7)];
+  voice->envelope_timing.decay = lut_envelope_phase_increments[modulate_7_13(voicing_.env_init_decay, voicing_.env_mod_decay, vel) >> (13 - 7)];
+  voice->envelope_timing.release = lut_envelope_phase_increments[modulate_7_13(voicing_.env_init_release, voicing_.env_mod_release, vel) >> (13 - 7)];
 
   if (voice->aux_1_envelope()) voice->dc_output(DC_AUX_1)->envelope()->Set(
     peak_level, sustain_level,
     voice->dc_output(DC_AUX_1)->volts_dac_code(0) >> 1,
     voice->dc_output(DC_AUX_1)->volts_dac_code(7) >> 1,
-    attack_time, decay_time, release_time
+    voice->envelope_timing
   );
   if (voice->aux_2_envelope()) voice->dc_output(DC_AUX_2)->envelope()->Set(
     peak_level, sustain_level,
     voice->dc_output(DC_AUX_2)->volts_dac_code(0) >> 1,
     voice->dc_output(DC_AUX_2)->volts_dac_code(7) >> 1,
-    attack_time, decay_time, release_time
+    voice->envelope_timing
   );
 
   Oscillator* osc = voice->oscillator();
@@ -855,12 +855,12 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
     peak_level, sustain_level,
     voicing_.oscillator_mode == OSCILLATOR_MODE_ENVELOPED ? 0 : osc->scale_ >> 1,
     osc->scale_ >> 1,
-    attack_time, decay_time, release_time
+    voice->envelope_timing
   );
   osc->timbre_envelope.Set(
     peak_level, sustain_level,
     0, timbre_14 << 2,
-    attack_time, decay_time, release_time
+    voice->envelope_timing
   );
 
   voice->NoteOn(Tune(pitch), vel, portamento, trigger);
