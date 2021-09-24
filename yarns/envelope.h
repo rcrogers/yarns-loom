@@ -180,7 +180,7 @@ class Envelope {
   uint32_t phase_;
   uint32_t phase_increment_;
 
-  // DISALLOW_COPY_AND_ASSIGN(Envelope);
+  DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
 
 }  // namespace yarns
