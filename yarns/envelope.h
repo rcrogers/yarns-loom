@@ -78,10 +78,11 @@ class Envelope {
     int32_t min_target, int32_t max_target, // Actual bounds, 16-bit signed
     uint8_t attack_time, uint8_t decay_time, uint8_t release_time // 7-bit
   ) {
-    scale_ = max_target - min_target;
+    int16_t scale = max_target - min_target;
+    positive_ = scale >= 0;
     min_target <<= 16;
-    segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale_ * peak_level;
-    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale_ * sustain_level;
+    segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * peak_level;
+    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * sustain_level;
     segment_target_[ENV_SEGMENT_RELEASE] = segment_target_[ENV_SEGMENT_DEAD] =
     min_target;
     // TODO could interpolate these from 16-bit parameters
@@ -104,7 +105,7 @@ class Envelope {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
     target_ = segment_target_[segment];
-    if (!gate_ && (scale_ >= 0) == (target_ >= value_)) {
+    if (!gate_ && positive_ == (target_ >= value_)) {
       // Moving away from minimum requires a gate -- to prevent e.g. an aborted attack from decaying upward
       target_ = value_;
     }
@@ -160,7 +161,7 @@ class Envelope {
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_NUM_SEGMENTS];
-  int16_t scale_;
+  bool positive_;
   
   // Current segment.
   size_t segment_;
