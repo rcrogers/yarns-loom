@@ -93,7 +93,6 @@ class Envelope {
     return relative_value * -strength >> 16;
   }
   
-  __attribute__ ((__always_inline__))
   inline void Trigger(EnvelopeSegment segment) {
     segment_ = segment;
     if (segment == ENV_SEGMENT_DEAD) {
@@ -120,7 +119,6 @@ class Envelope {
     tick_counter_ = -1;
   }
 
-  __attribute__ ((__always_inline__))
   inline void Tick() {
     if (!phase_increment_) return;
     phase_ += phase_increment_;
@@ -147,7 +145,7 @@ class Envelope {
     ) {
       // value_ = target_;
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-      // Tick();
+      Tick();
     } else {
       value_ += expo_slope_;
     }
