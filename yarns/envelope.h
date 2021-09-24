@@ -36,6 +36,10 @@ enum EnvelopeSegment {
   ENV_NUM_SEGMENTS,
 };
 
+struct PhaseIncrements {
+  uint32_t attack, decay, release;
+};
+
 class Envelope {
  public:
   Envelope() { }
@@ -43,9 +47,6 @@ class Envelope {
 
   void Init() {
     gate_ = false;
-
-    increment_[ENV_SEGMENT_SUSTAIN] = 0;
-    increment_[ENV_SEGMENT_DEAD] = 0;
   }
 
   inline void GateOn() {
@@ -85,9 +86,9 @@ class Envelope {
     segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * sustain_level;
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
     // TODO could interpolate these from 16-bit parameters
-    increment_[ENV_SEGMENT_ATTACK] = lut_envelope_phase_increments[attack_time];
-    increment_[ENV_SEGMENT_DECAY] = lut_envelope_phase_increments[decay_time];
-    increment_[ENV_SEGMENT_RELEASE] = lut_envelope_phase_increments[release_time];
+    phase_increments_.attack = lut_envelope_phase_increments[attack_time];
+    phase_increments_.decay = lut_envelope_phase_increments[decay_time];
+    phase_increments_.release = lut_envelope_phase_increments[release_time];
   }
 
   inline int16_t tremolo(uint16_t strength) const {
@@ -104,8 +105,12 @@ class Envelope {
     if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
-    phase_increment_ = increment_[segment];
-    if (!phase_increment_) return;
+    switch (segment) {
+      case ENV_SEGMENT_ATTACK: phase_increment_ = phase_increments_.attack; break;
+      case ENV_SEGMENT_DECAY: phase_increment_ = phase_increments_.decay; break;
+      case ENV_SEGMENT_RELEASE: phase_increment_ = phase_increments_.release; break;
+      default: phase_increment_ = 0; return;
+    }
     target_ = segment_target_[segment];
     if (!gate_ && positive_ == (target_ >= value_)) {
       // Moving away from minimum requires a gate -- to prevent e.g. an aborted attack from decaying upward
@@ -156,15 +161,14 @@ class Envelope {
  private:
   bool gate_;
 
-  // Phase increments for each segment.
-  uint32_t increment_[ENV_NUM_SEGMENTS];
+  PhaseIncrements phase_increments_;
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_SEGMENT_DEAD];
   bool positive_;
   
   // Current segment.
-  size_t segment_;
+  EnvelopeSegment segment_;
   
   // Target and current value of the current segment.
   int32_t target_;
