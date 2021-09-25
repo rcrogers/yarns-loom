@@ -33,11 +33,13 @@ import math
 from fractions import Fraction
 import itertools
 
+lookup_tables_32 = []
+lookup_tables = []
+lookup_tables_signed = []
+
 """----------------------------------------------------------------------------
 LFO and portamento increments.
 ----------------------------------------------------------------------------"""
-
-lookup_tables_32 = []
 
 refresh_rate = 4000
 audio_rate = 40000
@@ -60,8 +62,8 @@ lookup_tables_32.append(
 # Create lookup table for portamento.
 num_values = 128
 max_time = 5.0  # seconds
-gamma = 0.25
 
+gamma = 0.25
 min_time = 1.001 / refresh_rate
 min_increment = excursion / (max_time * refresh_rate)
 max_increment = excursion / (min_time * refresh_rate)
@@ -72,15 +74,17 @@ lookup_tables_32.append(
     ('portamento_increments', values)
 )
 
+gamma = 0.001
 envelope_rate = audio_rate / 16
 min_time = 1.001 / envelope_rate
+excusion_16 = 1 << 16
 print('min_time', min_time)
-min_increment = excursion / (max_time * envelope_rate)
-max_increment = excursion / (min_time * envelope_rate)
+min_increment = excusion_16 / (max_time * envelope_rate)
+max_increment = excusion_16 / (min_time * envelope_rate)
 rates = numpy.linspace(numpy.power(max_increment, -gamma),
                        numpy.power(min_increment, -gamma), num_values)
 values = numpy.power(rates, -1/gamma).astype(int)
-lookup_tables_32.append(
+lookup_tables.append(
     ('envelope_phase_increments', values)
 )
 
@@ -104,9 +108,6 @@ lookup_tables_32.append(
 """----------------------------------------------------------------------------
 Envelope curves
 -----------------------------------------------------------------------------"""
-
-lookup_tables = []
-lookup_tables_signed = []
 
 env_linear = numpy.arange(0, 257.0) / 256.0
 env_linear[-1] = env_linear[-2]

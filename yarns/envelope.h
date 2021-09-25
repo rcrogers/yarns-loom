@@ -37,7 +37,7 @@ enum EnvelopeSegment {
 };
 
 struct EnvelopeTiming {
-  uint32_t attack, decay, release;
+  uint16_t attack, decay, release;
 };
 
 class Envelope {
@@ -112,8 +112,9 @@ class Envelope {
       // Moving away from minimum requires a gate -- to prevent e.g. an aborted attack from decaying upward
       target_ = value_;
     }
-    int8_t delta = (target_ - value_) >> 24; // Take the brunt of the 32-bit shift here to minimize error
-    linear_slope_ = (phase_increment_ >> 12) * delta;
+    int16_t delta = (target_ - value_) >> 16; // Take the brunt of the 32-bit shift here to minimize error
+    linear_slope_ = phase_increment_ * delta;
+    linear_slope_ >>= 4; // Account for 1/16 freq of phase updates
     expo_dirty_ = true;
     phase_ = 0;
     tick_counter_ = -1;
@@ -123,7 +124,7 @@ class Envelope {
     if (!phase_increment_) return;
     tick_counter_ = (tick_counter_ + 1) % 16;
     if (tick_counter_ == 0) {
-      int8_t shift = lut_expo_slope_shift[phase_ >> 24];
+      int8_t shift = lut_expo_slope_shift[phase_ >> 8];
       phase_ += phase_increment_;
       if (phase_ < phase_increment_) {
         Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
@@ -178,8 +179,7 @@ class Envelope {
   // The naive value increment per tick, before exponential conversion
   int32_t linear_slope_;
 
-  uint32_t phase_;
-  uint32_t phase_increment_;
+  uint16_t phase_, phase_increment_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

@@ -61,6 +61,7 @@ extern const int8_t* lookup_table_8_table[];
 extern const uint16_t* char_table[];
 
 extern const char str_dummy[];
+extern const uint16_t lut_envelope_phase_increments[];
 extern const uint16_t lut_env_expo[];
 extern const uint16_t lut_arpeggiator_patterns[];
 extern const uint16_t lut_consonance[];
@@ -110,25 +111,26 @@ extern const int16_t ws_sine_fold[];
 extern const int16_t ws_tri_fold[];
 extern const uint32_t lut_lfo_increments[];
 extern const uint32_t lut_portamento_increments[];
-extern const uint32_t lut_envelope_phase_increments[];
 extern const uint32_t lut_oscillator_increments[];
 extern const uint32_t lut_euclidean[];
 extern const int8_t lut_expo_slope_shift[];
 extern const uint16_t chr_characters[];
 #define STR_DUMMY 0  // dummy
-#define LUT_ENV_EXPO 0
+#define LUT_ENVELOPE_PHASE_INCREMENTS 0
+#define LUT_ENVELOPE_PHASE_INCREMENTS_SIZE 128
+#define LUT_ENV_EXPO 1
 #define LUT_ENV_EXPO_SIZE 257
-#define LUT_ARPEGGIATOR_PATTERNS 1
+#define LUT_ARPEGGIATOR_PATTERNS 2
 #define LUT_ARPEGGIATOR_PATTERNS_SIZE 23
-#define LUT_CONSONANCE 2
+#define LUT_CONSONANCE 3
 #define LUT_CONSONANCE_SIZE 1536
-#define LUT_CLOCK_RATIO_TICKS 3
+#define LUT_CLOCK_RATIO_TICKS 4
 #define LUT_CLOCK_RATIO_TICKS_SIZE 32
-#define LUT_SVF_CUTOFF 4
+#define LUT_SVF_CUTOFF 5
 #define LUT_SVF_CUTOFF_SIZE 257
-#define LUT_SVF_DAMP 5
+#define LUT_SVF_DAMP 6
 #define LUT_SVF_DAMP_SIZE 257
-#define LUT_SVF_SCALE 6
+#define LUT_SVF_SCALE 7
 #define LUT_SVF_SCALE_SIZE 257
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12
@@ -218,11 +220,9 @@ extern const uint16_t chr_characters[];
 #define LUT_LFO_INCREMENTS_SIZE 96
 #define LUT_PORTAMENTO_INCREMENTS 1
 #define LUT_PORTAMENTO_INCREMENTS_SIZE 128
-#define LUT_ENVELOPE_PHASE_INCREMENTS 2
-#define LUT_ENVELOPE_PHASE_INCREMENTS_SIZE 128
-#define LUT_OSCILLATOR_INCREMENTS 3
+#define LUT_OSCILLATOR_INCREMENTS 2
 #define LUT_OSCILLATOR_INCREMENTS_SIZE 97
-#define LUT_EUCLIDEAN 4
+#define LUT_EUCLIDEAN 3
 #define LUT_EUCLIDEAN_SIZE 1024
 #define LUT_EXPO_SLOPE_SHIFT 0
 #define LUT_EXPO_SLOPE_SHIFT_SIZE 256
