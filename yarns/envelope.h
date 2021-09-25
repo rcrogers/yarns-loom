@@ -113,7 +113,7 @@ class Envelope {
       target_ = value_;
     }
     int8_t delta = (target_ - value_) >> 24; // Take the brunt of the 32-bit shift here to minimize error
-    linear_slope_ = (phase_increment_ >> 8) * delta;
+    linear_slope_ = (phase_increment_ >> 12) * delta;
     expo_dirty_ = true;
     phase_ = 0;
     tick_counter_ = -1;
@@ -121,10 +121,14 @@ class Envelope {
 
   inline void Tick() {
     if (!phase_increment_) return;
-    phase_ += phase_increment_;
-    tick_counter_ = (tick_counter_ + 1) % 10;
+    tick_counter_ = (tick_counter_ + 1) % 16;
     if (tick_counter_ == 0) {
       int8_t shift = lut_expo_slope_shift[phase_ >> 24];
+      phase_ += phase_increment_;
+      if (phase_ < phase_increment_) {
+        Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
+        return;
+      }
       if (shift != expo_slope_shift_) expo_dirty_ = true;
       if (expo_dirty_) {
         expo_dirty_ = false;
@@ -136,16 +140,13 @@ class Envelope {
         target_overshoot_threshold_ = target_ - expo_slope_;
       }
     }
-    if (
-      phase_ < phase_increment_ || (
-        linear_slope_ >= 0 // The slope is about to overshoot the target
-          ? value_ > target_overshoot_threshold_
-          : value_ < target_overshoot_threshold_
-      )
+    if (linear_slope_ >= 0 // The slope is about to overshoot the target
+      ? value_ > target_overshoot_threshold_
+      : value_ < target_overshoot_threshold_
     ) {
       // value_ = target_;
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-      Tick();
+      // Tick();
     } else {
       value_ += expo_slope_;
     }
