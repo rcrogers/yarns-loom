@@ -164,6 +164,23 @@ void Oscillator::Render() {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
+  size_t size;
+  size = kAudioBlockSize;
+  while (size--) {
+    gain_envelope.Tick();
+    int32_t gain = (gain_ + gain_envelope.value()) << 1;
+    CONSTRAIN(gain, 0, UINT16_MAX);
+    gain_buffer_.Overwrite(gain);
+  }
+  size = kAudioBlockSize;
+  while (size--) {
+    timbre_envelope.Tick();
+    int16_t timbre = timbre_envelope.value();
+    CONSTRAIN(timbre, 0 - timbre_, 32767 - timbre_);
+    timbre += timbre_;
+    timbre_buffer_.Overwrite(timbre);
+  }
+
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
@@ -171,9 +188,7 @@ void Oscillator::Render() {
 }
 
 #define SET_TIMBRE \
-  int16_t timbre = timbre_envelope.value(); \
-  CONSTRAIN(timbre, 0 - timbre_, 32767 - timbre_); \
-  timbre += timbre_; \
+  int16_t timbre = timbre_buffer_.ImmediatePeek();
 
 #define RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(body) \
   int32_t next_sample = next_sample_; \
@@ -186,13 +201,11 @@ void Oscillator::Render() {
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     phase += phase_increment; \
-    timbre_envelope.Tick(); \
-    SET_TIMBRE; \
+    int16_t timbre = timbre_buffer_.ImmediateRead(); \
     body \
-    gain_envelope.Tick(); \
-    int32_t gain = (gain_ + gain_envelope.value()) << 1; \
-    CONSTRAIN(gain, 0, UINT16_MAX); \
-    audio_buffer_.Overwrite(offset_ - ((gain * this_sample) >> 16)); \
+    audio_buffer_.Overwrite(offset_ - ( \
+      (static_cast<int32_t>(gain_buffer_.ImmediateRead()) * this_sample) >> 16) \
+    ); \
   } \
   next_sample_ = next_sample; \
   phase_ = phase; \
