@@ -832,10 +832,12 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
 
   uint16_t peak_level = UINT16_MAX - (damping_22 >> (22 - 16));
   uint16_t sustain_level = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
-  // 7-bit
-  voice->envelope_timing.attack = lut_envelope_phase_increments[modulate_7_13(voicing_.env_init_attack, voicing_.env_mod_attack, vel) >> (13 - 7)];
-  voice->envelope_timing.decay = lut_envelope_phase_increments[modulate_7_13(voicing_.env_init_decay, voicing_.env_mod_decay, vel) >> (13 - 7)];
-  voice->envelope_timing.release = lut_envelope_phase_increments[modulate_7_13(voicing_.env_init_release, voicing_.env_mod_release, vel) >> (13 - 7)];
+  voice->envelope_timing.attack   = Interpolate88(lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << 2);
+  voice->envelope_timing.decay    = Interpolate88(lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << 2);
+  voice->envelope_timing.release  = Interpolate88(lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << 2);
 
   if (voice->aux_1_envelope()) voice->dc_output(DC_AUX_1)->envelope()->Set(
     peak_level, sustain_level,
