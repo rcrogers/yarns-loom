@@ -74,17 +74,16 @@ lookup_tables_32.append(
     ('portamento_increments', values)
 )
 
-gamma = 0.001
-envelope_rate = audio_rate / 16
-min_time = 1.001 / envelope_rate
-excusion_16 = 1 << 16
+gamma = 0.25
+envelope_rate = audio_rate
+min_time = 5.0 / envelope_rate
 print('min_time', min_time)
-min_increment = excusion_16 / (max_time * envelope_rate)
-max_increment = excusion_16 / (min_time * envelope_rate)
+min_increment = excursion / (max_time * envelope_rate)
+max_increment = excursion / (min_time * envelope_rate)
 rates = numpy.linspace(numpy.power(max_increment, -gamma),
                        numpy.power(min_increment, -gamma), num_values)
 values = numpy.power(rates, -1/gamma).astype(int)
-lookup_tables.append(
+lookup_tables_32.append(
     ('envelope_phase_increments', values)
 )
 
