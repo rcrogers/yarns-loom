@@ -306,7 +306,7 @@ void Multi::AssignVoicesToCVOutputs() {
   for (uint8_t v = 0; v < kNumSystemVoices; ++v) {
     voice_[v].set_audio_output(NULL);
     for (int role = 0; role < DC_LAST; role++) {
-      voice_[v].set_dc_output(static_cast<DCRole>(role), &cv_outputs_[0]);
+      voice_[v].set_dc_output(static_cast<DCRole>(role), NULL);
     }
   }
   switch (settings_.layout) {

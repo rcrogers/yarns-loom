@@ -167,14 +167,13 @@ class Voice {
   }
   
   inline bool aux_1_envelope() const {
-    return aux_cv_source_ == MOD_AUX_ENVELOPE;
+    return aux_cv_source_ == MOD_AUX_ENVELOPE && dc_output(DC_AUX_1);
   }
   inline bool aux_2_envelope() const {
-    return aux_cv_source_2_ == MOD_AUX_ENVELOPE;
+    return aux_cv_source_2_ == MOD_AUX_ENVELOPE && dc_output(DC_AUX_2);
   }
-  __attribute__((nonnull))
   inline void set_dc_output(DCRole r, CVOutput* cvo) { dc_outputs_[r] = cvo; }
-  inline CVOutput* dc_output(DCRole r) { return dc_outputs_[r]; }
+  inline CVOutput* dc_output(DCRole r) const { return dc_outputs_[r]; }
   inline void set_audio_output(CVOutput* cvo) { audio_output_ = cvo; }
   inline bool uses_audio() const {
     return audio_output_ && oscillator_mode_ != OSCILLATOR_MODE_OFF;
