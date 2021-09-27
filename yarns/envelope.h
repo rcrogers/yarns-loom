@@ -80,7 +80,7 @@ class Envelope {
     EnvelopeTiming& timing
   ) {
     int16_t scale = max_target - min_target;
-    positive_ = scale >= 0;
+    positive_scale_ = scale >= 0;
     min_target <<= 16;
     segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * peak_level;
     segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * sustain_level;
@@ -108,22 +108,22 @@ class Envelope {
       default: phase_increment_ = 0; return;
     }
     target_ = segment_target_[segment];
-    if (!gate_ && positive_ == (target_ >= value_)) {
+    if (!gate_ && positive_scale_ == (target_ >= value_)) {
       // Moving away from minimum requires a gate -- to prevent e.g. an aborted attack from decaying upward
       target_ = value_;
     }
     int16_t delta = (target_ - value_) >> 16; // Take the brunt of the 32-bit shift here to minimize error
+    positive_segment_slope_ = delta >= 0;
     linear_slope_ = phase_increment_ * delta;
-    linear_slope_ >>= 4; // Account for 1/16 freq of phase updates
+    max_shift_ = __builtin_clz(abs(linear_slope_));
     expo_dirty_ = true;
     phase_ = 0;
-    tick_counter_ = -1;
+    tick_counter_ = 0xff;
   }
 
   inline void Tick() {
     if (!phase_increment_) return;
-    tick_counter_ = (tick_counter_ + 1) % 16;
-    if (tick_counter_ == 0) {
+    if ((++tick_counter_ & 15) == 0) {
       int8_t shift = lut_expo_slope_shift[phase_ >> 8];
       phase_ += phase_increment_;
       if (phase_ < phase_increment_) {
@@ -134,23 +134,24 @@ class Envelope {
       if (expo_dirty_) {
         expo_dirty_ = false;
         expo_slope_shift_ = shift;
+        shift -= 4; // Account for ticks occurring at 16x the freq of phase updates
         expo_slope_ = 0;
         if (linear_slope_ != 0) expo_slope_ = shift >= 0
-          ? linear_slope_ << std::min(static_cast<int>(shift), __builtin_clz(abs(linear_slope_)))
+          ? linear_slope_ << std::min(static_cast<uint8_t>(shift), max_shift_)
           : linear_slope_ >> static_cast<uint8_t>(-shift);
         target_overshoot_threshold_ = target_ - expo_slope_;
       }
     }
-    if (linear_slope_ >= 0 // The slope is about to overshoot the target
+    if (positive_segment_slope_ // The slope is about to overshoot the target
       ? value_ > target_overshoot_threshold_
       : value_ < target_overshoot_threshold_
     ) {
       // value_ = target_;
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
       // Tick();
-    } else {
-      value_ += expo_slope_;
+      return;
     }
+    value_ += expo_slope_;
   }
 
   inline int16_t value() const { return value_ >> 16; }
@@ -162,7 +163,7 @@ class Envelope {
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_SEGMENT_DEAD];
-  bool positive_;
+  bool positive_scale_, positive_segment_slope_;
   
   // Current segment.
   EnvelopeSegment segment_;
@@ -171,11 +172,12 @@ class Envelope {
   int32_t target_;
   int32_t value_;
 
-  int8_t tick_counter_;
+  uint8_t tick_counter_;
   int8_t expo_slope_shift_;
   int32_t expo_slope_;
   bool expo_dirty_;
   int32_t target_overshoot_threshold_;
+  uint8_t max_shift_;
   // The naive value increment per tick, before exponential conversion
   int32_t linear_slope_;
 
