@@ -115,7 +115,7 @@ class Envelope {
     int32_t delta = target_ - value_;
     positive_segment_slope_ = delta >= 0;
     linear_slope_ = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
-    max_shift_ = __builtin_clz(abs(linear_slope_));
+    max_shift_ = __builtin_clzl(abs(linear_slope_));
     expo_dirty_ = true;
     phase_ = 0;
   }

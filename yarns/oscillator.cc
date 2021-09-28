@@ -146,9 +146,7 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
       (static_cast<int32_t>(b - a) * (ref_pitch & 0xf) >> 4);
   if (num_shifts > 0) phase_increment >>= num_shifts;
   else if (num_shifts < 0) {
-    int16_t shifts_available = __builtin_clz(phase_increment) - 1;
-    num_shifts = -num_shifts;
-    num_shifts = std::min(shifts_available, num_shifts);
+    num_shifts = std::min(__builtin_clzl(phase_increment), static_cast<int>(-num_shifts));
     phase_increment <<= num_shifts;
   }
   return phase_increment;
