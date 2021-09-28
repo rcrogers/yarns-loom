@@ -94,7 +94,7 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "SF SINE FOLD",
   "^F TRIANGLE FOLD",
   "ST SINE TANH",
-  // "\x8E\x8E DIRAC COMB",
+  "\x8E\x8E DIRAC COMB",
 };
 
 const char* const tremolo_shape_values[LFO_SHAPE_LAST] = {

@@ -120,7 +120,7 @@ for zone in range(num_zones):
   pulse[WAVETABLE_SIZE / 2] = 1.0
   pulse = pulse[fill]
 
-  # bl_pulse_tables.append(('bandlimited_comb_%d' % zone,
-  #                         scale(pulse[quadrature])))
+  bl_pulse_tables.append(('bandlimited_comb_%d' % zone,
+                          scale(pulse[quadrature])))
 
 waveforms.extend(bl_pulse_tables)

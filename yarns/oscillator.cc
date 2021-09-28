@@ -70,7 +70,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFoldSine,
   &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderTanhSine,
-  // &Oscillator::RenderBuzz,
+  &Oscillator::RenderBuzz,
   &Oscillator::RenderFM,
   // &Oscillator::RenderAudioRatePWM,
 };
@@ -487,19 +487,19 @@ void Oscillator::RenderPhaseDistortionSaw() {
   )
 }
 
-// void Oscillator::RenderBuzz() {
-//   RENDER_LOOP(
-//     int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
-//     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
-//     size_t index = zone_14 >> 10; // Use highest 4 bits
-//     CONSTRAIN(index, 0, kNumZones - 1);
-//     const int16_t* wave_1 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
-//     index += 1;
-//     CONSTRAIN(index, 0, kNumZones - 1);
-//     const int16_t* wave_2 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
-//     this_sample = Crossfade(wave_1, wave_2, phase, crossfade);
-//   )
-// }
+void Oscillator::RenderBuzz() {
+  RENDER_LOOP(
+    int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
+    uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
+    size_t index = zone_14 >> 10; // Use highest 4 bits
+    CONSTRAIN(index, 0, kNumZones - 1);
+    const int16_t* wave_1 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
+    index += 1;
+    CONSTRAIN(index, 0, kNumZones - 1);
+    const int16_t* wave_2 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
+    this_sample = Crossfade(wave_1, wave_2, phase, crossfade);
+  )
+}
 
 void Oscillator::RenderFilteredNoise() {
   SET_TIMBRE;
