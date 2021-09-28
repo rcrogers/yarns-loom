@@ -402,14 +402,16 @@ void Oscillator::RenderTanhSine() {
 }
 
 void Oscillator::RenderFM() {
-  int16_t interval = lut_fm_modulator_intervals[shape_ - OSC_SHAPE_FM];
-  modulator_phase_increment_ = ComputePhaseIncrement(pitch_ + interval);
+  uint64_t inc = phase_increment_;
+  inc *= lut_fm_modulator_16x_ratios[shape_ - OSC_SHAPE_FM];
+  inc >>= 32 - 4; // Multiply by 16
+  modulator_phase_increment_ = inc;
   RENDER_LOOP(
     int16_t modulator = Interpolate824(wav_sine, modulator_phase);
     uint32_t phase_mod = modulator * timbre;
     // phase_mod = (phase_mod << 3) + (phase_mod << 2); // FM index 0-3
     phase_mod <<= 3; // FM index 0-2
-    if (interval == 0) phase_mod <<= 1; // Double index range for 1:1 FM ratio
+    if ((shape_ - OSC_SHAPE_FM) == 0) phase_mod <<= 1; // Double index range for 1:1 FM ratio
     this_sample = Interpolate824(wav_sine, phase + phase_mod);
   )
 }

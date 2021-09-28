@@ -97,7 +97,6 @@ extern const int16_t lut_scale_b_todi[];
 extern const int16_t lut_scale_chandradeep[];
 extern const int16_t lut_scale_kaushik_todi[];
 extern const int16_t lut_scale_jogeshwari[];
-extern const int16_t lut_fm_modulator_intervals[];
 extern const char* const lut_fm_ratio_names[];
 extern const char* const lut_clock_ratio_names[];
 extern const int16_t wav_exponential[];
@@ -128,6 +127,7 @@ extern const uint32_t lut_portamento_increments[];
 extern const uint32_t lut_envelope_phase_increments[];
 extern const uint32_t lut_oscillator_increments[];
 extern const uint32_t lut_euclidean[];
+extern const uint32_t lut_fm_modulator_16x_ratios[];
 extern const int8_t lut_expo_slope_shift[];
 extern const uint16_t chr_characters[];
 #define STR_DUMMY 0  // dummy
@@ -207,8 +207,6 @@ extern const uint16_t chr_characters[];
 #define LUT_SCALE_JOGESHWARI_SIZE 12
 #define LUT_SCALE_RASIA 30
 #define LUT_SCALE_RASIA_SIZE 12
-#define LUT_FM_MODULATOR_INTERVALS 31
-#define LUT_FM_MODULATOR_INTERVALS_SIZE 26
 #define LUT_FM_RATIO_NAMES 0
 #define LUT_FM_RATIO_NAMES_SIZE 26
 #define LUT_CLOCK_RATIO_NAMES 1
@@ -269,6 +267,8 @@ extern const uint16_t chr_characters[];
 #define LUT_OSCILLATOR_INCREMENTS_SIZE 97
 #define LUT_EUCLIDEAN 4
 #define LUT_EUCLIDEAN_SIZE 1024
+#define LUT_FM_MODULATOR_16X_RATIOS 5
+#define LUT_FM_MODULATOR_16X_RATIOS_SIZE 26
 #define LUT_EXPO_SLOPE_SHIFT 0
 #define LUT_EXPO_SLOPE_SHIFT_SIZE 256
 #define CHR_CHARACTERS 0

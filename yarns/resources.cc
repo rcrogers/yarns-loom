@@ -870,15 +870,6 @@ const int16_t lut_scale_jogeshwari[] = {
      -18,     -3,   -131,   -259,
     -387,    -20,     -5,   -133,
 };
-const int16_t lut_fm_modulator_intervals[] = {
-       0,   1536,   2434,   3566,
-    4312,   2030,   2776,   3333,
-    1877,   2173,   1797,   1848,
-    1908,   2647,   2227,   1953,
-    2918,   2721,   2132,   -535,
-     102,   1000,   2536,   4072,
-    4971,   3435,
-};
 
 
 const int16_t* lookup_table_signed_table[] = {
@@ -913,7 +904,6 @@ const int16_t* lookup_table_signed_table[] = {
   lut_scale_kaushik_todi,
   lut_scale_jogeshwari,
   lut_scale_yaman,
-  lut_fm_modulator_intervals,
 };
 
 const char* const lut_fm_ratio_names[] = {
@@ -2896,6 +2886,15 @@ const uint32_t lut_euclidean[] = {
   3722304989UL, 3740236733UL, 4018007933UL, 4159684349UL,
   4261281277UL, 4290768893UL, 4294836221UL, 4294967293UL,
 };
+const uint32_t lut_fm_modulator_16x_ratios[] = {
+  268435456, 536870912, 805306368, 1342177280,
+  1879048192, 671088640, 939524096, 1207959552,
+  626349397, 715827882, 603979776, 618146628,
+  635125108, 886582084, 733379304, 648060518,
+  1001814760, 916495974, 702773147, 210828714,
+  281104952, 421657428, 843314856, 1686629713,
+  2529944569UL, 1264972284,
+};
 
 
 const uint32_t* lookup_table_32_table[] = {
@@ -2904,6 +2903,7 @@ const uint32_t* lookup_table_32_table[] = {
   lut_envelope_phase_increments,
   lut_oscillator_increments,
   lut_euclidean,
+  lut_fm_modulator_16x_ratios,
 };
 
 const int8_t lut_expo_slope_shift[] = {

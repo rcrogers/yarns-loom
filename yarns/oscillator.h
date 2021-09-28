@@ -172,7 +172,7 @@ class Oscillator {
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t modulator_phase_;
-  uint32_t modulator_phase_increment_;
+  uint64_t modulator_phase_increment_;
   bool high_;
 
   StateVariableFilter svf_;
