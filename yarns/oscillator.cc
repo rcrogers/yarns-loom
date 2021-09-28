@@ -71,8 +71,8 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderBuzz,
-  &Oscillator::RenderFM,
-  // &Oscillator::RenderAudioRatePWM,
+  // &Oscillator::RenderFM,
+  &Oscillator::RenderAudioRatePWM,
 };
 
 void StateVariableFilter::Init(uint8_t interpolation_slope) {
@@ -413,6 +413,95 @@ void Oscillator::RenderFM() {
     this_sample = Interpolate824(wav_sine, phase + phase_mod);
   )
 }
+
+// Just sounds like two saws, despite inversion, also timbre is unused
+void Oscillator::RenderAudioRatePWM() {
+  int16_t interval = lut_fm_modulator_intervals[shape_ - OSC_SHAPE_FM];
+  modulator_phase_increment_ = ComputePhaseIncrement(pitch_ + interval);
+  RENDER_LOOP(
+    if (phase < phase_increment) {
+      uint32_t t = phase / (phase_increment >> 16);
+      this_sample += ThisBlepSample(t) >> 1;
+      next_sample += NextBlepSample(t) >> 1;
+    }
+    this_sample += phase >> 18;
+    if (modulator_phase < modulator_phase_increment) {
+      uint32_t t = modulator_phase / (modulator_phase_increment >> 16);
+      this_sample -= ThisBlepSample(t) >> 1;
+      next_sample -= NextBlepSample(t) >> 1;
+    }
+    // this_sample += 32767 - (modulator_phase >> 18);
+    this_sample += ~(modulator_phase >> 18);
+    this_sample = this_sample << 1;
+  )
+}
+
+/*
+// only has timbral stability on octaves -- others sound cool, but have extremely audible beat artifacts
+void Oscillator::RenderAudioRatePWM() {
+  int16_t interval = lut_fm_modulator_intervals[shape_ - OSC_SHAPE_FM];
+  modulator_phase_increment_ = ComputePhaseIncrement(pitch_ + interval);
+  RENDER_LOOP(
+    int16_t modulator = Interpolate824(wav_sine, modulator_phase);
+    // int16_t modulator = (modulator_phase >> 15) ^ (modulator_phase & 0x80000000 ? 0xffff : 0x0000);
+    uint32_t pwm = (modulator * timbre_.value()) << 1;
+    uint32_t pw = 0x80000000 + pwm;
+    bool self_reset = phase < phase_increment;
+    while (true) { EDGES_PULSE(phase, phase_increment) }
+    next_sample += phase < pw ? 0 : 32767;
+    this_sample = (this_sample - 16384) << 1;
+  )
+}
+*/
+
+// Ambika: seems more like a fucking saw?
+// void Oscillator::RenderPhaseDistortionPulse() {
+//   SET_PHASE_DISTORTION_INCREMENT;
+//   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
+//   RENDER_LOOP(
+//     if (phase < phase_increment) {
+//       modulator_phase = kPhaseReset[filter_type];
+//     }
+//     int32_t carrier = Interpolate824(wav_sine, modulator_phase);
+//     uint16_t window = 0;
+//     if (phase < 0x40000000) {
+//       window = UINT16_MAX;
+//     } else if (phase < 0x80000000) {
+//       window = ~(phase - 0x40000000) >> 14;
+//     }
+//     if (filter_type == 1) {
+//       carrier >>= 1;
+//       carrier += 0x8000;
+//     }
+//     int16_t output;
+//     if (filter_type & 2) { // Band- or high-pass
+//       output = (window * (carrier + 32768) >> 16) + 32768;
+//     } else {
+//       output = (window * carrier) >> 16;
+//     }
+//     this_sample = output;
+//   )
+// }
+
+// Naive: tons of artifacts
+// void Oscillator::RenderPhaseDistortionPulse() {
+//   SET_PHASE_DISTORTION_INCREMENT;
+//   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
+//   RENDER_LOOP(
+//     if (phase < phase_increment) {
+//       modulator_phase = kPhaseReset[filter_type];
+//     }
+//     int32_t carrier = Interpolate824(wav_sine, modulator_phase);
+//     uint16_t window = phase < 0x80000000 ? UINT16_MAX : 0;
+//     int16_t output;
+//     if (filter_type & 2) { // Band- or high-pass
+//       output = (window * carrier) >> 16;
+//     } else {
+//       output = (window * (carrier + 32768) >> 16) - 32768;
+//     }
+//     this_sample = output;
+//   )
+// }
 
 #define SET_PHASE_DISTORTION_INCREMENT \
   SET_TIMBRE; \
