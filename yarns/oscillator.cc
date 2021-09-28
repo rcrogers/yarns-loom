@@ -257,6 +257,7 @@ void Oscillator::Render() {
   }
 
 #define SYNC(discontinuity_code, edges) \
+  (void) timbre; \
   bool sync_reset = false; \
   bool self_reset = false; \
   bool transition_during_reset = false; \
@@ -441,6 +442,7 @@ void Oscillator::RenderPhaseDistortionPulse() {
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
   int32_t integrator = pd_square_.integrator;
   RENDER_LOOP(
+    (void) timbre;
     if ((phase << 1) < (phase_increment << 1)) {
       pd_square_.polarity = !pd_square_.polarity;
       modulator_phase = kPhaseResetPulse[filter_type];
@@ -471,6 +473,7 @@ void Oscillator::RenderPhaseDistortionSaw() {
   SET_PHASE_DISTORTION_INCREMENT;
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
   RENDER_LOOP(
+    (void) timbre;
     if (phase < phase_increment) {
       modulator_phase = kPhaseResetSaw[filter_type];
     }
@@ -507,6 +510,7 @@ void Oscillator::RenderFilteredNoise() {
   // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
   // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;
   RENDER_LOOP(
+    (void) timbre;
     svf_.RenderSample(Random::GetSample());
     switch (shape_) {
       case OSC_SHAPE_NOISE_LP: this_sample = svf_.lp; break;
