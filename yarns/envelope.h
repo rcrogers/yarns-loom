@@ -36,8 +36,9 @@ enum EnvelopeSegment {
   ENV_NUM_SEGMENTS,
 };
 
-struct EnvelopeTiming {
-  uint32_t attack, decay, release;
+struct ADSR {
+  uint16_t peak, sustain; // Platonic, unscaled targets
+  uint32_t attack, decay, release; // Timing
 };
 
 class Envelope {
@@ -49,14 +50,7 @@ class Envelope {
     gate_ = false;
   }
 
-  inline void GateOn() {
-    if (!gate_) {
-      gate_ = true;
-      Trigger(ENV_SEGMENT_ATTACK);
-    }
-  }
-
-  inline void GateOff() {
+  inline void NoteOff() {
     gate_ = false;
     switch (segment_) {
       case ENV_SEGMENT_ATTACK:
@@ -74,18 +68,22 @@ class Envelope {
     return static_cast<EnvelopeSegment>(segment_);
   }
 
-  inline void Set(
-    uint16_t peak_level, uint16_t sustain_level, // Platonic, unscaled targets
-    int32_t min_target, int32_t max_target, // Actual bounds, 16-bit signed
-    EnvelopeTiming& timing
+  inline void NoteOn(
+    ADSR& adsr,
+    int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   ) {
     int16_t scale = max_target - min_target;
     positive_scale_ = scale >= 0;
     min_target <<= 16;
-    segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * peak_level;
-    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * sustain_level;
+    segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
+    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * adsr.sustain;
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
-    timing_ = &timing;
+    adsr_ = &adsr;
+
+    if (!gate_) {
+      gate_ = true;
+      Trigger(ENV_SEGMENT_ATTACK);
+    }
   }
 
   inline int16_t tremolo(uint16_t strength) const {
@@ -102,9 +100,9 @@ class Envelope {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
     switch (segment) {
-      case ENV_SEGMENT_ATTACK: phase_increment_ = timing_->attack; break;
-      case ENV_SEGMENT_DECAY: phase_increment_ = timing_->decay; break;
-      case ENV_SEGMENT_RELEASE: phase_increment_ = timing_->release; break;
+      case ENV_SEGMENT_ATTACK: phase_increment_ = adsr_->attack; break;
+      case ENV_SEGMENT_DECAY: phase_increment_ = adsr_->decay; break;
+      case ENV_SEGMENT_RELEASE: phase_increment_ = adsr_->release; break;
       default: phase_increment_ = 0; return;
     }
     target_ = segment_target_[segment];
@@ -154,8 +152,7 @@ class Envelope {
 
  private:
   bool gate_;
-
-  EnvelopeTiming* timing_;
+  ADSR* adsr_;
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_SEGMENT_DEAD];

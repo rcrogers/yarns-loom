@@ -98,12 +98,12 @@ void StateVariableFilter::RenderSample(int16_t in) {
   bp += cutoff.value() * hp >> 15;
 }
 
-void Oscillator::Refresh(int16_t pitch, int16_t timbre, int16_t gain) {
+void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
     pitch_ = pitch;
     // if (shape_ >= OSC_SHAPE_FM) {
     //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
     // }
-    gain_.SetTarget(gain);
+    gain_.SetTarget(gain_envelope_.tremolo(tremolo));
 
     int32_t strength = 32767;
     if (shape_ == OSC_SHAPE_FOLD_SINE || shape_ >= OSC_SHAPE_FM) {
@@ -166,18 +166,18 @@ void Oscillator::Render() {
   size_t size;
   size = kAudioBlockSize;
   while (size--) {
-    gain_envelope.Tick();
+    gain_envelope_.Tick();
     gain_.Tick();
-    int32_t gain = (gain_.value() + gain_envelope.value()) << 1;
+    int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
     CONSTRAIN(gain, 0, UINT16_MAX);
     gain_buffer_.Overwrite(gain);
   }
   timbre_.ComputeSlope();
   size = kAudioBlockSize;
   while (size--) {
-    timbre_envelope.Tick();
+    timbre_envelope_.Tick();
     timbre_.Tick();
-    int32_t timbre = timbre_.value() + timbre_envelope.value();
+    int32_t timbre = timbre_.value() + timbre_envelope_.value();
     CONSTRAIN(timbre, 0, 32767);
     timbre_buffer_.Overwrite(timbre);
   }

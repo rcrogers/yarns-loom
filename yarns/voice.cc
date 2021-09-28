@@ -226,9 +226,8 @@ void Voice::Refresh(uint8_t voice_index) {
     dc_output(DC_AUX_2)->set_envelope_offset(dc_output(DC_AUX_2)->envelope()->tremolo(tremolo));
     mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->volts_dac_code(0) - (dc_output(DC_AUX_2)->envelope()->value() << 1);
   }
-  oscillator_.Refresh(note, timbre_15, oscillator_.gain_envelope.tremolo(tremolo));
+  oscillator_.Refresh(note, timbre_15, tremolo);
   // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
-  // this will likely be jagged in general -- may need to clock the LFO interpolators (both gain and timbre) inside the render loop
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;
@@ -269,10 +268,9 @@ void Voice::SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento) {
 }
 
 void Voice::NoteOn(
-    int16_t note,
-    uint8_t velocity,
-    uint8_t portamento,
-    bool trigger) {
+  int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+  ADSR& adsr, int16_t timbre_target
+) {
   SetPortamento(note, velocity, portamento);
   portamento_phase_ = 0;
   uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE >> 1;
@@ -299,18 +297,17 @@ void Voice::NoteOn(
     NoteOff();
   }
   gate_ = true;
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->GateOn();
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->GateOn();
-  oscillator_.gain_envelope.GateOn();
-  oscillator_.timbre_envelope.GateOn();
+  adsr_ = adsr;
+  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_target);
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 }
 
 void Voice::NoteOff() {
   gate_ = false;
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->GateOff();
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->GateOff();
-  oscillator_.gain_envelope.GateOff();
-  oscillator_.timbre_envelope.GateOff();
+  oscillator_.NoteOff();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->NoteOff();
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->NoteOff();
 }
 
 void Voice::ControlChange(uint8_t controller, uint8_t value) {

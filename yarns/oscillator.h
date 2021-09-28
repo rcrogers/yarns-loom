@@ -92,17 +92,14 @@ class Oscillator {
   Oscillator() { }
   ~Oscillator() { }
 
-  Envelope gain_envelope, timbre_envelope;
-  uint16_t scale_, offset_;
-
   inline void Init(uint16_t scale, uint16_t offset) {
     audio_buffer_.Init();
     scale_ = scale;
     offset_ = offset;
     gain_.Init(64);
     timbre_.Init(64);
-    gain_envelope.Init();
-    timbre_envelope.Init();
+    gain_envelope_.Init();
+    timbre_envelope_.Init();
     timbre_buffer_.Init();
     gain_buffer_.Init();
     svf_.Init(64);
@@ -117,10 +114,19 @@ class Oscillator {
     return audio_buffer_.ImmediateRead();
   }
 
-  void Refresh(int16_t pitch, int16_t timbre, int16_t gain);
+  void Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo);
   
   inline void set_shape(OscillatorShape shape) {
     shape_ = shape;
+  }
+
+  inline void NoteOn(ADSR& adsr, bool drone, int16_t timbre_target) {
+    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
+    timbre_envelope_.NoteOn(adsr, 0, timbre_target);
+  }
+  inline void NoteOff() {
+    gain_envelope_.NoteOff();
+    timbre_envelope_.NoteOff();
   }
   
   void Render();
@@ -158,6 +164,8 @@ class Oscillator {
   }
 
   OscillatorShape shape_;
+  Envelope gain_envelope_, timbre_envelope_;
+  uint16_t scale_, offset_;
   Interpolator timbre_, gain_;
   int16_t pitch_;
 

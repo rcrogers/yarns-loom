@@ -830,42 +830,17 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
     damping_22 += voicing_.amplitude_mod_velocity << 16;
   }
 
-  uint16_t peak_level = UINT16_MAX - (damping_22 >> (22 - 16));
-  uint16_t sustain_level = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
-  voice->envelope_timing.attack   = Interpolate88(lut_envelope_phase_increments,
+  ADSR adsr;
+  adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));;
+  adsr.sustain = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
+  adsr.attack = Interpolate88(lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << 2);
-  voice->envelope_timing.decay    = Interpolate88(lut_envelope_phase_increments,
+  adsr.decay = Interpolate88(lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << 2);
-  voice->envelope_timing.release  = Interpolate88(lut_envelope_phase_increments,
+  adsr.release = Interpolate88(lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << 2);
 
-  if (voice->aux_1_envelope()) voice->dc_output(DC_AUX_1)->envelope()->Set(
-    peak_level, sustain_level,
-    voice->dc_output(DC_AUX_1)->volts_dac_code(0) >> 1,
-    voice->dc_output(DC_AUX_1)->volts_dac_code(7) >> 1,
-    voice->envelope_timing
-  );
-  if (voice->aux_2_envelope()) voice->dc_output(DC_AUX_2)->envelope()->Set(
-    peak_level, sustain_level,
-    voice->dc_output(DC_AUX_2)->volts_dac_code(0) >> 1,
-    voice->dc_output(DC_AUX_2)->volts_dac_code(7) >> 1,
-    voice->envelope_timing
-  );
-
-  Oscillator* osc = voice->oscillator();
-  osc->gain_envelope.Set(
-    peak_level, sustain_level,
-    voicing_.oscillator_mode == OSCILLATOR_MODE_ENVELOPED ? 0 : osc->scale_ >> 1,
-    osc->scale_ >> 1,
-    voice->envelope_timing
-  );
-  osc->timbre_envelope.Set(
-    peak_level, sustain_level,
-    0, timbre_14 << 2,
-    voice->envelope_timing
-  );
-
-  voice->NoteOn(Tune(pitch), vel, portamento, trigger);
+  voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);
 }
 
 void Part::InternalNoteOn(uint8_t note, uint8_t velocity) {

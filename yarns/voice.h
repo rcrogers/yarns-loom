@@ -89,7 +89,6 @@ class CVOutput;
 
 class Voice {
  public:
-  EnvelopeTiming envelope_timing;
   Voice() { }
   ~Voice() { }
 
@@ -98,7 +97,10 @@ class Voice {
 
   void Refresh(uint8_t voice_index);
   void SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento);
-  void NoteOn(int16_t note, uint8_t velocity, uint8_t portamento, bool trigger);
+  void NoteOn(
+    int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+    ADSR& adsr, int16_t timbre_target
+  );
   void NoteOff();
   void ControlChange(uint8_t controller, uint8_t value);
   void PitchBend(uint16_t pitch_bend) {
@@ -194,6 +196,7 @@ class Voice {
  private:
   SyncedLFO synced_lfo_;
   Oscillator oscillator_;
+  ADSR adsr_;
 
   int32_t note_source_;
   int32_t note_target_;
@@ -299,6 +302,9 @@ class CVOutput {
     return
       (dc_role_ == DC_AUX_1 && dc_voice_->aux_1_envelope()) ||
       (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope());
+  }
+  inline void NoteOn(ADSR& adsr) {
+    envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
   }
   Envelope* envelope() { return &envelope_; }
   inline void set_envelope_offset(uint16_t n) {
