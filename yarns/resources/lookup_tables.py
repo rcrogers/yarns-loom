@@ -83,6 +83,8 @@ max_increment = excursion / (min_time * envelope_rate)
 rates = numpy.linspace(numpy.power(max_increment, -gamma),
                        numpy.power(min_increment, -gamma), num_values)
 values = numpy.power(rates, -1/gamma).astype(int)
+values = list(values)
+values.append(values[-1])
 lookup_tables_32.append(
     ('envelope_phase_increments', values)
 )

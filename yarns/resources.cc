@@ -1589,6 +1589,7 @@ const uint32_t lut_envelope_phase_increments[] = {
    30040,  29102,  28201,  27334,
    26501,  25699,  24927,  24184,
    23468,  22779,  22115,  21474,
+   21474,
 };
 const uint32_t lut_oscillator_increments[] = {
   713486825, 718657045, 723864730, 729110152,
