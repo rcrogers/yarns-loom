@@ -103,7 +103,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre, int16_t gain) {
     // if (shape_ >= OSC_SHAPE_FM) {
     //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
     // }
-    gain_modulation_.SetTarget(gain);
+    gain_.SetTarget(gain);
 
     int32_t strength = 32767;
     if (shape_ == OSC_SHAPE_FOLD_SINE || shape_ >= OSC_SHAPE_FM) {
@@ -124,7 +124,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre, int16_t gain) {
           break;
       }
     }
-    timbre_modulation_.SetTarget(timbre);
+    timbre_.SetTarget(timbre);
   }
 
 uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
@@ -162,22 +162,22 @@ void Oscillator::Render() {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
-  gain_modulation_.ComputeSlope();
+  gain_.ComputeSlope();
   size_t size;
   size = kAudioBlockSize;
   while (size--) {
     gain_envelope.Tick();
-    gain_modulation_.Tick();
-    int32_t gain = (gain_modulation_.value() + gain_envelope.value()) << 1;
+    gain_.Tick();
+    int32_t gain = (gain_.value() + gain_envelope.value()) << 1;
     CONSTRAIN(gain, 0, UINT16_MAX);
     gain_buffer_.Overwrite(gain);
   }
-  timbre_modulation_.ComputeSlope();
+  timbre_.ComputeSlope();
   size = kAudioBlockSize;
   while (size--) {
     timbre_envelope.Tick();
-    timbre_modulation_.Tick();
-    int32_t timbre = timbre_modulation_.value() + timbre_envelope.value();
+    timbre_.Tick();
+    int32_t timbre = timbre_.value() + timbre_envelope.value();
     CONSTRAIN(timbre, 0, 32767);
     timbre_buffer_.Overwrite(timbre);
   }

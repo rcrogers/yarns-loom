@@ -93,19 +93,18 @@ class Oscillator {
   ~Oscillator() { }
 
   Envelope gain_envelope, timbre_envelope;
-  Interpolator gain_modulation_, timbre_modulation_;
   uint16_t scale_, offset_;
 
   inline void Init(uint16_t scale, uint16_t offset) {
     audio_buffer_.Init();
-    gain_buffer_.Init();
-    timbre_buffer_.Init();
     scale_ = scale;
     offset_ = offset;
+    gain_.Init(64);
+    timbre_.Init(64);
     gain_envelope.Init();
     timbre_envelope.Init();
-    gain_modulation_.Init(64);
-    timbre_modulation_.Init(64);
+    timbre_buffer_.Init();
+    gain_buffer_.Init();
     svf_.Init(64);
     pitch_ = 60 << 7;
     phase_ = 0;
@@ -159,6 +158,7 @@ class Oscillator {
   }
 
   OscillatorShape shape_;
+  Interpolator timbre_, gain_;
   int16_t pitch_;
 
   uint32_t phase_;
