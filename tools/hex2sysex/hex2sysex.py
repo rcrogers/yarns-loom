@@ -49,6 +49,7 @@ def CreateMidifile(
     output_file,
     options):
   size = len(data)
+  print('size', size)
   page_size = options.page_size
   delay = options.delay
   _, input_file_name = os.path.split(input_file_name)
