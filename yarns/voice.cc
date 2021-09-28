@@ -98,6 +98,7 @@ void CVOutput::Init(bool reset_calibration) {
   dirty_ = false;
   dc_role_ = DC_PITCH;
   envelope_.Init();
+  tremolo_.Init(64);
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {

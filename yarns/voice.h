@@ -301,7 +301,10 @@ class CVOutput {
       (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope());
   }
   Envelope* envelope() { return &envelope_; }
-  inline void set_envelope_offset(uint16_t n) { envelope_offset_ = n; }
+  inline void set_envelope_offset(uint16_t n) {
+    tremolo_.SetTarget(n);
+    tremolo_.ComputeSlope();
+  }
 
   inline uint16_t GetAudioSample() {
     uint16_t mix = 0;
@@ -312,8 +315,11 @@ class CVOutput {
   }
 
   inline uint16_t GetEnvelopeSample() {
+    tremolo_.Tick();
     envelope_.Tick();
-    return envelope_offset_ + (envelope_.value() << 1);
+    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+    CONSTRAIN(value, 0, UINT16_MAX);
+    return value;
   }
 
   void Refresh();
@@ -367,7 +373,7 @@ class CVOutput {
   bool dirty_;  // Set to true when the calibration settings have changed.
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
-  uint16_t envelope_offset_;
+  Interpolator tremolo_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };
