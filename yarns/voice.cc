@@ -219,12 +219,10 @@ void Voice::Refresh(uint8_t voice_index) {
 
   uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
   if (aux_1_envelope()) {
-    dc_output(DC_AUX_1)->set_envelope_offset(dc_output(DC_AUX_1)->envelope()->tremolo(tremolo));
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->volts_dac_code(0) - (dc_output(DC_AUX_1)->envelope()->value() << 1);
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
   }
   if (aux_2_envelope()) {
-    dc_output(DC_AUX_2)->set_envelope_offset(dc_output(DC_AUX_2)->envelope()->tremolo(tremolo));
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->volts_dac_code(0) - (dc_output(DC_AUX_2)->envelope()->value() << 1);
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
   }
   oscillator_.Refresh(note, timbre_15, tremolo);
   // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
@@ -306,8 +304,8 @@ void Voice::NoteOn(
 void Voice::NoteOff() {
   gate_ = false;
   oscillator_.NoteOff();
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->envelope()->NoteOff();
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->envelope()->NoteOff();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
 }
 
 void Voice::ControlChange(uint8_t controller, uint8_t value) {

@@ -306,10 +306,16 @@ class CVOutput {
   inline void NoteOn(ADSR& adsr) {
     envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
   }
-  Envelope* envelope() { return &envelope_; }
-  inline void set_envelope_offset(uint16_t n) {
-    tremolo_.SetTarget(n);
+  inline void NoteOff() { envelope_.NoteOff(); }
+  uint16_t RefreshEnvelope(uint16_t tremolo) {
+    tremolo_.SetTarget(envelope_.tremolo(tremolo));
     tremolo_.ComputeSlope();
+    return volts_dac_code(0) - envelope_value();
+  }
+  inline uint16_t envelope_value() {
+    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+    CONSTRAIN(value, 0, UINT16_MAX);
+    return value;
   }
 
   inline uint16_t GetAudioSample() {
@@ -323,9 +329,7 @@ class CVOutput {
   inline uint16_t GetEnvelopeSample() {
     tremolo_.Tick();
     envelope_.Tick();
-    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-    CONSTRAIN(value, 0, UINT16_MAX);
-    return value;
+    return envelope_value();
   }
 
   void Refresh();
