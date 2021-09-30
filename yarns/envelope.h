@@ -114,6 +114,7 @@ class Envelope {
     int32_t delta = target_ - value_;
     positive_segment_slope_ = delta >= 0;
     linear_slope_ = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
+    if (!linear_slope_) linear_slope_ = delta > 0 ? 1 : -1;
     max_shift_ = __builtin_clzl(abs(linear_slope_));
     expo_dirty_ = true;
     phase_ = 0;
@@ -125,10 +126,7 @@ class Envelope {
     }
     if (!phase_increment_) return;
     phase_ += phase_increment_;
-    if (phase_ < phase_increment_) {
-      Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-      return;
-    }
+    if (phase_ < phase_increment_) phase_ = UINT32_MAX;
     int8_t shift = lut_expo_slope_shift[phase_ >> 24];
     if (shift != expo_slope_shift_) expo_dirty_ = true;
     if (expo_dirty_) {
@@ -144,9 +142,8 @@ class Envelope {
       ? value_ > target_overshoot_threshold_
       : value_ < target_overshoot_threshold_
     ) {
-      // value_ = target_;
+      value_ = target_;
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-      // Tick();
       return;
     }
     value_ += expo_slope_;
