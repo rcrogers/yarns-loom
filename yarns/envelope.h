@@ -48,16 +48,17 @@ class Envelope {
 
   void Init() {
     gate_ = false;
+    segment_ = next_tick_segment_ = ENV_SEGMENT_DEAD;
   }
 
   inline void NoteOff() {
     gate_ = false;
     switch (segment_) {
       case ENV_SEGMENT_ATTACK:
-        Trigger(ENV_SEGMENT_DECAY);
+        next_tick_segment_ = ENV_SEGMENT_DECAY;
         break;
       case ENV_SEGMENT_SUSTAIN:
-        Trigger(ENV_SEGMENT_RELEASE);
+        next_tick_segment_ = ENV_SEGMENT_RELEASE;
         break;
       default:
         break;
@@ -82,7 +83,7 @@ class Envelope {
 
     if (!gate_) {
       gate_ = true;
-      Trigger(ENV_SEGMENT_ATTACK);
+      next_tick_segment_ = ENV_SEGMENT_ATTACK;
     }
   }
 
@@ -92,7 +93,7 @@ class Envelope {
   }
   
   inline void Trigger(EnvelopeSegment segment) {
-    segment_ = segment;
+    segment_ = next_tick_segment_ = segment;
     if (segment == ENV_SEGMENT_DEAD) {
       value_ = segment_target_[ENV_SEGMENT_RELEASE];
     }
@@ -119,6 +120,9 @@ class Envelope {
   }
 
   inline void Tick() {
+    if (segment_ != next_tick_segment_) {
+      Trigger(next_tick_segment_);
+    }
     if (!phase_increment_) return;
     phase_ += phase_increment_;
     if (phase_ < phase_increment_) {
@@ -153,6 +157,7 @@ class Envelope {
  private:
   bool gate_;
   ADSR* adsr_;
+  EnvelopeSegment next_tick_segment_;
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_SEGMENT_DEAD];
