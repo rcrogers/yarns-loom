@@ -831,7 +831,7 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
   }
 
   ADSR adsr;
-  adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));;
+  adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));
   adsr.sustain = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
   adsr.attack = Interpolate88(lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << 2);
