@@ -833,11 +833,11 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
   ADSR adsr;
   adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));
   adsr.sustain = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
-  adsr.attack = Interpolate88(lut_envelope_phase_increments,
+  adsr.attack   = Interpolate88(lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << 2);
-  adsr.decay = Interpolate88(lut_envelope_phase_increments,
+  adsr.decay    = Interpolate88(lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << 2);
-  adsr.release = Interpolate88(lut_envelope_phase_increments,
+  adsr.release  = Interpolate88(lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << 2);
 
   voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);

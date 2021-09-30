@@ -65,21 +65,17 @@ class Envelope {
     }
   }
 
-  inline EnvelopeSegment segment() const {
-    return static_cast<EnvelopeSegment>(segment_);
-  }
-
   inline void NoteOn(
     ADSR& adsr,
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   ) {
+    adsr_ = &adsr;
     int16_t scale = max_target - min_target;
     positive_scale_ = scale >= 0;
     min_target <<= 16;
     segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
     segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * adsr.sustain;
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
-    adsr_ = &adsr;
 
     if (!gate_) {
       gate_ = true;
@@ -101,9 +97,9 @@ class Envelope {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
     switch (segment) {
-      case ENV_SEGMENT_ATTACK: phase_increment_ = adsr_->attack; break;
-      case ENV_SEGMENT_DECAY: phase_increment_ = adsr_->decay; break;
-      case ENV_SEGMENT_RELEASE: phase_increment_ = adsr_->release; break;
+      case ENV_SEGMENT_ATTACK : phase_increment_ = adsr_->attack  ; break;
+      case ENV_SEGMENT_DECAY  : phase_increment_ = adsr_->decay   ; break;
+      case ENV_SEGMENT_RELEASE: phase_increment_ = adsr_->release ; break;
       default: phase_increment_ = 0; return;
     }
     target_ = segment_target_[segment];
