@@ -54,14 +54,9 @@ class Envelope {
   inline void NoteOff() {
     gate_ = false;
     switch (segment_) {
-      case ENV_SEGMENT_ATTACK:
-        next_tick_segment_ = ENV_SEGMENT_DECAY;
-        break;
-      case ENV_SEGMENT_SUSTAIN:
-        next_tick_segment_ = ENV_SEGMENT_RELEASE;
-        break;
-      default:
-        break;
+      case ENV_SEGMENT_ATTACK : next_tick_segment_ = ENV_SEGMENT_DECAY  ; break;
+      case ENV_SEGMENT_SUSTAIN: next_tick_segment_ = ENV_SEGMENT_RELEASE; break;
+      default: break;
     }
   }
 
