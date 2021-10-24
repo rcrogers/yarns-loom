@@ -89,13 +89,13 @@ class Envelope {
   }
   
   inline void Trigger(EnvelopeSegment segment) {
-    segment_ = next_tick_segment_ = segment;
     if (segment == ENV_SEGMENT_DEAD) {
       value_ = segment_target_[ENV_SEGMENT_RELEASE];
     }
     if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
+    segment_ = next_tick_segment_ = segment;
     switch (segment) {
       case ENV_SEGMENT_ATTACK : phase_increment_ = adsr_->attack  ; break;
       case ENV_SEGMENT_DECAY  : phase_increment_ = adsr_->decay   ; break;
@@ -104,8 +104,9 @@ class Envelope {
     }
     target_ = segment_target_[segment];
     if (!gate_ && positive_scale_ == (target_ >= value_)) {
-      // Moving away from minimum requires a gate -- to prevent e.g. an aborted attack from decaying upward
-      target_ = value_;
+      // Moving away from minimum requires a gate -- if we're trying to decay
+      // 'upward', skip the segment
+      return Trigger(static_cast<EnvelopeSegment>(segment + 1));
     }
     int32_t delta = target_ - value_;
     positive_segment_slope_ = delta >= 0;
@@ -132,6 +133,7 @@ class Envelope {
       if (linear_slope_ != 0) expo_slope_ = shift >= 0
         ? linear_slope_ << std::min(static_cast<uint8_t>(shift), max_shift_)
         : linear_slope_ >> static_cast<uint8_t>(-shift);
+      if (!expo_slope_) expo_slope_ = linear_slope_;
       target_overshoot_threshold_ = target_ - expo_slope_;
     }
     if (positive_segment_slope_ // The slope is about to overshoot the target
@@ -139,7 +141,7 @@ class Envelope {
       : value_ < target_overshoot_threshold_
     ) {
       value_ = target_;
-      Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
+      next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }
     value_ += expo_slope_;
