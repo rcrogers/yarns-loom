@@ -74,9 +74,8 @@ lookup_tables_32.append(
     ('portamento_increments', values)
 )
 
-gamma = 0.25
 envelope_rate = audio_rate
-min_time = 5.0 / envelope_rate
+min_time = 4.0 / envelope_rate
 print('min_time', min_time)
 min_increment = excursion / (max_time * envelope_rate)
 max_increment = excursion / (min_time * envelope_rate)
