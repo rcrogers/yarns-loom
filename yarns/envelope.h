@@ -23,8 +23,6 @@
 
 #include "yarns/resources.h"
 
-const uint8_t kTicksPerUpdate = 1;
-
 namespace yarns {
 
 using namespace stmlib;
@@ -113,7 +111,6 @@ class Envelope {
     max_shift_ = __builtin_clzl(abs(linear_slope_));
     expo_dirty_ = true;
     phase_ = 0;
-    tick_counter_ = -1;
   }
 
   inline void Tick() {
@@ -121,8 +118,6 @@ class Envelope {
       Trigger(next_tick_segment_);
     }
     if (!phase_increment_) return;
-    tick_counter_ = (tick_counter_ + 1) % kTicksPerUpdate;
-    if (tick_counter_ != 0) return;
     phase_ += phase_increment_;
     if (phase_ < phase_increment_) phase_ = UINT32_MAX;
     int8_t shift = lut_expo_slope_shift[phase_ >> 24];
@@ -165,8 +160,6 @@ class Envelope {
   // Target and current value of the current segment.
   int32_t target_;
   int32_t value_;
-
-  int8_t tick_counter_;
 
   // Cache
   int8_t expo_slope_shift_;
