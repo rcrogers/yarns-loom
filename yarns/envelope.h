@@ -103,7 +103,8 @@ class Envelope {
     if (!gate_ && positive_scale_ == (target_ >= value_)) {
       // Moving away from minimum requires a gate -- if we're trying to decay
       // 'upward', skip the segment
-      return Trigger(static_cast<EnvelopeSegment>(segment + 1));
+      next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
+      return;
     }
     int32_t delta = target_ - value_;
     positive_segment_slope_ = delta >= 0;
@@ -116,7 +117,7 @@ class Envelope {
   }
 
   inline void Tick() {
-    if (segment_ != next_tick_segment_) {
+    while (segment_ != next_tick_segment_) { // Event loop
       Trigger(next_tick_segment_);
     }
     if (!phase_increment_) return;
