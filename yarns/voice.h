@@ -72,6 +72,13 @@ enum ModAux {
   MOD_AUX_VIBRATO_LFO,
   MOD_AUX_FULL_LFO,
   MOD_AUX_ENVELOPE,
+  MOD_AUX_PITCH_1,
+  MOD_AUX_PITCH_2,
+  MOD_AUX_PITCH_3,
+  MOD_AUX_PITCH_4,
+  MOD_AUX_PITCH_5,
+  MOD_AUX_PITCH_6,
+  MOD_AUX_PITCH_7,
 
   MOD_AUX_LAST
 };
@@ -168,6 +175,13 @@ class Voice {
     tuning_ = (static_cast<int32_t>(coarse) << 7) + fine;
   }
   
+  inline ModAux aux_1_source() const {
+    return static_cast<ModAux>(aux_cv_source_);
+  }
+  inline ModAux aux_2_source() const {
+    return static_cast<ModAux>(aux_cv_source_2_);
+  }
+
   inline bool aux_1_envelope() const {
     return aux_cv_source_ == MOD_AUX_ENVELOPE && dc_output(DC_AUX_1);
   }
@@ -342,14 +356,26 @@ class CVOutput {
     return static_cast<uint16_t>(volts_dac_code(0) - (scale * v >> 16));
   }
 
-  inline uint16_t pitch_dac_code();
+  uint16_t pitch_dac_code();
   inline uint16_t velocity_dac_code() {
     return DacCodeFrom16BitValue(dc_voice_->velocity() << 9);
   }
   inline uint16_t aux_cv_dac_code() {
+    if (dc_voice_->aux_1_source() >= MOD_AUX_PITCH_1) {
+      return NoteToDacCode(
+        dc_voice_->note() +
+        lut_fm_modulator_intervals[dc_voice_->aux_1_source() - MOD_AUX_PITCH_1]
+      );
+    }
     return DacCodeFrom16BitValue(dc_voice_->aux_cv_16bit());
   }
   inline uint16_t aux_cv_dac_code_2() {
+    if (dc_voice_->aux_2_source() >= MOD_AUX_PITCH_1) {
+      return NoteToDacCode(
+        dc_voice_->note() +
+        lut_fm_modulator_intervals[dc_voice_->aux_2_source() - MOD_AUX_PITCH_1]
+      );
+    }
     return DacCodeFrom16BitValue(dc_voice_->aux_cv_2_16bit());
   }
   inline uint16_t trigger_dac_code() {

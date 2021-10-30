@@ -59,8 +59,25 @@ const char* const sequencer_arp_direction_values[ARPEGGIATOR_DIRECTION_LAST] = {
   "LINEAR", "BOUNCE", "RANDOM", "ROTATE", "SUBROTATE"
 };
 
-const char* const voicing_aux_cv_values[] = {
-  "VELOCITY", "MODULATION", "AT", "BREATH", "PEDAL", "BEND", "VIBRATO LFO", "LFO", "ENVELOPE"
+const char* const voicing_aux_cv_values[MOD_AUX_LAST] = {
+  "VELOCITY",
+  "MODULATION",
+  "AFTERTOUCH",
+  "BREATH",
+  "PEDAL",
+  "BEND",
+  "VIBRATO LFO",
+  "LFO",
+  "ENVELOPE",
+  // lut_fm_ratio_names[0],
+  // lut_fm_ratio_names[1],
+  // lut_fm_ratio_names[2],
+  // lut_fm_ratio_names[3],
+  // lut_fm_ratio_names[4],
+  // lut_fm_ratio_names[5],
+  // lut_fm_ratio_names[6],
+  "11 FM 1/1", "12 FM 1/2", "13 FM 1/3", "15 FM 1/5",
+  "17 FM 1/7", "25 FM 2/5", "27 FM 2/7"
 };
 
 const char* const legato_mode_values[LEGATO_MODE_LAST] = {
