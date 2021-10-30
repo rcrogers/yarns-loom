@@ -82,7 +82,7 @@ void Voice::Init() {
 
 /* static */
 CVOutput::DCFn CVOutput::dc_fn_table_[] = {
-  &CVOutput::NoteToDacCode,
+  &CVOutput::pitch_dac_code,
   &CVOutput::velocity_dac_code,
   &CVOutput::aux_cv_dac_code,
   &CVOutput::aux_cv_dac_code_2,
@@ -108,12 +108,15 @@ void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
       &calibrated_dac_code_[0]);
 }
 
-uint16_t CVOutput::NoteToDacCode() {
+uint16_t CVOutput::pitch_dac_code() {
   int32_t note = dc_voice_->note();
-  if (note_ == note && !dirty_) return dac_code_;
+  if (dirty_ || note_ != note) dac_code_ = NoteToDacCode(note);
   dirty_ = false;
   note_ = note;
+  return dac_code_;
+}
 
+uint16_t CVOutput::NoteToDacCode(int32_t note) const {
   if (note <= 0) {
     note = 0;
   }

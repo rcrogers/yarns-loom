@@ -342,6 +342,7 @@ class CVOutput {
     return static_cast<uint16_t>(volts_dac_code(0) - (scale * v >> 16));
   }
 
+  inline uint16_t pitch_dac_code();
   inline uint16_t velocity_dac_code() {
     return DacCodeFrom16BitValue(dc_voice_->velocity() << 9);
   }
@@ -371,7 +372,7 @@ class CVOutput {
   }
 
  private:
-  uint16_t NoteToDacCode();
+  uint16_t NoteToDacCode(int32_t note) const;
 
   Voice* dc_voice_;
   Voice* audio_voices_[kNumMaxVoicesPerPart];
