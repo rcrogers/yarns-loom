@@ -572,7 +572,7 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
   uint32_t pattern;
   uint8_t pattern_length;
   bool hit = false;
-  if (seq_.arp_pattern == 0) {
+  if (seq_driven_arp()) {
     pattern_length = seq_.num_steps;
     if (seq_step.has_note()) {
       hit = true;

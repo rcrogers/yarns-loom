@@ -732,10 +732,16 @@ class Part {
   }
 
   inline bool looper_in_use() const {
-    return looped() && (
-      midi_.play_mode == PLAY_MODE_SEQUENCER ||
-      midi_.play_mode == PLAY_MODE_ARPEGGIATOR
-    );
+    return looped() && sequencer_in_use();
+  }
+
+  inline bool sequencer_in_use() const {
+    return midi_.play_mode == PLAY_MODE_SEQUENCER ||
+      (midi_.play_mode == PLAY_MODE_ARPEGGIATOR && seq_driven_arp());
+  }
+
+  inline bool seq_driven_arp() const {
+    return seq_.arp_pattern == 0;
   }
 
   inline bool uses_poly_allocator() const {

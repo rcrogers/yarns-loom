@@ -986,7 +986,7 @@ void Ui::DoEvents() {
     if (print_part) {
       display_.set_fade(0);
       PrintPartAndPlayMode(active_part_);
-      if (multi.running()) {
+      if (multi.running() && active_part().sequencer_in_use()) {
         SetBrightnessFromSequencerPhase(active_part());
       } else {
         display_.set_brightness(UINT16_MAX);
