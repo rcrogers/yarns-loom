@@ -48,6 +48,7 @@ const uint8_t kCCMacroPlayMode = 117;
 
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
+  master_lfo_.Init();
   
   fill(
       &settings_.custom_pitch_table[0],
@@ -139,13 +140,9 @@ void Multi::Clock() {
 
     // Sync LFOs
     ++tick_counter_;
+    master_lfo_.Tap(tick_counter_, 16);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       part_[p].mutable_looper().Clock(tick_counter_);
-      uint8_t lfo_rate = part_[p].voicing_settings().lfo_rate;
-      if (lfo_rate < LUT_LFO_INCREMENTS_SIZE) continue;
-      for (uint8_t v = 0; v < part_[p].num_voices(); ++v) {
-        part_[p].voice(v)->lfo()->Tap(tick_counter_, lut_clock_ratio_ticks[lfo_rate - LUT_LFO_INCREMENTS_SIZE]);
-      }
     }
     
     ++swing_counter_;
@@ -218,7 +215,7 @@ void Multi::Start(bool started_by_keyboard) {
   clock_input_prescaler_ = 0;
   clock_output_prescaler_ = 0;
   stop_count_down_ = 0;
-  tick_counter_ = -1;
+  tick_counter_ = master_lfo_tick_counter_ = -1;
   bar_position_ = -1;
   swing_counter_ = -1;
   previous_output_division_ = 0;
@@ -271,11 +268,20 @@ void Multi::ClockFast() {
 }
 
 void Multi::Refresh() {
+  master_lfo_.Refresh();
+  bool new_tick = (master_lfo_.GetPhase() << 4) < (master_lfo_.GetPhaseIncrement() << 4);
+  if (new_tick) master_lfo_tick_counter_++;
   for (uint8_t j = 0; j < num_active_parts_; ++j) {
     Part& part = part_[j];
     part.mutable_looper().Refresh();
     for (uint8_t v = 0; v < part.num_voices(); ++v) {
       part.voice(v)->Refresh(v);
+    }
+    if (!new_tick) continue;
+    uint8_t lfo_rate = part.voicing_settings().lfo_rate;
+    if (lfo_rate < LUT_LFO_INCREMENTS_SIZE) continue;
+    for (uint8_t v = 0; v < part.num_voices(); ++v) {
+      part.voice(v)->lfo()->Tap(master_lfo_tick_counter_, lut_clock_ratio_ticks[lfo_rate - LUT_LFO_INCREMENTS_SIZE]);
     }
   }
 
@@ -295,7 +301,7 @@ bool Multi::Set(uint8_t address, uint8_t value) {
         static_cast<Layout>(previous_value),
         static_cast<Layout>(value));
   } else if (address == MULTI_CLOCK_TEMPO) {
-    internal_clock_.set_tempo(settings_.clock_tempo);
+    UpdateTempo();
   } else if (address == MULTI_CLOCK_SWING) {
     internal_clock_.set_swing(settings_.clock_swing);
   }
@@ -675,10 +681,17 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
   }
 }
 
+const uint32_t kTempoToRefreshPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
+void Multi::UpdateTempo() {
+  internal_clock_.set_tempo(settings_.clock_tempo);
+  if (running_) return;
+  master_lfo_.SetPhaseIncrement((settings_.clock_tempo * kTempoToRefreshPhaseIncrement) >> 4);
+}
+
 void Multi::AfterDeserialize() {
   Stop();
 
-  internal_clock_.set_tempo(settings_.clock_tempo);
+  UpdateTempo();
   AllocateParts();
   
   for (uint8_t i = 0; i < kNumParts; ++i) {

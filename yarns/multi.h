@@ -515,6 +515,7 @@ class Multi {
 
  private:
   void ChangeLayout(Layout old_layout, Layout new_layout);
+  void UpdateTempo();
   void AllocateParts();
   void ClockSong();
   
@@ -535,6 +536,10 @@ class Multi {
   
   // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 517 days -- acceptable
   uint32_t tick_counter_;
+
+  // Runs at 16 PPQN
+  SyncedLFO master_lfo_;
+  uint32_t master_lfo_tick_counter_;
 
   uint8_t clock_input_prescaler_;
   uint16_t clock_output_prescaler_;

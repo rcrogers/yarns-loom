@@ -46,7 +46,7 @@ const uint16_t kRefreshTwoThirds = 600;
 const uint32_t kEncoderLongPressTime = kRefreshPeriod * 2 / 3;
 const uint32_t kDefaultFade = (1 << 15) / kRefreshPeriod; // 1/2 frequency
 
-const char* const kVersion = "Loom 2_2_0";
+const char* const kVersion = "Loom 2_3_0";
 
 /* static */
 const Ui::Command Ui::commands_[] = {
@@ -822,7 +822,7 @@ void Ui::DoLearnCommand() {
   multi.StartLearning();
 }
 
-const uint32_t kTapDeltaMax = 1500;
+const uint32_t kTapDeltaMax = 1500; // 40 BPM
 
 void Ui::TapTempo() {
   uint32_t tap_time = system_clock.milliseconds();

@@ -95,7 +95,8 @@ class Deck {
   }
   void Clock(uint32_t tick_counter);
   inline void Refresh() {
-    uint16_t new_phase = lfo_.Refresh() >> 16;
+    lfo_.Refresh();
+    uint16_t new_phase = lfo_.GetPhase() >> 16;
     if (
       // phase has definitely changed, or
       pos_ != new_phase ||

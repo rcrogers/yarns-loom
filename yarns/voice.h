@@ -118,6 +118,7 @@ class Voice {
   }
 
   void set_lfo_rate(uint8_t lfo_rate, uint8_t index);
+  void garbage(uint8_t x);
   inline void set_pitch_bend_range(uint8_t pitch_bend_range) {
     pitch_bend_range_ = pitch_bend_range;
   }

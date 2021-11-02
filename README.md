@@ -14,7 +14,7 @@ An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](ht
 - [Sequencer-driven arpeggiator](yarns/MANUAL.md#sequencer-driven-arpeggiator)
 - [More options for how a sequence interacts with keyboard input](yarns/MANUAL.md#event-routing-filtering-and-transformation)
 - [Global control and display of the active part and its play mode](yarns/MANUAL.md#global-control-and-display-of-the-active-part-and-its-play-mode)
-- [Expanded CC support: recording control, display of received values](yarns/MANUAL.md#expanded-support-for-control-change-events)
+- [Expanded CC support: recording control, macro functions, display of received values](yarns/MANUAL.md#expanded-support-for-control-change-events)
 - [Check the manual for more!](yarns/MANUAL.md)
 
 ### Caveats

@@ -155,6 +155,8 @@
 - The result of a received CC is briefly displayed (value, setting abbreviation, and receiving part)
 - Recording control: start/stop recording mode, delete a recording
 - CC support for all new settings
+- Macro CC for controlling recording state: off, on, triggered erase, immediate erase
+- Macro CC for controlling sequencer mode: step sequencer, step arpeggiator, manual, loop arpeggiator, loop sequencer
 - Fixed settings to accept a negative value via CC
 - [Implementation Chart](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 
