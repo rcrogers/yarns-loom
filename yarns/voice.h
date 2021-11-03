@@ -92,6 +92,13 @@ enum DCRole {
   DC_LAST
 };
 
+enum LFORole {
+  LFO_ROLE_PITCH,
+  LFO_ROLE_TIMBRE,
+  LFO_ROLE_AMPLITUDE,
+  LFO_ROLE_LAST
+};
+
 class CVOutput;
 
 class Voice {
@@ -102,7 +109,7 @@ class Voice {
   void Init();
   void ResetAllControllers();
 
-  void Refresh(uint8_t voice_index);
+  void Refresh();
   void SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento);
   void NoteOn(
     int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
@@ -117,7 +124,6 @@ class Voice {
     mod_aux_[MOD_AUX_AFTERTOUCH] = velocity << 9;
   }
 
-  void set_lfo_rate(uint8_t lfo_rate, uint8_t index);
   void garbage(uint8_t x);
   inline void set_pitch_bend_range(uint8_t pitch_bend_range) {
     pitch_bend_range_ = pitch_bend_range;
@@ -199,7 +205,7 @@ class Voice {
   inline Oscillator* oscillator() {
     return &oscillator_;
   }
-  inline SyncedLFO* lfo() { return &synced_lfo_; }
+  inline SyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
 
   inline void RenderSamples() {
     if (uses_audio()) oscillator_.Render();
@@ -209,7 +215,7 @@ class Voice {
   }
   
  private:
-  SyncedLFO synced_lfo_;
+  SyncedLFO lfos_[LFO_ROLE_LAST];
   Oscillator oscillator_;
   ADSR adsr_;
 
@@ -225,7 +231,6 @@ class Voice {
   uint8_t mod_velocity_;
   
   uint8_t pitch_bend_range_;
-  uint32_t lfo_phase_increment_;
   uint8_t vibrato_range_;
   uint8_t vibrato_mod_;
   

@@ -81,6 +81,8 @@ void Part::Init() {
   voicing_.vibrato_range = 1;
   voicing_.vibrato_mod = 0;
   voicing_.lfo_rate = 50;
+  voicing_.lfo_spread_types = 0;
+  voicing_.lfo_spread_voices = 0;
   voicing_.trigger_duration = 2;
   voicing_.aux_cv = MOD_AUX_ENVELOPE;
   voicing_.aux_cv_2 = MOD_AUX_ENVELOPE;
@@ -372,7 +374,7 @@ void Part::Reset() {
   }
 }
 
-void Part::Clock() {
+void Part::Clock() { // From Multi::ClockFast
   if (looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL) return;
 
   SequencerStep step;
@@ -997,7 +999,6 @@ void Part::TouchVoices() {
   voice_[0]->garbage(0);
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->set_pitch_bend_range(voicing_.pitch_bend_range);
-    voice_[i]->set_lfo_rate(voicing_.lfo_rate, i);
     voice_[i]->set_vibrato_range(voicing_.vibrato_range);
     voice_[i]->set_vibrato_mod(voicing_.vibrato_mod);
     voice_[i]->set_tremolo_mod(voicing_.tremolo_mod);

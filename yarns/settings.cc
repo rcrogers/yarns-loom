@@ -380,10 +380,22 @@ const Setting Settings::settings_[] = {
     22, 13,
   },
   {
-    "VS", "VIBRATO SPEED",
+    "LF", "LFO RATE",
     SETTING_DOMAIN_PART, { PART_VOICING_LFO_RATE, 0 },
     SETTING_UNIT_VIBRATO_SPEED, 0, kVibratoSpeedMax, NULL,
     23, 14,
+  },
+  {
+    "LT", "LFO SPREAD TYPES",
+    SETTING_DOMAIN_PART, { PART_VOICING_LFO_SPREAD_TYPES, 0 },
+    SETTING_UNIT_LFO_SPREAD, -64, 63, NULL,
+    118, 0xff,
+  },
+  {
+    "LV", "LFO SPREAD VOICES",
+    SETTING_DOMAIN_PART, { PART_VOICING_LFO_SPREAD_VOICES, 0 },
+    SETTING_UNIT_LFO_SPREAD, -64, 63, NULL,
+    119, 0xff,
   },
   {
     "VB", "VIBRATO AMOUNT",
@@ -776,6 +788,13 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
         strcpy(buffer, lut_fm_ratio_names[value - OSC_SHAPE_FM]);
       } else {
         strcpy(buffer, voicing_oscillator_shape_values[value]);
+      }
+      break;
+
+    case SETTING_UNIT_LFO_SPREAD:
+      PrintInteger(buffer, abs((int8_t) value));
+      if (buffer[0] == ' ') {
+        buffer[0] = ((int8_t) value) < 0 ? 'F' : 'P';
       }
       break;
       

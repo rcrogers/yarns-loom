@@ -518,6 +518,7 @@ class Multi {
   void UpdateTempo();
   void AllocateParts();
   void ClockSong();
+  void SpreadLFOs(int8_t spread, SyncedLFO** base_lfo, uint8_t num_lfos);
   
   MultiSettings settings_;
   

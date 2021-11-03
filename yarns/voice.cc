@@ -57,7 +57,10 @@ void Voice::Init() {
   mod_velocity_ = 0x7f;
   ResetAllControllers();
   
-  lfo_phase_increment_ = lut_lfo_increments[50];
+  for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
+    lfos_[i].Init();
+    lfos_[i].SetPhaseIncrement(lut_lfo_increments[50]);
+  }
   pitch_bend_range_ = 2;
   vibrato_range_ = 0;
 
@@ -71,7 +74,6 @@ void Voice::Init() {
   amplitude_lfo_interpolator_.Init(kLowFreqRefresh);
   scaled_vibrato_lfo_interpolator_.Init(kLowFreqRefresh);
   
-  synced_lfo_.Init();
   portamento_phase_ = 0;
   portamento_phase_increment_ = 1U << 31;
   portamento_exponential_shape_ = false;
@@ -146,15 +148,7 @@ void Voice::garbage(uint8_t x) {
   (void) foo;
 }
 
-void Voice::set_lfo_rate(uint8_t lfo_rate, uint8_t index) {
-  if (lfo_rate < LUT_LFO_INCREMENTS_SIZE) {
-    lfo_phase_increment_ = lut_lfo_increments[LUT_LFO_INCREMENTS_SIZE - lfo_rate - 1];
-  } else {
-    lfo_phase_increment_ = 0;
-  }
-}
-
-void Voice::Refresh(uint8_t voice_index) {
+void Voice::Refresh() {
   // Slew coarse inputs to avoid clicks
   tremolo_mod_current_ = stmlib::slew(
     tremolo_mod_current_, tremolo_mod_target_);
@@ -185,25 +179,21 @@ void Voice::Refresh(uint8_t voice_index) {
   note += tuning_;
   
   // Render modulation sources
-  if (lfo_phase_increment_) {
-    synced_lfo_.Increment(lfo_phase_increment_);
-  } else {
-    synced_lfo_.Refresh();
+  for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
+    lfos_[i].Refresh();
   }
-  // Use voice index to put voice LFOs in quadrature
-  uint32_t lfo_phase = synced_lfo_.GetPhase();// + (voice_index << 30);
-  int32_t triangle_lfo = synced_lfo_.shape(LFO_SHAPE_TRIANGLE, lfo_phase);
+  int32_t vibrato_lfo = lfos_[LFO_ROLE_PITCH].shape(LFO_SHAPE_TRIANGLE);
 
   if (refresh_counter_ == 0) {
-    uint16_t tremolo_lfo = 32767 - synced_lfo_.shape(tremolo_shape_);
+    uint16_t tremolo_lfo = 32767 - lfos_[LFO_ROLE_AMPLITUDE].shape(tremolo_shape_);
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
     amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
 
-    timbre_lfo_interpolator_.SetTarget(triangle_lfo * timbre_mod_lfo_current_ >> (31 - 15));
+    timbre_lfo_interpolator_.SetTarget(lfos_[LFO_ROLE_TIMBRE].shape(LFO_SHAPE_TRIANGLE) * timbre_mod_lfo_current_ >> (31 - 15));
     timbre_lfo_interpolator_.ComputeSlope();
 
-    scaled_vibrato_lfo_interpolator_.SetTarget(triangle_lfo * vibrato_mod_ >> 8);
+    scaled_vibrato_lfo_interpolator_.SetTarget(vibrato_lfo * vibrato_mod_ >> 8);
     scaled_vibrato_lfo_interpolator_.ComputeSlope();
     pitch_lfo_interpolator_.SetTarget(scaled_vibrato_lfo_interpolator_.target() * vibrato_range_ >> 8);
     pitch_lfo_interpolator_.ComputeSlope();
@@ -236,7 +226,7 @@ void Voice::Refresh(uint8_t voice_index) {
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
-  mod_aux_[MOD_AUX_FULL_LFO] = triangle_lfo + 32768;
+  mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
 
   if (retrigger_delay_) {
     --retrigger_delay_;
