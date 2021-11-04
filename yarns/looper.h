@@ -108,9 +108,7 @@ class Deck {
     }
   }
 
-  inline bool overwrite_armed() const { return overwrite_; }
-  inline void toggle_overwrite_armed() { set_overwrite_armed(!overwrite_); }
-  inline void set_overwrite_armed(bool b) { overwrite_ = b && size_; }
+  inline bool num_notes() const { return size_; }
 
   void RemoveOldestNote();
   void RemoveNewestNote();
@@ -154,7 +152,6 @@ class Deck {
   // Linked lists track current and upcoming notes
   Link head_; // Points to the latest on/off
   Link next_link_[kMaxNotes];
-  bool overwrite_;
 
   // Phase tracking
   SyncedLFO lfo_;

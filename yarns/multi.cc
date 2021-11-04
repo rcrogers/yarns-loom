@@ -806,7 +806,7 @@ void Multi::StopRecording(uint8_t part) {
   if (recording_ && recording_part_ == part) {
     part_[part].StopRecording();
     recording_ = false;
-    part_[part].mutable_looper().set_overwrite_armed(false);
+    part_[part].set_seq_overwrite(false);
   }
 }
 
@@ -842,7 +842,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
           part_[i].DeleteRecording();
           ui.SplashPartString("RX", i);
         } else {
-          part_[i].mutable_looper().set_overwrite_armed(macro_zone == 2);
+          part_[i].set_seq_overwrite(macro_zone == 2);
           ui.SplashPartString(macro_zone == 2 ? "R*" : (macro_zone ? "R+" : "--"), i);
         }
         macro_record_last_value_[i] = value;

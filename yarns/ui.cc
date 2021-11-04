@@ -342,7 +342,7 @@ void Ui::PrintLooperRecordingStatus() {
     uint16_t ticks = lut_clock_ratio_ticks[recording_part().sequencer_settings().clock_division];
     if (static_cast<uint16_t>(multi.tick_counter() % ticks) <= (ticks >> 4)) {
       display_.set_brightness(UINT16_MAX);
-      if (recording_part().looper().overwrite_armed()) {
+      if (recording_part().seq_overwrite()) {
         display_.Print("//");
       } else {
         display_.PrintMasks(kMasksNewLooperBeat);
@@ -793,9 +793,7 @@ void Ui::OnSwitchHeld(const Event& e) {
 
     case UI_SWITCH_TAP_TEMPO:
       if (recording_any) {
-        if (recording_part().looped()) {
-          mutable_recording_part()->mutable_looper().toggle_overwrite_armed();
-        } // Else, set last step for sequencer?
+        mutable_recording_part()->toggle_seq_overwrite();
       } else {
         multi.ApplySettingAndSplash(
           setting_defs.get(SETTING_SEQUENCER_PLAY_MODE),

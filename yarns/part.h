@@ -717,6 +717,12 @@ class Part {
     voicing_.legato_mode = LEGATO_MODE_OFF;
   }
 
+  inline bool seq_overwrite() const { return seq_overwrite_; }
+  inline void toggle_seq_overwrite() { set_seq_overwrite(!seq_overwrite_); }
+  inline void set_seq_overwrite(bool b) {
+    seq_overwrite_ = b && (looped() ? looper_.num_notes() : seq_.num_steps);
+  }
+
   inline const looper::Deck& looper() const { return looper_; }
   inline looper::Deck& mutable_looper() { return looper_; }
   inline uint8_t LooperCurrentNoteIndex() const {
@@ -814,6 +820,7 @@ class Part {
   }
 
   inline void LooperRecordNoteOn(uint8_t pressed_key_index) {
+    if (seq_overwrite_) { DeleteRecording(); }
     const stmlib::NoteEntry& e = manual_keys_.stack.note(pressed_key_index);
     uint8_t looper_note_index = looper_.RecordNoteOn(e.note, e.velocity & 0x7f);
     looper_note_recording_pressed_key_[pressed_key_index] = looper_note_index;
@@ -863,6 +870,7 @@ class Part {
 
   inline void RecordStep(const SequencerStep& step) {
     if (seq_recording_) {
+      if (seq_overwrite_) { DeleteRecording(); }
       SequencerStep* target = &seq_.step[seq_rec_step_];
       target->data[0] = step.data[0];
       target->data[1] |= step.data[1];
@@ -1040,6 +1048,7 @@ class Part {
   bool seq_overdubbing_;
   uint8_t seq_step_;
   uint8_t seq_rec_step_;
+  bool seq_overwrite_;
   
   looper::Deck looper_;
 
