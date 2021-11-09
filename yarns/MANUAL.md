@@ -70,12 +70,13 @@
   
 # Sequencer
 
-### Recording interface changes
+### Recording interface
 - Hold `REC` to clear sequence
+- Hold `TAP` to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
 - First `REC` press switches the display to show the pitch instead of the step number (press again to exit recording)
 - Flash note (or RS/TI) for the selected step
 - Brighten display while the selected step is being played
-- Wrap around around when using encoder to scroll through steps
+- Wrap around when using encoder to scroll through steps
 
 ### Looper-style sequencing mode with real-time recording
 - To enable, ensure `SM (SEQ MODE)` is set to `LOOP`
@@ -83,7 +84,6 @@
   - Play notes to record them into the loop
   - Press `START` to delete the oldest note, or `TAP` for the newest
   - Scroll the encoder to shift the loop phase by 1/128: clockwise shifts notes earlier, counter-clockwise shits notes later
-  - Hold `TAP` to toggle overwrite mode, which will clear the loop as soon as a new note is recorded
 - Loop length is set by the `L- (LOOP LENGTH)` in quarter notes, combined with the part's clock settings
 - Note start/end times are recorded at 13-bit resolution (1/8192 of the loop length)
 - Holds 30 notes max -- past this limit, overwrites oldest note

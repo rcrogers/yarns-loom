@@ -955,17 +955,17 @@ void Ui::DoEvents() {
     );
     if (multi.recording()) {
       display_.set_fade(0);
-    } else if (
-      mode_ == UI_MODE_MAIN_MENU || (
-        mode_ == UI_MODE_PARAMETER_SELECT && (
-          &setting() == &setting_defs.get(SETTING_MENU_SETUP) ||
-          &setting() == &setting_defs.get(SETTING_MENU_OSCILLATOR) ||
-          &setting() == &setting_defs.get(SETTING_MENU_ENVELOPE) ||
-          current_menu_ != &live_menu_
-        )
-      )
-    ) {
-      display_.set_fade(kDefaultFade);
+    // } else if (
+    //   mode_ == UI_MODE_MAIN_MENU || (
+    //     mode_ == UI_MODE_PARAMETER_SELECT && (
+    //       &setting() == &setting_defs.get(SETTING_MENU_SETUP) ||
+    //       &setting() == &setting_defs.get(SETTING_MENU_OSCILLATOR) ||
+    //       &setting() == &setting_defs.get(SETTING_MENU_ENVELOPE) ||
+    //       current_menu_ != &live_menu_
+    //     )
+    //   )
+    // ) {
+    //   display_.set_fade(kDefaultFade);
     } else if (mode_ == UI_MODE_PARAMETER_EDIT) {
       SetFadeForSetting(setting());
     } else {
