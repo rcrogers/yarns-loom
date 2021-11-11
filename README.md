@@ -27,14 +27,14 @@ An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](ht
 1. Download `yarns.syx` from the [latest release's assets](https://github.com/rcrogers/mutable-instruments-eurorack/releases/latest)
 2. [Follow the manufacturer's instructions for installing new firmware](https://mutable-instruments.net/modules/yarns/manual/#firmware)
 
-### Contributions and support
+### Community
+- [Discussion thread on the Mutable Instruments forums](https://forum.mutable-instruments.net/t/loom-alternative-firmware-for-yarns-looper-paraphony-and-more/17723)
+- [Support on Patreon](https://www.patreon.com/rcrogers)
+- Forks, pull requests, feature ideas, and bug reports are welcome (though I can't guarantee a timely response)
 - License: MIT License
-- Forks, pull requests, feature ideas, and bug reports are welcome
-- Responses and merges are at my discretion
-- [Patreon link](https://www.patreon.com/rcrogers)
 
 ### Acknowledgements
+- Thanks to [forum user `bloc`](https://forum.mutable-instruments.net/t/loom-alternative-firmware-for-yarns-looper-paraphony-and-more/17723/3) for beta testing, bug reports, support, and many great ideas
 - Thanks to [forum user `Airell`](https://forum.mutable-instruments.net/t/yarns-firmware-wish-list/8051/39) for the idea of per-part latching
 - Thanks to [forum user `sdejesus13`](https://forum.mutable-instruments.net/t/yarns-firmware-wish-list/8051/24) for encouraging the exploration of clock-based recording
-- Thanks to [forum user `bloc`](https://forum.mutable-instruments.net/t/loom-alternative-firmware-for-yarns-looper-paraphony-and-more/17723/3) for beta testing, bug reports, support, and many great ideas
-- And above all, thanks to Émilie Gillet for making a great module and then open-sourcing it!
+- And above all, thanks to Émilie Gillet for making a great open-source module!

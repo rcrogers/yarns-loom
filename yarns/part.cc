@@ -80,7 +80,7 @@ void Part::Init() {
   voicing_.pitch_bend_range = 2;
   voicing_.vibrato_range = 1;
   voicing_.vibrato_mod = 0;
-  voicing_.lfo_rate = 50;
+  voicing_.lfo_rate = 70;
   voicing_.lfo_spread_types = 0;
   voicing_.lfo_spread_voices = 0;
   voicing_.trigger_duration = 2;

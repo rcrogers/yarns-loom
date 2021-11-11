@@ -217,9 +217,6 @@ const char* const tuning_factor_values[] = {
   "ALPHA"
 };
 
-const uint8_t kVibratoSpeedMax = LUT_LFO_INCREMENTS_SIZE + LUT_CLOCK_RATIO_NAMES_SIZE - 1;
-STATIC_ASSERT(kVibratoSpeedMax <= 127, overflow);
-
 /* static */
 const Setting Settings::settings_[] = {
   {
@@ -382,7 +379,7 @@ const Setting Settings::settings_[] = {
   {
     "LF", "LFO RATE",
     SETTING_DOMAIN_PART, { PART_VOICING_LFO_RATE, 0 },
-    SETTING_UNIT_VIBRATO_SPEED, 0, kVibratoSpeedMax, NULL,
+    SETTING_UNIT_LFO_RATE, 0, 127, NULL,
     23, 14,
   },
   {
@@ -742,14 +739,13 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       strcpy(buffer, lut_clock_ratio_names[value]);
       break;
     
-    case SETTING_UNIT_VIBRATO_SPEED:
-      if (value < LUT_LFO_INCREMENTS_SIZE) {
-        PrintInteger(buffer, LUT_LFO_INCREMENTS_SIZE - value - 1);
+    case SETTING_UNIT_LFO_RATE:
+      if (value < 64) {
+        STATIC_ASSERT(LUT_CLOCK_RATIO_NAMES_SIZE == 32, ratios); // Allows an easy bit shift
+        Print(settings_[SETTING_SEQUENCER_CLOCK_DIVISION], (64 - value - 1) >> 1, buffer);
       } else {
-        Print(settings_[SETTING_SEQUENCER_CLOCK_DIVISION], value - LUT_LFO_INCREMENTS_SIZE, buffer);
-      }
-      if (buffer[0] == ' ') {
-        buffer[0] = value < LUT_LFO_INCREMENTS_SIZE ? 'F' : ' ';
+        PrintInteger(buffer, value + 1 - 64);
+        if (buffer[0] == ' ') buffer[0] = 'F';
       }
       break;
       
@@ -791,12 +787,14 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       }
       break;
 
-    case SETTING_UNIT_LFO_SPREAD:
-      PrintInteger(buffer, abs((int8_t) value));
-      if (buffer[0] == ' ') {
-        buffer[0] = ((int8_t) value) < 0 ? 'F' : 'P';
-      }
+    case SETTING_UNIT_LFO_SPREAD: {
+      int8_t spread = value;
+      bool dephase = spread < 0;
+      if (dephase) spread++;
+      PrintInteger(buffer, abs(spread));
+      if (buffer[0] == ' ') buffer[0] = dephase ? 'P' : 'F';
       break;
+    }
       
     default:
       strcpy(buffer, "??");

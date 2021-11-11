@@ -48,9 +48,10 @@ audio_rate = 40000
 min_frequency = 1.0 / 8.0  # Hertz
 max_frequency = 16.0  # Hertz
 excursion = 1 << 32
-num_values = 96
+num_values = 64
 min_increment = excursion * min_frequency / refresh_rate
 max_increment = excursion * max_frequency / refresh_rate
+
 rates = numpy.linspace(numpy.log(min_increment),
                        numpy.log(max_increment), num_values)
 lookup_tables_32.append(
