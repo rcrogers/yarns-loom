@@ -114,7 +114,7 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "\x8E\x8E DIRAC COMB",
 };
 
-const char* const tremolo_shape_values[LFO_SHAPE_LAST] = {
+const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
   "/\\",
   "|\\",
   "/|",
@@ -407,9 +407,21 @@ const Setting Settings::settings_[] = {
     93, 0xff,
   },
   {
+    "VS", "VIBRATO SHAPE",
+    SETTING_DOMAIN_PART, { PART_VOICING_VIBRATO_SHAPE, 0 },
+    SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, lfo_shape_values,
+    125, 0xff,
+  },
+  {
+    "LS", "TIMBRE LFO SHAPE",
+    SETTING_DOMAIN_PART, { PART_VOICING_TIMBRE_LFO_SHAPE, 0 },
+    SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, lfo_shape_values,
+    126, 0xff,
+  },
+  {
     "TS", "TREMOLO SHAPE",
     SETTING_DOMAIN_PART, { PART_VOICING_TREMOLO_SHAPE, 0 },
-    SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, tremolo_shape_values,
+    SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, lfo_shape_values,
     94, 0xff,
   },
   {

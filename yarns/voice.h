@@ -134,8 +134,13 @@ class Voice {
   inline void set_vibrato_mod(uint8_t n) { vibrato_mod_ = n; }
   inline void set_tremolo_mod(uint8_t n) {
     tremolo_mod_target_ = n << (16 - 7); }
-  inline void set_tremolo_shape(uint8_t n) {
-    tremolo_shape_ = static_cast<LFOShape>(n); }
+
+  inline void set_lfo_shape(LFORole role, uint8_t shape) {
+    lfo_shapes_[role] = static_cast<LFOShape>(shape);
+  }
+  inline int16_t lfo_value(LFORole role) const {
+    return lfos_[role].shape(lfo_shapes_[role]);
+  }
 
   inline void set_trigger_duration(uint8_t trigger_duration) {
     trigger_duration_ = trigger_duration;
@@ -239,7 +244,7 @@ class Voice {
   bool trigger_scale_;
 
   uint8_t oscillator_mode_;
-  LFOShape tremolo_shape_;
+  LFOShape lfo_shapes_[LFO_ROLE_LAST];
   uint8_t aux_cv_source_;
   uint8_t aux_cv_source_2_;
   

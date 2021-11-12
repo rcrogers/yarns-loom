@@ -182,15 +182,15 @@ void Voice::Refresh() {
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
     lfos_[i].Refresh();
   }
-  int32_t vibrato_lfo = lfos_[LFO_ROLE_PITCH].shape(LFO_SHAPE_TRIANGLE);
+  int32_t vibrato_lfo = lfo_value(LFO_ROLE_PITCH);
 
   if (refresh_counter_ == 0) {
-    uint16_t tremolo_lfo = 32767 - lfos_[LFO_ROLE_AMPLITUDE].shape(tremolo_shape_);
+    uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
     amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
 
-    timbre_lfo_interpolator_.SetTarget(lfos_[LFO_ROLE_TIMBRE].shape(LFO_SHAPE_TRIANGLE) * timbre_mod_lfo_current_ >> (31 - 15));
+    timbre_lfo_interpolator_.SetTarget(lfo_value(LFO_ROLE_TIMBRE) * timbre_mod_lfo_current_ >> (31 - 15));
     timbre_lfo_interpolator_.ComputeSlope();
 
     scaled_vibrato_lfo_interpolator_.SetTarget(vibrato_lfo * vibrato_mod_ >> 8);

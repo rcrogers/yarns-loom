@@ -1003,7 +1003,9 @@ void Part::TouchVoices() {
     voice_[i]->set_vibrato_range(voicing_.vibrato_range);
     voice_[i]->set_vibrato_mod(voicing_.vibrato_mod);
     voice_[i]->set_tremolo_mod(voicing_.tremolo_mod);
-    voice_[i]->set_tremolo_shape(voicing_.tremolo_shape);
+    voice_[i]->set_lfo_shape(LFO_ROLE_PITCH, voicing_.vibrato_shape);
+    voice_[i]->set_lfo_shape(LFO_ROLE_TIMBRE, voicing_.timbre_lfo_shape);
+    voice_[i]->set_lfo_shape(LFO_ROLE_AMPLITUDE, voicing_.tremolo_shape);
     voice_[i]->set_trigger_duration(voicing_.trigger_duration);
     voice_[i]->set_trigger_scale(voicing_.trigger_scale);
     voice_[i]->set_trigger_shape(voicing_.trigger_shape);
@@ -1047,6 +1049,8 @@ bool Part::Set(uint8_t address, uint8_t value) {
     case PART_VOICING_VIBRATO_RANGE:
     case PART_VOICING_VIBRATO_MOD:
     case PART_VOICING_TREMOLO_MOD:
+    case PART_VOICING_VIBRATO_SHAPE:
+    case PART_VOICING_TIMBRE_LFO_SHAPE:
     case PART_VOICING_TREMOLO_SHAPE:
     case PART_VOICING_TRIGGER_DURATION:
     case PART_VOICING_TRIGGER_SHAPE:

@@ -197,7 +197,7 @@ struct PackedPart {
     portamento : 7,
     legato_mode : 2,
     pitch_bend_range : 5,
-    vibrato_shape: 3,
+    vibrato_shape: 3, // TODO
     vibrato_range : 4,
     vibrato_mod : 7,
     lfo_rate : 7,
@@ -212,9 +212,11 @@ struct PackedPart {
     oscillator_mode : 2,
     oscillator_shape : 7, // 1 bit unused
     tremolo_mod : kTimbreBits,
-    tremolo_shape : 3,
+    tremolo_shape : 3, // TODO
     timbre_initial : kTimbreBits,
     timbre_mod_lfo : kTimbreBits,
+    // TODO
+    // timbre_lfo_shape : 2,
     env_init_attack : kTimbreBits,
     env_init_decay : kTimbreBits,
     env_init_sustain : kTimbreBits,
@@ -289,6 +291,8 @@ struct VoicingSettings {
   uint8_t vibrato_range;
   uint8_t vibrato_mod;
   uint8_t tremolo_mod;
+  uint8_t vibrato_shape;
+  uint8_t timbre_lfo_shape;
   uint8_t tremolo_shape;
   uint8_t lfo_rate;
   int8_t lfo_spread_types;
@@ -329,6 +333,8 @@ struct VoicingSettings {
     packed.vibrato_range = vibrato_range;
     packed.vibrato_mod = vibrato_mod;
     packed.tremolo_mod = tremolo_mod;
+    // packed.vibrato_shape = vibrato_shape;
+    // packed.timbre_lfo_shape = timbre_lfo_shape;
     packed.tremolo_shape = tremolo_shape;
     packed.lfo_rate = lfo_rate;
     // packed.lfo_spread_types = lfo_spread_types;
@@ -369,6 +375,8 @@ struct VoicingSettings {
     vibrato_range = packed.vibrato_range;
     vibrato_mod = packed.vibrato_mod;
     tremolo_mod = packed.tremolo_mod;
+    // vibrato_shape = packed.vibrato_shape;
+    // timbre_lfo_shape = packed.timbre_lfo_shape;
     tremolo_shape = packed.tremolo_shape;
     lfo_rate = packed.lfo_rate;
     // lfo_spread_types = packed.lfo_spread_types;
@@ -424,6 +432,8 @@ enum PartSetting {
   PART_VOICING_VIBRATO_RANGE,
   PART_VOICING_VIBRATO_MOD,
   PART_VOICING_TREMOLO_MOD,
+  PART_VOICING_VIBRATO_SHAPE,
+  PART_VOICING_TIMBRE_LFO_SHAPE,
   PART_VOICING_TREMOLO_SHAPE,
   PART_VOICING_LFO_RATE,
   PART_VOICING_LFO_SPREAD_TYPES,
