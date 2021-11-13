@@ -459,7 +459,7 @@ class Multi {
     settings_.Pack(packed);
     const uint16_t size = sizeof(packed);
     // char (*__debug)[size] = 1;
-    STATIC_ASSERT(size == 1012, expected);
+    STATIC_ASSERT(size == 1020, expected);
     STATIC_ASSERT(size % 4 == 0, flash_word);
     STATIC_ASSERT(size <= kMaxSize, capacity);
     stream_buffer->Write(packed);
