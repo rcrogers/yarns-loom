@@ -899,11 +899,11 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value
   // Apply dynamic min/max as needed
   int16_t min_value = setting.min_value;
   int16_t max_value = setting.max_value;
-  if (
-    &setting == &setting_defs.get(SETTING_VOICING_ALLOCATION_MODE) &&
-    multi.part(part).num_voices() == 1
-  ) {
-    max_value = VOICE_ALLOCATION_MODE_MONO;
+  if (multi.part(part).num_voices() == 1) { // Part is monophonic
+    if (&setting == &setting_defs.get(SETTING_VOICING_ALLOCATION_MODE))
+      min_value = max_value = VOICE_ALLOCATION_MODE_MONO;
+    if (&setting == &setting_defs.get(SETTING_VOICING_LFO_SPREAD_VOICES))
+      min_value = max_value = 0;
   }
   if (
     multi.layout() == LAYOUT_PARAPHONIC_PLUS_TWO &&
