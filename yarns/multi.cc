@@ -405,6 +405,13 @@ void Multi::AssignVoicesToCVOutputs() {
       AssignOutputVoice(2, kNumParaphonicVoices, DC_AUX_1, 0);
       AssignOutputVoice(3, kNumParaphonicVoices + 1, DC_PITCH, 1);
       break;
+
+    case LAYOUT_TRI_MONO:
+      for (uint8_t i = 0; i < 3; ++i) {
+        AssignOutputVoice(i, i, DC_PITCH, 1);
+      }
+      AssignOutputVoice(3, 0, DC_VELOCITY, 0); // Dummy, will be overwritten
+      break;
   }
 }
 
@@ -475,6 +482,14 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       gate[1] = cv_outputs_[1].gate();
       gate[2] = settings_.clock_override ? clock() : cv_outputs_[2].trigger();
       gate[3] = cv_outputs_[3].gate();
+      break;
+
+    case LAYOUT_TRI_MONO:
+      for (uint8_t i = 0; i < 3; ++i) {
+        gate[i] = voice_[i].gate();
+      }
+      gate[3] = clock();
+      cv[3] = cv_outputs_[3].volts_dac_code(reset_or_playing_flag() ? 5 : 0);
       break;
 
     case LAYOUT_QUAD_TRIGGERS:
@@ -564,6 +579,13 @@ void Multi::GetLedsBrightness(uint8_t* brightness) {
       }
       break;
 
+    case LAYOUT_TRI_MONO:
+      for (uint8_t i = 0; i < 3; ++i) {
+        brightness[i] = voice_[i].gate() ? (voice_[i].velocity() << 1) : 0;
+      }
+      brightness[3] = clock() ? 0xff : 0;
+      break;
+
     case LAYOUT_QUAD_VOLTAGES:
       brightness[0] = voice_[0].aux_cv();
       brightness[1] = voice_[1].aux_cv();
@@ -643,6 +665,13 @@ void Multi::AllocateParts() {
       }
       break;
 
+    case LAYOUT_TRI_MONO:
+      num_active_parts_ = 3;
+      for (uint8_t i = 0; i < num_active_parts_; ++i) {
+        part_[i].AllocateVoices(&voice_[i], 1, false);
+      }
+      break;
+
     default:
       break;
   }
@@ -660,6 +689,7 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
     case LAYOUT_DUAL_MONO:
     case LAYOUT_QUAD_MONO:
     case LAYOUT_QUAD_VOLTAGES:
+    case LAYOUT_TRI_MONO:
       {
         // Duplicate uninitialized voices.
         for (uint8_t i = 1; i < num_active_parts_; ++i) {
@@ -711,6 +741,9 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
 
     default:
       break;
+  }
+  for (uint8_t i = 1; i < num_active_parts_; ++i) {
+    part_[i].AfterDeserialize();
   }
 }
 

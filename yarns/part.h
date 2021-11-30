@@ -1008,6 +1008,7 @@ class Part {
     CONSTRAIN(seq_.loop_length, 0, 7);
     CONSTRAIN(seq_.arp_range, 0, 3);
     CONSTRAIN(seq_.arp_direction, 0, ARPEGGIATOR_DIRECTION_LAST - 1);
+    AllNotesOff();
     TouchVoices();
     TouchVoiceAllocation();
     ResetLatch();
