@@ -46,7 +46,7 @@ const uint16_t kRefreshTwoThirds = 600;
 const uint32_t kEncoderLongPressTime = kRefreshPeriod * 2 / 3;
 const uint32_t kDefaultFade = (1 << 15) / kRefreshPeriod; // 1/2 frequency
 
-const char* const kVersion = "Loom 2_3_0";
+const char* const kVersion = "Loom 2_4_0";
 
 /* static */
 const Ui::Command Ui::commands_[] = {
@@ -624,7 +624,10 @@ void Ui::OnIncrementParameterSelect(const Event& e) {
 
 void Ui::OnIncrementParameterEdit(const stmlib::Event& e) {
   int16_t value = multi.GetSetting(setting(), active_part_);
-  if (setting().unit == SETTING_UNIT_INT8) {
+  if (
+    setting().unit == SETTING_UNIT_INT8 ||
+    setting().unit == SETTING_UNIT_LFO_SPREAD
+  ) {
     value = static_cast<int8_t>(value);
   }
   value += e.data;
