@@ -4,8 +4,8 @@ An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](ht
 ### Features
 - [Looper-style sequencer with real-time recording and overdubbing](yarns/MANUAL.md#looper-style-sequencing-mode-with-real-time-recording)
 - [Braids-inspired oscillator waveforms with timbre modulation: 10 synthesis models, with over 30 variants](yarns/MANUAL.md#oscillator-controls)
-- [ADSR envelopes with velocity-sensitive segments and amplitude](yarns/MANUAL.md#amplitude-dynamics-adsr-envelopes-with-velocity-modulation-and-tremolo)
-- [Tremolo with variable depth and shape](yarns/MANUAL.md#amplitude-dynamics-adsr-envelopes-with-velocity-modulation-and-tremolo)
+- [ADSR envelopes with velocity-sensitive segments and amplitude](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
+- [Tremolo with variable depth and shape](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
 - [New layouts, including a layout that features a 3-voice paraphonic part](yarns/MANUAL.md#layouts)
 - [New and improved algorithms for polyphonic dispatch](yarns/MANUAL.md#voicing-allocation-methods)
 - [New ways to use the hold pedal, including latch, sostenuto, and note filtering](yarns/MANUAL.md#hold-pedal)

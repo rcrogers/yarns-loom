@@ -1,3 +1,7 @@
+#### Introduction
+
+This manual explains how Loom differs from a stock Yarns.  For documentation about Yarns' native capabilities (which Loom largely retains), [check the manufacturer's manual!](https://mutable-instruments.net/modules/yarns/manual/)
+
 #### Table of contents
 - [Interface](#interface)
     - [Global control and display of the active part and its play mode](#global-control-and-display-of-the-active-part-and-its-play-mode)
@@ -18,6 +22,7 @@
     - [`VOICING` allocation methods](#voicing-allocation-methods)
     - [Expanded support for Control Change events](#expanded-support-for-control-change-events)
     - [Clocking](#clocking)
+    - [LFOs](#lfos)
     - [Other tweaks](#other-tweaks)
 
 # Interface
