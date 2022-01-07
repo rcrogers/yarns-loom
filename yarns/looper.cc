@@ -64,7 +64,7 @@ void Deck::RemoveAll() {
 }
 
 void Deck::Rewind() {
-  lfo_.Init();
+  lfo_.Init(23, 12);
   Advance(0, false);
 }
 

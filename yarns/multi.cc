@@ -48,7 +48,7 @@ const uint8_t kCCMacroPlayMode = 117;
 
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
-  master_lfo_.Init();
+  master_lfo_.Init(17, 9);
   
   fill(
       &settings_.custom_pitch_table[0],
