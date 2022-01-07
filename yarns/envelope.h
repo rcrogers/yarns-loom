@@ -68,6 +68,7 @@ class Envelope {
     int16_t scale = max_target - min_target;
     positive_scale_ = scale >= 0;
     min_target <<= 16;
+    // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
     segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
     segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * adsr.sustain;
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
@@ -84,9 +85,6 @@ class Envelope {
   }
   
   inline void Trigger(EnvelopeSegment segment) {
-    if (segment == ENV_SEGMENT_DEAD) {
-      value_ = segment_target_[ENV_SEGMENT_RELEASE];
-    }
     if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
@@ -98,16 +96,23 @@ class Envelope {
       default: phase_increment_ = 0; return;
     }
     target_ = segment_target_[segment];
-    if (!gate_ && positive_scale_ == (target_ >= value_)) {
-      // Moving away from minimum requires a gate -- if we're trying to decay
-      // 'upward', skip the segment
+    int32_t actual_delta = target_ - value_;
+    int32_t nominal_delta = target_ - segment_target_[
+      stmlib::modulo(static_cast<int8_t>(segment) - 1, ENV_SEGMENT_DEAD)
+    ];
+    positive_segment_slope_ = nominal_delta >= 0;
+    if (positive_segment_slope_ != (actual_delta >= 0)) {
+      // If the deltas differ in sign, we're going the wrong direction, so skip
       next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }
-    int32_t delta = target_ - value_;
-    positive_segment_slope_ = delta >= 0;
+    // Pick the steeper of the deltas.  This will shorten the segment if it's
+    // already near the target, which avoids glitchy attacks
+    int32_t delta = positive_segment_slope_
+      ? std::max(nominal_delta, actual_delta)
+      : std::min(nominal_delta, actual_delta);
     linear_slope_ = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
-    if (!linear_slope_) linear_slope_ = delta > 0 ? 1 : -1;
+    if (!linear_slope_) linear_slope_ = positive_segment_slope_ ? 1 : -1;
     max_shift_ = __builtin_clzl(abs(linear_slope_));
     expo_dirty_ = true;
     phase_ = 0;
@@ -136,7 +141,7 @@ class Envelope {
       ? value_ > target_overshoot_threshold_
       : value_ < target_overshoot_threshold_
     ) {
-      value_ = target_;
+      value_ = target_; // TODO can cause jumps?
       next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }
