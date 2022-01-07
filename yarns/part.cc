@@ -338,6 +338,7 @@ bool Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
   
   if (seq_recording_ &&
       (pitch_bend > 8192 + 2048 || pitch_bend < 8192 - 2048)) {
+    // Set slide flag
     seq_.step[seq_rec_step_].data[1] |= 0x80;
   }
   
@@ -377,26 +378,30 @@ void Part::Reset() {
 void Part::Clock() { // From Multi::ClockFast
   if (looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL) return;
 
-  SequencerStep step;
   uint16_t ticks_per_step = lut_clock_ratio_ticks[seq_.clock_division];
 
   if (multi.tick_counter() % ticks_per_step == 0) { // New step
     uint32_t step_counter = multi.tick_counter() / ticks_per_step;
-    seq_step_ = step_counter % seq_.num_steps;
-    step = BuildSeqStep();
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      arp_ = BuildArpState(step);
-      step = arp_.step;
+    SequencerStep* step_ptr = NULL;
+    SequencerStep step;
+    if (seq_.num_steps) {
+      seq_step_ = step_counter % seq_.num_steps;
+      step = BuildSeqStep(seq_step_);
+      step_ptr = &step;
     }
-    if (step.has_note()) {
-      if (step.is_slid()) {
-        InternalNoteOn(step.note(), step.velocity());
+    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+      arp_ = BuildArpState(step_ptr);
+      step_ptr = &arp_.step;
+    }
+    if (step_ptr && step_ptr->has_note()) {
+      if (step_ptr->is_slid()) {
+        InternalNoteOn(step_ptr->note(), step_ptr->velocity());
         StopSequencerArpeggiatorNotes();
       } else {
         StopSequencerArpeggiatorNotes();
-        InternalNoteOn(step.note(), step.velocity());
+        InternalNoteOn(step_ptr->note(), step_ptr->velocity());
       }
-      generated_notes_.NoteOn(step.note(), step.velocity());
+      generated_notes_.NoteOn(step_ptr->note(), step_ptr->velocity());
       gate_length_counter_ = seq_.gate_length;
     }
   }
@@ -405,11 +410,17 @@ void Part::Clock() { // From Multi::ClockFast
     --gate_length_counter_;
   } else if (generated_notes_.most_recent_note_index()) {
     // Peek at next step to see if it's a continuation
-    step = BuildSeqStep();
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      step = BuildArpState(step).step;
+    SequencerStep* next_step_ptr = NULL;
+    SequencerStep next_step;
+    if (seq_.num_steps) {
+      next_step = BuildSeqStep((seq_step_ + 1) % seq_.num_steps);
+      next_step_ptr = &next_step;
     }
-    if (step.is_continuation()) {
+    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+      next_step = BuildArpState(next_step_ptr).step;
+      next_step_ptr = &next_step;
+    }
+    if (next_step_ptr && next_step_ptr->is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
       gate_length_counter_ += ticks_per_step;
@@ -551,8 +562,8 @@ uint8_t Part::ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch) cons
   return pitch;
 }
 
-const SequencerStep Part::BuildSeqStep() const {
-  const SequencerStep& step = seq_.step[seq_step_];
+const SequencerStep Part::BuildSeqStep(uint8_t step_index) const {
+  const SequencerStep& step = seq_.step[step_index];
   int16_t note = step.note();
   if (step.has_note()) {
     // When we play a monophonic sequence, we can make the guess that root
@@ -565,7 +576,8 @@ const SequencerStep Part::BuildSeqStep() const {
   return SequencerStep((0x80 & step.data[0]) | (0x7f & note), step.data[1]);
 }
 
-const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
+const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
+  SequencerStep seq_step;
   ArpeggiatorState next = arp_;
   // In case the pattern doesn't hit a note, the default output step is a REST
   next.step.data[0] = SEQUENCER_STEP_REST;
@@ -577,6 +589,8 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep seq_step) const {
   bool hit = false;
   if (seq_driven_arp()) {
     pattern_length = seq_.num_steps;
+    if (!seq_step_ptr) return next;
+    seq_step = *seq_step_ptr;
     if (seq_step.has_note()) {
       hit = true;
     } else { // Here, the output step can also be a TIE

@@ -219,7 +219,6 @@ class Ui {
   void PrintCalibrationVoiceNumber();
   void PrintCalibrationNote();
   void PrintRecordingPart();
-  void PrintDeleteSequence();
   void SetBrightnessFromSequencerPhase(const Part& part);
   void PrintLooperRecordingStatus();
   void PrintRecordingStatus();

@@ -790,7 +790,8 @@ class Part {
     pitch = ApplySequencerInputResponse(pitch);
     if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
       // Advance arp
-      arp_ = BuildArpState(SequencerStep(pitch, velocity));
+      SequencerStep step = SequencerStep(pitch, velocity);
+      arp_ = BuildArpState(&step);
       pitch = arp_.step.note();
       if (arp_.step.has_note()) {
         InternalNoteOn(pitch, arp_.step.velocity());
@@ -816,7 +817,7 @@ class Part {
       uint8_t next_on_index = looper_.PeekNextOn();
       const looper::Note& next_on_note = looper_.note_at(next_on_index);
       SequencerStep next_step = SequencerStep(next_on_note.pitch, next_on_note.velocity);
-      next_step = BuildArpState(next_step).step;
+      next_step = BuildArpState(&next_step).step;
       if (next_step.is_continuation()) {
         // Leave this pitch in the care of the next looper note
         output_pitch_for_looper_note_[next_on_index] = pitch;
@@ -1030,8 +1031,8 @@ class Part {
   void KillAllInstancesOfNote(uint8_t note);
 
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = 60) const;
-  const SequencerStep BuildSeqStep() const;
-  const ArpeggiatorState BuildArpState(SequencerStep seq_step) const;
+  const SequencerStep BuildSeqStep(uint8_t step_index) const;
+  const ArpeggiatorState BuildArpState(SequencerStep* seq_step_ptr) const;
 
   MidiSettings midi_;
   VoicingSettings voicing_;

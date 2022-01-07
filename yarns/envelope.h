@@ -3,16 +3,25 @@
 //
 // Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+// 
+// See http://creativecommons.org/licenses/MIT/ for more information.
 
 #ifndef YARNS_ENVELOPE_H_
 #define YARNS_ENVELOPE_H_
@@ -68,6 +77,7 @@ class Envelope {
     int16_t scale = max_target - min_target;
     positive_scale_ = scale >= 0;
     min_target <<= 16;
+    // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
     segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
     segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * adsr.sustain;
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
@@ -84,9 +94,6 @@ class Envelope {
   }
   
   inline void Trigger(EnvelopeSegment segment) {
-    if (segment == ENV_SEGMENT_DEAD) {
-      value_ = segment_target_[ENV_SEGMENT_RELEASE];
-    }
     if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain
     }
@@ -98,16 +105,23 @@ class Envelope {
       default: phase_increment_ = 0; return;
     }
     target_ = segment_target_[segment];
-    if (!gate_ && positive_scale_ == (target_ >= value_)) {
-      // Moving away from minimum requires a gate -- if we're trying to decay
-      // 'upward', skip the segment
+    int32_t actual_delta = target_ - value_;
+    int32_t nominal_delta = target_ - segment_target_[
+      stmlib::modulo(static_cast<int8_t>(segment) - 1, ENV_SEGMENT_DEAD)
+    ];
+    positive_segment_slope_ = nominal_delta >= 0;
+    if (positive_segment_slope_ != (actual_delta >= 0)) {
+      // If the deltas differ in sign, we're going the wrong direction, so skip
       next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }
-    int32_t delta = target_ - value_;
-    positive_segment_slope_ = delta >= 0;
+    // Pick the steeper of the deltas.  This will shorten the segment if it's
+    // already near the target, which avoids glitchy attacks
+    int32_t delta = positive_segment_slope_
+      ? std::max(nominal_delta, actual_delta)
+      : std::min(nominal_delta, actual_delta);
     linear_slope_ = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
-    if (!linear_slope_) linear_slope_ = delta > 0 ? 1 : -1;
+    if (!linear_slope_) linear_slope_ = positive_segment_slope_ ? 1 : -1;
     max_shift_ = __builtin_clzl(abs(linear_slope_));
     expo_dirty_ = true;
     phase_ = 0;
@@ -136,7 +150,7 @@ class Envelope {
       ? value_ > target_overshoot_threshold_
       : value_ < target_overshoot_threshold_
     ) {
-      value_ = target_;
+      value_ = target_; // TODO can cause jumps?
       next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }

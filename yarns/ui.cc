@@ -329,6 +329,8 @@ void Ui::SetBrightnessFromSequencerPhase(const Part& part) {
   uint16_t phase;
   if (part.looped()) {
     phase = UINT16_MAX - part.looper().phase();
+  } else if (!part.sequencer_settings().num_steps) {
+    phase = UINT16_MAX;
   } else {
     phase = ((1 + part.playing_step()) << 16) / part.sequencer_settings().num_steps;
   }
@@ -368,7 +370,10 @@ void Ui::PrintRecordingStatus() {
   if (push_it_) {
     PrintPushItNote();
   } else {
-    if (recording_part().recording_step() == recording_part().playing_step()) {
+    if (
+      recording_part().num_steps() == 0 ||
+      recording_part().recording_step() == recording_part().playing_step()
+    ) {
       display_.set_brightness(UINT16_MAX);
     } else {
       // If playing a sequencer step other than the selected one, 2/3 brightness
