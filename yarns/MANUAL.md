@@ -1,3 +1,25 @@
+#### Table of contents
+- [Interface](#interface)
+    - [Global control and display of the active part and its play mode](#global-control-and-display-of-the-active-part-and-its-play-mode)
+    - [Tap tempo changes](#tap-tempo-changes)
+    - [Other changes](#other-changes)
+- [Synth voice](#synth-voice)
+    - [Oscillator controls](#oscillator-controls)
+    - [Oscillator synthesis models](#oscillator-synthesis-models)
+    - [Amplitude dynamics: envelope and tremolo](#amplitude-dynamics-envelope-and-tremolo)
+- [Sequencer](#sequencer)
+    - [Recording interface](#recording-interface)
+    - [Looper-style sequencing mode with real-time recording](#looper-style-sequencing-mode-with-real-time-recording)
+    - [Sequencer-driven arpeggiator](#sequencer-driven-arpeggiator)
+- [MIDI](#midi)
+    - [Layouts](#layouts)
+    - [Hold pedal](#hold-pedal)
+    - [Event routing, filtering, and transformation](#event-routing-filtering-and-transformation)
+    - [`VOICING` allocation methods](#voicing-allocation-methods)
+    - [Expanded support for Control Change events](#expanded-support-for-control-change-events)
+    - [Clocking](#clocking)
+    - [Other tweaks](#other-tweaks)
+
 # Interface
 
 ### Global control and display of the active part and its play mode
@@ -70,20 +92,20 @@
   
 # Sequencer
 
-### Recording interface changes
+### Recording interface
 - Hold `REC` to clear sequence
+- Hold `TAP` to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
 - First `REC` press switches the display to show the pitch instead of the step number (press again to exit recording)
 - Flash note (or RS/TI) for the selected step
 - Brighten display while the selected step is being played
-- Wrap around around when using encoder to scroll through steps
+- Wrap around when using encoder to scroll through steps
 
 ### Looper-style sequencing mode with real-time recording
 - To enable, ensure `SM (SEQ MODE)` is set to `LOOP`
 - To use, press `REC` to enter real-time recording mode
   - Play notes to record them into the loop
   - Press `START` to delete the oldest note, or `TAP` for the newest
-  - Scroll the encoder to shift the loop phase by 1/128: clockwise shifts notes earlier, counter-clockwise shits notes later
-  - Hold `TAP` to toggle overwrite mode, which will clear the loop as soon as a new note is recorded
+  - Scroll the encoder to shift the loop phase by 1/128: clockwise shifts notes earlier, counter-clockwise shifts notes later
 - Loop length is set by the `L- (LOOP LENGTH)` in quarter notes, combined with the part's clock settings
 - Note start/end times are recorded at 13-bit resolution (1/8192 of the loop length)
 - Holds 30 notes max -- past this limit, overwrites oldest note
@@ -102,9 +124,9 @@
 # MIDI
 
 ### Layouts
-- `2+2` 3-part layout: one two-voice polyphonic part, two monophonic parts
-- `2+1` 2-part layout: 2-voice polyphonic part, monophonic part with modulation output
-- `*2` 3-part layout: 3-voice paraphonic part, 1 monophonic part with modulation, 1 monophonic part without modulation
+- `2+2` 3-part layout: 2-voice polyphonic part + two monophonic parts
+- `2+1` 2-part layout: 2-voice polyphonic part + monophonic part with aux CV
+- `*2` 3-part layout: 3-voice paraphonic part + monophonic part with aux CV + monophonic part without aux CV
   - Paraphonic part can use the new [envelopes](#adsr-envelopes-modulated-by-velocity)
   - Audio mode is always on for the paraphonic part
   - Output channels:
@@ -112,6 +134,7 @@
     2. Part 2, monophonic CV/gate
     3. Part 2, modulation configurable via `3>`
     4. Part 3, monophonic CV/gate
+- `3M` 3-part layout: 3 monophonic parts, plus clock on gate 4 and bar/reset on CV 4
     
 ### Hold pedal
 - Screen flashes the active part's hold status
@@ -155,6 +178,8 @@
 - The result of a received CC is briefly displayed (value, setting abbreviation, and receiving part)
 - Recording control: start/stop recording mode, delete a recording
 - CC support for all new settings
+- Macro CC for controlling recording state: off, on, triggered erase, immediate erase
+- Macro CC for controlling sequencer mode: step sequencer, step arpeggiator, manual, loop arpeggiator, loop sequencer
 - Fixed settings to accept a negative value via CC
 - [Implementation Chart](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 

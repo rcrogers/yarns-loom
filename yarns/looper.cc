@@ -55,7 +55,6 @@ void Deck::RemoveAll() {
   head_.off = kNullIndex;
   oldest_index_ = 0;
   size_ = 0;
-  overwrite_ = false;
 
   std::fill(
     &next_link_[0],
@@ -194,8 +193,6 @@ void Deck::Advance(uint16_t new_pos, bool play) {
 }
 
 uint8_t Deck::RecordNoteOn(uint8_t pitch, uint8_t velocity) {
-  if (overwrite_) { RemoveAll(); }
-
   if (size_ == kMaxNotes) {
     RemoveOldestNote();
   }

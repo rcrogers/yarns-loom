@@ -30,7 +30,6 @@
 #ifndef YARNS_DRIVERS_DISPLAY_H_
 #define YARNS_DRIVERS_DISPLAY_H_
 
-#include <cmath>
 #include <algorithm>
 #include "stmlib/stmlib.h"
 

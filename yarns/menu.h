@@ -281,6 +281,15 @@ static const SettingIndex two_one[] = {
   MENU_END
 };
 
+static const SettingIndex tri_mono[] = {
+  MENU_LAYOUT_CLOCK,
+  MENU_MIDI,
+  MENU_VOICING_ALLOCATION_MONO,
+  MENU_MODULATION,
+  MENU_TUNING,
+  MENU_END
+};
+
 static const SettingIndex quad_voltages[] = {
   MENU_LAYOUT_CLOCK,
   SETTING_CLOCK_OVERRIDE,
@@ -289,7 +298,7 @@ static const SettingIndex quad_voltages[] = {
   MENU_END
 };
 
-static const SettingIndex* setup_setting_list_for_layout[] = {
+static const SettingIndex* setup_setting_list_for_layout[LAYOUT_LAST] = {
   mono,
   dual_mono,
   quad_mono,
@@ -304,6 +313,7 @@ static const SettingIndex* setup_setting_list_for_layout[] = {
   two_two,
   two_one,
   paraphonic_plus_two,
+  tri_mono,
 };
 
 class Menu {

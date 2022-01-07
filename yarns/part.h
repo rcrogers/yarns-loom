@@ -706,6 +706,12 @@ class Part {
     voicing_.legato_mode = LEGATO_MODE_OFF;
   }
 
+  inline bool seq_overwrite() const { return seq_overwrite_; }
+  inline void toggle_seq_overwrite() { set_seq_overwrite(!seq_overwrite_); }
+  inline void set_seq_overwrite(bool b) {
+    seq_overwrite_ = b && (looped() ? looper_.num_notes() : seq_.num_steps);
+  }
+
   inline const looper::Deck& looper() const { return looper_; }
   inline looper::Deck& mutable_looper() { return looper_; }
   inline uint8_t LooperCurrentNoteIndex() const {
@@ -764,7 +770,8 @@ class Part {
     pitch = ApplySequencerInputResponse(pitch);
     if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
       // Advance arp
-      arp_ = BuildArpState(SequencerStep(pitch, velocity));
+      SequencerStep step = SequencerStep(pitch, velocity);
+      arp_ = BuildArpState(&step);
       pitch = arp_.step.note();
       if (arp_.step.has_note()) {
         InternalNoteOn(pitch, arp_.step.velocity());
@@ -790,7 +797,7 @@ class Part {
       uint8_t next_on_index = looper_.PeekNextOn();
       const looper::Note& next_on_note = looper_.note_at(next_on_index);
       SequencerStep next_step = SequencerStep(next_on_note.pitch, next_on_note.velocity);
-      next_step = BuildArpState(next_step).step;
+      next_step = BuildArpState(&next_step).step;
       if (next_step.is_continuation()) {
         // Leave this pitch in the care of the next looper note
         output_pitch_for_looper_note_[next_on_index] = pitch;
@@ -803,6 +810,7 @@ class Part {
   }
 
   inline void LooperRecordNoteOn(uint8_t pressed_key_index) {
+    if (seq_overwrite_) { DeleteRecording(); }
     const stmlib::NoteEntry& e = manual_keys_.stack.note(pressed_key_index);
     uint8_t looper_note_index = looper_.RecordNoteOn(e.note, e.velocity & 0x7f);
     looper_note_recording_pressed_key_[pressed_key_index] = looper_note_index;
@@ -852,6 +860,7 @@ class Part {
 
   inline void RecordStep(const SequencerStep& step) {
     if (seq_recording_) {
+      if (seq_overwrite_) { DeleteRecording(); }
       SequencerStep* target = &seq_.step[seq_rec_step_];
       target->data[0] = step.data[0];
       target->data[1] |= step.data[1];
@@ -980,6 +989,7 @@ class Part {
     CONSTRAIN(seq_.loop_length, 0, 7);
     CONSTRAIN(seq_.arp_range, 0, 3);
     CONSTRAIN(seq_.arp_direction, 0, ARPEGGIATOR_DIRECTION_LAST - 1);
+    AllNotesOff();
     TouchVoices();
     TouchVoiceAllocation();
     ResetLatch();
@@ -1001,8 +1011,8 @@ class Part {
   void KillAllInstancesOfNote(uint8_t note);
 
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = 60) const;
-  const SequencerStep BuildSeqStep() const;
-  const ArpeggiatorState BuildArpState(SequencerStep seq_step) const;
+  const SequencerStep BuildSeqStep(uint8_t step_index) const;
+  const ArpeggiatorState BuildArpState(SequencerStep* seq_step_ptr) const;
 
   MidiSettings midi_;
   VoicingSettings voicing_;
@@ -1029,6 +1039,7 @@ class Part {
   bool seq_overdubbing_;
   uint8_t seq_step_;
   uint8_t seq_rec_step_;
+  bool seq_overwrite_;
   
   looper::Deck looper_;
 

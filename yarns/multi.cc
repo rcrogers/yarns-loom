@@ -48,6 +48,7 @@ const uint8_t kCCMacroPlayMode = 117;
 
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
+  master_lfo_.Init();
   
   fill(
       &settings_.custom_pitch_table[0],
@@ -139,13 +140,9 @@ void Multi::Clock() {
 
     // Sync LFOs
     ++tick_counter_;
+    master_lfo_.Tap(tick_counter_, 16);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       part_[p].mutable_looper().Clock(tick_counter_);
-      uint8_t lfo_rate = part_[p].voicing_settings().lfo_rate;
-      if (lfo_rate < LUT_LFO_INCREMENTS_SIZE) continue;
-      for (uint8_t v = 0; v < part_[p].num_voices(); ++v) {
-        part_[p].voice(v)->lfo()->Tap(tick_counter_, lut_clock_ratio_ticks[lfo_rate - LUT_LFO_INCREMENTS_SIZE]);
-      }
     }
     
     ++swing_counter_;
@@ -218,7 +215,7 @@ void Multi::Start(bool started_by_keyboard) {
   clock_input_prescaler_ = 0;
   clock_output_prescaler_ = 0;
   stop_count_down_ = 0;
-  tick_counter_ = -1;
+  tick_counter_ = master_lfo_tick_counter_ = -1;
   bar_position_ = -1;
   swing_counter_ = -1;
   previous_output_division_ = 0;
@@ -271,11 +268,20 @@ void Multi::ClockFast() {
 }
 
 void Multi::Refresh() {
+  master_lfo_.Refresh();
+  bool new_tick = (master_lfo_.GetPhase() << 4) < (master_lfo_.GetPhaseIncrement() << 4);
+  if (new_tick) master_lfo_tick_counter_++;
   for (uint8_t j = 0; j < num_active_parts_; ++j) {
     Part& part = part_[j];
     part.mutable_looper().Refresh();
     for (uint8_t v = 0; v < part.num_voices(); ++v) {
       part.voice(v)->Refresh(v);
+    }
+    if (!new_tick) continue;
+    uint8_t lfo_rate = part.voicing_settings().lfo_rate;
+    if (lfo_rate >= 64) continue;
+    for (uint8_t v = 0; v < part.num_voices(); ++v) {
+      part.voice(v)->lfo()->Tap(master_lfo_tick_counter_, lut_clock_ratio_ticks[(64 - lfo_rate - 1) >> 1]);
     }
   }
 
@@ -295,7 +301,7 @@ bool Multi::Set(uint8_t address, uint8_t value) {
         static_cast<Layout>(previous_value),
         static_cast<Layout>(value));
   } else if (address == MULTI_CLOCK_TEMPO) {
-    internal_clock_.set_tempo(settings_.clock_tempo);
+    UpdateTempo();
   } else if (address == MULTI_CLOCK_SWING) {
     internal_clock_.set_swing(settings_.clock_swing);
   }
@@ -365,6 +371,13 @@ void Multi::AssignVoicesToCVOutputs() {
       AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 1);
       AssignOutputVoice(2, kNumParaphonicVoices, DC_AUX_1, 0);
       AssignOutputVoice(3, kNumParaphonicVoices + 1, DC_PITCH, 1);
+      break;
+
+    case LAYOUT_TRI_MONO:
+      for (uint8_t i = 0; i < 3; ++i) {
+        AssignOutputVoice(i, i, DC_PITCH, 1);
+      }
+      AssignOutputVoice(3, 0, DC_VELOCITY, 0); // Dummy, will be overwritten
       break;
   }
 }
@@ -436,6 +449,14 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       gate[1] = cv_outputs_[1].gate();
       gate[2] = settings_.clock_override ? clock() : cv_outputs_[2].trigger();
       gate[3] = cv_outputs_[3].gate();
+      break;
+
+    case LAYOUT_TRI_MONO:
+      for (uint8_t i = 0; i < 3; ++i) {
+        gate[i] = voice_[i].gate();
+      }
+      gate[3] = clock();
+      cv[3] = cv_outputs_[3].volts_dac_code(reset_or_playing_flag() ? 5 : 0);
       break;
 
     case LAYOUT_QUAD_TRIGGERS:
@@ -525,6 +546,13 @@ void Multi::GetLedsBrightness(uint8_t* brightness) {
       }
       break;
 
+    case LAYOUT_TRI_MONO:
+      for (uint8_t i = 0; i < 3; ++i) {
+        brightness[i] = voice_[i].gate() ? (voice_[i].velocity() << 1) : 0;
+      }
+      brightness[3] = clock() ? 0xff : 0;
+      break;
+
     case LAYOUT_QUAD_VOLTAGES:
       brightness[0] = voice_[0].aux_cv();
       brightness[1] = voice_[1].aux_cv();
@@ -604,6 +632,13 @@ void Multi::AllocateParts() {
       }
       break;
 
+    case LAYOUT_TRI_MONO:
+      num_active_parts_ = 3;
+      for (uint8_t i = 0; i < num_active_parts_; ++i) {
+        part_[i].AllocateVoices(&voice_[i], 1, false);
+      }
+      break;
+
     default:
       break;
   }
@@ -621,6 +656,7 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
     case LAYOUT_DUAL_MONO:
     case LAYOUT_QUAD_MONO:
     case LAYOUT_QUAD_VOLTAGES:
+    case LAYOUT_TRI_MONO:
       {
         // Duplicate uninitialized voices.
         for (uint8_t i = 1; i < num_active_parts_; ++i) {
@@ -673,12 +709,22 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
     default:
       break;
   }
+  for (uint8_t i = 1; i < num_active_parts_; ++i) {
+    part_[i].AfterDeserialize();
+  }
+}
+
+const uint32_t kTempoToRefreshPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
+void Multi::UpdateTempo() {
+  internal_clock_.set_tempo(settings_.clock_tempo);
+  if (running_) return;
+  master_lfo_.SetPhaseIncrement((settings_.clock_tempo * kTempoToRefreshPhaseIncrement) >> 4);
 }
 
 void Multi::AfterDeserialize() {
   Stop();
 
-  internal_clock_.set_tempo(settings_.clock_tempo);
+  UpdateTempo();
   AllocateParts();
   
   for (uint8_t i = 0; i < kNumParts; ++i) {
@@ -759,7 +805,7 @@ void Multi::StopRecording(uint8_t part) {
   if (recording_ && recording_part_ == part) {
     part_[part].StopRecording();
     recording_ = false;
-    part_[part].mutable_looper().set_overwrite_armed(false);
+    part_[part].set_seq_overwrite(false);
   }
 }
 
@@ -795,7 +841,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
           part_[i].DeleteRecording();
           ui.SplashPartString("RX", i);
         } else {
-          part_[i].mutable_looper().set_overwrite_armed(macro_zone == 2);
+          part_[i].set_seq_overwrite(macro_zone == 2);
           ui.SplashPartString(macro_zone == 2 ? "R*" : (macro_zone ? "R+" : "--"), i);
         }
         macro_record_last_value_[i] = value;
