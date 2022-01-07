@@ -190,12 +190,14 @@ void Voice::Refresh() {
     amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
 
-    timbre_lfo_interpolator_.SetTarget(lfo_value(LFO_ROLE_TIMBRE) * timbre_mod_lfo_current_ >> (31 - 15));
+    int32_t timbre_lfo_15 = lfo_value(LFO_ROLE_TIMBRE) * timbre_mod_lfo_current_ >> (31 - 15);
+    timbre_lfo_interpolator_.SetTarget(timbre_lfo_15);
     timbre_lfo_interpolator_.ComputeSlope();
 
     scaled_vibrato_lfo_interpolator_.SetTarget(vibrato_lfo * vibrato_mod_ >> 8);
     scaled_vibrato_lfo_interpolator_.ComputeSlope();
-    pitch_lfo_interpolator_.SetTarget(scaled_vibrato_lfo_interpolator_.target() * vibrato_range_ >> 8);
+    int32_t pitch_lfo_15 = scaled_vibrato_lfo_interpolator_.target() * vibrato_range_ >> 8;
+    pitch_lfo_interpolator_.SetTarget(pitch_lfo_15);
     pitch_lfo_interpolator_.ComputeSlope();
   }
   refresh_counter_ = (refresh_counter_ + 1) % kLowFreqRefresh;
