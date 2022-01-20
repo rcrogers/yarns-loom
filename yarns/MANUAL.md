@@ -90,7 +90,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - `TS (TREMOLO SHAPE)` sets the shape of the tremolo LFO (triangle, down saw, up saw, square)
 - ADSR envelope with velocity modulation
   - Envelope controls voice amplitude when the `OSCILLATOR MODE` is `ENVELOPED`
-  - Envelope is available as an assignable CV output (`ENVELOPE`) in all layouts
+  - Envelope is available as an aux CV output (`ENVELOPE`) in all layouts
   - Peak attack amplitude can be velocity-scaled via `PV (PEAK VEL MOD)`
     - Positive values = damp on low velocity, negative values = damp on high velocity
   - The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
@@ -198,6 +198,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
 - LFO "spreading" (dephasing or detuning)
   - `LV (LFO SPREAD VOICES)` sets the spread among the voices for the selected part
+    - Only available in polyphonic/paraphonic layouts
   - `LT (LFO SPREAD TYPES)` sets the spread among the vibrato, timbre, and tremolo LFOs for each voice in the part
   - Turning these settings counter-clockwise from center progressively dephases the LFOs
     - Each LFO's phase is progressively more offset, by an amount ranging from 0° to 360° depending on the setting

@@ -298,12 +298,12 @@ class CVOutput {
     dc_voice_->set_dc_output(dc_role, this);
 
     num_audio_voices_ = num_audio;
-    uint16_t offset = volts_dac_code(0);
+    zero_dac_code_ = volts_dac_code(0);
     uint16_t scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
     scale /= num_audio_voices_;
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
       Voice* audio_voice = audio_voices_[i] = dc_voice_ + i;
-      audio_voice->oscillator()->Init(scale, offset);
+      audio_voice->oscillator()->Init(scale);
       audio_voice->set_audio_output(this);
     }
   }
@@ -344,9 +344,9 @@ class CVOutput {
   }
 
   inline uint16_t GetAudioSample() {
-    uint16_t mix = 0;
+    uint16_t mix = zero_dac_code_;
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
-      mix += audio_voices_[i]->ReadSample();
+      mix -= audio_voices_[i]->ReadSample();
     }
     return mix;
   }
@@ -419,6 +419,7 @@ class CVOutput {
   int32_t note_;
   uint16_t dac_code_;
   bool dirty_;  // Set to true when the calibration settings have changed.
+  uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
   Interpolator tremolo_;

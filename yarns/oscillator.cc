@@ -204,8 +204,8 @@ void Oscillator::Render() {
     phase += phase_increment; \
     int16_t timbre = timbre_buffer_.ImmediateRead(); \
     body \
-    audio_buffer_.Overwrite(offset_ - ( \
-      (static_cast<int32_t>(gain_buffer_.ImmediateRead()) * this_sample) >> 16) \
+    audio_buffer_.Overwrite( \
+      (static_cast<int32_t>(gain_buffer_.ImmediateRead()) * this_sample) >> 16 \
     ); \
   } \
   next_sample_ = next_sample; \

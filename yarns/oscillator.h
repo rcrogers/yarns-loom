@@ -92,10 +92,9 @@ class Oscillator {
   Oscillator() { }
   ~Oscillator() { }
 
-  inline void Init(uint16_t scale, uint16_t offset) {
+  inline void Init(uint16_t scale) {
     audio_buffer_.Init();
     scale_ = scale;
-    offset_ = offset;
     gain_.Init(64);
     timbre_.Init(64);
     gain_envelope_.Init();
@@ -165,7 +164,6 @@ class Oscillator {
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;
-  uint16_t scale_, offset_;
   Interpolator timbre_, gain_;
   int16_t pitch_;
 
@@ -179,6 +177,7 @@ class Oscillator {
   PhaseDistortionSquareModulator pd_square_;
   
   int32_t next_sample_;
+  uint16_t scale_;
   stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_, gain_buffer_, timbre_buffer_;
   
   static RenderFn fn_table_[];
