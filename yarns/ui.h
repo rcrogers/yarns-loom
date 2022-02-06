@@ -232,7 +232,7 @@ class Ui {
   void PrintLatch();
   void SetFadeForSetting(const Setting& setting);
 
-  PressedKeys& LatchableKeys();
+  HeldKeys& ActivePartHeldKeys();
   
   void StopRecording();
 

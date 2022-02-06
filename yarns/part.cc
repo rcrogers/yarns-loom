@@ -136,22 +136,9 @@ void Part::AllocateVoices(Voice* voice, uint8_t num_voices, bool polychain) {
   TouchVoices();
 }
 
-uint8_t Part::PressedKeysNoteOn(PressedKeys &keys, uint8_t pitch, uint8_t velocity) {
-  if (keys.release_latched_keys_on_next_note_on) {
-    bool still_latched = keys.ignore_note_off_messages;
-
-    // Releasing all latched key will generate "fake" NoteOff messages. We
-    // should not ignore them.
-    keys.ignore_note_off_messages = false;
-    ReleaseLatchedNotes(keys);
-
-    keys.release_latched_keys_on_next_note_on = still_latched;
-    keys.ignore_note_off_messages = still_latched;
-  }
-  bool sustained = keys.IsSustained(pitch); // Capture existing sustain status
-  uint8_t index = keys.stack.NoteOn(pitch, velocity);
-  if (sustained) { keys.SetSustain(pitch); }
-  return index;
+uint8_t Part::HeldKeysNoteOn(HeldKeys &keys, uint8_t pitch, uint8_t velocity) {
+  if (keys.stop_sustained_notes_on_next_note_on) StopSustainedNotes(keys);
+  return keys.stack.NoteOn(pitch, velocity);
 }
 
 bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
@@ -166,13 +153,13 @@ bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
     if (!looped() && !sent_from_step_editor) {
       RecordStep(SequencerStep(note, velocity));
     } else if (looped()) {
-      uint8_t pressed_key_index = PressedKeysNoteOn(manual_keys_, note, velocity);
+      uint8_t pressed_key_index = HeldKeysNoteOn(manual_keys_, note, velocity);
       LooperRecordNoteOn(pressed_key_index);
     }
   } else if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-    PressedKeysNoteOn(arp_keys_, note, velocity);
+    HeldKeysNoteOn(arp_keys_, note, velocity);
   } else {
-    PressedKeysNoteOn(manual_keys_, note, velocity);
+    HeldKeysNoteOn(manual_keys_, note, velocity);
     if (sent_from_step_editor || manual_control()) {
       InternalNoteOn(note, velocity);
     }
@@ -181,7 +168,7 @@ bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
   return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
 }
 
-bool Part::NoteOff(uint8_t channel, uint8_t note) {
+bool Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
   bool sent_from_step_editor = channel & 0x80;
 
   uint8_t recording_pitch = ArpUndoTransposeInputPitch(note);
@@ -195,9 +182,9 @@ bool Part::NoteOff(uint8_t channel, uint8_t note) {
       manual_keys_.stack.NoteOff(recording_pitch);
     }
   } else if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-    arp_keys_.SustainableNoteOff(note);
+    arp_keys_.NoteOff(note, respect_sustain);
   } else {
-    bool off = manual_keys_.SustainableNoteOff(note);
+    bool off = manual_keys_.NoteOff(note, respect_sustain);
     if (off && (sent_from_step_editor || manual_control())) {
       InternalNoteOff(note);
     }
@@ -205,19 +192,48 @@ bool Part::NoteOff(uint8_t channel, uint8_t note) {
   return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
 }
 
-void Part::PressedKeysSustainOn(PressedKeys &keys) {
+void Part::HeldKeysSustainOn(HeldKeys &keys) {
   switch (midi_.sustain_mode) {
     case SUSTAIN_MODE_NORMAL:
-      keys.ignore_note_off_messages = true;
+      keys.universally_sustainable = true;
       break;
     case SUSTAIN_MODE_SOSTENUTO:
-      keys.SetSustainable(true);
+      keys.SetIndividuallySustainable(true);
+      break;
+    case SUSTAIN_MODE_LATCH:
+    case SUSTAIN_MODE_MOMENTARY_LATCH:
+      keys.Latch(true);
+      break;
+    case SUSTAIN_MODE_FILTER:
+      keys.universally_sustainable = true;
+      keys.stop_sustained_notes_on_next_note_on = false;
+      break;
+    case SUSTAIN_MODE_CLUTCH:
+      keys.Clutch(true);
+      break;
+    case SUSTAIN_MODE_OFF:
+    default:
+      break;
+  }
+}
+
+void Part::HeldKeysSustainOff(HeldKeys &keys) {
+  switch (midi_.sustain_mode) {
+    case SUSTAIN_MODE_NORMAL:
+      keys.universally_sustainable = false;
+      StopSustainedNotes(keys);
+      break;
+    case SUSTAIN_MODE_SOSTENUTO:
+      keys.SetIndividuallySustainable(false);
+      StopSustainedNotes(keys);
       break;
     case SUSTAIN_MODE_LATCH:
     case SUSTAIN_MODE_MOMENTARY_LATCH:
     case SUSTAIN_MODE_FILTER:
-      keys.ignore_note_off_messages = true;
-      keys.release_latched_keys_on_next_note_on = true;
+      if (midi_.sustain_mode == SUSTAIN_MODE_MOMENTARY_LATCH) {
+        StopSustainedNotes(keys);
+      }
+      keys.Latch(false);
       break;
     case SUSTAIN_MODE_CLUTCH:
       keys.Clutch(false);
@@ -228,35 +244,9 @@ void Part::PressedKeysSustainOn(PressedKeys &keys) {
   }
 }
 
-void Part::PressedKeysSustainOff(PressedKeys &keys) {
-  switch (midi_.sustain_mode) {
-    case SUSTAIN_MODE_NORMAL:
-      keys.ignore_note_off_messages = false;
-      ReleaseLatchedNotes(keys);
-      break;
-    case SUSTAIN_MODE_SOSTENUTO:
-      keys.SetSustainable(false);
-      ReleaseLatchedNotes(keys);
-      break;
-    case SUSTAIN_MODE_LATCH:
-    case SUSTAIN_MODE_FILTER:
-      keys.ignore_note_off_messages = false;
-      keys.release_latched_keys_on_next_note_on = true;
-      break;
-    case SUSTAIN_MODE_MOMENTARY_LATCH:
-      PressedKeysResetLatch(keys);
-    case SUSTAIN_MODE_CLUTCH:
-      keys.Clutch(true);
-      break;
-    case SUSTAIN_MODE_OFF:
-    default:
-      break;
-  }
-}
-
-void Part::ResetLatch() {
-  PressedKeysResetLatch(manual_keys_);
-  PressedKeysResetLatch(arp_keys_);
+void Part::ResetAllKeys() {
+  ResetKeys(manual_keys_);
+  ResetKeys(arp_keys_);
   ControlChange(0, kCCHoldPedal, hold_pedal_engaged_ ? 127 : 0);
 }
 
@@ -742,7 +732,7 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
 }
 
 void Part::ResetAllControllers() {
-  ResetLatch();
+  ResetAllKeys();
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->ResetAllControllers();
   }
@@ -752,7 +742,7 @@ void Part::AllNotesOff() {
   poly_allocator_.ClearNotes();
   mono_allocator_.Clear();
 
-  ResetLatch();
+  ResetAllKeys();
 
   generated_notes_.Clear();
   looper_note_index_for_generated_note_index_[generated_notes_.most_recent_note_index()] = looper::kNullIndex;
@@ -765,12 +755,11 @@ void Part::AllNotesOff() {
       VOICE_ALLOCATION_NOT_FOUND);
 }
 
-void Part::ReleaseNotesBySustainStatus(PressedKeys &keys, bool sustain_status) {
+void Part::StopNotesBySustainStatus(HeldKeys &keys, bool sustain_status) {
   for (uint8_t i = 1; i <= keys.stack.max_size(); ++i) {
     NoteEntry* e = keys.stack.mutable_note(i);
     if (keys.IsSustained(*e) != sustain_status) continue;
-    e->velocity &= ~PressedKeys::VELOCITY_SUSTAIN_MASK; // Un-flag the note
-    NoteOff(tx_channel(), e->note);
+    NoteOff(tx_channel(), e->note, false);
   }
 }
 
@@ -1055,8 +1044,8 @@ bool Part::Set(uint8_t address, uint8_t value) {
     case PART_MIDI_TRANSPOSE_OCTAVES:
       // Release notes that are currently under direct manual control, sparing
       // notes that are controlled by sustain or the sequencer
-      ReleaseNotesBySustainStatus(manual_keys_, false);
-      ReleaseNotesBySustainStatus(arp_keys_, false);
+      StopNotesBySustainStatus(manual_keys_, false);
+      StopNotesBySustainStatus(arp_keys_, false);
       break;
 
     case PART_VOICING_ALLOCATION_MODE:

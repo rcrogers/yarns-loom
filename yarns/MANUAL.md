@@ -119,12 +119,14 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 ### Sequencer-driven arpeggiator
 - Activated by setting the `ARP PATTERN` to `SEQUENCER`
-- Arpeggiator is driven by looper/sequencer notes instead of by clock pulses -- a sequence must exist to produce arpeggiator output
-- The arpeggiator respects rests/ties in the sequence
-- The velocity of the arpeggiator output is the product of the velocities of the sequencer step and the held key
-- New arpeggiator directions that use the note pitch as movement instructions:
-  - Notes are interpreted based on key color (black/white) and distance above/below middle C
-  - `ROTATE` treats white keys as relative movement through the chord, and black keys as offsets from the current position
+- As in the normal arpeggiator, the arp chord is controlled by holding keys on the keyboard
+- Unlike the normal arpeggiator, the sequencer-driven arpeggiator advances when the loop/step sequencer encounters a new note, instead of advancing on every clock pulse
+- A sequence must exist to produce arpeggiator output
+- The arpeggiator respects rests/ties in a step sequence
+- The velocity of the arpeggiator output is calculated by multiplying the velocities of the sequencer step and the held key
+- New arpeggiator directions use the note pitch as instructions to move through the arp chord in non-linear fashion:
+  - Notes are interpreted based on key color (black/white) and distance above/below C4 (middle C)
+  - `ROTATE` treats white keys as relative movement through the chord, and black keys as offsets from the current position in the chord
   - `SUBROTATE` generates quasi-cartesian patterns
 
 # MIDI
@@ -133,7 +135,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - `2+2` 3-part layout: 2-voice polyphonic part + two monophonic parts
 - `2+1` 2-part layout: 2-voice polyphonic part + monophonic part with aux CV
 - `*2` 3-part layout: 3-voice paraphonic part + monophonic part with aux CV + monophonic part without aux CV
-  - Paraphonic part can use the new [envelopes](#adsr-envelopes-modulated-by-velocity)
+  - Paraphonic part can use the new [envelopes](#amplitude-dynamics-envelope-and-tremolo)
   - Audio mode is always on for the paraphonic part
   - Output channels:
     1. Part 1, 3 voices mixed to 1 audio output
@@ -143,18 +145,25 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - `3M` 3-part layout: 3 monophonic parts, plus clock on gate 4 and bar/reset on CV 4
     
 ### Hold pedal
-- Screen flashes the active part's hold status
-  - Tick marks show the number of keys that are held, sustainable, sustained, and/or about to be released
-  - Limited to the 6 most recent keys due to display size
+- Instead of a global latch state, each part can respond to the hold pedal in its own way
+- Screen periodically shows tick marks to show the sustain state of the 6 most recent keys (limited due to display size)
+  - Bottom-half tick: key is manually held, will stop when released
+  - Full-height tick: key is manually held, will be sustained when released
+  - Steady top-half tick: key is sustained, will continue after the next key-press
+  - Blinking top-half tick: key is sustained, will be stopped by the next key-press
+- New `HP (HOLD PEDAL POLARITY)` setting to switch between [negative and positive pedal polarity](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html), or otherwise reverse the pedal's up/down behavior
 - New `HM (HOLD PEDAL MODE)` setting to change the part's response to the hold pedal
-  - `OFF` ignores the pedal
-  - `SUSTAIN` is the stock firmware behavior (no notes are released as long as the pedal is down)
-  - `SOSTENUTO` sustains only the notes held at the time the pedal goes down
-  - `LATCH` uses the semantics of the front-panel latching in stock Yarns
-  - `MOMENTARY LATCH` resembles `LATCH`, but releases latched notes as soon as the pedal is released, instead of on the next note
-  - `CLUTCH` is a hybrid of `SOSTENUTO` and `LATCH` -- when the pedal goes down, sustains any held notes; while the pedal is up, pressing any note will release held notes
-  - `FILTER` causes the part to only receive notes while the pedal is in a given state, and latches any notes that are "silently" released
-- New `HP (HOLD PEDAL POLARITY)` setting to switch between [negative and positive pedal polarity](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html), or otherwise reverse pedal semantics
+  - `OFF`: pedal has no effect
+  - `SUSTAIN`: sustains key-releases after pedal-down, and stops sustained notes on pedal-up
+    - Matches the behavior of the pedal in the stock firmware
+  - `SOSTENUTO`: while pedal is down, sustains key-releases on only the keys pressed before pedal-down; stops sustained notes on pedal-up
+  - `LATCH`: uses the semantics of the button-controlled latching in stock Yarns -- sustains key-releases after pedal-down; stops sustained notes on key-press regardless of pedal state
+    - Matches the behavior of the front-panel latching (triggered by holding `REC`)
+  - `MOMENTARY LATCH`: like `LATCH`, but stop sustained notes on pedal-up, instead of on key-press
+  - `CLUTCH`: while pedal is down, sustains key-releases on only the keys pressed before pedal-down (similar to `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (similar to `LATCH`)
+    - Notes triggered while the pedal is down are not sustained and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
+  - `FILTER`: while pedal is up, ignores key-presses and sustains key-releases; while pedal is down, stops sustained notes on key-press
+    - In combination with setting an opposite `HOLD PEDAL POLARITY` on two different parts, this allows the use of the pedal to select which part is controlled by the keyboard, while also supporting latching
 
 ### Event routing, filtering, and transformation
 - New `SI (SEQ INPUT RESPONSE)` setting changes how a playing sequence responds to manual input

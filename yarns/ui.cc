@@ -752,8 +752,8 @@ void Ui::OnSwitchPress(const Event& e) {
   }
 }
 
-PressedKeys& Ui::LatchableKeys() {
-  return mutable_active_part()->MutablePressedKeysForLatchUI();
+HeldKeys& Ui::ActivePartHeldKeys() {
+  return mutable_active_part()->MutableHeldKeysForUI();
 }
 
 void Ui::OnSwitchHeld(const Event& e) {
@@ -765,11 +765,11 @@ void Ui::OnSwitchHeld(const Event& e) {
         mutable_recording_part()->DeleteRecording();
         SplashOn(SPLASH_DELETE_RECORDING, active_part_);
       } else {
-        PressedKeys &keys = LatchableKeys();
-        if (keys.ignore_note_off_messages) {
-          mutable_active_part()->PressedKeysSustainOff(keys);
+        HeldKeys &keys = ActivePartHeldKeys();
+        if (keys.universally_sustainable) {
+          mutable_active_part()->HeldKeysSustainOff(keys);
         } else if (multi.running() && keys.stack.most_recent_note_index()) {
-          mutable_active_part()->PressedKeysSustainOn(keys);
+          mutable_active_part()->HeldKeysSustainOn(keys);
         } else {
           if (push_it_) {
             multi.PushItNoteOff(push_it_note_);
@@ -986,7 +986,7 @@ void Ui::DoEvents() {
   // If display is idle, flash various statuses
   bool print_latch =
     active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
-    LatchableKeys().stack.most_recent_note_index();
+    ActivePartHeldKeys().stack.most_recent_note_index();
   bool print_part = mode_ == UI_MODE_PARAMETER_SELECT;
   if (queue_.idle_time() > kRefreshTwoThirds) {
     if (print_part) {
@@ -1031,7 +1031,7 @@ const uint16_t kHoldDisplayMasks[2][3] = {
 };
 void Ui::PrintLatch() {
   display_.set_fade(0);
-  const PressedKeys& keys = LatchableKeys();
+  const HeldKeys& keys = ActivePartHeldKeys();
   uint16_t masks[kDisplayWidth];
   std::fill(&masks[0], &masks[kDisplayWidth], 0);
   uint8_t note_ordinal = 0, display_pos = 0;
@@ -1046,7 +1046,7 @@ void Ui::PrintLatch() {
     bool sustained = keys.IsSustained(note_entry);
     bool top;
     if (sustained) {
-      top = (keys.release_latched_keys_on_next_note_on && !keys.ignore_note_off_messages) ? blink : true;
+      top = keys.stop_sustained_notes_on_next_note_on ? blink : true;
     } else {
       top = keys.IsSustainable(note_index);
     }
