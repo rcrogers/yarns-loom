@@ -765,10 +765,10 @@ void Part::AllNotesOff() {
       VOICE_ALLOCATION_NOT_FOUND);
 }
 
-void Part::ReleaseLatchedNotes(PressedKeys &keys) {
+void Part::ReleaseNotesBySustainStatus(PressedKeys &keys, bool sustain_status) {
   for (uint8_t i = 1; i <= keys.stack.max_size(); ++i) {
     NoteEntry* e = keys.stack.mutable_note(i);
-    if (!keys.IsSustained(*e)) { continue; }
+    if (keys.IsSustained(*e) != sustain_status) continue;
     e->velocity &= ~PressedKeys::VELOCITY_SUSTAIN_MASK; // Un-flag the note
     NoteOff(tx_channel(), e->note);
   }
@@ -1047,10 +1047,16 @@ bool Part::Set(uint8_t address, uint8_t value) {
     case PART_MIDI_MAX_VELOCITY:
     case PART_MIDI_INPUT_RESPONSE:
     case PART_MIDI_PLAY_MODE:
-    case PART_MIDI_TRANSPOSE_OCTAVES:
       // Shut all channels off when a MIDI parameter is changed to prevent
       // stuck notes.
       AllNotesOff();
+      break;
+
+    case PART_MIDI_TRANSPOSE_OCTAVES:
+      // Release notes that are currently under direct manual control, sparing
+      // notes that are controlled by sustain or the sequencer
+      ReleaseNotesBySustainStatus(manual_keys_, false);
+      ReleaseNotesBySustainStatus(arp_keys_, false);
       break;
 
     case PART_VOICING_ALLOCATION_MODE:

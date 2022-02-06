@@ -619,6 +619,7 @@ struct PressedKeys {
     );
   }
 
+  // Returns true if result is NoteOff
   bool SustainableNoteOff(uint8_t pitch) {
     SetSustain(pitch);
     if (IsSustained(pitch)) { return false; }
@@ -631,18 +632,6 @@ struct PressedKeys {
     if (!i || !IsSustainable(i)) { return; }
     // Flag the note so that it is removed once the sustain pedal is released.
     stack.mutable_note(i)->velocity |= VELOCITY_SUSTAIN_MASK;
-  }
-
-  bool SustainAll() {
-    bool changed = false;
-    for (uint8_t i = 1; i <= stack.max_size(); ++i) {
-      stmlib::NoteEntry* e = stack.mutable_note(i);
-      if (e->note == stmlib::NOTE_STACK_FREE_SLOT) { continue; }
-      if (IsSustained(*e)) { continue; }
-      e->velocity |= VELOCITY_SUSTAIN_MASK;
-      changed = true;
-    }
-    return changed;
   }
 
   void SetSustainable(bool value) {
@@ -1025,7 +1014,10 @@ class Part {
   void TouchVoiceAllocation();
   void TouchVoices();
   
-  void ReleaseLatchedNotes(PressedKeys &keys);
+  void ReleaseNotesBySustainStatus(PressedKeys &keys, bool where_sustained);
+  void ReleaseLatchedNotes(PressedKeys &keys) {
+    ReleaseNotesBySustainStatus(keys, true);
+  }
   void DispatchSortedNotes(bool legato);
   void VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato);
   void KillAllInstancesOfNote(uint8_t note);
