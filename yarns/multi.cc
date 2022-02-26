@@ -46,6 +46,9 @@ using namespace stmlib;
 const uint8_t kCCMacroRecord = 116;
 const uint8_t kCCMacroPlayMode = 117;
 
+// 16 ticks per cycle makes for less jitter than the obvious 1 tick per cycle
+const uint8_t kMasterLFOTicksPerCycleBits = 4;
+
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
   master_lfo_.Init(17, 9);
@@ -140,7 +143,7 @@ void Multi::Clock() {
 
     // Sync LFOs
     ++tick_counter_;
-    master_lfo_.Tap(tick_counter_, 16);
+    master_lfo_.Tap(tick_counter_, 1 << kMasterLFOTicksPerCycleBits);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       part_[p].mutable_looper().Clock(tick_counter_);
     }
@@ -288,7 +291,9 @@ void Multi::SpreadLFOs(int8_t spread, SyncedLFO** base_lfo, uint8_t num_lfos) {
 
 void Multi::Refresh() {
   master_lfo_.Refresh();
-  bool new_tick = (master_lfo_.GetPhase() << 4) < (master_lfo_.GetPhaseIncrement() << 4);
+  bool new_tick =
+    (master_lfo_.GetPhase() << kMasterLFOTicksPerCycleBits) <
+    (master_lfo_.GetPhaseIncrement() << kMasterLFOTicksPerCycleBits);
   if (new_tick) master_lfo_tick_counter_++;
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
     Part& part = part_[p];
@@ -751,7 +756,11 @@ const uint32_t kTempoToRefreshPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
 void Multi::UpdateTempo() {
   internal_clock_.set_tempo(settings_.clock_tempo);
   if (running_) return;
-  master_lfo_.SetPhaseIncrement((settings_.clock_tempo * kTempoToRefreshPhaseIncrement) >> 4);
+  // If not running, there's no Tap to update the increment, so do that here
+  master_lfo_.SetPhaseIncrement(
+    (settings_.clock_tempo * kTempoToRefreshPhaseIncrement)
+    >> kMasterLFOTicksPerCycleBits
+  );
 }
 
 void Multi::AfterDeserialize() {
