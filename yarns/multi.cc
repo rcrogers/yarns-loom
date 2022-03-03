@@ -360,14 +360,14 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       cv[1] = voice_[1].note_dac_code();
       cv[2] = voice_[2].note_dac_code();
       cv[3] = voice_[3].note_dac_code();
-      gate[0] = voice_[0].gate();
-      gate[1] = voice_[1].gate();
+      gate[0] = voice_[0].trigger();
+      gate[1] = voice_[1].trigger();
       if (settings_.clock_override) {
         gate[2] = clock();
         gate[3] = reset_or_playing_flag();
       } else {
-        gate[2] = voice_[2].gate();
-        gate[3] = voice_[3].gate();
+        gate[2] = voice_[2].trigger();
+        gate[3] = voice_[3].trigger();
       }
       break;
     
