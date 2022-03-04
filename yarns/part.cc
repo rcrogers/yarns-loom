@@ -534,6 +534,33 @@ void Part::GeneratedNoteOff(uint8_t pitch) {
   InternalNoteOff(pitch);
 }
 
+// bool Part::CanGenerateNote(uint8_t pitch) {
+//   if (
+//     mono_allocator_.size() < mono_allocator_.max_size() ||
+//     generated_notes_.size() < generated_notes_.max_size()
+//   ) return true;
+//   // If the sum of manual + generated notes is at max, and the lowest-priority
+//   // generated note exists and is lower priority than the new note, purge it
+//   uint8_t omega = generated_notes_.note_by_priority(
+//     // static_cast<stmlib::NoteStackFlags>(voicing_.allocation_priority),
+//     NOTE_PR
+//     num_voices_ - 1
+//   ).note;
+//   // TODO is it possible that omega is being played?  like if there are a lot of manual notes and one generated note?  if so, need to turn it off, or risk a hung note.  InternalNoteOff IFF it is present in mono_allocator_ and not in manual_keys_
+//   bool make_room = false;
+//   if (omega != NOTE_STACK_FREE_SLOT) {
+//     switch (voicing_.allocation_priority) {
+//       case NOTE_STACK_PRIORITY_LAST : make_room = true          ; break;
+//       case NOTE_STACK_PRIORITY_LOW  : make_room = pitch < omega ; break;
+//       case NOTE_STACK_PRIORITY_HIGH : make_room = pitch > omega ; break;
+//       case NOTE_STACK_PRIORITY_FIRST: make_room = false         ; break;
+//     }
+//   }
+//   if (!make_room) return false;
+//   GeneratedNoteOff(omega);
+//   return true;
+// }
+
 uint8_t Part::ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch) const {
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
     return pitch;
