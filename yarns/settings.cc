@@ -584,7 +584,7 @@ const Setting Settings::settings_[] = {
   {
     "G-", "GATE LENGTH",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_GATE_LENGTH, 0 },
-    SETTING_UNIT_UINT8, 1, 48, NULL,
+    SETTING_UNIT_INDEX, 0, 63, NULL,
     103, 25,
   },
   {

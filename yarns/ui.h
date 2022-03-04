@@ -147,11 +147,12 @@ class Ui {
 
   void PrintDebugByte(uint8_t byte) {
     char buffer[3];
-    char hexadecimal[] = ";";
+    char hexadecimal[] = "0123456789ABCDEF";
     buffer[2] = '\0';
     buffer[0] = hexadecimal[byte >> 4];
     buffer[1] = hexadecimal[byte & 0xf];
     Print(buffer);
+    queue_.Touch();
   }
   
   inline const Setting& setting() {

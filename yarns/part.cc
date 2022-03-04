@@ -360,7 +360,7 @@ bool Part::Aftertouch(uint8_t channel, uint8_t velocity) {
 void Part::Reset() {
   Stop();
   for (uint8_t i = 0; i < num_voices_; ++i) {
-    voice_[i]->NoteOff();
+    VoiceNoteOff(i);
     voice_[i]->ResetAllControllers();
   }
 }
@@ -384,22 +384,22 @@ void Part::Clock() { // From Multi::ClockFast
       step_ptr = &arp_.step;
     }
     if (step_ptr && step_ptr->has_note()) {
-      if (step_ptr->is_slid()) {
-        InternalNoteOn(step_ptr->note(), step_ptr->velocity());
-        StopSequencerArpeggiatorNotes();
-      } else {
-        StopSequencerArpeggiatorNotes();
-        InternalNoteOn(step_ptr->note(), step_ptr->velocity());
+      uint8_t pitch = step_ptr->note();
+      uint8_t velocity = step_ptr->velocity();
+      GeneratedNoteOff(pitch); // Simulate a human retriggering a key
+      if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
+        InternalNoteOn(pitch, velocity, step_ptr->is_slid());
       }
-      generated_notes_.NoteOn(step_ptr->note(), step_ptr->velocity());
-      gate_length_counter_ = seq_.gate_length;
     }
   }
 
-  if (gate_length_counter_) {
-    --gate_length_counter_;
-  } else if (generated_notes_.most_recent_note_index()) {
+  for (uint8_t v = 0; v < num_voices_; ++v) {
+    if (gate_length_counter_[v]) { // Gate hasn't ended yet
+      --gate_length_counter_[v];
+      continue;
+    }
     // Peek at next step to see if it's a continuation
+    // If more than one voice has a step ending, the peek is redundant
     SequencerStep* next_step_ptr = NULL;
     SequencerStep next_step;
     if (seq_.num_steps) {
@@ -413,9 +413,9 @@ void Part::Clock() { // From Multi::ClockFast
     if (next_step_ptr && next_step_ptr->is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
-      gate_length_counter_ += ticks_per_step;
-    } else {
-      StopSequencerArpeggiatorNotes();
+      gate_length_counter_[v] += lut_clock_ratio_ticks[seq_.clock_division];
+    } else if (active_note_[v] != VOICE_ALLOCATION_NOT_FOUND) {
+      GeneratedNoteOff(active_note_[v]);
     }
   }
 }
@@ -503,22 +503,35 @@ void Part::DeleteSequence() {
   seq_overdubbing_ = false;
 }
 
+bool Part::GeneratedNoteOn(uint8_t pitch, uint8_t velocity) {
+  if (
+    mono_allocator_.size() == mono_allocator_.max_size() ||
+    generated_notes_.size() == generated_notes_.max_size()
+  ) {
+    return false;
+  }
+  generated_notes_.NoteOn(pitch, velocity);
+  return true;
+}
+
 void Part::StopSequencerArpeggiatorNotes() {
   while (generated_notes_.most_recent_note_index()) {
-    uint8_t generated_note_index = generated_notes_.most_recent_note_index();
-    uint8_t pitch = generated_notes_.note(generated_note_index).note;
-    uint8_t looper_note_index = looper_note_index_for_generated_note_index_[generated_note_index];
-
-    looper_note_index_for_generated_note_index_[generated_note_index] = looper::kNullIndex;
-    generated_notes_.NoteOff(pitch);
-    if (looper_in_use()) {
-      if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-        pitch = output_pitch_for_looper_note_[looper_note_index];
-      }
-      if (!looper_can_control(pitch)) { continue; }
-    } else if (manual_keys_.stack.Find(pitch)) continue;
-    InternalNoteOff(pitch);
+    GeneratedNoteOff(generated_notes_.most_recent_note().note);
   }
+}
+
+void Part::GeneratedNoteOff(uint8_t pitch) {
+  uint8_t generated_note_index = generated_notes_.Find(pitch);
+  uint8_t looper_note_index = looper_note_index_for_generated_note_index_[generated_note_index];
+  looper_note_index_for_generated_note_index_[generated_note_index] = looper::kNullIndex;
+  generated_notes_.NoteOff(pitch);
+  if (looper_in_use()) {
+    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+      pitch = output_pitch_for_looper_note_[looper_note_index];
+    }
+    if (!looper_can_control(pitch)) return;
+  } else if (manual_keys_.stack.Find(pitch)) return;
+  InternalNoteOff(pitch);
 }
 
 uint8_t Part::ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch) const {
@@ -747,7 +760,7 @@ void Part::AllNotesOff() {
   generated_notes_.Clear();
   looper_note_index_for_generated_note_index_[generated_notes_.most_recent_note_index()] = looper::kNullIndex;
   for (uint8_t i = 0; i < num_voices_; ++i) {
-    voice_[i]->NoteOff();
+    VoiceNoteOff(i);
   }
   std::fill(
       &active_note_[0],
@@ -768,7 +781,7 @@ struct DispatchNote {
   bool done;
 };
 
-void Part::DispatchSortedNotes(bool legato) {
+void Part::DispatchSortedNotes(bool via_note_off) {
   uint8_t num_notes = mono_allocator_.size();
   uint8_t num_dispatch = num_voices_;
   bool unison = voicing_.allocation_mode != VOICE_ALLOCATION_MODE_POLY_SORTED;
@@ -804,16 +817,17 @@ void Part::DispatchSortedNotes(bool legato) {
       break; // Voice gets this note
     }
     if (note) {
-      active_note_[v] = note->note;
-      VoiceNoteOn(voice_[v], note->note, note->velocity, legato);
+      VoiceNoteOn(v, note->note, note->velocity, via_note_off, !via_note_off);
     } else if (active_note_[v] != VOICE_ALLOCATION_NOT_FOUND) {
-      voice_[v]->NoteOff();
-      active_note_[v] = VOICE_ALLOCATION_NOT_FOUND;
+      VoiceNoteOff(v);
     }
   }
 }
 
-void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
+void Part::VoiceNoteOn(
+  uint8_t voice_index, uint8_t pitch, uint8_t vel,
+  bool legato, bool reset_gate_counter
+) {
   uint8_t portamento = voicing_.portamento;
   bool trigger = !legato;
   switch (voicing_.legato_mode) {
@@ -826,6 +840,12 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
     default:
       break;
   }
+  // If this pitch is under manual control, don't extend the gate
+  if (reset_gate_counter && !manual_keys_.stack.Find(pitch)) {
+    gate_length_counter_[voice_index] = seq_.gate_length + 1;
+  }
+  active_note_[voice_index] = pitch;
+  Voice* voice = voice_[voice_index];
 
   int32_t timbre_14 = (voicing_.timbre_mod_envelope << 7) + vel * voicing_.timbre_mod_velocity;
   CONSTRAIN(timbre_14, -1 << 13, (1 << 13) - 1)
@@ -849,7 +869,12 @@ void Part::VoiceNoteOn(Voice* voice, uint8_t pitch, uint8_t vel, bool legato) {
   voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);
 }
 
-void Part::InternalNoteOn(uint8_t note, uint8_t velocity) {
+void Part::VoiceNoteOff(uint8_t voice) {
+  voice_[voice]->NoteOff();
+  active_note_[voice] = VOICE_ALLOCATION_NOT_FOUND;
+}
+
+void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
   if (midi_.out_mode == MIDI_OUT_MODE_GENERATED_EVENTS && !polychained_) {
     midi_handler.OnInternalNoteOn(tx_channel(), note, velocity);
   }
@@ -857,13 +882,13 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity) {
   const NoteEntry& before = priority_note();
   mono_allocator_.NoteOn(note, velocity);
   const NoteEntry& after = priority_note();
-  bool legato = mono_allocator_.size() > 1;
+  bool legato = force_legato || mono_allocator_.size() > 1;
   if (voicing_.allocation_mode == VOICE_ALLOCATION_MODE_MONO) {
     // Check if the note that has been played should be triggered according
     // to selected voice priority rules.
     if (before.note != after.note) {
       for (uint8_t i = 0; i < num_voices_; ++i) {
-        VoiceNoteOn(voice_[i], after.note, after.velocity, legato);
+        VoiceNoteOn(i, after.note, after.velocity, legato, true);
       }
     }
   } else if (uses_sorted_dispatch()) {
@@ -915,8 +940,7 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity) {
       }
       // Prevent the same note from being simultaneously played on two channels.
       KillAllInstancesOfNote(note);
-      VoiceNoteOn(voice_[voice_index], note, velocity, legato);
-      active_note_[voice_index] = note;
+      VoiceNoteOn(voice_index, note, velocity, legato, true);
     } else {
       // Polychaining forwarding.
       midi_handler.OnInternalNoteOn(tx_channel(), note, velocity);
@@ -928,8 +952,7 @@ void Part::KillAllInstancesOfNote(uint8_t note) {
   while (true) {
     uint8_t index = FindVoiceForNote(note);
     if (index != VOICE_ALLOCATION_NOT_FOUND) {
-      voice_[index]->NoteOff();
-      active_note_[index] = VOICE_ALLOCATION_NOT_FOUND;
+      VoiceNoteOff(index);
     } else {
       break;
     }
@@ -953,12 +976,12 @@ void Part::InternalNoteOff(uint8_t note) {
     if (mono_allocator_.size() == 0) {
       // No key is pressed, we just close the gate.
       for (uint8_t i = 0; i < num_voices_; ++i) {
-        voice_[i]->NoteOff();
+        VoiceNoteOff(i);
       }
     } else if (before.note != after.note) {
       // Removing the note gives priority to another note that is still held
       for (uint8_t i = 0; i < num_voices_; ++i) {
-        VoiceNoteOn(voice_[i], after.note, after.velocity, true);
+        VoiceNoteOn(i, after.note, after.velocity, true, false);
       }
     }
   } else if (uses_sorted_dispatch()) {
@@ -975,16 +998,14 @@ void Part::InternalNoteOff(uint8_t note) {
         poly_allocator_.NoteOff(note) : \
         FindVoiceForNote(note);
     if (voice_index < num_voices_) {
-      voice_[voice_index]->NoteOff();
-      active_note_[voice_index] = VOICE_ALLOCATION_NOT_FOUND;
+      VoiceNoteOff(voice_index);
       if (
         had_extra_notes &&
         voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_NICE
       ) {
         const NoteEntry& nice = priority_note(NOTE_STACK_PRIORITY_FIRST, num_voices_ - 1);
         poly_allocator_.NoteOn(nice.note, VOICE_STEALING_MODE_NONE);
-        VoiceNoteOn(voice_[voice_index], nice.note, nice.velocity, true);
-        active_note_[voice_index] = nice.note;
+        VoiceNoteOn(voice_index, nice.note, nice.velocity, true, false);
       }
     } else {
        midi_handler.OnInternalNoteOff(tx_channel(), note);

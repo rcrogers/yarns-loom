@@ -166,6 +166,8 @@ class Multi {
  public:
   Multi() { }
   ~Multi() { }
+
+  void PrintDebugByte(uint8_t byte);
   
   void Init(bool reset_calibration);
   

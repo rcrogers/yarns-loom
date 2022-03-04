@@ -46,6 +46,10 @@ using namespace stmlib;
 const uint8_t kCCMacroRecord = 116;
 const uint8_t kCCMacroPlayMode = 117;
 
+void Multi::PrintDebugByte(uint8_t byte) {
+  ui.PrintDebugByte(byte);
+}
+
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
   master_lfo_.Init(17, 9);
