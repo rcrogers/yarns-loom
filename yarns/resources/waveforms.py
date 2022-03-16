@@ -106,8 +106,8 @@ fill = numpy.fmod(
 
 waveforms.append(('sine', scale(sine[quadrature])))
 
-sizzle_input = sine_input * 4
-sizzle = -numpy.sin(numpy.exp(sizzle_input)) * 127.5 + 127.5
+sizzle_input = sine_input * numpy.pi + numpy.pi / 3
+sizzle = numpy.sin(numpy.exp(sizzle_input)) * 127.5 + 127.5
 waveforms.append(('sizzle', scale(sizzle)))
 
 for zone in range(num_zones):
