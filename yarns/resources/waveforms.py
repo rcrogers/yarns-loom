@@ -84,8 +84,8 @@ def scale(array, min=-32766, max=32766, center=True, dither_level=2):
   return dither(array, order=dither_level)
 
 # Sine wave.
-sine = -numpy.sin(numpy.arange(WAVETABLE_SIZE + 1) / float(WAVETABLE_SIZE) * \
-    2 * numpy.pi) * 127.5 + 127.5
+sine_input = numpy.arange(WAVETABLE_SIZE + 1) / float(WAVETABLE_SIZE)
+sine = -numpy.sin(2 * numpy.pi * sine_input) * 127.5 + 127.5
 
 # Band limited waveforms.
 SAMPLE_RATE=40000
@@ -105,6 +105,10 @@ fill = numpy.fmod(
     WAVETABLE_SIZE)
 
 waveforms.append(('sine', scale(sine[quadrature])))
+
+sizzle_input = sine_input * 4
+sizzle = -numpy.sin(numpy.exp(sizzle_input)) * 127.5 + 127.5
+waveforms.append(('sizzle', scale(sizzle)))
 
 for zone in range(num_zones):
   f0 = 440.0 * 2.0 ** ((18 + 8 * zone - 69) / 12.0)

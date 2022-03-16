@@ -70,6 +70,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFoldSine,
   &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderTanhSine,
+  &Oscillator::RenderExponentialSine,
   &Oscillator::RenderBuzz,
   &Oscillator::RenderFM,
   // &Oscillator::RenderAudioRatePWM,
@@ -398,6 +399,15 @@ void Oscillator::RenderTanhSine() {
     int16_t baseline = this_sample >> 6;
     this_sample = baseline + ((this_sample - baseline) * timbre >> 15);
     this_sample = Interpolate88(ws_violent_overdrive, this_sample + 32768);
+  )
+}
+
+void Oscillator::RenderExponentialSine() {
+  RENDER_LOOP(
+    // timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff;
+    this_sample = Interpolate824(wav_sine, phase);
+    this_sample = this_sample * timbre >> 15;
+    this_sample = Interpolate88(wav_sizzle, this_sample + 32768);
   )
 }
 
