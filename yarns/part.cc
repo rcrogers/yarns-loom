@@ -413,7 +413,7 @@ void Part::Clock() { // From Multi::ClockFast
     if (next_step_ptr && next_step_ptr->is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
-      gate_length_counter_[v] += lut_clock_ratio_ticks[seq_.clock_division];
+      gate_length_counter_[v] += ticks_per_step;
     } else if (active_note_[v] != VOICE_ALLOCATION_NOT_FOUND) {
       GeneratedNoteOff(active_note_[v]);
     }
@@ -503,15 +503,14 @@ void Part::DeleteSequence() {
   seq_overdubbing_ = false;
 }
 
-bool Part::GeneratedNoteOn(uint8_t pitch, uint8_t velocity) {
+uint8_t Part::GeneratedNoteOn(uint8_t pitch, uint8_t velocity) {
   if (
     mono_allocator_.size() == mono_allocator_.max_size() ||
     generated_notes_.size() == generated_notes_.max_size()
   ) {
-    return false;
+    return 0;
   }
-  generated_notes_.NoteOn(pitch, velocity);
-  return true;
+  return generated_notes_.NoteOn(pitch, velocity);
 }
 
 void Part::StopSequencerArpeggiatorNotes() {
