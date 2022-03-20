@@ -112,6 +112,7 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "^F TRIANGLE FOLD",
   "ST SINE TANH",
   "SX SINE EXP",
+  "WHISTLE",
   "\x8E\x8E DIRAC COMB",
 };
 

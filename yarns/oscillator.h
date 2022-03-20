@@ -81,6 +81,7 @@ enum OscillatorShape {
   OSC_SHAPE_FOLD_TRIANGLE,
   OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_EXP_SINE,
+  OSC_SHAPE_WHISTLE,
   OSC_SHAPE_BUZZ,
   OSC_SHAPE_FM,
 };
@@ -130,6 +131,7 @@ class Oscillator {
   void RenderPhaseDistortionPulse();
   void RenderPhaseDistortionSaw();
   void RenderExponentialSine();
+  void RenderWhistle();
   void RenderBuzz();
   void RenderFilteredNoise();
   

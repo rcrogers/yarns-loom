@@ -41,7 +41,7 @@ using namespace stmlib;
 static const size_t kNumZones = 15;
 
 static const uint16_t kHighestNote = 128 * 128;
-static const uint16_t kPitchTableStart = 116 * 128;
+static const uint16_t kPitchTableStart = 116 * 128; // See highest_octave
 static const uint16_t kOctave = 12 * 128;
 
 /* static */
@@ -71,6 +71,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderExponentialSine,
+  &Oscillator::RenderWhistle,
   &Oscillator::RenderBuzz,
   &Oscillator::RenderFM,
   // &Oscillator::RenderAudioRatePWM,
@@ -84,7 +85,8 @@ void StateVariableFilter::Init(uint8_t interpolation_slope) {
 // 15-bit params
 void StateVariableFilter::RenderInit(int16_t frequency, int16_t resonance) {
   cutoff.SetTarget(Interpolate824(lut_svf_cutoff, frequency << 17) >> 1);
-  damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17) >> 1);
+  // damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17));
+  damp.SetTarget((0x7fff - resonance) - (resonance >> 4));
   cutoff.ComputeSlope();
   damp.ComputeSlope();
 }
@@ -92,11 +94,11 @@ void StateVariableFilter::RenderInit(int16_t frequency, int16_t resonance) {
 void StateVariableFilter::RenderSample(int16_t in) {
   cutoff.Tick();
   damp.Tick();
-  notch = (in >> 1) - (bp * damp.value() >> 15);
-  lp += cutoff.value() * bp >> 15;
-  CONSTRAIN(lp, -16384, 16383);
+  notch = (in >> 1) - (bp * damp.value() >> 14);
+  lp += cutoff.value() * bp >> 14;
+  CONSTRAIN(lp, -0x8000, 0x7fff);
   hp = notch - lp;
-  bp += cutoff.value() * hp >> 15;
+  bp += cutoff.value() * hp >> 14;
 }
 
 void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t gain) {
@@ -179,7 +181,7 @@ void Oscillator::Render() {
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     body \
-    audio_buffer_.Overwrite((gain * this_sample) >> 15); \
+    audio_buffer_.Overwrite(this_sample); \
   } \
   next_sample_ = next_sample; \
 
@@ -194,6 +196,7 @@ void Oscillator::Render() {
     gain_.Tick(); \
     uint16_t gain = gain_.value(); \
     body \
+    this_sample = (gain * this_sample) >> 15; \
   ) \
   phase_ = phase; \
   phase_increment_ = phase_increment; \
@@ -488,6 +491,20 @@ void Oscillator::RenderPhaseDistortionSaw() {
   )
 }
 
+void Oscillator::RenderWhistle() {
+  SET_TIMBRE;
+  svf_.RenderInit(pitch_, timbre);
+  gain_.ComputeSlope();
+  RENDER_CORE(
+    gain_.Tick();
+    uint16_t gain = gain_.value();
+    this_sample = Random::GetSample();
+    this_sample = this_sample * gain >> 16;
+    svf_.RenderSample(this_sample);
+    this_sample = svf_.bp << 1;
+  )
+}
+
 void Oscillator::RenderBuzz() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
@@ -525,6 +542,7 @@ void Oscillator::RenderFilteredNoise() {
     // CLIP(this_sample);
     // result = result * gain_correction >> 15;
     // result = Interpolate88(ws_moderate_overdrive, result + 32768);
+    this_sample = (gain * this_sample) >> 15; \
   )
   svf_ = svf;
 }
