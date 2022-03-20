@@ -41,7 +41,7 @@ using namespace stmlib;
 static const size_t kNumZones = 15;
 
 static const uint16_t kHighestNote = 128 * 128;
-static const uint16_t kPitchTableStart = 116 * 128;
+static const uint16_t kPitchTableStart = 116 * 128; // See highest_octave
 static const uint16_t kOctave = 12 * 128;
 
 /* static */
@@ -71,6 +71,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderExponentialSine,
+  &Oscillator::RenderWhistle,
   &Oscillator::RenderBuzz,
   &Oscillator::RenderFM,
   // &Oscillator::RenderAudioRatePWM,
@@ -84,7 +85,8 @@ void StateVariableFilter::Init(uint8_t interpolation_slope) {
 // 15-bit params
 void StateVariableFilter::RenderInit(int16_t frequency, int16_t resonance) {
   cutoff.SetTarget(Interpolate824(lut_svf_cutoff, frequency << 17) >> 1);
-  damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17) >> 1);
+  // damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17));
+  damp.SetTarget((0x7fff - resonance) - (resonance >> 4));
   cutoff.ComputeSlope();
   damp.ComputeSlope();
 }
@@ -92,11 +94,11 @@ void StateVariableFilter::RenderInit(int16_t frequency, int16_t resonance) {
 void StateVariableFilter::RenderSample(int16_t in) {
   cutoff.Tick();
   damp.Tick();
-  notch = (in >> 1) - (bp * damp.value() >> 15);
-  lp += cutoff.value() * bp >> 15;
-  CONSTRAIN(lp, -16384, 16383);
+  notch = (in >> 1) - (bp * damp.value() >> 14);
+  lp += cutoff.value() * bp >> 14;
+  CONSTRAIN(lp, -0x8000, 0x7fff);
   hp = notch - lp;
-  bp += cutoff.value() * hp >> 15;
+  bp += cutoff.value() * hp >> 14;
 }
 
 void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
@@ -192,7 +194,7 @@ void Oscillator::Render() {
 #define SET_TIMBRE \
   int16_t timbre = timbre_buffer_.ImmediatePeek();
 
-#define RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(body) \
+#define RENDER_LOOP_WITHOUT_GAIN(body) \
   int32_t next_sample = next_sample_; \
   uint32_t phase = phase_; \
   uint32_t phase_increment = phase_increment_; \
@@ -204,16 +206,21 @@ void Oscillator::Render() {
     next_sample = 0; \
     phase += phase_increment; \
     int16_t timbre = timbre_buffer_.ImmediateRead(); \
+    uint16_t gain = gain_buffer_.ImmediateRead(); \
     body \
-    audio_buffer_.Overwrite( \
-      (static_cast<int32_t>(gain_buffer_.ImmediateRead()) * this_sample) >> 16 \
-    ); \
+    audio_buffer_.Overwrite(this_sample); \
   } \
   next_sample_ = next_sample; \
   phase_ = phase; \
   phase_increment_ = phase_increment; \
   modulator_phase_ = modulator_phase; \
   modulator_phase_increment_ = modulator_phase_increment;
+
+#define RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT(body) \
+  RENDER_LOOP_WITHOUT_GAIN( \
+    body \
+    this_sample = this_sample * gain >> 16; \
+  )
 
 #define RENDER_LOOP(body) \
   RENDER_LOOP_WITHOUT_MOD_PHASE_INCREMENT( \
@@ -494,6 +501,18 @@ void Oscillator::RenderPhaseDistortionSaw() {
       output = (window * (carrier + 32768) >> 16) - 32768;
     }
     this_sample = output;
+  )
+}
+
+void Oscillator::RenderWhistle() {
+  SET_TIMBRE;
+  svf_.RenderInit(pitch_, timbre);
+  RENDER_LOOP_WITHOUT_GAIN(
+    (void) timbre;
+    this_sample = Random::GetSample();
+    this_sample = this_sample * gain >> 16;
+    svf_.RenderSample(this_sample);
+    this_sample = svf_.bp << 1;
   )
 }
 
