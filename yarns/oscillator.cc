@@ -492,11 +492,12 @@ void Oscillator::RenderPhaseDistortionSaw() {
 
 void Oscillator::RenderWhistle() {
   SET_TIMBRE;
+  int16_t resonance = 0x5fff + (timbre >> 2);
   gain_.ComputeSlope();
   StateVariableFilter svf = svf_;
   svf.cutoff.SetTarget(Interpolate824(lut_svf_cutoff, pitch_ << 17) >> 1);
   // svf.damp.SetTarget((0x7fff - timbre) - (timbre >> 5));
-  svf.damp.SetTarget(0x7fff - timbre);
+  svf.damp.SetTarget(0x7fff - resonance);
   svf.cutoff.ComputeSlope();
   svf.damp.ComputeSlope();
   RENDER_CORE(
@@ -504,6 +505,7 @@ void Oscillator::RenderWhistle() {
     uint16_t gain = gain_.value();
     this_sample = Random::GetSample();
     this_sample = this_sample * gain >> 15;
+    this_sample >>= 2;
     svf.RenderSample(this_sample);
     this_sample = svf.bp;
   )

@@ -645,10 +645,9 @@ f = cutoff / audio_rate
 
 f[f > 1 / 8.0] = 1 / 8.0
 f = 2 * numpy.sin(numpy.pi * f)
-resonance = numpy.arange(0, 257) / 256.0
+resonance = numpy.arange(0, 257) / 260.0
 damp = numpy.minimum(
-  # 2 * (1 - resonance ** 0.125),
-  2 * ((1 - resonance) ** 2),
+  2 * (1 - resonance ** 0.25),
   numpy.minimum(2, 2 / f - f * 0.5)
 )
 
