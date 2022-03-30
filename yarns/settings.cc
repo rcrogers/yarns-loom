@@ -113,6 +113,7 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "ST SINE TANH",
   "SX SINE EXP",
   "WHISTLE",
+  "\x8F\xA0 PING LOW-PASS SVF",
   "\x8E\x8E DIRAC COMB",
 };
 

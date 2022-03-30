@@ -72,6 +72,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderExponentialSine,
   &Oscillator::RenderWhistle,
+  &Oscillator::RenderPingLP,
   &Oscillator::RenderBuzz,
   &Oscillator::RenderFM,
   // &Oscillator::RenderAudioRatePWM,
@@ -95,7 +96,7 @@ void StateVariableFilter::RenderSample(int16_t in) {
   damp.Tick();
   notch = (in >> 1) - (bp * damp.value() >> 14);
   lp += cutoff.value() * bp >> 14;
-  CONSTRAIN(lp, -0x8000, 0x7fff);
+  CLIP(lp);
   hp = notch - lp;
   bp += cutoff.value() * hp >> 14;
 }
@@ -507,7 +508,24 @@ void Oscillator::RenderWhistle() {
     this_sample = this_sample * gain >> 15;
     this_sample >>= 2;
     svf.RenderSample(this_sample);
-    this_sample = svf.bp;
+    this_sample = svf.bp << 1;
+  )
+  svf_ = svf;
+}
+
+void Oscillator::RenderPingLP() {
+  SET_TIMBRE;
+  int16_t resonance = 0x5fff + (timbre >> 2);
+  gain_.ComputeSlope();
+  StateVariableFilter svf = svf_;
+  svf.cutoff.SetTarget(Interpolate824(lut_svf_cutoff, pitch_ << 17) >> 1);
+  svf.damp.SetTarget(0x7fff - resonance);
+  svf.cutoff.ComputeSlope();
+  svf.damp.ComputeSlope();
+  RENDER_CORE(
+    gain_.Tick();
+    svf.RenderSample(gain_.value());
+    this_sample = svf.lp << 1;
   )
   svf_ = svf;
 }
