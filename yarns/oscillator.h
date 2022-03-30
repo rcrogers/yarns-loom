@@ -48,7 +48,6 @@ class StateVariableFilter {
   void RenderInit(int16_t frequency, int16_t resonance);
   void RenderSample(int16_t in);
   int32_t bp, lp, notch, hp;
- private:
   Interpolator cutoff, damp;
 };
 

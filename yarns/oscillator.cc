@@ -85,8 +85,7 @@ void StateVariableFilter::Init(uint8_t interpolation_slope) {
 // 15-bit params
 void StateVariableFilter::RenderInit(int16_t frequency, int16_t resonance) {
   cutoff.SetTarget(Interpolate824(lut_svf_cutoff, frequency << 17) >> 1);
-  // damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17));
-  damp.SetTarget((0x7fff - resonance) - (resonance >> 4));
+  damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17) >> 1);
   cutoff.ComputeSlope();
   damp.ComputeSlope();
 }
@@ -493,16 +492,22 @@ void Oscillator::RenderPhaseDistortionSaw() {
 
 void Oscillator::RenderWhistle() {
   SET_TIMBRE;
-  svf_.RenderInit(pitch_, timbre);
   gain_.ComputeSlope();
+  StateVariableFilter svf = svf_;
+  svf.cutoff.SetTarget(Interpolate824(lut_svf_cutoff, pitch_ << 17) >> 1);
+  // svf.damp.SetTarget((0x7fff - timbre) - (timbre >> 5));
+  svf.damp.SetTarget(0x7fff - timbre);
+  svf.cutoff.ComputeSlope();
+  svf.damp.ComputeSlope();
   RENDER_CORE(
     gain_.Tick();
     uint16_t gain = gain_.value();
     this_sample = Random::GetSample();
-    this_sample = this_sample * gain >> 16;
-    svf_.RenderSample(this_sample);
-    this_sample = svf_.bp << 1;
+    this_sample = this_sample * gain >> 15;
+    svf.RenderSample(this_sample);
+    this_sample = svf.bp;
   )
+  svf_ = svf;
 }
 
 void Oscillator::RenderBuzz() {
