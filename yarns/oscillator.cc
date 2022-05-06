@@ -336,6 +336,14 @@ void Oscillator::RenderSaw() {
   svf_ = svf;
 }
 
+/* TODO timbre interpolation
+  timbre >> 3 = 0..2^(15 - 3) = 0..4096 MIDI cents = 0..32 semitones
+  Can get 0..4 octaves with: (timbre >> 3) + (timbre >> 4)
+  Is it possible to combine results of ComputePhaseIncrement in an operation like this?
+    timbre_.value() + timbre_envelope_.value()?
+  Effectively adding frequencies together.  
+  Amounts to 
+*/
 #define SET_SYNC_INCREMENT \
   SET_TIMBRE; \
   int32_t modulator_pitch = pitch_ + (timbre >> 3); \
