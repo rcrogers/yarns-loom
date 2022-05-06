@@ -178,11 +178,11 @@ characters = {
   
   # Waveforms
   '\x88': 'efgl',  # Saw
-  '\x89': 'pjb',   # CSaw
-  '\x8A': 'ml',    # Baby saw
-  '\x8B': 'nl',    # Tri
+  '\x89': 'epkb',  # Stepped
+  '\x8A': 'ml',    # Baby saw -- unused
+  '\x8B': 'nl',    # Tri -- unused
   '\x8C': 'efabc', # Square
-  '\x8D': 'epkc',   # Baby square
+  '\x8D': 'epkc',  # Baby square -- unused
   '\x8E': 'dhm',   # Pulse
   '\x8F': 'efgkc', # ADSR
   

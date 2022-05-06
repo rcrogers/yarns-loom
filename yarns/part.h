@@ -144,7 +144,7 @@ enum LegatoMode {
   LEGATO_MODE_LAST
 };
 struct PackedPart {
-  // Currently has 7 bits to spare
+  // Currently has 4 bits to spare
 
   struct PackedSequencerStep {
     unsigned int
@@ -159,7 +159,7 @@ struct PackedPart {
     looper_size         : looper::kBitsNoteIndex;
 
   static const uint8_t kTimbreBits = 7;
-  static const uint8_t kLFOShapeBits = 2;
+  static const uint8_t kLFOShapeBits = 3; // 6/8 values used
 
   signed int
     // MidiSettings

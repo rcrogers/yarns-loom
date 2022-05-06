@@ -51,6 +51,7 @@ class Interpolator {
   }
   void SetTarget(int16_t y) { y_target_ = y; } // 15-bit
   void ComputeSlope() {
+    // Could replace `/ x_delta` with `* phase_increment`, but that means going from a 8- to 32-bit operation.  Maybe add GetYDelta, SetXDelta so caller can do this?
     m_ = static_cast<int32_t>((y_target_ - y_.hi) << 16) / x_delta_;
   }
   void Tick() { y_.i += m_; }

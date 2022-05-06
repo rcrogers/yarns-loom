@@ -179,6 +179,8 @@ void Voice::Refresh() {
   int32_t vibrato_lfo = lfo_value(LFO_ROLE_PITCH);
 
   if (refresh_counter_ == 0) {
+    // TODO could use interpolators for frequency-dependent slew?
+    // Also might as well move interpolator into SyncedLFO at this point?
     uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
     amplitude_lfo_interpolator_.SetTarget((UINT16_MAX - scaled_tremolo_lfo) >> 1);

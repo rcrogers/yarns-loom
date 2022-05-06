@@ -120,6 +120,7 @@ const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
   "|\\",
   "/|",
   "\x8C_",
+  "*\x89",
 };
 
 const char* const voicing_allocation_priority_values[] = {

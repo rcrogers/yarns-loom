@@ -30,6 +30,8 @@
 #ifndef YARNS_SYNCED_LFO_H_
 #define YARNS_SYNCED_LFO_H_
 
+#include "stmlib/utils/random.h"
+
 namespace yarns {
 
 enum LFOShape {
@@ -37,6 +39,8 @@ enum LFOShape {
   LFO_SHAPE_SAW_DOWN,
   LFO_SHAPE_SAW_UP,
   LFO_SHAPE_SQUARE,
+  LFO_SHAPE_RANDOM_STEPPED,
+  // LFO_SHAPE_RANDOM_SMOOTHED,
 
   LFO_SHAPE_LAST
 };
@@ -57,22 +61,28 @@ class SyncedLFO {
   uint32_t GetPhase() const { return phase_; }
   uint32_t GetPhaseIncrement() const { return phase_increment_; }
   void SetPhaseIncrement(uint32_t i) { phase_increment_ = i; }
-  void Increment(uint32_t increment) { phase_ += increment; }
-  void Refresh() { return Increment(phase_increment_); }
 
-  int16_t shape(LFOShape s) const { return shape(s, phase_); }
-  int16_t shape(LFOShape shape, uint32_t phase) const {
+  void Refresh() {
+    phase_ += phase_increment_;
+    if (phase_ < phase_increment_) {
+      random_ = stmlib::Random::GetSample();
+    }
+  }
+
+  int16_t shape(LFOShape shape) const {
     switch (shape) {
       case LFO_SHAPE_TRIANGLE:
-        return phase < 1UL << 31      // x < 0.5
-          ? INT16_MIN + (phase >> 15) // y = -0.5 + 2x = 2(x - 1/4)
-          : 0x17fff - (phase >> 15);  // y =  1.5 - 2x = 2(3/4 - x)
+        return phase_ < 1UL << 31      // x < 0.5
+          ? INT16_MIN + (phase_ >> 15) // y = -0.5 + 2x = 2(x - 1/4)
+          : 0x17fff - (phase_ >> 15);  // y =  1.5 - 2x = 2(3/4 - x)
       case LFO_SHAPE_SAW_DOWN:
-        return INT16_MAX - (phase >> 16);
+        return INT16_MAX - (phase_ >> 16);
       case LFO_SHAPE_SAW_UP:
-        return INT16_MIN + (phase >> 16);
+        return INT16_MIN + (phase_ >> 16);
       case LFO_SHAPE_SQUARE:
-        return phase < 1UL << 31 ? INT16_MAX : INT16_MIN;
+        return phase_ < 1UL << 31 ? INT16_MAX : INT16_MIN;
+      case LFO_SHAPE_RANDOM_STEPPED:
+        return random_;
       default:
         return 0;
     } 
@@ -110,6 +120,7 @@ class SyncedLFO {
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t previous_phase_, previous_target_phase_;
+  int16_t random_;
 
   uint8_t phase_err_coeff_shift_, freq_err_coeff_shift_;
 
