@@ -48,6 +48,12 @@ const uint8_t kNullIndex = UINT8_MAX;
 const uint8_t kMaxNotes = 30;
 STATIC_ASSERT(kMaxNotes < (1 << kBitsNoteIndex), bits);
 
+enum RecordMode {
+  MODE_OVERDUB,
+  MODE_ERASE_ALL_ON_NEXT_INPUT,
+  MODE_ERASE_WHEN_PASSED,
+};
+
 struct Link {
   Link() {
     on = off = kNullIndex;
@@ -108,10 +114,12 @@ class Deck {
     }
   }
 
-  inline bool overwrite_enabled() const { return overwrite_; }
-  inline void ToggleOverwrite() {
-    if (overwrite_) { overwrite_ = false; }
-    else if (size_) { overwrite_ = true; }
+  inline bool overwrite_enabled() const {
+    return mode_ == MODE_ERASE_ALL_ON_NEXT_INPUT;
+  }
+  inline void ToggleOverwrite() { // TODO move to UI? need to mng state xitions
+    if (mode_ == MODE_ERASE_ALL_ON_NEXT_INPUT) { mode_ = MODE_OVERDUB; }
+    else if (size_) { mode_ = MODE_ERASE_ALL_ON_NEXT_INPUT; }
   }
 
   void RemoveOldestNote();
@@ -152,7 +160,7 @@ class Deck {
   // Linked lists track current and upcoming notes
   Link head_; // Points to the latest on/off
   Link next_link_[kMaxNotes];
-  bool overwrite_;
+  RecordMode mode_;
 
   uint8_t next_free_[kMaxNotes];
   uint8_t free_head_;
