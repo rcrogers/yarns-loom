@@ -36,6 +36,7 @@
 #include "stmlib/algorithms/voice_allocator.h"
 #include "stmlib/algorithms/note_stack.h"
 
+#include "yarns/resources.h"
 #include "yarns/looper.h"
 
 namespace yarns {
@@ -704,7 +705,12 @@ class Part {
   uint8_t GeneratedNoteOn(uint8_t pitch, uint8_t velocity);
   void GeneratedNoteOff(uint8_t pitch);
   void Reset();
+  uint16_t PPQN() const { // Pulses Per Quarter Note
+    return lut_clock_ratio_ticks[seq_.clock_division];
+  }
   void Clock();
+  void StepSequencerArpeggiator(uint32_t step_counter);
+  void ClockStepGateEndings();
   void Start();
   void Stop();
   void StopRecording();
@@ -870,14 +876,6 @@ class Part {
     keys.Init();
   }
   void ResetAllKeys();
-
-  inline uint8_t ArpUndoTransposeInputPitch(uint8_t pitch) const {
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR && pitch < SEQUENCER_STEP_REST) {
-      // This is an arpeggiation control step, so undo input transpose
-      pitch = TransposeInputPitch(pitch, -midi_.transpose_octaves);
-    }
-    return pitch;
-  }
 
   inline void RecordStep(const SequencerStep& step) {
     if (seq_recording_) {
@@ -1062,6 +1060,7 @@ class Part {
   uint8_t cyclic_allocation_note_counter_;
   
   ArpeggiatorState arp_;
+  uint8_t euclidean_step_index_;
   
   bool seq_recording_;
   bool seq_overdubbing_;
