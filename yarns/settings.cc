@@ -56,7 +56,7 @@ const char* const voicing_allocation_mode_values[VOICE_ALLOCATION_MODE_LAST] = {
 };
 
 const char* const sequencer_arp_direction_values[ARPEGGIATOR_DIRECTION_LAST] = {
-  "LINEAR", "BOUNCE", "RANDOM", "ROTATE", "SUBROTATE"
+  "LINEAR", "BOUNCE", "RANDOM", "JUMP", "GRID"
 };
 
 const char* const voicing_aux_cv_values[MOD_AUX_LAST] = {

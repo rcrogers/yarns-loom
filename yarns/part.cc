@@ -611,7 +611,7 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
       return next;
     }
   } else {
-    // Build a dummy input step for ROTATE/SUBROTATE
+    // Build a dummy input step for JUMP/GRID
     seq_step.data[0] = kC4 + 1 + next.step_index;
     seq_step.data[1] = 0x7f; // Full velocity
     pattern_mask = 1 << next.step_index;
@@ -626,6 +626,7 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
   }
 
   uint8_t key_with_octave = next.octave * num_keys + next.key_index;
+  uint8_t num_keys_all_octaves = num_keys * (seq_.arp_range + 1);
   // Update arepggiator note/octave counter.
   switch (seq_.arp_direction) {
     case ARPEGGIATOR_DIRECTION_RANDOM:
@@ -635,49 +636,44 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
         next.key_index = random >> 8;
       }
       break;
-    case ARPEGGIATOR_DIRECTION_STEP_ROTATE:
+    case ARPEGGIATOR_DIRECTION_STEP_JUMP:
       {
+        // If step value by color within octave is greater than total chord size, rest without moving
+        if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
+
         if (seq_step.is_white()) {
-          // Move immediately
-          next.key_increment = 0;
-          next.key_index = key_with_octave + seq_step.white_key_distance_from_middle_c();
+          // Advance chord position by octave #
+          next.key_increment = 0; // Move before playing the note
+          next.key_index = (key_with_octave + seq_step.octave()) % num_keys_all_octaves;
         } else { // If black key
-          int8_t key_offset = seq_step.black_key_distance_from_middle_c();
-          if (abs(key_offset) >= num_keys * (seq_.arp_range + 1)) {
-            // If offset is outside range, rest
-            return next;
-          }
+          // Play the black key value as an absolute position in the arp chord,
+          // then return to previous chord position and advance by octave #
+          int8_t key_offset = seq_step.color_key_value() - next.key_index;
           next.key_index += key_offset;
-          next.key_increment = -key_offset;
+          next.key_increment = -key_offset + seq_step.octave();
         }
         next.octave = next.key_index / num_keys;
       }
       break;
-    case ARPEGGIATOR_DIRECTION_STEP_SUBROTATE:
+    case ARPEGGIATOR_DIRECTION_STEP_GRID:
       {
-        next.key_increment = 0; // These arp directions move before playing the note
-        // Movement instructions derived from sequence step
-        uint8_t limit = seq_step.octave();
-        uint8_t clock;
-        uint8_t spacer;
-        if (seq_step.is_white()) {
-          clock = seq_step.white_key_value();
-          spacer = 1;
-        } else {
-          clock = 1;
-          spacer = seq_step.black_key_value() + 1;
-        }
-        uint8_t old_pos = modulo(key_with_octave / spacer, limit);
-        uint8_t new_pos = modulo(old_pos + clock, limit);
-        int8_t key_without_wrap = key_with_octave + spacer * (new_pos - old_pos);
-        next.octave = key_without_wrap / num_keys;
-        if (next.octave < 0 || next.octave > seq_.arp_range) {
-          // If outside octave range
-          next.key_index = key_with_octave - spacer * old_pos;
-          next.octave = next.key_index / num_keys;
-        } else {
-          next.key_index = key_without_wrap;
-        }
+        // If step value by color within octave is greater than total chord size, rest without moving
+        if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
+
+        // Map chord position and step type to an X-Y grid position
+        uint8_t x_clock, y_clock;
+        uint8_t size = seq_step.octave() + 1; // X- and Y-sizes
+        seq_step.is_white() ? (x_clock = 1) : (y_clock = 1);
+        uint8_t old_x_pos = modulo(key_with_octave, size);
+        uint8_t new_x_pos = modulo(old_x_pos + x_clock, size);
+        uint8_t old_y_pos = modulo(key_with_octave / size, size);
+        uint8_t new_y_pos = modulo(old_y_pos + y_clock, size);
+
+        // Map grid position back to chord position
+        next.key_increment = 0; // Move before playing the note
+        uint8_t new_key_with_octave = modulo(new_x_pos + new_y_pos * size, num_keys_all_octaves);
+        next.key_index = modulo(new_key_with_octave, num_keys);
+        next.octave = new_key_with_octave / num_keys;
       }
       break;
     default:

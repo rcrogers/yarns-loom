@@ -70,8 +70,8 @@ enum ArpeggiatorDirection {
   ARPEGGIATOR_DIRECTION_LINEAR,
   ARPEGGIATOR_DIRECTION_UP_DOWN,
   ARPEGGIATOR_DIRECTION_RANDOM,
-  ARPEGGIATOR_DIRECTION_STEP_ROTATE,
-  ARPEGGIATOR_DIRECTION_STEP_SUBROTATE,
+  ARPEGGIATOR_DIRECTION_STEP_JUMP,
+  ARPEGGIATOR_DIRECTION_STEP_GRID,
   ARPEGGIATOR_DIRECTION_LAST
 };
 
@@ -509,9 +509,11 @@ struct SequencerStep {
 
   inline bool is_white() const { return whiteKeyValues[note() % 12] != 0xff; }
   inline uint8_t octave() const { return note() / 12; }
-  inline int8_t octaves_above_middle_c() const { return ((int8_t) octave()) - (60 / 12); }
   inline uint8_t white_key_value() const { return whiteKeyValues[note() % 12]; }
   inline uint8_t black_key_value() const { return blackKeyValues[note() % 12]; }
+  inline uint8_t color_key_value() const { return is_white() ? white_key_value() : black_key_value(); }
+
+  inline int8_t octaves_above_middle_c() const { return ((int8_t) octave()) - (60 / 12); }
   inline int8_t white_key_distance_from_middle_c() const {
     return octaves_above_middle_c() * ((int8_t) kNumWhiteKeys) + white_key_value();
   }
