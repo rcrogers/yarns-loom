@@ -46,7 +46,7 @@ const uint16_t kRefreshTwoThirds = 600;
 const uint32_t kEncoderLongPressTime = kRefreshPeriod * 2 / 3;
 const uint32_t kDefaultFade = (1 << 15) / kRefreshPeriod; // 1/2 frequency
 
-const char* const kVersion = "Loom 2_6_0";
+const char* const kVersion = "Loom 2_6_1";
 
 /* static */
 const Ui::Command Ui::commands_[] = {
@@ -248,6 +248,8 @@ const char* const calibration_strings[] = {
 };
 
 const char notes_long[] = "C d D e E F g G a A b B ";
+
+// Display starts at "-1" -- C4 = MIDI note 60 = octave index 5 = display octave 4
 const char octave[] = "-0123456789";
 
 void Ui::PrintParameterName() {

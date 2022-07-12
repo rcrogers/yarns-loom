@@ -126,7 +126,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - New arpeggiator directions `JUMP` and `GRID` use the sequencer pitch as instructions to move through the arp chord in non-linear fashion:
   - Sequencer steps are interpreted based on their:
     - Color (black or white)
-    - Octave number (starting from C)
+    - Displayed octave number (with C as the first note of the octave)
     - Pitch ordinal within octave and color, e.g.
       - On a sequencer step that is the 2nd white note of octave 5, the pitch ordinal is 2
       - On a sequencer step that is the 4th black note of octave 2, the pitch ordinal is 4
@@ -143,7 +143,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
       - On a sequencer step that the 3rd black note of octave 5, the emitted note is the 3rd note of the arp chord, while the active position is incremented by 5
   - `GRID` simulates an X-Y coordinate system
     - The arp chord is mapped onto the grid in linear fashion, repeated as necessary to fill the grid
-    - Octave sets the size of the grid: 4th octave => 4x4 grid
+    - Octave sets the size of the grid: 4th octave => 4x4 grid (minimum 1x1)
     - White keys advance by 1 along the X-axis, moving left-to-right and wrapping back to the left
     - Black keys advance by 1 along the Y-axis, moving top-to-bottom and wrapping back to the top
   - These arp directions can still be used with `ARP PATTERN` values other than `SEQUENCER`, but the results are less interesting

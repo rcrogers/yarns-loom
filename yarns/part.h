@@ -772,6 +772,7 @@ class Part {
       (midi_.play_mode == PLAY_MODE_ARPEGGIATOR && seq_driven_arp());
   }
 
+  // Does arpeggiator use notes from the loop/step sequence?
   inline bool seq_driven_arp() const {
     return seq_.arp_pattern == 0;
   }

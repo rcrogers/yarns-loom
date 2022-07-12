@@ -625,8 +625,10 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
     return next;
   }
 
-  uint8_t key_with_octave = next.octave * num_keys + next.key_index;
-  uint8_t num_keys_all_octaves = num_keys * (seq_.arp_range + 1);
+  uint8_t num_octaves = seq_.arp_range + 1;
+  uint8_t num_keys_all_octaves = num_keys * num_octaves;
+  uint8_t display_octave = seq_step.octave();
+  if (display_octave > 0) display_octave--; // Match octave display in UI, with floor 0
   // Update arepggiator note/octave counter.
   switch (seq_.arp_direction) {
     case ARPEGGIATOR_DIRECTION_RANDOM:
@@ -641,18 +643,18 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
         // If step value by color within octave is greater than total chord size, rest without moving
         if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
 
+        // Advance active position by octave # -- C4 -> pos + 4
+        next.key_index = modulo(next.key_index + display_octave, num_keys_all_octaves);
         if (seq_step.is_white()) {
-          // Advance chord position by octave #
-          next.key_increment = 0; // Move before playing the note
-          next.key_index = (key_with_octave + seq_step.octave()) % num_keys_all_octaves;
+          next.key_increment = 0; // Move is already complete
         } else { // If black key
           // Play the black key value as an absolute position in the arp chord,
-          // then return to previous chord position and advance by octave #
-          int8_t key_offset = seq_step.color_key_value() - next.key_index;
-          next.key_index += key_offset;
-          next.key_increment = -key_offset + seq_step.octave();
+          // then return to active position
+          next.key_increment = next.key_index - seq_step.color_key_value();
+          next.key_index = seq_step.color_key_value();
         }
-        next.octave = next.key_index / num_keys;
+
+        next.octave = modulo(next.key_index / num_keys, num_octaves);
       }
       break;
     case ARPEGGIATOR_DIRECTION_STEP_GRID:
@@ -660,20 +662,21 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
         // If step value by color within octave is greater than total chord size, rest without moving
         if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
 
-        // Map chord position and step type to an X-Y grid position
-        uint8_t x_clock, y_clock;
-        uint8_t size = seq_step.octave() + 1; // X- and Y-sizes
-        seq_step.is_white() ? (x_clock = 1) : (y_clock = 1);
-        uint8_t old_x_pos = modulo(key_with_octave, size);
-        uint8_t new_x_pos = modulo(old_x_pos + x_clock, size);
-        uint8_t old_y_pos = modulo(key_with_octave / size, size);
-        uint8_t new_y_pos = modulo(old_y_pos + y_clock, size);
+        // Map linear position to X-Y grid coordinates
+        uint8_t size = std::max(static_cast<uint8_t>(1), display_octave); // C4 -> 4x4 grid; minimum 1x1
+        uint8_t x_pos = modulo(next.key_index, size);
+        uint8_t y_pos = modulo(next.key_index / size, size);
+        // Move within grid
+        if (seq_step.is_white()) {
+          x_pos = modulo(x_pos + 1, size);
+        } else {
+          y_pos = modulo(y_pos + 1, size);
+        }
+        // Map grid position back to linear position, which can be > chord size
+        next.key_index = x_pos + y_pos * size;
+        next.key_increment = 0; // Move is already complete
 
-        // Map grid position back to chord position
-        next.key_increment = 0; // Move before playing the note
-        uint8_t new_key_with_octave = modulo(new_x_pos + new_y_pos * size, num_keys_all_octaves);
-        next.key_index = modulo(new_key_with_octave, num_keys);
-        next.octave = new_key_with_octave / num_keys;
+        next.octave = modulo(next.key_index / num_keys, num_octaves);
       }
       break;
     default:
@@ -705,12 +708,9 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
       }
       break;
   }
-  // Invariants
-  next.octave = stmlib::modulo(next.octave, seq_.arp_range + 1);
-  next.key_index = stmlib::modulo(next.key_index, num_keys);
 
   // Build arpeggiator step
-  const NoteEntry* arpeggio_note = &arp_keys_.stack.played_note(next.key_index);
+  const NoteEntry* arpeggio_note = &arp_keys_.stack.played_note(modulo(next.key_index, num_keys));
   next.key_index += next.key_increment;
 
   // TODO step type algorithm
