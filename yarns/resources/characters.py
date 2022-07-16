@@ -218,6 +218,7 @@ characters = {
 
   '\xC0': 'plcb', # sqrt
   '\xC1': 'fhak', # pi
+  '\xC2': 'abcdefhmpk', # grid
   
   '\xFF': 'abcdefghjklmnp',
   

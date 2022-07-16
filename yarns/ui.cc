@@ -247,10 +247,14 @@ const char* const calibration_strings[] = {
   "-3", "-2", "-1", " 0", "+1", "+2", "+3", "+4", "+5", "+6", "+7", "OK"
 };
 
-const char notes_long[] = "C d D e E F g G a A b B ";
+const char notes_long[] = "CdDeEFgGaAbB";
 
 // Display starts at "-1" -- C4 = MIDI note 60 = octave index 5 = display octave 4
-const char octave[] = "-0123456789";
+const char kOctave[] = "-0123456789";
+
+const char kDisplayArpStepJumpWhite[32] = "POS+? @POS IF ?+ KEYS";
+const char kDisplayArpStepJumpBlack[32] = "POS+? @? IF ?+ KEYS";
+const char kDisplayArpStepGrid[32] = "GRID\xC2? X+1 IF ?+ KEYS";
 
 void Ui::PrintParameterName() {
   display_.Print(setting().short_name, setting().name);
@@ -258,7 +262,7 @@ void Ui::PrintParameterName() {
 
 void Ui::PrintParameterValue() {
   setting_defs.Print(setting(), multi.GetSetting(setting(), active_part_), buffer_);
-  display_.Print(buffer_, buffer_);
+  display_.Print(buffer_);
 }
 
 void Ui::PrintMenuName() {
@@ -312,19 +316,6 @@ void Ui::PrintRecordingStep() {
   }
   PrintNote(step.note());
   return;
-}
-
-void Ui::PrintArpeggiatorMovementStep(SequencerStep step) {
-  if (step.is_white()) {
-    Settings::PrintSignedInteger(buffer_, step.white_key_value());
-  } else {
-    int8_t value = step.black_key_value();
-    Settings::PrintSignedInteger(buffer_, (value >= 0 ? value + 1 : abs(value)));
-    if (buffer_[0] == ' ') {
-      buffer_[0] = value >= 0 ? '>' : '<';
-    }
-  }
-  display_.Print(buffer_, buffer_);
 }
 
 void Ui::SetBrightnessFromSequencerPhase(const Part& part) {
@@ -391,11 +382,39 @@ void Ui::PrintRecordingStatus() {
 }
 
 void Ui::PrintNote(int16_t note) {
-  buffer_[0] = notes_long[(note % 12) << 1];
-  buffer_[1] = notes_long[1 + ((note % 12) << 1)];
-  buffer_[1] = buffer_[1] == ' ' ? octave[note / 12] : buffer_[1];
+  char octave = kOctave[note / 12];
+  bool is_white = yarns::SequencerStep::is_white(note);
+  uint8_t color_key_value = yarns::SequencerStep::color_key_value(note);
+  uint8_t display_octave = yarns::SequencerStep::display_octave(note);
+
+  buffer_[0] = notes_long[note % 12];
+  buffer_[1] = octave;
   buffer_[2] = '\0';
-  display_.Print(buffer_, buffer_);
+  
+  if (!recording_part().seq_driven_arp()) {
+    display_.Print(buffer_);
+  } else if (recording_part().sequencer_settings().arp_direction == ARPEGGIATOR_DIRECTION_STEP_JUMP) {
+    if (is_white) {
+      strcpy(long_buffer_, kDisplayArpStepJumpWhite);
+      long_buffer_[4] = display_octave;
+      long_buffer_[14] = color_key_value;
+    } else {
+      strcpy(long_buffer_, kDisplayArpStepJumpBlack);
+      long_buffer_[4] = display_octave;
+      long_buffer_[7] = color_key_value;
+      long_buffer_[12] = color_key_value;
+    }
+    display_.Print(buffer_, long_buffer_);
+  } else if (recording_part().sequencer_settings().arp_direction == ARPEGGIATOR_DIRECTION_STEP_GRID) {
+    strcpy(long_buffer_, kDisplayArpStepGrid);
+    long_buffer_[5] = display_octave;
+    long_buffer_[7] = is_white ? 'X' : 'Y';
+    long_buffer_[14] = color_key_value;
+    display_.Print(buffer_, long_buffer_);
+  } else {
+    display_.Print(buffer_);
+  }
+  display_.Scroll();
 }
 
 void Ui::PrintPushItNote() {
@@ -910,6 +929,11 @@ void Ui::DoEvents() {
   }
 
   if (multi.recording()) {
+    /* TODO
+    this fucks everything up
+    only print recording if note hasn't changed?
+    need to update brightness separately from print?
+    */
     refresh_display = true;
   }
 

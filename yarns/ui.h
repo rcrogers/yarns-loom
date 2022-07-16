@@ -266,7 +266,7 @@ class Ui {
   Display display_;
   Encoder encoder_;
   Switches switches_;
-  char buffer_[32];
+  char buffer_[32], long_buffer_[32];
   
   bool rec_long_press_event_sent_;
   uint32_t rec_press_time_;

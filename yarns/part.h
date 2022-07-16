@@ -507,12 +507,26 @@ struct SequencerStep {
   inline bool is_slid() const { return data[1] & 0x80; }
   inline uint8_t velocity() const { return data[1] & 0x7f; }
 
-  inline bool is_white() const { return whiteKeyValues[note() % 12] != 0xff; }
-  inline uint8_t octave() const { return note() / 12; }
-  inline uint8_t white_key_value() const { return whiteKeyValues[note() % 12]; }
-  inline uint8_t black_key_value() const { return blackKeyValues[note() % 12]; }
-  inline uint8_t color_key_value() const { return is_white() ? white_key_value() : black_key_value(); }
+  inline static bool is_white(uint8_t note) { return whiteKeyValues[note % 12] != 0xff; }
+  inline bool is_white() const { return is_white(note()); }
 
+  inline static uint8_t white_key_value(uint8_t note) { return whiteKeyValues[note % 12]; }
+  inline static uint8_t black_key_value(uint8_t note) { return blackKeyValues[note % 12]; }
+  inline static uint8_t color_key_value(uint8_t note) { return is_white(note) ? white_key_value(note) : black_key_value(note); }
+
+  inline static uint8_t display_octave(uint8_t note) {
+    uint8_t display_octave = note / 12;
+    if (display_octave > 0) display_octave--; // Match octave display in UI, with floor 0
+    return display_octave;
+  }
+
+  inline uint8_t white_key_value() const { return white_key_value(note()); }
+  inline uint8_t black_key_value() const { return black_key_value(note()); }
+  inline uint8_t color_key_value() const { return color_key_value(note()); }
+
+  inline uint8_t octave() const { return note() / 12; }
+  inline uint8_t display_octave() const { return display_octave(note()); }
+  
   inline int8_t octaves_above_middle_c() const { return ((int8_t) octave()) - (60 / 12); }
   inline int8_t white_key_distance_from_middle_c() const {
     return octaves_above_middle_c() * ((int8_t) kNumWhiteKeys) + white_key_value();

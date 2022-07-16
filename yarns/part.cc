@@ -627,8 +627,6 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
 
   uint8_t num_octaves = seq_.arp_range + 1;
   uint8_t num_keys_all_octaves = num_keys * num_octaves;
-  uint8_t display_octave = seq_step.octave();
-  if (display_octave > 0) display_octave--; // Match octave display in UI, with floor 0
   // Update arepggiator note/octave counter.
   switch (seq_.arp_direction) {
     case ARPEGGIATOR_DIRECTION_RANDOM:
@@ -644,7 +642,7 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
         if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
 
         // Advance active position by octave # -- C4 -> pos + 4
-        next.key_index = modulo(next.key_index + display_octave, num_keys_all_octaves);
+        next.key_index = modulo(next.key_index + seq_step.display_octave(), num_keys_all_octaves);
         if (seq_step.is_white()) {
           next.key_increment = 0; // Move is already complete
         } else { // If black key
@@ -663,7 +661,7 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
         if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
 
         // Map linear position to X-Y grid coordinates
-        uint8_t size = std::max(static_cast<uint8_t>(1), display_octave); // C4 -> 4x4 grid; minimum 1x1
+        uint8_t size = std::max(static_cast<uint8_t>(1), seq_step.display_octave()); // C4 -> 4x4 grid; minimum 1x1
         uint8_t x_pos = modulo(next.key_index, size);
         uint8_t y_pos = modulo(next.key_index / size, size);
         // Move within grid
