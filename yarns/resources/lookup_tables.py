@@ -110,21 +110,22 @@ lookup_tables_32.append(
 Envelope curves
 -----------------------------------------------------------------------------"""
 
-env_linear = numpy.arange(0, 257.0) / 256.0
+env_samples = 256.0
+
+env_linear = numpy.arange(0, env_samples + 1) / env_samples
 env_linear[-1] = env_linear[-2]
 env_expo = 1.0 - numpy.exp(-4 * env_linear)
 lookup_tables.append(('env_expo', env_expo / env_expo.max() * 65535.0))
 
-
-env_linear = numpy.arange(1, 257.0) / 256.0
+env_linear = numpy.arange(1, env_samples + 1) / env_samples
 env_expo = 1.0 - numpy.exp(-4 * env_linear)
 env_expo /= env_expo.max()
-dx = 1 / 256.0
+dx = 1 / env_samples
 y_approx = 0
 slope_power = None
 errors = []
 expo_slope_shift = []
-assert(len(env_expo) == 256)
+assert(len(env_expo) == env_samples)
 for idx, y in enumerate(env_expo):
   dy = y - (0 if idx == 0 else env_expo[idx - 1])
   slope = dy / dx
@@ -530,7 +531,6 @@ Integer ratios for clock sync and FM
 
 lookup_tables_string = []
 
-import math
 MAXITER = 151
 def minkowski_inv(x):
     if x > 1 or x < 0:
