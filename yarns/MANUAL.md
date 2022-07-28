@@ -56,10 +56,10 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - `OS (OSCILLATOR SHAPE)` sets the waveform (see below)
 - Each wave shape has a timbral parameter that can be modulated by several sources
   - `TI (TIMBRE INITIAL)` sets initial timbre
-  - `TL (TIMBRE LFO MOD)` sets the depth of timbre modulation by the voice's bipolar LFO
+  - `TL (TIMBRE LFO MOD)`: attenuator for the bipolar LFO's modulation of timbre
   - `LS (TIMBRE LFO SHAPE)` sets the shape of the timbre LFO (triangle, down saw, up saw, square)
-  - `TE (TIMBRE ENV MOD)` sets the initial bipolar depth of modulation of timbre by envelope
-  - `TV (TIMBRE VEL MOD)` sets the bipolar modulation by velocity of the envelope modulation of timbre (e.g. velocity can polarize the timbre envelope)
+  - `TE (TIMBRE ENV MOD)`: attenuverter for the envelope's modulation of timbre
+  - `TV (TIMBRE VEL MOD)` attenuverter for velocity's modulation of the timbre envelope (velocity can polarize the timbre envelope)
 
 ### Oscillator synthesis models
 - Filtered noise: `TIMBRE` sets filter cutoff
@@ -86,15 +86,19 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Configured via the `▽A (AMPLITUDE MENU)`
 - Tremolo can be applied to envelope and oscillator
   - Tremolo uses the same LFO frequency as vibrato
-  - `TR (TREMOLO DEPTH)` sets the amount of tremolo
-  - `TS (TREMOLO SHAPE)` sets the shape of the tremolo LFO (triangle, down saw, up saw, square)
+  - `TR (TREMOLO DEPTH)`: attenuator for the unipolar tremolo LFO's reduction of gain
+  - `TS (TREMOLO SHAPE)`: the shape of the tremolo LFO (triangle, down saw, up saw, square)
 - ADSR envelope with velocity modulation
   - Envelope controls voice amplitude when the `OSCILLATOR MODE` is `ENVELOPED`
   - Envelope is available as an aux CV output (`ENVELOPE`) in all layouts
-  - Peak attack amplitude can be velocity-scaled via `PV (PEAK VEL MOD)`
-    - Positive values = damp on low velocity, negative values = damp on high velocity
-  - The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
+  - `ATTACK INIT`, `DECAY INIT`, `SUSTAIN INIT`, `RELEASE INIT`: initial settings for ADSR segments
     - Segment times range from 1 ms (2 ticks) to 5 seconds
+  - `ATTACK MOD VEL`, `DECAY MOD VEL`, `SUSTAIN MOD VEL`, `RELEASE MOD VEL`: attenuverter for velocity's modulation of the segment
+  - The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
+  - Peak attack amplitude can be velocity-scaled via `PV (PEAK VEL MOD)`
+    - Positive values: peak attack amplitude is lower when velocity is lower
+    - Negative values: peak attack amplitude is lower when velocity is higher
+    - Zero: peak attack amplitude is always maximum
   
 # Sequencer
 

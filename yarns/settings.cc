@@ -105,14 +105,15 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "\x88\xA0 SAW LOW-PASS SVF",
   "\x8CW PULSE WIDTH MOD",
   "\x88W SAW WIDTH MOD",
+  "\x88\x8C SAW-PULSE MORPH",
   "S$ SINE SYNC",
   "\x8C$ PULSE SYNC",
   "\x88$ SAW SYNC",
   "SF SINE FOLD",
   "^F TRIANGLE FOLD",
-  "ST SINE TANH",
-  "SX SINE EXP",
   "\x8E\x8E DIRAC COMB",
+  "ST SINE TANH",
+  "SX SINE EXPONENTIAL",
 };
 
 const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
