@@ -756,9 +756,10 @@ void Part::AllNotesOff() {
 
 void Part::StopNotesBySustainStatus(HeldKeys &keys, bool sustain_status) {
   for (uint8_t i = 1; i <= keys.stack.max_size(); ++i) {
-    NoteEntry* e = keys.stack.mutable_note(i);
-    if (keys.IsSustained(*e) != sustain_status) continue;
-    NoteOff(tx_channel(), e->note, false);
+    const NoteEntry& e = keys.stack.note(i);
+    if (e.note == NOTE_STACK_FREE_SLOT) continue;
+    if (keys.IsSustained(e) != sustain_status) continue;
+    NoteOff(tx_channel(), e.note, false);
   }
 }
 

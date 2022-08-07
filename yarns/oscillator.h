@@ -133,21 +133,23 @@ class Oscillator {
   void Render();
   
  private:
-  void RenderPulse();
-  void RenderSaw();
+  void RenderFilteredNoise();
+  void RenderPhaseDistortionPulse();
+  void RenderPhaseDistortionSaw();
+  void RenderLPPulse();
+  void RenderLPSaw();
+  void RenderVariablePulse();
+  void RenderVariableSaw();
   void RenderSawPulseMorph();
-  void RenderFoldTriangle();
-  void RenderFoldSine();
-  void RenderFM();
   void RenderSyncSine();
   void RenderSyncPulse();
   void RenderSyncSaw();
-  void RenderTanhSine();
-  void RenderPhaseDistortionPulse();
-  void RenderPhaseDistortionSaw();
-  void RenderExponentialSine();
+  void RenderFoldSine();
+  void RenderFoldTriangle();
   void RenderDiracComb();
-  void RenderFilteredNoise();
+  void RenderTanhSine();
+  void RenderExponentialSine();
+  void RenderFM();
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   

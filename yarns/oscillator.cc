@@ -58,12 +58,10 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderPhaseDistortionSaw,
   &Oscillator::RenderPhaseDistortionSaw,
   &Oscillator::RenderPhaseDistortionSaw,
-  // SVF LP
-  &Oscillator::RenderPulse,
-  &Oscillator::RenderSaw,
-  // Width mod
-  &Oscillator::RenderPulse,
-  &Oscillator::RenderSaw,
+  &Oscillator::RenderLPPulse,
+  &Oscillator::RenderLPSaw,
+  &Oscillator::RenderVariablePulse,
+  &Oscillator::RenderVariableSaw,
   &Oscillator::RenderSawPulseMorph,
   &Oscillator::RenderSyncSine,
   &Oscillator::RenderSyncPulse,
@@ -74,7 +72,6 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderExponentialSine,
   &Oscillator::RenderFM,
-  // &Oscillator::RenderAudioRatePWM,
 };
 
 void StateVariableFilter::Init(uint8_t interpolation_slope) {
@@ -225,21 +222,11 @@ void Oscillator::Render() {
   )
 
 #define EDGES_SAW(ph, ph_incr) \
-  if (!high_) { \
-    if (ph < pw) break; \
-    uint32_t t = (ph - pw) / (ph_incr >> 16); \
-    this_sample -= ThisBlepSample(t) >> 1; \
-    next_sample -= NextBlepSample(t) >> 1; \
-    high_ = true; \
-  } \
-  if (high_) { \
-    if (!self_reset) break; \
-    self_reset = false; \
-    uint32_t t = ph / (ph_incr >> 16); \
-    this_sample -= ThisBlepSample(t) >> 1; \
-    next_sample -= NextBlepSample(t) >> 1; \
-    high_ = false; \
-  }
+  if (!self_reset) break; \
+  self_reset = false; \
+  uint32_t t = ph / (ph_incr >> 16); \
+  this_sample -= ThisBlepSample(t); \
+  next_sample -= NextBlepSample(t); \
 
 #define EDGES_PULSE(ph, ph_incr) \
   if (!high_) { \
@@ -291,60 +278,70 @@ void Oscillator::Render() {
   int32_t cutoff = (pitch_ >> 1) + (timbre >> 1); \
   CONSTRAIN(cutoff, 0, 0x7fff);
 
-void Oscillator::RenderPulse() {
+void Oscillator::RenderLPPulse() {
   StateVariableFilter svf = svf_;
   SET_TRACKING_FILTER_CUTOFF;
   svf.RenderInit(cutoff, 0x7fff);
   uint32_t pw = 0x80000000;
-  RENDER_WITH_PHASE_GAIN_TIMBRE(
-    if (shape_ == OSC_SHAPE_VARIABLE_PULSE) {
-      CONSTRAIN(timbre, 0, 31767);
-      pw = static_cast<uint32_t>(32767 - timbre) << 16;
-    }
+  RENDER_WITH_PHASE_GAIN(
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_PULSE(phase, phase_increment) }
-    next_sample += phase < pw ? 0 : 32767;
-    this_sample = (this_sample - 16384) << 1;
-    if (shape_ == OSC_SHAPE_LP_PULSE) {
-      svf.RenderSample(this_sample);
-      this_sample = svf.lp << 1;
-    }
+    next_sample += phase < pw ? 0 : 0x7fff;
+    this_sample = (this_sample - 0x4000) << 1;
+    svf.RenderSample(this_sample);
+    this_sample = svf.lp << 1;
   )
   svf_ = svf;
 }
 
-void Oscillator::RenderSaw() {
+void Oscillator::RenderLPSaw() {
   StateVariableFilter svf = svf_;
   SET_TRACKING_FILTER_CUTOFF;
   svf.RenderInit(cutoff, 0x6000);
-  uint32_t pw = 0;
-  RENDER_WITH_PHASE_GAIN_TIMBRE(
-    if (shape_ == OSC_SHAPE_VARIABLE_SAW) {
-      pw = static_cast<uint32_t>(timbre) << 16;
-    }
+  RENDER_WITH_PHASE_GAIN(
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_SAW(phase, phase_increment) }
-    next_sample += phase >> 18;
-    next_sample += (phase - pw) >> 18;
-    this_sample = (this_sample - 16384) << 1;
-    if (shape_ == OSC_SHAPE_LP_SAW) {
-      svf.RenderSample(this_sample);
-      this_sample = svf.lp << 1;
-    }
+    next_sample += phase >> 17;
+    this_sample = (this_sample - 0x4000) << 1;
+    svf.RenderSample(this_sample);
+    this_sample = svf.lp << 1;
   )
   svf_ = svf;
 }
 
+void Oscillator::RenderVariablePulse() {
+  RENDER_WITH_PHASE_GAIN_TIMBRE(
+    timbre = timbre + (timbre >> 1); // 3/4
+    uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo, timbre)) << 15; // 50-0%
+    bool self_reset = phase < phase_increment;
+    while (true) { EDGES_PULSE(phase, phase_increment) }
+    next_sample += phase < pw ? 0 : 0x7fff;
+    this_sample = (this_sample - 0x4000) << 1;
+  )
+}
+
+void Oscillator::RenderVariableSaw() {
+  RENDER_WITH_PHASE_GAIN_TIMBRE(
+    bool self_reset = phase < phase_increment;
+    while (true) { EDGES_SAW(phase, phase_increment) }
+    timbre = timbre + (timbre >> 1); // 3/4
+    uint16_t saw_width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
+    if ((phase >> 16) < saw_width) next_sample += (phase / saw_width) >> 1;
+    else next_sample += 0x7fff;
+    this_sample = (this_sample - 0x4000) << 1;
+  )
+}
+
 // Rotates the rising edge's slope from saw to pulse
-// /|/| -> _/‾|_/‾| -> _|‾|_|‾|
+// ⟋|⟋| -> _/‾|_/‾| -> _|‾|_|‾|
 void Oscillator::RenderSawPulseMorph() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     // Prevent saw from reaching an infinitely steep rise, else we'd have to
     // clumsily transition into a BLEP of what is now a rising pulse edge
-    CONSTRAIN(timbre, 0, 0x7ccc);
+    timbre = timbre + (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + (timbre >> 4); // 31/32
 
-    // Exponential timbre curve, biased toward square
-    uint32_t pw = Interpolate88(lut_env_expo, timbre << 1) << 15; // 0-50%
+    // Exponential timbre curve, biased high
+    uint32_t pw = Interpolate88(lut_env_expo, timbre) << 15; // 0-50%
     uint32_t saw_width = UINT32_MAX - (pw << 1); // 0-100%
 
     bool self_reset = phase < phase_increment;
@@ -390,16 +387,12 @@ void Oscillator::RenderSyncPulse() {
 
 void Oscillator::RenderSyncSaw() {
   SET_SYNC_INCREMENT;
-  uint32_t pw = 0;
   RENDER_WITH_PHASE_GAIN(
     SYNC(
-      0 - (
-        (reset_modulator_phase >> 18) + ((reset_modulator_phase - pw) >> 18)
-      ),
+      0 - (reset_modulator_phase >> 17),
       EDGES_SAW(modulator_phase, modulator_phase_increment)
     );
-    next_sample += modulator_phase >> 18;
-    next_sample += (modulator_phase - pw) >> 18;
+    next_sample += modulator_phase >> 17;
     this_sample = (this_sample - 16384) << 1;
   )
 }
