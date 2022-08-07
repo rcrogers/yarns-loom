@@ -74,14 +74,15 @@ enum OscillatorShape {
   OSC_SHAPE_LP_SAW,
   OSC_SHAPE_VARIABLE_PULSE,
   OSC_SHAPE_VARIABLE_SAW,
+  OSC_SHAPE_SAW_PULSE_MORPH,
   OSC_SHAPE_SYNC_SINE,
   OSC_SHAPE_SYNC_PULSE,
   OSC_SHAPE_SYNC_SAW,
   OSC_SHAPE_FOLD_SINE,
   OSC_SHAPE_FOLD_TRIANGLE,
+  OSC_SHAPE_DIRAC_COMB,
   OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_EXP_SINE,
-  OSC_SHAPE_BUZZ,
   OSC_SHAPE_FM,
 };
 
@@ -118,20 +119,23 @@ class Oscillator {
   void Render();
   
  private:
-  void RenderPulse();
-  void RenderSaw();
-  void RenderFoldTriangle();
-  void RenderFoldSine();
-  void RenderFM();
+  void RenderFilteredNoise();
+  void RenderPhaseDistortionPulse();
+  void RenderPhaseDistortionSaw();
+  void RenderLPPulse();
+  void RenderLPSaw();
+  void RenderVariablePulse();
+  void RenderVariableSaw();
+  void RenderSawPulseMorph();
   void RenderSyncSine();
   void RenderSyncPulse();
   void RenderSyncSaw();
+  void RenderFoldSine();
+  void RenderFoldTriangle();
+  void RenderDiracComb();
   void RenderTanhSine();
-  void RenderPhaseDistortionPulse();
-  void RenderPhaseDistortionSaw();
   void RenderExponentialSine();
-  void RenderBuzz();
-  void RenderFilteredNoise();
+  void RenderFM();
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   

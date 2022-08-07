@@ -23,7 +23,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - [Expanded support for Control Change events](#expanded-support-for-control-change-events)
     - [Clocking](#clocking)
     - [LFOs](#lfos)
-    - [Other tweaks](#other-tweaks)
+    - [Portamento](#portamento)
 
 # Interface
 
@@ -56,10 +56,10 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - `OS (OSCILLATOR SHAPE)` sets the waveform (see below)
 - Each wave shape has a timbral parameter that can be modulated by several sources
   - `TI (TIMBRE INITIAL)` sets initial timbre
-  - `TL (TIMBRE LFO MOD)` sets the depth of timbre modulation by the voice's bipolar LFO
+  - `TL (TIMBRE LFO MOD)`: attenuator for the bipolar LFO's modulation of timbre
   - `LS (TIMBRE LFO SHAPE)` sets the shape of the timbre LFO (triangle, down saw, up saw, square)
-  - `TE (TIMBRE ENV MOD)` sets the initial bipolar depth of modulation of timbre by envelope
-  - `TV (TIMBRE VEL MOD)` sets the bipolar modulation by velocity of the envelope modulation of timbre (e.g. velocity can polarize the timbre envelope)
+  - `TE (TIMBRE ENV MOD)`: attenuverter for the envelope's modulation of timbre
+  - `TV (TIMBRE VEL MOD)` attenuverter for velocity's modulation of the timbre envelope (velocity can polarize the timbre envelope)
 
 ### Oscillator synthesis models
 - Filtered noise: `TIMBRE` sets filter cutoff
@@ -86,25 +86,28 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Configured via the `▽A (AMPLITUDE MENU)`
 - Tremolo can be applied to envelope and oscillator
   - Tremolo uses the same LFO frequency as vibrato
-  - `TR (TREMOLO DEPTH)` sets the amount of tremolo
-  - `TS (TREMOLO SHAPE)` sets the shape of the tremolo LFO (triangle, down saw, up saw, square)
+  - `TR (TREMOLO DEPTH)`: attenuator for the unipolar tremolo LFO's reduction of gain
+  - `TS (TREMOLO SHAPE)`: the shape of the tremolo LFO (triangle, down saw, up saw, square)
 - ADSR envelope with velocity modulation
   - Envelope controls voice amplitude when the `OSCILLATOR MODE` is `ENVELOPED`
   - Envelope is available as an aux CV output (`ENVELOPE`) in all layouts
-  - Peak attack amplitude can be velocity-scaled via `PV (PEAK VEL MOD)`
-    - Positive values = damp on low velocity, negative values = damp on high velocity
-  - The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
+  - `ATTACK INIT`, `DECAY INIT`, `SUSTAIN INIT`, `RELEASE INIT`: initial settings for ADSR segments
     - Segment times range from 1 ms (2 ticks) to 5 seconds
+  - `ATTACK MOD VEL`, `DECAY MOD VEL`, `SUSTAIN MOD VEL`, `RELEASE MOD VEL`: attenuverter for velocity's modulation of the segment
+  - The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
+  - Peak attack amplitude can be velocity-scaled via `PV (PEAK VEL MOD)`
+    - Positive values: peak attack amplitude is lower when velocity is lower
+    - Negative values: peak attack amplitude is lower when velocity is higher
+    - Zero: peak attack amplitude is always maximum
   
 # Sequencer
 
 ### Recording interface
 - Hold `REC` to clear sequence
 - Hold `TAP` to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
-- First `REC` press switches the display to show the pitch instead of the step number (press again to exit recording)
-- Flash note (or RS/TI) for the selected step
-- Brighten display while the selected step is being played
-- Wrap around when using encoder to scroll through steps
+- First `REC` press switches the display to show the pitch (or `RS`/`TI`) instead of the step number (press again to exit recording)
+- Display brightens while the selected step is being played
+- Wraps around when using encoder to scroll through steps
 
 ### Looper-style sequencing mode with real-time recording
 - To enable, ensure `SM (SEQ MODE)` is set to `LOOP`
@@ -124,10 +127,30 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - A sequence must exist to produce arpeggiator output
 - The arpeggiator respects rests/ties in a step sequence
 - The velocity of the arpeggiator output is calculated by multiplying the velocities of the sequencer step and the held key
-- New arpeggiator directions use the note pitch as instructions to move through the arp chord in non-linear fashion:
-  - Notes are interpreted based on key color (black/white) and distance above/below C4 (middle C)
-  - `ROTATE` treats white keys as relative movement through the chord, and black keys as offsets from the current position in the chord
-  - `SUBROTATE` generates quasi-cartesian patterns
+- New arpeggiator directions `JUMP` and `GRID` use the sequencer pitch as instructions to move through the arp chord in non-linear fashion:
+  - Sequencer steps are interpreted based on their:
+    - Color (black or white)
+    - Displayed octave number (with C as the first note of the octave)
+    - Pitch ordinal within octave and color, e.g.
+      - On a sequencer step that is the 2nd white note of octave 5, the pitch ordinal is 2
+      - On a sequencer step that is the 4th black note of octave 2, the pitch ordinal is 4
+  - The sequencer step's pitch ordinal is checked against the size of the arp chord to see if a note is emitted
+    - On a sequencer step with pitch ordinal N, the step is ignored unless there are N or more keys in the arp chord, e.g.:
+      - On a sequencer step that is the 3rd white key of its octave, a note is emitted IFF there are 3+ keys in the arp chord
+      - On sequencer step that is the 1st black key of its octave, a note is emitted IFF there are 1+ keys in the arp chord
+    - Allows dynamic control of the arpeggiator's rhythmic pattern by varying the size of the arp chord
+  - `JUMP` uses a combination of relative and absolute movement through the chord
+    - Both colors advance the active position in the arp chord by octave-many places, wrapping around to the beginning of the chord
+    - White steps emit a note from the active position in the arp chord, e.g.:
+      - On a sequencer step that is the 5th white note of octave 2, where the starting active position is 1 out of the arp chord's 6 notes, the active position is first incremented by 2 to become 3, and then the 3rd note of the arp chord is emitted
+    - Black steps ignore the active position, instead treating the pitch ordinal as an absolute position in the arp chord, e.g.:
+      - On a sequencer step that the 3rd black note of octave 5, the emitted note is the 3rd note of the arp chord, while the active position is incremented by 5
+  - `GRID` simulates an X-Y coordinate system
+    - The arp chord is mapped onto the grid in linear fashion, repeated as necessary to fill the grid
+    - Octave sets the size of the grid: 4th octave => 4x4 grid (minimum 1x1)
+    - White keys advance by 1 along the X-axis, moving left-to-right and wrapping back to the left
+    - Black keys advance by 1 along the Y-axis, moving top-to-bottom and wrapping back to the top
+  - These arp directions can still be used with `ARP PATTERN` values other than `SEQUENCER`, but the results are less interesting
 
 # MIDI
 
@@ -146,23 +169,23 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     
 ### Hold pedal
 - Instead of a global latch state, each part can respond to the hold pedal in its own way
-- Screen periodically shows tick marks to show the sustain state of the 6 most recent keys (limited due to display size)
-  - Bottom-half tick: key is manually held, will stop when released
-  - Full-height tick: key is manually held, will be sustained when released
-  - Steady top-half tick: key is sustained, will continue after the next key-press
-  - Blinking top-half tick: key is sustained, will be stopped by the next key-press
-- New `HP (HOLD PEDAL POLARITY)` setting to switch between [negative and positive pedal polarity](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html), or otherwise reverse the pedal's up/down behavior
+- Screen periodically shows tick marks to show the state of the part's 6 most recently pressed keys, and how the hold pedal is affecting them
+  - Bottom-half tick: key is manually held, and will stop when released
+  - Full-height tick: key is manually held, and will be sustained when released
+  - Steady top-half tick: key is sustained, and will continue after the next key-press
+  - Blinking top-half tick: key is sustained, and will be stopped by the next key-press
+- New `HP (HOLD PEDAL POLARITY)` setting to switch between [negative (default) and positive pedal polarity](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html), or otherwise reverse the pedal's up/down behavior
 - New `HM (HOLD PEDAL MODE)` setting to change the part's response to the hold pedal
   - `OFF`: pedal has no effect
-  - `SUSTAIN`: sustains key-releases after pedal-down, and stops sustained notes on pedal-up
+  - `SUSTAIN`: sustains key-releases while pedal is down, and stops sustained notes on pedal-up
     - Matches the behavior of the pedal in the stock firmware
-  - `SOSTENUTO`: while pedal is down, sustains key-releases on only the keys pressed before pedal-down; stops sustained notes on pedal-up
-  - `LATCH`: uses the semantics of the button-controlled latching in stock Yarns -- sustains key-releases after pedal-down; stops sustained notes on key-press regardless of pedal state
+  - `SOSTENUTO`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down; stops sustained notes on pedal-up
+  - `LATCH`: uses the semantics of the button-controlled latching in stock Yarns -- sustains key-releases while pedal is down; stops sustained notes on key-press regardless of pedal state
     - Matches the behavior of the front-panel latching (triggered by holding `REC`)
   - `MOMENTARY LATCH`: like `LATCH`, but stop sustained notes on pedal-up, instead of on key-press
-  - `CLUTCH`: while pedal is down, sustains key-releases on only the keys pressed before pedal-down (similar to `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (similar to `LATCH`)
+  - `CLUTCH`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down (like `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (like `LATCH`)
     - Notes triggered while the pedal is down are not sustained and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
-  - `FILTER`: while pedal is up, ignores key-presses and sustains key-releases; while pedal is down, stops sustained notes on key-press
+  - `FILTER`: while pedal is down, ignores key-presses and sustains key-releases; while pedal is up, stops sustained notes on key-press
     - In combination with setting an opposite `HOLD PEDAL POLARITY` on two different parts, this allows the use of the pedal to select which part is controlled by the keyboard, while also supporting latching
 
 ### Event routing, filtering, and transformation
@@ -173,7 +196,6 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - `DIRECT` gives full use of the keyboard, allowing accompaniment of a sequence, etc.
 - New `IT (INPUT TRANSPOSE OCTAVES)` setting to apply transposition to notes received by a part
   - Effectively an octave switch for the controller
-  - Ignored when using the step to control arpeggiator movement
 - Parts can filter notes by velocity
   - Added UI for previously hidden settings `V> (VELOCITY MIN)` and `V< (VELOCITY MAX)`
   - Present for all layouts except 4V
@@ -199,11 +221,15 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - [Implementation Chart](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 
 ### Clocking
-- Added a variety of integer ratios for `O/` and `C/` (and for clock-synced `VS (VIBRATO SPEED)`)
+- Added a variety of integer ratios for `O/` and `C/`, as well as for `LFO RATE` when clock-synced
   - Includes 1/8, 3/7, 2/3, 6/5, 4/3, and more
 - Sequencers' phases are based on a master clock, to allow returning to predictable phase relationships between sequences even after a stint in disparate time signatures
+- An explicit clock start (from panel switch or MIDI) can supersede an implicit clock start (from keyboard)
+- Euclidean rhythms can be applied to the step sequencer as well as the arpeggiator
 
 ### LFOs
+- `LFO RATE` (formerly `VIBRATO SPEED`) has a shared zero at center
+  - Increases clock sync ratio when turning counter-clockwise of center, and increases frequency when turning clockwise
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
 - LFO "spreading" (dephasing or detuning)
   - `LV (LFO SPREAD VOICES)` sets the spread among the voices for the selected part
@@ -217,7 +243,8 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - Each LFO's frequency is a multiple of the last, with that multiple being between 1x and 2x depending on the setting
     - Facilitates unstable, meandering modulation
   
-### Other tweaks
-- Broadened portamento setting range from 51 to 64 values per curve shape
-- Allow an explicit clock start (from panel switch or MIDI) to supersede an implicit clock start (from keyboard)
-- Change 'split' controls (portamento and vibrato speed) to have a common zero at the split point, increasing both CCW and CW of this point
+### Portamento
+- `PORTAMENTO` setting has a shared zero at center
+  - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
+- Broadened setting range from 51 to 64 values per curve shape
+  

@@ -36,6 +36,7 @@
 #include "stmlib/algorithms/voice_allocator.h"
 #include "stmlib/algorithms/note_stack.h"
 
+#include "yarns/resources.h"
 #include "yarns/looper.h"
 
 namespace yarns {
@@ -69,8 +70,8 @@ enum ArpeggiatorDirection {
   ARPEGGIATOR_DIRECTION_LINEAR,
   ARPEGGIATOR_DIRECTION_UP_DOWN,
   ARPEGGIATOR_DIRECTION_RANDOM,
-  ARPEGGIATOR_DIRECTION_STEP_ROTATE,
-  ARPEGGIATOR_DIRECTION_STEP_SUBROTATE,
+  ARPEGGIATOR_DIRECTION_STEP_JUMP,
+  ARPEGGIATOR_DIRECTION_STEP_GRID,
   ARPEGGIATOR_DIRECTION_LAST
 };
 
@@ -508,9 +509,11 @@ struct SequencerStep {
 
   inline bool is_white() const { return whiteKeyValues[note() % 12] != 0xff; }
   inline uint8_t octave() const { return note() / 12; }
-  inline int8_t octaves_above_middle_c() const { return ((int8_t) octave()) - (60 / 12); }
   inline uint8_t white_key_value() const { return whiteKeyValues[note() % 12]; }
   inline uint8_t black_key_value() const { return blackKeyValues[note() % 12]; }
+  inline uint8_t color_key_value() const { return is_white() ? white_key_value() : black_key_value(); }
+
+  inline int8_t octaves_above_middle_c() const { return ((int8_t) octave()) - (60 / 12); }
   inline int8_t white_key_distance_from_middle_c() const {
     return octaves_above_middle_c() * ((int8_t) kNumWhiteKeys) + white_key_value();
   }
@@ -704,7 +707,12 @@ class Part {
   uint8_t GeneratedNoteOn(uint8_t pitch, uint8_t velocity);
   void GeneratedNoteOff(uint8_t pitch);
   void Reset();
+  uint16_t PPQN() const { // Pulses Per Quarter Note
+    return lut_clock_ratio_ticks[seq_.clock_division];
+  }
   void Clock();
+  void StepSequencerArpeggiator(uint32_t step_counter);
+  void ClockStepGateEndings();
   void Start();
   void Stop();
   void StopRecording();
@@ -764,6 +772,7 @@ class Part {
       (midi_.play_mode == PLAY_MODE_ARPEGGIATOR && seq_driven_arp());
   }
 
+  // Does arpeggiator use notes from the loop/step sequence?
   inline bool seq_driven_arp() const {
     return seq_.arp_pattern == 0;
   }
@@ -870,14 +879,6 @@ class Part {
     keys.Init();
   }
   void ResetAllKeys();
-
-  inline uint8_t ArpUndoTransposeInputPitch(uint8_t pitch) const {
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR && pitch < SEQUENCER_STEP_REST) {
-      // This is an arpeggiation control step, so undo input transpose
-      pitch = TransposeInputPitch(pitch, -midi_.transpose_octaves);
-    }
-    return pitch;
-  }
 
   inline void RecordStep(const SequencerStep& step) {
     if (seq_recording_) {
@@ -1062,6 +1063,7 @@ class Part {
   uint8_t cyclic_allocation_note_counter_;
   
   ArpeggiatorState arp_;
+  uint8_t euclidean_step_index_;
   
   bool seq_recording_;
   bool seq_overdubbing_;
