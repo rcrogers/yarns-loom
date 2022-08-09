@@ -136,7 +136,7 @@ class Voice {
     lfo_shapes_[role] = static_cast<LFOShape>(shape);
   }
   inline int16_t lfo_value(LFORole role) const {
-    return lfos_[role].shape(lfo_shapes_[role]);
+    return lfos_[role].Render(lfo_shapes_[role]);
   }
 
   inline void set_trigger_duration(uint8_t trigger_duration) {

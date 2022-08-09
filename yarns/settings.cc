@@ -117,11 +117,12 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
 };
 
 const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
-  "/\\",
-  "|\\",
-  "/|",
-  "\x8C_",
-  "*\x89",
+  "/\\ TRIANGLE",
+  "|\\ DOWN SAW",
+  "/| UP SAW",
+  "\x8C_ SQUARE",
+  "*\x89 STEPPED RANDOM",
+  "*/ SMOOTH RANDOM",
 };
 
 const char* const voicing_allocation_priority_values[] = {

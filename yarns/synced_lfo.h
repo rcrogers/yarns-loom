@@ -31,6 +31,7 @@
 #define YARNS_SYNCED_LFO_H_
 
 #include "stmlib/utils/random.h"
+#include "stmlib/utils/dsp.h"
 
 namespace yarns {
 
@@ -40,7 +41,7 @@ enum LFOShape {
   LFO_SHAPE_SAW_UP,
   LFO_SHAPE_SQUARE,
   LFO_SHAPE_RANDOM_STEPPED,
-  // LFO_SHAPE_RANDOM_SMOOTHED,
+  LFO_SHAPE_RANDOM_SMOOTH,
 
   LFO_SHAPE_LAST
 };
@@ -65,11 +66,12 @@ class SyncedLFO {
   void Refresh() {
     phase_ += phase_increment_;
     if (phase_ < phase_increment_) {
+      prev_random_ = random_;
       random_ = stmlib::Random::GetSample();
     }
   }
 
-  int16_t shape(LFOShape shape) const {
+  int16_t Render(LFOShape shape) const {
     switch (shape) {
       case LFO_SHAPE_TRIANGLE:
         return phase_ < 1UL << 31      // x < 0.5
@@ -83,6 +85,8 @@ class SyncedLFO {
         return phase_ < 1UL << 31 ? INT16_MAX : INT16_MIN;
       case LFO_SHAPE_RANDOM_STEPPED:
         return random_;
+      case LFO_SHAPE_RANDOM_SMOOTH:
+        return stmlib::Mix(prev_random_, random_, phase_ >> 16);
       default:
         return 0;
     } 
@@ -120,7 +124,7 @@ class SyncedLFO {
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t previous_phase_, previous_target_phase_;
-  int16_t random_;
+  int16_t random_, prev_random_;
 
   uint8_t phase_err_coeff_shift_, freq_err_coeff_shift_;
 
