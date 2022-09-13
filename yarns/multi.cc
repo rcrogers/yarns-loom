@@ -482,7 +482,7 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
-      gate[0] = cv_outputs_[0].trigger();
+      gate[0] = cv_outputs_[0].gate();
       gate[1] = cv_outputs_[1].gate();
       gate[2] = settings_.clock_override ? clock() : cv_outputs_[2].trigger();
       gate[3] = cv_outputs_[3].gate();

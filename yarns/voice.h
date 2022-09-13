@@ -308,16 +308,19 @@ class CVOutput {
     }
   }
 
-  inline bool gate() const { return dc_voice_->gate(); }
-  inline bool trigger() const {
-    if (is_audio()) {
-      for (uint8_t i = 0; i < num_audio_voices_; ++i) {
-        if (audio_voices_[i]->trigger()) { return true; }
-      }
-      return false;
-    } else {
-      return dc_voice_->trigger();
+  inline bool gate() const {
+    if (!is_audio()) return dc_voice_->gate();
+    for (uint8_t i = 0; i < num_audio_voices_; ++i) {
+      if (audio_voices_[i]->gate()) return true;
     }
+    return false;
+  }
+  inline bool trigger() const {
+    if (!is_audio()) return dc_voice_->trigger();
+    for (uint8_t i = 0; i < num_audio_voices_; ++i) {
+      if (audio_voices_[i]->trigger()) return true;
+    }
+    return false;
   }
 
   inline bool is_audio() const {
