@@ -57,7 +57,8 @@ class Envelope {
 
   void Init() {
     gate_ = false;
-    segment_ = next_tick_segment_ = ENV_SEGMENT_DEAD;
+    value_ = segment_target_[ENV_SEGMENT_RELEASE] = 0;
+    Trigger(ENV_SEGMENT_DEAD);
   }
 
   inline void NoteOff() {
@@ -105,21 +106,30 @@ class Envelope {
       default: phase_increment_ = 0; return;
     }
     target_ = segment_target_[segment];
+
+    // In case the segment is not starting from its nominal value (e.g. an
+    // attack that interrupts a still-high release), adjust its timing and slope
+    // to try to match the nominal sound and feel
     int32_t actual_delta = target_ - value_;
     int32_t nominal_delta = target_ - segment_target_[
       stmlib::modulo(static_cast<int8_t>(segment) - 1, ENV_SEGMENT_DEAD)
     ];
     positive_segment_slope_ = nominal_delta >= 0;
     if (positive_segment_slope_ != (actual_delta >= 0)) {
-      // If the deltas differ in sign, we're going the wrong direction, so skip
+      // If deltas differ in sign, the direction is wrong -- skip segment
       next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }
-    // Pick the steeper of the deltas.  This will shorten the segment if it's
-    // already near the target, which avoids glitchy attacks
+    // Pick the larger delta, and thus the steeper slope that reaches the target
+    // more quickly.  If actual delta is smaller than nominal (e.g. from
+    // re-attacks that begin high), use nominal's steeper slope (e.g. so the
+    // attack sounds like a quick catch-up vs a flat, blaring hold stage). If
+    // actual is greater (rare in practice), use that
     int32_t delta = positive_segment_slope_
       ? std::max(nominal_delta, actual_delta)
       : std::min(nominal_delta, actual_delta);
+
+    // Prepare inputs for Tick to convert slope
     linear_slope_ = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
     if (!linear_slope_) linear_slope_ = positive_segment_slope_ ? 1 : -1;
     max_shift_ = __builtin_clzl(abs(linear_slope_));
@@ -132,11 +142,13 @@ class Envelope {
       Trigger(next_tick_segment_);
     }
     if (!phase_increment_) return;
+
     phase_ += phase_increment_;
     if (phase_ < phase_increment_) phase_ = UINT32_MAX;
     int8_t shift = lut_expo_slope_shift[phase_ >> 24];
     if (shift != expo_slope_shift_) expo_dirty_ = true;
-    if (expo_dirty_) {
+
+    if (expo_dirty_) { // Calculate a fresh expo slope
       expo_dirty_ = false;
       expo_slope_shift_ = shift;
       expo_slope_ = 0;
@@ -146,6 +158,7 @@ class Envelope {
       if (!expo_slope_) expo_slope_ = linear_slope_;
       target_overshoot_threshold_ = target_ - expo_slope_;
     }
+
     if (positive_segment_slope_ // The slope is about to overshoot the target
       ? value_ > target_overshoot_threshold_
       : value_ < target_overshoot_threshold_
@@ -154,6 +167,7 @@ class Envelope {
       next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }
+
     value_ += expo_slope_;
   }
 
