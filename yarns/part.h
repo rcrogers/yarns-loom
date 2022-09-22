@@ -75,18 +75,18 @@ enum ArpeggiatorDirection {
   ARPEGGIATOR_DIRECTION_LAST
 };
 
-enum VoiceAllocationMode {
-  VOICE_ALLOCATION_MODE_MONO,
-  VOICE_ALLOCATION_MODE_POLY,
-  VOICE_ALLOCATION_MODE_POLY_CYCLIC,
-  VOICE_ALLOCATION_MODE_POLY_RANDOM,
-  VOICE_ALLOCATION_MODE_POLY_VELOCITY,
-  VOICE_ALLOCATION_MODE_POLY_SORTED,
-  VOICE_ALLOCATION_MODE_POLY_UNISON_1,
-  VOICE_ALLOCATION_MODE_POLY_UNISON_2,
-  VOICE_ALLOCATION_MODE_POLY_STEAL_MOST_RECENT,
-  VOICE_ALLOCATION_MODE_POLY_NICE,
-  VOICE_ALLOCATION_MODE_LAST
+enum PolyMode {
+  POLY_MODE_OFF,
+  POLY_MODE_STEAL_RELEASE_SILENT,
+  POLY_MODE_CYCLIC,
+  POLY_MODE_RANDOM,
+  POLY_MODE_VELOCITY,
+  POLY_MODE_SORTED,
+  POLY_MODE_UNISON_RELEASE_REASSIGN,
+  POLY_MODE_UNISON_RELEASE_SILENT,
+  POLY_MODE_STEAL_HIGHEST_PRIORITY,
+  POLY_MODE_STEAL_RELEASE_REASSIGN,
+  POLY_MODE_LAST
 };
 
 enum VoiceAllocationFlags {
@@ -726,7 +726,7 @@ class Part {
     midi_.min_velocity = 0;
     midi_.max_velocity = 127;
 
-    voicing_.allocation_mode = num_voices_ > 1 ? VOICE_ALLOCATION_MODE_POLY : VOICE_ALLOCATION_MODE_MONO;
+    voicing_.allocation_mode = num_voices_ > 1 ? POLY_MODE_STEAL_RELEASE_SILENT : POLY_MODE_OFF;
     voicing_.allocation_priority = stmlib::NOTE_STACK_PRIORITY_LAST;
     voicing_.portamento = 0;
     voicing_.legato_mode = LEGATO_MODE_OFF;
@@ -779,16 +779,16 @@ class Part {
 
   inline bool uses_poly_allocator() const {
     return
-      voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY ||
-      voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_NICE ||
-      voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_STEAL_MOST_RECENT;
+      voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_SILENT ||
+      voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN ||
+      voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY;
   }
 
   inline bool uses_sorted_dispatch() const {
     return
-      voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_SORTED ||
-      voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_UNISON_1 ||
-      voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_UNISON_2;
+      voicing_.allocation_mode == POLY_MODE_SORTED ||
+      voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_REASSIGN ||
+      voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_SILENT;
   }
 
   inline void LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {

@@ -74,7 +74,7 @@ void Part::Init() {
   midi_.transpose_octaves = 0;
 
   voicing_.allocation_priority = NOTE_STACK_PRIORITY_LAST;
-  voicing_.allocation_mode = VOICE_ALLOCATION_MODE_MONO;
+  voicing_.allocation_mode = POLY_MODE_OFF;
   voicing_.legato_mode = LEGATO_MODE_OFF;
   voicing_.portamento = 0;
   voicing_.pitch_bend_range = 2;
@@ -266,12 +266,12 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       break;
       
     case kCCMonoModeOn:
-      voicing_.allocation_mode = VOICE_ALLOCATION_MODE_MONO;
+      voicing_.allocation_mode = POLY_MODE_OFF;
       TouchVoiceAllocation();
       break;
       
     case kCCPolyModeOn:
-      voicing_.allocation_mode = VOICE_ALLOCATION_MODE_POLY;
+      voicing_.allocation_mode = POLY_MODE_STEAL_RELEASE_SILENT;
       TouchVoiceAllocation();
       break;
       
@@ -334,7 +334,7 @@ bool Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
 }
 
 bool Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
-  if (voicing_.allocation_mode != VOICE_ALLOCATION_MODE_MONO) {
+  if (voicing_.allocation_mode != POLY_MODE_OFF) {
     uint8_t voice_index = \
         uses_poly_allocator() ? \
         poly_allocator_.Find(note) : \
@@ -710,7 +710,10 @@ const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
   }
 
   // Build arpeggiator step
-  const NoteEntry* arpeggio_note = &arp_keys_.stack.played_note(modulo(next.key_index, num_keys));
+  const NoteEntry* arpeggio_note = &arp_keys_.stack.note_by_priority(
+    static_cast<stmlib::NoteStackFlags>(voicing_.allocation_priority),
+    modulo(next.key_index, num_keys)
+  );
   next.key_index += next.key_increment;
 
   // TODO step type algorithm
@@ -771,7 +774,7 @@ struct DispatchNote {
 void Part::DispatchSortedNotes(bool via_note_off) {
   uint8_t num_notes = mono_allocator_.size();
   uint8_t num_dispatch = num_voices_;
-  bool unison = voicing_.allocation_mode != VOICE_ALLOCATION_MODE_POLY_SORTED;
+  bool unison = voicing_.allocation_mode != POLY_MODE_SORTED;
   if (!unison) { num_dispatch = std::min(num_dispatch, num_notes); }
 
   // Set up structures to track assignments
@@ -870,7 +873,7 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
   mono_allocator_.NoteOn(note, velocity);
   const NoteEntry& after = priority_note();
   bool legato = force_legato || mono_allocator_.size() > 1;
-  if (voicing_.allocation_mode == VOICE_ALLOCATION_MODE_MONO) {
+  if (voicing_.allocation_mode == POLY_MODE_OFF) {
     // Check if the note that has been played should be triggered according
     // to selected voice priority rules.
     if (before.note != after.note) {
@@ -883,19 +886,25 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
   } else {
     uint8_t voice_index = 0;
     switch (voicing_.allocation_mode) {
-      case VOICE_ALLOCATION_MODE_POLY:
-        voice_index = poly_allocator_.NoteOn(note, VOICE_STEALING_MODE_LRU);
+      case POLY_MODE_STEAL_RELEASE_SILENT:
+      case POLY_MODE_STEAL_RELEASE_REASSIGN:
+      case POLY_MODE_STEAL_HIGHEST_PRIORITY: {
+        bool note_justifies_steal = mono_allocator_.priority_for_note(
+          static_cast<stmlib::NoteStackFlags>(voicing_.allocation_priority),
+          note
+        ) < num_voices_;
+        uint8_t note_to_steal_voice_from =
+          voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY
+          ? before.note // Highest priority before this note
+          : priority_note(num_voices_).note; // Note that just got deprioritized
+        uint8_t stealable_voice_index = note_justifies_steal
+          ? FindVoiceForNote(note_to_steal_voice_from) : NOT_ALLOCATED;
+        voice_index = poly_allocator_.NoteOn(note, stealable_voice_index);
+        if (voice_index == NOT_ALLOCATED) return;
         break;
-      
-      case VOICE_ALLOCATION_MODE_POLY_STEAL_MOST_RECENT:
-        voice_index = poly_allocator_.NoteOn(note, VOICE_STEALING_MODE_MRU);
-        break;
-
-      case VOICE_ALLOCATION_MODE_POLY_NICE:
-        voice_index = poly_allocator_.NoteOn(note, VOICE_STEALING_MODE_NONE);
-        break;
+      }
         
-      case VOICE_ALLOCATION_MODE_POLY_CYCLIC:
+      case POLY_MODE_CYCLIC:
         if (cyclic_allocation_note_counter_ >= num_voices_) {
           cyclic_allocation_note_counter_ = 0;
         }
@@ -903,11 +912,11 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
         ++cyclic_allocation_note_counter_;
         break;
       
-      case VOICE_ALLOCATION_MODE_POLY_RANDOM:
+      case POLY_MODE_RANDOM:
         voice_index = (Random::GetWord() >> 24) % num_voices_;
         break;
         
-      case VOICE_ALLOCATION_MODE_POLY_VELOCITY:
+      case POLY_MODE_VELOCITY:
         voice_index = (static_cast<uint16_t>(velocity) * num_voices_) >> 7;
         break;
         
@@ -959,7 +968,7 @@ void Part::InternalNoteOff(uint8_t note) {
   const NoteEntry& before = priority_note();
   mono_allocator_.NoteOff(note);
   const NoteEntry& after = priority_note();
-  if (voicing_.allocation_mode == VOICE_ALLOCATION_MODE_MONO) {
+  if (voicing_.allocation_mode == POLY_MODE_OFF) {
     if (mono_allocator_.size() == 0) {
       // No key is pressed, we just close the gate.
       for (uint8_t i = 0; i < num_voices_; ++i) {
@@ -974,8 +983,8 @@ void Part::InternalNoteOff(uint8_t note) {
   } else if (uses_sorted_dispatch()) {
     KillAllInstancesOfNote(note);
     if (
-        voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_UNISON_1 ||
-        had_extra_notes
+      voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_REASSIGN ||
+      had_extra_notes
     ) {
       DispatchSortedNotes(true);
     }
@@ -988,10 +997,10 @@ void Part::InternalNoteOff(uint8_t note) {
       VoiceNoteOff(voice_index);
       if (
         had_extra_notes &&
-        voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_NICE
-      ) {
-        const NoteEntry& nice = priority_note(NOTE_STACK_PRIORITY_FIRST, num_voices_ - 1);
-        poly_allocator_.NoteOn(nice.note, VOICE_STEALING_MODE_NONE);
+        voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN
+      ) { // Reassign freed voice to the note that is now in the priority window
+        const NoteEntry& nice = priority_note(num_voices_ - 1);
+        poly_allocator_.NoteOn(nice.note, NOT_ALLOCATED);
         VoiceNoteOn(voice_index, nice.note, nice.velocity, true, false);
       }
     } else {

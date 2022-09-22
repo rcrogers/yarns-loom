@@ -50,9 +50,17 @@ const char* const boolean_values[] = {
   "OFF", "ON"
 };
 
-const char* const voicing_allocation_mode_values[VOICE_ALLOCATION_MODE_LAST] = {
-  "MONO", "POLY", "CYCLIC", "RANDOM", "VELO", "SORTED", "U1 UNISON",
-  "U2 UNISON 2", "STEAL MOST RECENT", "NICE"
+const char* const voicing_allocation_mode_values[POLY_MODE_LAST] = {
+  "MONOPHONIC",
+  "SM STEAL RELEASE MUTE",
+  "CYCLIC",
+  "RANDOM",
+  "VELOCITY",
+  "PRIORITY ORDER",
+  "UR UNISON RELEASE REASSIGN",
+  "UM UNISON RELEASE MUTE",
+  "SP STEAL HIGHEST PRIORITY",
+  "SR STEAL RELEASE REASSIGN",
 };
 
 const char* const sequencer_arp_direction_values[ARPEGGIATOR_DIRECTION_LAST] = {
@@ -344,7 +352,7 @@ const Setting Settings::settings_[] = {
   {
     "VO", "VOICING",
     SETTING_DOMAIN_PART, { PART_VOICING_ALLOCATION_MODE, 0 },
-    SETTING_UNIT_ENUMERATION, 0, VOICE_ALLOCATION_MODE_LAST - 1,
+    SETTING_UNIT_ENUMERATION, 0, POLY_MODE_LAST - 1,
     voicing_allocation_mode_values,
     18, 8,
   },

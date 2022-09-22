@@ -104,21 +104,14 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
     // }
     gain_.SetTarget(gain_envelope_.tremolo(tremolo));
 
-    int32_t strength = 32767;
-    if (shape_ == OSC_SHAPE_FOLD_SINE || shape_ >= OSC_SHAPE_EXP_SINE) {
-      strength -= 6 * (pitch_ - (92 << 7));
-      CONSTRAIN(strength, 0, 32767);
+    int32_t strength = 0x7fff - (pitch << 1);
+    CONSTRAIN(strength, 0, 0x7fff);
+    if (
+      shape_ == OSC_SHAPE_FOLD_SINE ||
+      shape_ == OSC_SHAPE_FOLD_TRIANGLE ||
+      shape_ >= OSC_SHAPE_EXP_SINE
+    ) {
       timbre = timbre * strength >> 15;
-    } else {
-      switch (shape_) {
-        case OSC_SHAPE_FOLD_TRIANGLE:
-          strength -= 7 * (pitch_ - (80 << 7));
-          CONSTRAIN(strength, 0, 32767);
-          timbre = timbre * strength >> 15;
-          break;
-        default:
-          break;
-      }
     }
     timbre_.SetTarget(timbre);
   }
