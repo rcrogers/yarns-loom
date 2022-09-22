@@ -110,7 +110,6 @@ class Voice {
   void ResetAllControllers();
 
   void Refresh();
-  void SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento);
   void NoteOn(
     int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
     ADSR& adsr, int16_t timbre_target

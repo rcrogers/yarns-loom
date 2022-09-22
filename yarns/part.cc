@@ -872,13 +872,13 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
   const NoteEntry& before = priority_note();
   mono_allocator_.NoteOn(note, velocity);
   const NoteEntry& after = priority_note();
-  bool legato = force_legato || mono_allocator_.size() > 1;
   if (voicing_.allocation_mode == POLY_MODE_OFF) {
+    bool stealing = mono_allocator_.size() > 1;
     // Check if the note that has been played should be triggered according
     // to selected voice priority rules.
     if (before.note != after.note) {
       for (uint8_t i = 0; i < num_voices_; ++i) {
-        VoiceNoteOn(i, after.note, after.velocity, legato, true);
+        VoiceNoteOn(i, after.note, after.velocity, force_legato || stealing, true);
       }
     }
   } else if (uses_sorted_dispatch()) {
@@ -925,18 +925,10 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
     }
     
     if (voice_index < num_voices_) {
-      if (legato) {
-        if (active_note_[voice_index] != VOICE_ALLOCATION_NOT_FOUND) {
-          // Disable legato when stealing
-          legato = false;
-        } else {
-          // Begin portamento from the preceding priority note
-          voice_[voice_index]->SetPortamento(Tune(before.note), velocity, 0);
-        }
-      }
       // Prevent the same note from being simultaneously played on two channels.
       KillAllInstancesOfNote(note);
-      VoiceNoteOn(voice_index, note, velocity, legato, true);
+      bool stealing = active_note_[voice_index] != VOICE_ALLOCATION_NOT_FOUND;
+      VoiceNoteOn(voice_index, note, velocity, force_legato || stealing, true);
     } else {
       // Polychaining forwarding.
       midi_handler.OnInternalNoteOn(tx_channel(), note, velocity);

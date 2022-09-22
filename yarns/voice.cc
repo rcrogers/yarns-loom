@@ -254,19 +254,16 @@ void CVOutput::Refresh() {
   dac_code_ = (this->*dc_fn_table_[dc_role_])();
 }
 
-void Voice::SetPortamento(int16_t note, uint8_t velocity, uint8_t portamento) {
+void Voice::NoteOn(
+  int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+  ADSR& adsr, int16_t timbre_target
+) {
   note_source_ = note_portamento_;  
   note_target_ = note;
   if (!portamento) {
     note_source_ = note_target_;
   }
-}
 
-void Voice::NoteOn(
-  int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
-  ADSR& adsr, int16_t timbre_target
-) {
-  SetPortamento(note, velocity, portamento);
   portamento_phase_ = 0;
   uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE >> 1;
   if (portamento < split_point) {
