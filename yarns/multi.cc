@@ -463,6 +463,18 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       break;
 
     case LAYOUT_THREE_ONE:
+      if (settings_.clock_override) {
+        gate[0] = voice_[0].gate() || voice_[1].gate() || voice_[2].gate();
+        gate[1] = clock();
+        gate[2] = reset_or_playing_flag();
+      } else {
+        gate[0] = voice_[0].gate();
+        gate[1] = voice_[1].gate();
+        gate[2] = voice_[2].gate();
+      }
+      gate[3] = voice_[3].gate();
+      break;
+
     case LAYOUT_TWO_TWO:
       gate[0] = voice_[0].gate();
       gate[1] = voice_[1].gate();
