@@ -83,6 +83,7 @@ enum ModAux {
   MOD_AUX_LAST
 };
 
+// A role used by a CV output when it is not acting as an audio oscillator
 enum DCRole {
   DC_PITCH,
   DC_VELOCITY,

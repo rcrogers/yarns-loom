@@ -38,6 +38,8 @@
 
 #include "yarns/resources.h"
 #include "yarns/looper.h"
+#include "yarns/sequencer_step.h"
+#include "yarns/arpeggiator.h"
 
 namespace yarns {
 
@@ -51,20 +53,6 @@ const uint8_t kNoteStackMapping = kNoteStackSize + 1; // 1-based
 
 const uint8_t kCCRecordOffOn = 110;
 const uint8_t kCCDeleteRecording = 111;
-
-const uint8_t kC4 = 60;
-const uint8_t whiteKeyValues[] = {
-  0,    0xff, 1,    0xff,
-  2,    3,    0xff, 4,
-  0xff, 5,    0xff, 6,
-};
-const uint8_t blackKeyValues[] = {
-  0xff, 0,    0xff, 1,
-  0xff, 0xff, 2,    0xff,
-  3,    0xff, 4,    0xff,
-};
-const uint8_t kNumBlackKeys = 5;
-const uint8_t kNumWhiteKeys = 7;
 
 enum ArpeggiatorDirection {
   ARPEGGIATOR_DIRECTION_LINEAR,
@@ -477,50 +465,6 @@ enum PartSetting {
   PART_SEQUENCER_LOOP_LENGTH,
 };
 
-enum SequencerStepFlags {
-  SEQUENCER_STEP_REST = 0x80,
-  SEQUENCER_STEP_TIE = 0x81
-};
-
-struct SequencerStep {
-  // BYTE 0:
-  // 0x00 to 0x7f: note
-  // 0x80: rest
-  // 0x81: tie
-  //
-  // BYTE 1:
-  // 7 bits of velocity + 1 bit for slide flag.
-  SequencerStep() { }
-  SequencerStep(uint8_t data_0, uint8_t data_1) {
-    data[0] = data_0;
-    data[1] = data_1;
-  }
-
-  uint8_t data[2];
-
-  inline bool has_note() const { return !(data[0] & 0x80); }
-  inline bool is_rest() const { return data[0] == SEQUENCER_STEP_REST; }
-  inline bool is_tie() const { return data[0] == SEQUENCER_STEP_TIE; }
-  inline bool is_continuation() const { return is_tie() || is_slid(); }
-  inline uint8_t note() const { return data[0] & 0x7f; }
-
-  inline bool is_slid() const { return data[1] & 0x80; }
-  inline uint8_t velocity() const { return data[1] & 0x7f; }
-
-  inline bool is_white() const { return whiteKeyValues[note() % 12] != 0xff; }
-  inline uint8_t octave() const { return note() / 12; }
-  inline uint8_t white_key_value() const { return whiteKeyValues[note() % 12]; }
-  inline uint8_t black_key_value() const { return blackKeyValues[note() % 12]; }
-  inline uint8_t color_key_value() const { return is_white() ? white_key_value() : black_key_value(); }
-
-  inline int8_t octaves_above_middle_c() const { return ((int8_t) octave()) - (60 / 12); }
-  inline int8_t white_key_distance_from_middle_c() const {
-    return octaves_above_middle_c() * ((int8_t) kNumWhiteKeys) + white_key_value();
-  }
-  inline int8_t black_key_distance_from_middle_c() const {
-    return octaves_above_middle_c() * ((int8_t) kNumBlackKeys) + black_key_value();
-  }
-};
 
 struct SequencerSettings {
   uint8_t clock_division;
@@ -585,20 +529,7 @@ struct SequencerSettings {
         return step[i].note();
       }
     }
-    return 60;
-  }
-};
-
-struct ArpeggiatorState {
-  SequencerStep step;
-  uint8_t step_index;
-  int8_t key_index;
-  int8_t octave;
-  int8_t key_increment;
-  void ResetKey() {
-    key_index = 0;
-    octave = 0;
-    key_increment = 1;
+    return kC4;
   }
 };
 
@@ -1039,9 +970,11 @@ class Part {
   void VoiceNoteOff(uint8_t voice);
   void KillAllInstancesOfNote(uint8_t note);
 
-  uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = 60) const;
+  uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = kC4) const;
   const SequencerStep BuildSeqStep(uint8_t step_index) const;
-  const ArpeggiatorState BuildArpState(SequencerStep* seq_step_ptr) const;
+  const Arpeggiator BuildArpState(const SequencerStep* seq_step_ptr) const {
+    return arp_.BuildNextState(*this, arp_keys_, seq_step_ptr);
+  }
 
   MidiSettings midi_;
   VoicingSettings voicing_;
@@ -1062,7 +995,7 @@ class Part {
   uint8_t active_note_[kNumMaxVoicesPerPart];
   uint8_t cyclic_allocation_note_counter_;
   
-  ArpeggiatorState arp_;
+  Arpeggiator arp_;
   uint8_t euclidean_step_index_;
   
   bool seq_recording_;
