@@ -374,13 +374,14 @@ void Part::Clock() { // From Multi::ClockFast
 }
 
 void Part::StepSequencerArpeggiator(uint32_t step_counter) {
-  // Advance euclidean state.  If skipping this beat, don't advance other state
   if (seq_.euclidean_length != 0) {
+    // If euclidean rhythm is enabled, advance euclidean state
     euclidean_step_index_ = (euclidean_step_index_ + 1) % seq_.euclidean_length;
     uint32_t pattern_mask = 1 << ((euclidean_step_index_ + seq_.euclidean_rotate) % seq_.euclidean_length);
     // Read euclidean pattern from ROM.
     uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) << 5;
     uint32_t pattern = lut_euclidean[offset + seq_.euclidean_fill];
+    // If skipping this beat, don't advance other state
     if (!(pattern_mask & pattern)) return;
   }
 

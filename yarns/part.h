@@ -638,7 +638,8 @@ class Part {
   uint8_t GeneratedNoteOn(uint8_t pitch, uint8_t velocity);
   void GeneratedNoteOff(uint8_t pitch);
   void Reset();
-  uint16_t PPQN() const { // Pulses Per Quarter Note
+  // Pulses Per Quarter Note
+  uint16_t PPQN() const {
     return lut_clock_ratio_ticks[seq_.clock_division];
   }
   void Clock();
