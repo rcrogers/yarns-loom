@@ -367,8 +367,7 @@ void Part::ClockSteppedNotes() { // From Multi::ClockFast
   if (looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL) return;
 
   if (multi.tick_counter() % PPQN() == 0) { // New step
-    step_counter_ = multi.tick_counter() / PPQN();
-    SteppedNoteOn(step_counter_);
+    SteppedNoteOn();
   }
   ClockSteppedNoteOff();
 }
@@ -384,31 +383,36 @@ bool Part::euclidean_step_has_beat(uint32_t step_counter) const {
   return pattern_mask & pattern;
 }
 
-// Ideally, there would be a const version of this, used for both peeking and
-// advancing state -- however, it would need to return both a new arp state to
-// be stored, and a (nullable) step to be immediately played
-void Part::SteppedNoteOn(uint32_t step_counter) {
+SeqArpStepResult Part::BuildStepState(uint32_t step_counter) const {
+  SeqArpStepResult result = SeqArpStepResult();
+  result.step.data[0] = SEQUENCER_STEP_REST;
+
   // If skipping this beat, don't advance any state
-  if (!euclidean_step_has_beat(step_counter)) return;
+  if (!euclidean_step_has_beat(step_counter)) return result;
 
   // Advance sequencer and arpeggiator state
   SequencerStep* step_ptr = NULL;
-  SequencerStep step;
   if (seq_.num_steps) {
-    step = BuildSeqStep(step_counter % seq_.num_steps);
-    step_ptr = &step;
+    result.step = BuildSeqStep(step_counter % seq_.num_steps);
+    step_ptr = &result.step;
   }
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-    arp_ = BuildArpState(step_counter, step_ptr);
-    step_ptr = &arp_.step;
+    result = BuildArpState(step_counter, step_ptr);
   }
-  if (step_ptr && step_ptr->has_note()) {
-    uint8_t pitch = step_ptr->note();
-    uint8_t velocity = step_ptr->velocity();
-    GeneratedNoteOff(pitch); // Simulate a human retriggering a key
-    if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
-      InternalNoteOn(pitch, velocity, step_ptr->is_slid());
-    }
+  return result;
+}
+
+void Part::SteppedNoteOn() {
+  step_counter_ = multi.tick_counter() / PPQN();
+  SeqArpStepResult result = BuildStepState(step_counter_);
+  arp_ = result.arp;
+  if (!result.step.has_note()) return;
+
+  uint8_t pitch = result.step.note();
+  uint8_t velocity = result.step.velocity();
+  GeneratedNoteOff(pitch); // Simulate a human retriggering a key
+  if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
+    InternalNoteOn(pitch, velocity, result.step.is_slid());
   }
 }
 
@@ -420,20 +424,8 @@ void Part::ClockSteppedNoteOff() {
     }
     // Peek at next step to see if it's a continuation
     // If more than one voice has a step ending, the peek is redundant
-    SequencerStep* next_step_ptr = NULL;
-    SequencerStep next_step;
-    uint32_t next_step_counter = step_counter_ + 1;
-    if (euclidean_step_has_beat(next_step_counter)) {
-      if (seq_.num_steps) {
-        next_step = BuildSeqStep(next_step_counter % seq_.num_steps);
-        next_step_ptr = &next_step;
-      }
-      if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-        next_step = BuildArpState(next_step_counter, next_step_ptr).step;
-        next_step_ptr = &next_step;
-      }
-    }
-    if (next_step_ptr && next_step_ptr->is_continuation()) {
+    SequencerStep next_step = BuildStepState(step_counter_ + 1).step;
+    if (next_step.is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
       gate_length_counter_[v] += PPQN();

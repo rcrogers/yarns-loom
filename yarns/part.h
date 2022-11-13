@@ -132,6 +132,12 @@ enum LegatoMode {
   LEGATO_MODE_ON,
   LEGATO_MODE_LAST
 };
+
+struct SeqArpStepResult {
+  Arpeggiator arp;
+  SequencerStep step;
+};
+
 struct PackedPart {
   // Currently has 7 bits to spare
 
@@ -645,7 +651,8 @@ class Part {
   void ClockSteppedNotes();
   bool euclidean_step_has_beat(uint32_t step_counter) const;
   // Advance step sequencer and/or arpeggiator
-  void SteppedNoteOn(uint32_t step_counter);
+  SeqArpStepResult BuildStepState(uint32_t step_counter) const;
+  void SteppedNoteOn();
   void ClockSteppedNoteOff();
   void Start();
   void Stop();
@@ -735,11 +742,12 @@ class Part {
       // Advance arp
       SequencerStep step = SequencerStep(pitch, velocity);
       step_counter_++;
-      arp_ = BuildArpState(step_counter_, &step);
-      pitch = arp_.step.note();
-      if (arp_.step.has_note()) {
-        bool slide = arp_.step.is_slid();
-        InternalNoteOn(pitch, arp_.step.velocity(), slide);
+      SeqArpStepResult result = BuildArpState(step_counter_, &step);
+      arp_ = result.arp;
+      pitch = result.step.note();
+      if (result.step.has_note()) {
+        bool slide = result.step.is_slid();
+        InternalNoteOn(pitch, result.step.velocity(), slide);
         if (slide) {
           InternalNoteOff(output_pitch_for_looper_note_[looper_note_index]);
         }
@@ -974,7 +982,7 @@ class Part {
 
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = kC4) const;
   const SequencerStep BuildSeqStep(uint8_t step_index) const;
-  const Arpeggiator BuildArpState(uint32_t step_counter, const SequencerStep* seq_step_ptr) const {
+  const SeqArpStepResult BuildArpState(uint32_t step_counter, const SequencerStep* seq_step_ptr) const {
     return arp_.BuildNextState(*this, arp_keys_, step_counter, seq_step_ptr);
   }
 

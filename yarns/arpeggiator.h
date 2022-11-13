@@ -41,16 +41,16 @@ using namespace stmlib;
 
 class Part;
 class HeldKeys;
+class SeqArpStepResult;
 
 struct Arpeggiator {
-  SequencerStep step; // TODO This could be moved to a Result struct
   int8_t key_index;
   int8_t octave;
   int8_t key_increment;
 
   void ResetKey();
 
-  const Arpeggiator BuildNextState(
+  const SeqArpStepResult BuildNextState(
     const Part& part,
     const HeldKeys& arp_keys,
     uint32_t step_counter,

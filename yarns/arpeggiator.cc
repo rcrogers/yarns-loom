@@ -46,26 +46,27 @@ void Arpeggiator::ResetKey() {
   key_increment = 1;
 }
 
-const Arpeggiator Arpeggiator::BuildNextState(
+const SeqArpStepResult Arpeggiator::BuildNextState(
   const Part& part,
   const HeldKeys& arp_keys,
   uint32_t step_counter,
   const SequencerStep* seq_step_ptr
 ) const {
   SequencerStep seq_step;
-  Arpeggiator next = *this;
+  SeqArpStepResult output = SeqArpStepResult();
+  Arpeggiator& next = output.arp;
   // In case the pattern doesn't hit a note, the default output step is a REST
-  next.step.data[0] = SEQUENCER_STEP_REST;
+  output.step.data[0] = SEQUENCER_STEP_REST;
 
   // If sequencer/pattern doesn't hit a note, return a REST/TIE output step, and
   // don't advance the arp key
   uint32_t pattern_mask, pattern;
   if (part.seq_driven_arp()) {
-    if (!seq_step_ptr) return next;
+    if (!seq_step_ptr) return output;
     seq_step = *seq_step_ptr;
     if (!seq_step.has_note()) { // Here, the output step can also be a TIE
-      next.step.data[0] = seq_step.data[0];
-      return next;
+      output.step.data[0] = seq_step.data[0];
+      return output;
     }
   } else { // Use an arp pattern
     uint8_t pattern_step_index = step_counter % 16;
@@ -74,13 +75,13 @@ const Arpeggiator Arpeggiator::BuildNextState(
     seq_step.data[1] = 0x7f; // Full velocity
     pattern_mask = 1 << pattern_step_index;
     pattern = lut_arpeggiator_patterns[part.sequencer_settings().arp_pattern - 1];
-    if (!(pattern_mask & pattern)) return next;
+    if (!(pattern_mask & pattern)) return output;
   }
 
   uint8_t num_keys = arp_keys.stack.size();
   if (!num_keys) {
     next.ResetKey();
-    return next;
+    return output;
   }
 
   uint8_t arp_range = part.sequencer_settings().arp_range;
@@ -102,9 +103,10 @@ const Arpeggiator Arpeggiator::BuildNextState(
     case ARPEGGIATOR_DIRECTION_STEP_JUMP:
       {
         // If step value by color within octave is greater than total chord size, rest without moving
-        if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
+        if (seq_step.color_key_value() >= num_keys_all_octaves) return output;
 
         // Advance active position by octave # -- C4 -> pos + 4; C0 -> pos + 0
+        // TODO if step_counter % (num_steps * bar_duration) == 0, ResetKey?
         next.key_index = modulo(next.key_index + display_octave, num_keys_all_octaves);
         if (seq_step.is_white()) {
           next.key_increment = 0; // Move is already complete
@@ -121,7 +123,7 @@ const Arpeggiator Arpeggiator::BuildNextState(
     case ARPEGGIATOR_DIRECTION_STEP_GRID:
       {
         // If step value by color within octave is greater than total chord size, rest without moving
-        if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
+        if (seq_step.color_key_value() >= num_keys_all_octaves) return output;
 
         // Map linear position to X-Y grid coordinates
         // C4 -> 4x4 grid; C0 -> 1x1; C1 -> 1x1; C9 -> 9x9
@@ -190,10 +192,10 @@ const Arpeggiator Arpeggiator::BuildNextState(
   while (note > 127) {
     note -= 12;
   }
-  next.step.data[0] = note;
-  next.step.data[1] = velocity;
+  output.step.data[0] = note;
+  output.step.data[1] = velocity;
 
-  return next;
+  return output;
 }
 
 }
