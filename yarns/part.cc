@@ -363,37 +363,43 @@ void Part::Reset() {
   }
 }
 
-void Part::Clock() { // From Multi::ClockFast
+void Part::ClockSteppedNotes() { // From Multi::ClockFast
   if (looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL) return;
 
   if (multi.tick_counter() % PPQN() == 0) { // New step
-    uint32_t step_counter = multi.tick_counter() / PPQN();
-    StepSequencerArpeggiator(step_counter);
+    step_counter_ = multi.tick_counter() / PPQN();
+    SteppedNoteOn(step_counter_);
   }
-  ClockStepGateEndings();
+  ClockSteppedNoteOff();
 }
 
-void Part::StepSequencerArpeggiator(uint32_t step_counter) {
-  if (seq_.euclidean_length != 0) {
-    // If euclidean rhythm is enabled, advance euclidean state
-    euclidean_step_index_ = (euclidean_step_index_ + 1) % seq_.euclidean_length;
-    uint32_t pattern_mask = 1 << ((euclidean_step_index_ + seq_.euclidean_rotate) % seq_.euclidean_length);
-    // Read euclidean pattern from ROM.
-    uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) << 5;
-    uint32_t pattern = lut_euclidean[offset + seq_.euclidean_fill];
-    // If skipping this beat, don't advance other state
-    if (!(pattern_mask & pattern)) return;
-  }
+bool Part::euclidean_step_has_beat(uint32_t step_counter) const {
+  if (seq_.euclidean_length == 0) return true;
 
+  uint8_t euclidean_step_index = step_counter % seq_.euclidean_length;
+  uint32_t pattern_mask = 1 << ((euclidean_step_index + seq_.euclidean_rotate) % seq_.euclidean_length);
+  // Read euclidean pattern from ROM.
+  uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) << 5;
+  uint32_t pattern = lut_euclidean[offset + seq_.euclidean_fill];
+  return pattern_mask & pattern;
+}
+
+// Ideally, there would be a const version of this, used for both peeking and
+// advancing state -- however, it would need to return both a new arp state to
+// be stored, and a (nullable) step to be immediately played
+void Part::SteppedNoteOn(uint32_t step_counter) {
+  // If skipping this beat, don't advance any state
+  if (!euclidean_step_has_beat(step_counter)) return;
+
+  // Advance sequencer and arpeggiator state
   SequencerStep* step_ptr = NULL;
   SequencerStep step;
   if (seq_.num_steps) {
-    seq_step_ = step_counter % seq_.num_steps;
-    step = BuildSeqStep(seq_step_);
+    step = BuildSeqStep(step_counter % seq_.num_steps);
     step_ptr = &step;
   }
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-    arp_ = BuildArpState(step_ptr);
+    arp_ = BuildArpState(step_counter, step_ptr);
     step_ptr = &arp_.step;
   }
   if (step_ptr && step_ptr->has_note()) {
@@ -406,7 +412,7 @@ void Part::StepSequencerArpeggiator(uint32_t step_counter) {
   }
 }
 
-void Part::ClockStepGateEndings() {
+void Part::ClockSteppedNoteOff() {
   for (uint8_t v = 0; v < num_voices_; ++v) {
     if (gate_length_counter_[v]) { // Gate hasn't ended yet
       --gate_length_counter_[v];
@@ -416,13 +422,16 @@ void Part::ClockStepGateEndings() {
     // If more than one voice has a step ending, the peek is redundant
     SequencerStep* next_step_ptr = NULL;
     SequencerStep next_step;
-    if (seq_.num_steps) {
-      next_step = BuildSeqStep((seq_step_ + 1) % seq_.num_steps);
-      next_step_ptr = &next_step;
-    }
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      next_step = BuildArpState(next_step_ptr).step;
-      next_step_ptr = &next_step;
+    uint32_t next_step_counter = step_counter_ + 1;
+    if (euclidean_step_has_beat(next_step_counter)) {
+      if (seq_.num_steps) {
+        next_step = BuildSeqStep(next_step_counter % seq_.num_steps);
+        next_step_ptr = &next_step;
+      }
+      if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+        next_step = BuildArpState(next_step_counter, next_step_ptr).step;
+        next_step_ptr = &next_step;
+      }
     }
     if (next_step_ptr && next_step_ptr->is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
@@ -436,7 +445,6 @@ void Part::ClockStepGateEndings() {
 
 void Part::Start() {
   arp_.ResetKey();
-  arp_.step_index = euclidean_step_index_ = -1;
   
   looper_.Rewind();
   std::fill(

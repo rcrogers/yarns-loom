@@ -49,15 +49,13 @@ void Arpeggiator::ResetKey() {
 const Arpeggiator Arpeggiator::BuildNextState(
   const Part& part,
   const HeldKeys& arp_keys,
+  uint32_t step_counter,
   const SequencerStep* seq_step_ptr
 ) const {
   SequencerStep seq_step;
   Arpeggiator next = *this;
   // In case the pattern doesn't hit a note, the default output step is a REST
   next.step.data[0] = SEQUENCER_STEP_REST;
-
-  // Always advance the pattern counter, even if we rest
-  next.step_index = (next.step_index + 1) % 16;
 
   // If sequencer/pattern doesn't hit a note, return a REST/TIE output step, and
   // don't advance the arp key
@@ -69,11 +67,12 @@ const Arpeggiator Arpeggiator::BuildNextState(
       next.step.data[0] = seq_step.data[0];
       return next;
     }
-  } else {
+  } else { // Use an arp pattern
+    uint8_t pattern_step_index = step_counter % 16;
     // Build a dummy input step for JUMP/GRID
-    seq_step.data[0] = kC4 + 1 + next.step_index;
+    seq_step.data[0] = kC4 + 1 + pattern_step_index;
     seq_step.data[1] = 0x7f; // Full velocity
-    pattern_mask = 1 << next.step_index;
+    pattern_mask = 1 << pattern_step_index;
     pattern = lut_arpeggiator_patterns[part.sequencer_settings().arp_pattern - 1];
     if (!(pattern_mask & pattern)) return next;
   }

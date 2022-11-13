@@ -43,8 +43,7 @@ class Part;
 class HeldKeys;
 
 struct Arpeggiator {
-  SequencerStep step;
-  uint8_t step_index;
+  SequencerStep step; // TODO This could be moved to a Result struct
   int8_t key_index;
   int8_t octave;
   int8_t key_increment;
@@ -54,6 +53,7 @@ struct Arpeggiator {
   const Arpeggiator BuildNextState(
     const Part& part,
     const HeldKeys& arp_keys,
+    uint32_t step_counter,
     const SequencerStep* seq_step_ptr
   ) const;
 
