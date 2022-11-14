@@ -420,13 +420,13 @@ const Setting Settings::settings_[] = {
     "VS", "VIBRATO SHAPE",
     SETTING_DOMAIN_PART, { PART_VOICING_VIBRATO_SHAPE, 0 },
     SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, lfo_shape_values,
-    125, 0xff,
+    95, 0xff,
   },
   {
     "LS", "TIMBRE LFO SHAPE",
     SETTING_DOMAIN_PART, { PART_VOICING_TIMBRE_LFO_SHAPE, 0 },
     SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, lfo_shape_values,
-    126, 0xff,
+    96, 0xff,
   },
   {
     "TS", "TREMOLO SHAPE",
