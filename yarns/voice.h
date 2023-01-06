@@ -371,10 +371,10 @@ class CVOutput {
   }
 
   uint16_t pitch_dac_code();
-  inline uint16_t velocity_dac_code() const {
+  inline uint16_t velocity_dac_code() {
     return DacCodeFrom16BitValue(dc_voice_->velocity() << 9);
   }
-  inline uint16_t aux_cv_dac_code() const {
+  inline uint16_t aux_cv_dac_code() {
     if (dc_voice_->aux_1_source() >= MOD_AUX_PITCH_1) {
       return NoteToDacCode(
         dc_voice_->note() +
@@ -383,7 +383,7 @@ class CVOutput {
     }
     return DacCodeFrom16BitValue(dc_voice_->aux_cv_16bit());
   }
-  inline uint16_t aux_cv_dac_code_2() const {
+  inline uint16_t aux_cv_dac_code_2() {
     if (dc_voice_->aux_2_source() >= MOD_AUX_PITCH_1) {
       return NoteToDacCode(
         dc_voice_->note() +
@@ -392,7 +392,7 @@ class CVOutput {
     }
     return DacCodeFrom16BitValue(dc_voice_->aux_cv_2_16bit());
   }
-  inline uint16_t trigger_dac_code() const {
+  inline uint16_t trigger_dac_code() {
     int32_t max = volts_dac_code(5);
     int32_t min = volts_dac_code(0);
     return min + ((max - min) * dc_voice_->trigger_value() >> 15);
