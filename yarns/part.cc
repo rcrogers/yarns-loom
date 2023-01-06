@@ -262,7 +262,7 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       break;
       
     case kCCOmniModeOn:
-      midi_.channel = 0x10;
+      midi_.channel = kMidiChannelOmni;
       break;
       
     case kCCMonoModeOn:

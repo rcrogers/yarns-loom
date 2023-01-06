@@ -29,6 +29,7 @@
 #include "yarns/looper.h"
 
 #include "yarns/resources.h"
+#include "yarns/multi.h"
 #include "yarns/part.h"
 
 namespace yarns {
@@ -64,7 +65,11 @@ void Deck::RemoveAll() {
 }
 
 void Deck::Rewind() {
-  lfo_.Init(23, 12);
+  lfo_.Init();
+  // A stored LFO increment may have been invalidated by changes to clock
+  // settings (leading to a glitchy Start, esp if clock has slowed), so we
+  // preemptively update it
+  lfo_.SetPhaseIncrement(multi.tick_phase_increment() / period_ticks());
   Advance(0, false);
 }
 
@@ -106,9 +111,12 @@ void Deck::Pack(PackedPart& storage) const {
   }
 }
 
-void Deck::Clock(uint32_t tick_counter) {
-  uint32_t period_ticks = part_->PPQN() << part_->sequencer_settings().loop_length;
-  lfo_.Tap(tick_counter, period_ticks, pos_offset << 16);
+uint32_t Deck::period_ticks() const {
+  return part_->PPQN() << part_->sequencer_settings().loop_length;
+}
+
+void Deck::Clock() {
+  lfo_.Tap(multi.tick_counter(), period_ticks(), pos_offset << 16);
 }
 
 void Deck::RemoveOldestNote() {

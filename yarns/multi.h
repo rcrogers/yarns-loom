@@ -47,6 +47,9 @@ const uint8_t kNumCVOutputs = 4;
 const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
 const uint8_t kMaxBarDuration = 32;
 
+// Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
+const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
+
 struct PackedMulti {
   PackedPart parts[kNumParts];
 
@@ -56,7 +59,7 @@ struct PackedMulti {
     layout : 4,
     clock_tempo : 8,
     clock_swing : 7,
-    clock_input_division : 3, // can 0-index for 1 fewer bit
+    clock_input_division : 3, // Breaking: can 0-index for 1 fewer bit
     clock_output_division : 5,
     clock_bar_duration : 6, // barely
     clock_override : 1,
@@ -188,7 +191,7 @@ class Multi {
 
   inline bool part_accepts_channel(uint8_t part, uint8_t channel) const {
     return is_remote_control_channel(channel) ||
-      midi(part).channel == 0x10 ||
+      midi(part).channel == kMidiChannelOmni ||
       midi(part).channel == channel;
   }
 
@@ -401,6 +404,9 @@ class Multi {
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
   inline uint32_t tick_counter() { return tick_counter_; }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
+  inline uint32_t tick_phase_increment() const {
+    return settings_.clock_tempo * kTempoToTickPhaseIncrement;
+  }
   inline bool running() const { return running_; }
   inline bool recording() const { return recording_; }
   inline uint8_t recording_part() const { return recording_part_; }
@@ -523,7 +529,7 @@ class Multi {
   void UpdateTempo();
   void AllocateParts();
   void ClockSong();
-  void SpreadLFOs(int8_t spread, SyncedLFO** base_lfo, uint8_t num_lfos);
+  void SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos);
   
   MultiSettings settings_;
   
@@ -543,8 +549,12 @@ class Multi {
   // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 517 days -- acceptable
   uint32_t tick_counter_;
 
-  // Runs at 16 PPQN
-  SyncedLFO master_lfo_;
+  // The master LFO sits between the clock and the part-specific synced LFOs.
+  // While the clock is running, the master LFO syncs to the clock's phase/freq,
+  // and while the clock is stopped, the master LFO continues free-running based
+  // on its last sync
+  FastSyncedLFO master_lfo_;
+  // Roughly 1:1 with tick_counter_, but can free-run without the clock
   uint32_t master_lfo_tick_counter_;
 
   uint8_t clock_input_prescaler_;

@@ -51,6 +51,8 @@ const uint8_t kNumParaphonicVoices = 4;
 const uint8_t kNoteStackSize = 12;
 const uint8_t kNoteStackMapping = kNoteStackSize + 1; // 1-based
 
+const uint8_t kMidiChannelOmni = 0x10;
+
 const uint8_t kCCRecordOffOn = 110;
 const uint8_t kCCDeleteRecording = 111;
 
@@ -173,9 +175,9 @@ struct PackedPart {
     max_note : 7,
     min_velocity : 7,
     max_velocity : 7,
-    out_mode : 2,
+    out_mode : 2, // 1 value unused
     sustain_mode : 3,
-    play_mode : 2,
+    play_mode : 2, // 1 value unused
     input_response : 2,
     sustain_polarity : 1;
 
@@ -184,21 +186,21 @@ struct PackedPart {
     allocation_mode : 4,
     allocation_priority : 2,
     portamento : 7,
-    legato_mode : 2,
+    legato_mode : 2, // 1 value unused
     pitch_bend_range : 5,
     vibrato_range : 4,
     vibrato_mod : 7,
     lfo_rate : 7,
     tuning_root : 4,
     tuning_system : 6,
-    trigger_duration : 7, // probably excessive
+    trigger_duration : 7, // Breaking: probably excessive
     trigger_scale : 1,
     trigger_shape : 3,
     aux_cv : 4,
     aux_cv_2 : 4,
     tuning_factor : 4,
-    oscillator_mode : 2,
-    oscillator_shape : 7, // 1 bit unused
+    oscillator_mode : 2, // 1 value unused
+    oscillator_shape : 7, // Breaking: 1 bit unused
     tremolo_mod : kTimbreBits,
     vibrato_shape : kLFOShapeBits,
     timbre_lfo_shape : kLFOShapeBits,
@@ -856,7 +858,7 @@ class Part {
   }
   
   inline uint8_t tx_channel() const {
-    return midi_.channel == 0x10 ? 0 : midi_.channel;
+    return midi_.channel == kMidiChannelOmni ? 0 : midi_.channel;
   }
   inline bool direct_thru() const {
     return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;

@@ -100,6 +100,8 @@ enum LFORole {
   LFO_ROLE_LAST
 };
 
+typedef SyncedLFO<17, 9> FastSyncedLFO; // Locks on in less than a second
+
 class CVOutput;
 
 class Voice {
@@ -210,7 +212,7 @@ class Voice {
   inline Oscillator* oscillator() {
     return &oscillator_;
   }
-  inline SyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
+  inline FastSyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
 
   inline void RenderSamples() {
     if (uses_audio()) oscillator_.Render();
@@ -220,7 +222,7 @@ class Voice {
   }
   
  private:
-  SyncedLFO lfos_[LFO_ROLE_LAST];
+  FastSyncedLFO lfos_[LFO_ROLE_LAST];
   Oscillator oscillator_;
   ADSR adsr_;
 

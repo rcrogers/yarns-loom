@@ -742,7 +742,7 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       break;
 
     case SETTING_UNIT_MIDI_CHANNEL:
-      if (value == 0x10) {
+      if (value == kMidiChannelOmni) {
         strcpy(buffer, "ALL");
       } else {
         PrintInteger(buffer, value + 1);

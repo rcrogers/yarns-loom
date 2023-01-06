@@ -41,6 +41,7 @@ enum LFOShape {
   LFO_SHAPE_LAST
 };
 
+template<uint8_t PHASE_ERR_SHIFT, uint8_t FREQ_ERR_SHIFT>
 class SyncedLFO {
  public:
 
@@ -48,17 +49,14 @@ class SyncedLFO {
 
   SyncedLFO() { }
   ~SyncedLFO() { }
-  void Init(uint8_t phase_err_coeff_shift, uint8_t freq_err_coeff_shift) {
-    phase_ = 0;
-    phase_err_coeff_shift_ = phase_err_coeff_shift;
-    freq_err_coeff_shift_ = freq_err_coeff_shift;
+  void Init(uint32_t phase = 0) {
+    phase_ = phase;
   }
 
   uint32_t GetPhase() const { return phase_; }
   uint32_t GetPhaseIncrement() const { return phase_increment_; }
   void SetPhaseIncrement(uint32_t i) { phase_increment_ = i; }
-  void Increment(uint32_t increment) { phase_ += increment; }
-  void Refresh() { return Increment(phase_increment_); }
+  void Refresh() { phase_ += phase_increment_; }
 
   int16_t shape(LFOShape s) const { return shape(s, phase_); }
   int16_t shape(LFOShape shape, uint32_t phase) const {
@@ -89,7 +87,7 @@ class SyncedLFO {
     uint32_t target_increment = target_phase - previous_target_phase_;
     int32_t d_error = target_increment - (phase_ - previous_phase_);
     int32_t p_error = target_phase - phase_;
-    int32_t error = (p_error >> phase_err_coeff_shift_) + (d_error >> freq_err_coeff_shift_);
+    int32_t error = (p_error >> PHASE_ERR_SHIFT) + (d_error >> FREQ_ERR_SHIFT);
 
     if (error < 0 && abs(error) > phase_increment_) {
       // underflow
@@ -110,8 +108,6 @@ class SyncedLFO {
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t previous_phase_, previous_target_phase_;
-
-  uint8_t phase_err_coeff_shift_, freq_err_coeff_shift_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncedLFO);
 };
