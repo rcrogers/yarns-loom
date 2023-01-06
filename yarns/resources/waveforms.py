@@ -31,32 +31,31 @@
 import numpy
 
 WAVETABLE_SIZE = 256
-waveforms = []
 
 # Waveforms for the trigger shaper ---------------------------------------------
 
-# numpy.random.seed(666)
+numpy.random.seed(666)
 
-# def trigger_scale(x):
-#   if x.min() > 0:
-#     x = (x - x.min()) / (x.max() - x.min()) * 32767.0
-#   else:
-#     abs_max = numpy.abs(x).max()
-#     x = x / abs_max * 32767.0
-#   return numpy.round(x)
+def trigger_scale(x):
+  if x.min() > 0:
+    x = (x - x.min()) / (x.max() - x.min()) * 32767.0
+  else:
+    abs_max = numpy.abs(x).max()
+    x = x / abs_max * 32767.0
+  return numpy.round(x)
 
 
-# t = numpy.arange(0, WAVETABLE_SIZE + 1) / float(WAVETABLE_SIZE)
+t = numpy.arange(0, WAVETABLE_SIZE + 1) / float(WAVETABLE_SIZE)
 
-# exponential = numpy.exp(-4.0 * t)
-# ring = numpy.exp(-3.0 * t) * numpy.cos(8.0 * t * numpy.pi)
-# steps = numpy.sign(numpy.sin(4.0 * t * numpy.pi)) * (2 ** (-numpy.round(t * 2.0)))
-# noise = numpy.random.randn(WAVETABLE_SIZE + 1, 1).ravel() * ((1 - t) ** 2)
+exponential = numpy.exp(-4.0 * t)
+ring = numpy.exp(-3.0 * t) * numpy.cos(8.0 * t * numpy.pi)
+steps = numpy.sign(numpy.sin(4.0 * t * numpy.pi)) * (2 ** (-numpy.round(t * 2.0)))
+noise = numpy.random.randn(WAVETABLE_SIZE + 1, 1).ravel() * ((1 - t) ** 2)
 
-# waveforms += [('exponential', trigger_scale(exponential))]
-# waveforms += [('ring', trigger_scale(ring))]
-# waveforms += [('steps', trigger_scale(steps))]
-# waveforms += [('noise', trigger_scale(noise))]
+waveforms = [('exponential', trigger_scale(exponential))]
+waveforms += [('ring', trigger_scale(ring))]
+waveforms += [('steps', trigger_scale(steps))]
+waveforms += [('noise', trigger_scale(noise))]
 
 
 

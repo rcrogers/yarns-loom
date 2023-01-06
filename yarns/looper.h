@@ -93,7 +93,7 @@ class Deck {
   inline uint16_t phase() const {
     return pos_;
   }
-  uint32_t period_ticks() const;
+  uint16_t period_ticks() const;
   void Clock();
   inline void Refresh() {
     lfo_.Refresh();

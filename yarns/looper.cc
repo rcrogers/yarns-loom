@@ -111,7 +111,7 @@ void Deck::Pack(PackedPart& storage) const {
   }
 }
 
-uint32_t Deck::period_ticks() const {
+uint16_t Deck::period_ticks() const {
   return part_->PPQN() << part_->sequencer_settings().loop_length;
 }
 
