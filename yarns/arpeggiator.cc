@@ -78,7 +78,7 @@ const Arpeggiator Arpeggiator::BuildNextState(
     if (!(pattern_mask & pattern)) return next;
   }
 
-  uint8_t num_keys = arp_keys.stack.size();
+  uint8_t num_keys = arp_keys.stack.size(); // Max: kNoteStackSize
   if (!num_keys) {
     next.ResetKey();
     return next;

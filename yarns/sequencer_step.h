@@ -51,6 +51,8 @@ struct SequencerStep {
   inline uint8_t velocity() const { return data[1] & 0x7f; }
 
   inline bool is_white() const { return whiteKeyValues[note() % 12] != 0xff; }
+
+  // 0-indexed
   inline uint8_t octave() const { return note() / 12; }
   inline uint8_t white_key_value() const { return whiteKeyValues[note() % 12]; }
   inline uint8_t black_key_value() const { return blackKeyValues[note() % 12]; }
