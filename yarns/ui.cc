@@ -363,8 +363,7 @@ void Ui::PrintLooperRecordingStatus() {
   if (recording_mode_is_displaying_pitch_) {
     PrintNote(looper_tape.NotePitch(note_index));
   } else {
-    Settings::PrintInteger(buffer_, looper_tape.NoteAgeOrdinal(note_index) + 1);
-    display_.Print(buffer_);
+    PrintInteger(looper_tape.NoteAgeOrdinal(note_index) + 1);
   }
 }
 
@@ -384,8 +383,7 @@ void Ui::PrintRecordingStatus() {
     if (recording_mode_is_displaying_pitch_) {
       PrintRecordingStep();
     } else {
-      Settings::PrintInteger(buffer_, recording_part().recording_step() + 1);
-      display_.Print(buffer_);
+      PrintInteger(recording_part().recording_step() + 1);
     }
   }
 }
@@ -437,8 +435,8 @@ void Ui::PrintFactoryTesting() {
   }
 }
 
-void Ui::SplashOn(Splash s) {
-  splash_ = s;
+void Ui::SplashOn(Splash splash) {
+  splash_ = splash;
   queue_.Touch(); // Reset idle timer
   display_.set_brightness(UINT16_MAX);
   display_.set_fade(0);
@@ -482,17 +480,8 @@ void Ui::SplashOn(Splash s) {
       display_.Print(buffer_);
       break;
 
-    case SPLASH_DELETE_RECORDING:
-      strcpy(buffer_, "1D");
-      buffer_[0] += splash_part_;
-      display_.Print(buffer_);
-      break;
-
     case SPLASH_LOOPER_PHASE_OFFSET:
-      Settings::PrintInteger(
-        buffer_, recording_part().looper().pos_offset >> 9
-      );
-      display_.Print(buffer_);
+      PrintInteger(recording_part().looper().pos_offset >> 9);
       break;
 
     case SPLASH_PROGRAM_LOAD:
@@ -630,14 +619,7 @@ void Ui::OnIncrementParameterSelect(const Event& e) {
 }
 
 void Ui::OnIncrementParameterEdit(const stmlib::Event& e) {
-  int16_t value = multi.GetSetting(setting(), active_part_);
-  if (
-    setting().unit == SETTING_UNIT_INT8 ||
-    setting().unit == SETTING_UNIT_LFO_SPREAD
-  ) {
-    value = static_cast<int8_t>(value);
-  }
-  value += e.data;
+  int16_t value = multi.IncrementSetting(setting(), active_part_, e.data);
   multi.ApplySetting(setting(), active_part_, value);
 }
 
@@ -765,7 +747,7 @@ void Ui::OnSwitchHeld(const Event& e) {
     case UI_SWITCH_REC:
       if (recording_any) {
         mutable_recording_part()->DeleteRecording();
-        SplashOn(SPLASH_DELETE_RECORDING, active_part_);
+        SplashPartString("RX", active_part_);
       } else {
         HeldKeys &keys = ActivePartHeldKeys();
         if (keys.universally_sustainable) {
@@ -917,7 +899,7 @@ void Ui::DoEvents() {
     OnClickLearning(Event());
   }
 
-  if (splash_) {
+  if (splash_) { // Check whether to end this splash (and maybe chain another)
     if (queue_.idle_time() < kRefreshPeriod || display_.scrolling()) {
       return; // Splash isn't over yet
     }

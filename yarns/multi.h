@@ -55,15 +55,15 @@ struct PackedMulti {
 
   int8_t custom_pitch_table[12];
 
-  unsigned int
-    layout : 4,
-    clock_tempo : 8,
-    clock_swing : 7,
+  unsigned int // 7 bits to spare (plus 16 in flash_padding)
+    layout : 4, // values free: 1
+    clock_tempo : 8, // values free: 54
+    clock_swing : 7, // values free: 28
     clock_input_division : 3, // Breaking: can 0-index for 1 fewer bit
-    clock_output_division : 5,
-    clock_bar_duration : 6, // barely
+    clock_output_division : 5, // values free: 0
+    clock_bar_duration : 6, // values free: 30
     clock_override : 1,
-    remote_control_channel : 5, // barely
+    remote_control_channel : 5, // values free: 15
     nudge_first_tick : 1,
     clock_manual_start : 1;
 
@@ -79,7 +79,7 @@ struct MultiSettings {
   uint8_t clock_bar_duration;
   uint8_t clock_override;
   int8_t custom_pitch_table[12];
-  uint8_t remote_control_channel;
+  uint8_t remote_control_channel; // first value = off
   uint8_t nudge_first_tick;
   uint8_t clock_manual_start;
   uint8_t padding[10];
@@ -269,7 +269,20 @@ class Multi {
     return thru;
   }
   
-  bool ControlChange(uint8_t channel, uint8_t controller, uint8_t value);
+  bool ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bits);
+  int16_t ScaleAbsoluteCC(uint8_t value_7bits, int16_t min, int16_t max) const;
+  inline int8_t IncrementFromTwosComplementRelativeCC(uint8_t value_7bits) const {
+    return static_cast<int8_t>(value_7bits << 1) >> 1;
+  }
+  inline int16_t IncrementSetting(const Setting& setting, uint8_t part, int16_t increment) const {
+    int16_t value = GetSetting(setting, part);
+    if (
+      setting.unit == SETTING_UNIT_INT8 ||
+      setting.unit == SETTING_UNIT_LFO_SPREAD
+    ) value = static_cast<int8_t>(value);
+    value += increment;
+    return value;
+  }
   void SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value);
   uint8_t GetSetting(const Setting& setting, uint8_t part) const;
   void ApplySetting(SettingIndex setting, uint8_t part, int16_t raw_value) {

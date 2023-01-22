@@ -41,20 +41,20 @@ using namespace stmlib;
 
 class Part;
 class HeldKeys;
+class SequencerArpeggiatorResult;
 
 struct Arpeggiator {
-  SequencerStep step;
-  uint8_t step_index;
-  int8_t key_index; // Combines with octave to select a note from the arp chord
-  int8_t octave; // Current octave of the ARP RANGE
+  int8_t key_index;
+  int8_t octave;
   int8_t key_increment;
 
-  void ResetKey();
+  void Reset();
 
-  const Arpeggiator BuildNextState(
+  const SequencerArpeggiatorResult BuildNextResult(
     const Part& part,
     const HeldKeys& arp_keys,
-    const SequencerStep* seq_step_ptr
+    uint32_t step_counter,
+    const SequencerStep seq_step
   ) const;
 
 };

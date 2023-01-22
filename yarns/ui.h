@@ -66,12 +66,11 @@ enum UiMode {
 enum Splash {
   SPLASH_NONE = 0,
   SPLASH_VERSION,
-  SPLASH_PART_STRING,
-  SPLASH_SETTING_VALUE,
-  SPLASH_SETTING_NAME,
+  SPLASH_PART_STRING,   // Print an arbitrary string, then SPLASH_SETTING_PART
+  SPLASH_SETTING_VALUE, // Print a setting value, then SPLASH_SETTING_NAME
+  SPLASH_SETTING_NAME,  // Print a setting name, then SPLASH_SETTING_PART
   SPLASH_SETTING_PART,
   SPLASH_ACTIVE_PART,
-  SPLASH_DELETE_RECORDING,
   SPLASH_LOOPER_PHASE_OFFSET,
   SPLASH_PROGRAM_LOAD,
   SPLASH_PROGRAM_SAVE,
@@ -122,9 +121,9 @@ class Ui {
   }
   void DoEvents();
   void FlushEvents();
-  void SplashOn(Splash s);
-  void SplashPartString(const char* text, uint8_t part) {
-    strcpy(buffer_, text);
+  void SplashOn(Splash splash);
+  void SplashPartString(const char* label, uint8_t part) {
+    strcpy(buffer_, label);
     buffer_[2] = '\0';
     display_.Print(buffer_);
     SplashOn(SPLASH_PART_STRING, part);
@@ -143,6 +142,10 @@ class Ui {
 
   void Print(const char* text) {
     display_.Print(text, text);
+  }
+  void PrintInteger(uint8_t number) {
+    Settings::PrintInteger(buffer_, number);
+    display_.Print(buffer_);
   }
 
   void PrintDebugByte(uint8_t byte) {

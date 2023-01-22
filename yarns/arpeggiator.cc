@@ -40,48 +40,43 @@ namespace yarns {
     
 using namespace stmlib;
 
-void Arpeggiator::ResetKey() {
+void Arpeggiator::Reset() {
   key_index = 0;
   octave = 0;
   key_increment = 1;
 }
 
-const Arpeggiator Arpeggiator::BuildNextState(
+const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
   const Part& part,
   const HeldKeys& arp_keys,
-  const SequencerStep* seq_step_ptr
+  uint32_t step_counter, // May differ from part's current step (for peeking)
+  SequencerStep seq_step
 ) const {
-  SequencerStep seq_step;
-  Arpeggiator next = *this;
-  // In case the pattern doesn't hit a note, the default output step is a REST
-  next.step.data[0] = SEQUENCER_STEP_REST;
+  // In case of early return, the arp does not advance, and the note is a REST
+  SequencerArpeggiatorResult result = {
+    *this, SequencerStep(SEQUENCER_STEP_REST, 0)
+  };
+  Arpeggiator& next = result.arpeggiator;
 
-  // Always advance the pattern counter, even if we rest
-  next.step_index = (next.step_index + 1) % 16;
-
-  // If sequencer/pattern doesn't hit a note, return a REST/TIE output step, and
-  // don't advance the arp key
-  uint32_t pattern_mask, pattern;
   if (part.seq_driven_arp()) {
-    if (!seq_step_ptr) return next;
-    seq_step = *seq_step_ptr;
     if (!seq_step.has_note()) { // Here, the output step can also be a TIE
-      next.step.data[0] = seq_step.data[0];
-      return next;
+      result.note.data[0] = seq_step.data[0];
+      return result;
     }
-  } else {
+  } else { // Use an arp pattern
+    uint8_t pattern_step_index = step_counter % 16;
     // Build a dummy input step for JUMP/GRID
-    seq_step.data[0] = kC4 + 1 + next.step_index;
+    seq_step.data[0] = kC4 + 1 + pattern_step_index;
     seq_step.data[1] = 0x7f; // Full velocity
-    pattern_mask = 1 << next.step_index;
-    pattern = lut_arpeggiator_patterns[part.sequencer_settings().arp_pattern - 1];
-    if (!(pattern_mask & pattern)) return next;
+    uint16_t pattern_mask = 1 << pattern_step_index;
+    uint16_t pattern = lut_arpeggiator_patterns[LUT_ARPEGGIATOR_PATTERNS_SIZE - part.sequencer_settings().arp_pattern - 1];
+    if (!(pattern_mask & pattern)) return result;
   }
 
-  uint8_t num_keys = arp_keys.stack.size(); // Max: kNoteStackSize
+  uint8_t num_keys = arp_keys.stack.size();
   if (!num_keys) {
-    next.ResetKey();
-    return next;
+    next.Reset();
+    return result;
   }
 
   uint8_t arp_range = part.sequencer_settings().arp_range;
@@ -103,7 +98,7 @@ const Arpeggiator Arpeggiator::BuildNextState(
     case ARPEGGIATOR_DIRECTION_STEP_JUMP:
       {
         // If step value by color within octave is greater than total chord size, rest without moving
-        if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
+        if (seq_step.color_key_value() >= num_keys_all_octaves) return result;
 
         // Advance active position by octave # -- C4 -> pos + 4; C0 -> pos + 0
         next.key_index = modulo(next.key_index + display_octave, num_keys_all_octaves);
@@ -122,7 +117,7 @@ const Arpeggiator Arpeggiator::BuildNextState(
     case ARPEGGIATOR_DIRECTION_STEP_GRID:
       {
         // If step value by color within octave is greater than total chord size, rest without moving
-        if (seq_step.color_key_value() >= num_keys_all_octaves) return next;
+        if (seq_step.color_key_value() >= num_keys_all_octaves) return result;
 
         // Map linear position to X-Y grid coordinates
         // C4 -> 4x4 grid; C0 -> 1x1; C1 -> 1x1; C9 -> 9x9
@@ -191,10 +186,10 @@ const Arpeggiator Arpeggiator::BuildNextState(
   while (note > 127) {
     note -= 12;
   }
-  next.step.data[0] = note;
-  next.step.data[1] = velocity;
+  result.note.data[0] = note;
+  result.note.data[1] = velocity;
 
-  return next;
+  return result;
 }
 
 }

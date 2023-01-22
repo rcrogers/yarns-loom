@@ -70,7 +70,7 @@ const uint8_t kBitsMIDI = 7;
 
 struct PackedNote {
   PackedNote() { }
-  unsigned int
+  unsigned int // values free: 0
     on_pos    : kBitsPos,
     off_pos   : kBitsPos,
     pitch     : kBitsMIDI,

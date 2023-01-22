@@ -113,7 +113,7 @@ void Part::Init() {
   seq_.gate_length = 3;
   seq_.arp_range = 0;
   seq_.arp_direction = 0;
-  seq_.arp_pattern = 1;
+  seq_.arp_pattern = LUT_ARPEGGIATOR_PATTERNS_SIZE - 1; // Pattern 0
   midi_.input_response = SEQUENCER_INPUT_RESPONSE_TRANSPOSE;
   midi_.play_mode = PLAY_MODE_MANUAL;
   seq_.clock_quantization = 0;
@@ -297,14 +297,7 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       }
       break;
 
-    case 0x73:
-      if (looped()) {
-        looper_.pos_offset = value << 9;
-        ui.SplashOn(SPLASH_LOOPER_PHASE_OFFSET);
-      }
-      break;
-    
-    case 0x78:
+    case 0x78: // All Sound Off
       AllNotesOff();
       break;
       
@@ -312,7 +305,7 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       ResetAllControllers();
       break;
       
-    case 0x7b:
+    case 0x7b: // All Notes Off
       AllNotesOff();
       break;
   }
@@ -364,46 +357,63 @@ void Part::Reset() {
 }
 
 void Part::Clock() { // From Multi::ClockFast
+  bool new_step = multi.tick_counter() % PPQN() == 0;
+  if (new_step) {
+    step_counter_ = multi.tick_counter() / PPQN();
+    int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
+    if (sequence_repeats_per_arp_reset > 0) {
+      uint8_t quarter_notes_per_sequence_repeat =
+        looped() ? (1 << seq_.loop_length) : seq_.num_steps;
+      uint16_t quarter_notes_per_arp_reset =
+        sequence_repeats_per_arp_reset * quarter_notes_per_sequence_repeat;
+      if (step_counter_ % quarter_notes_per_arp_reset == 0) arpeggiator_.Reset();
+    }
+  }
+
+  // The rest of the method is only for the step sequencer and/or arpeggiator
   if (looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL) return;
 
-  if (multi.tick_counter() % PPQN() == 0) { // New step
-    uint32_t step_counter = multi.tick_counter() / PPQN();
-    StepSequencerArpeggiator(step_counter);
+  if (new_step) {
+    SequencerArpeggiatorResult result = BuildNextStepResult(step_counter_);
+    arpeggiator_ = result.arpeggiator;
+    if (result.note.has_note()) {
+      uint8_t pitch = result.note.note();
+      uint8_t velocity = result.note.velocity();
+      GeneratedNoteOff(pitch); // Simulate a human retriggering a key
+      if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
+        InternalNoteOn(pitch, velocity, result.note.is_slid());
+      }
+    }
   }
   ClockStepGateEndings();
 }
 
-void Part::StepSequencerArpeggiator(uint32_t step_counter) {
+SequencerArpeggiatorResult Part::BuildNextStepResult(uint32_t step_counter) const {
+  // In case of early return, the arp does not advance, and the note is a REST
+  SequencerArpeggiatorResult result = {
+    arpeggiator_, SequencerStep(SEQUENCER_STEP_REST, 0),
+  };
+
   if (seq_.euclidean_length != 0) {
     // If euclidean rhythm is enabled, advance euclidean state
-    euclidean_step_index_ = (euclidean_step_index_ + 1) % seq_.euclidean_length;
-    uint32_t pattern_mask = 1 << ((euclidean_step_index_ + seq_.euclidean_rotate) % seq_.euclidean_length);
+    uint8_t euclidean_step_index = step_counter % seq_.euclidean_length;
+    uint32_t pattern_mask = 1 << ((euclidean_step_index + seq_.euclidean_rotate) % seq_.euclidean_length);
     // Read euclidean pattern from ROM.
     uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) << 5;
     uint32_t pattern = lut_euclidean[offset + seq_.euclidean_fill];
-    // If skipping this beat, don't advance other state
-    if (!(pattern_mask & pattern)) return;
+    if (!(pattern_mask & pattern)) return result; // If skipping this beat, early return
   }
 
-  SequencerStep* step_ptr = NULL;
-  SequencerStep step;
+  // Advance sequencer and arpeggiator state
   if (seq_.num_steps) {
-    seq_step_ = step_counter % seq_.num_steps;
-    step = BuildSeqStep(seq_step_);
-    step_ptr = &step;
+    result.note = BuildSeqStep(step_counter % seq_.num_steps);
   }
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-    arp_ = BuildArpState(step_ptr);
-    step_ptr = &arp_.step;
+    // If seq-driven and there are no steps, early return
+    if (seq_driven_arp() && !seq_.num_steps) return result;
+    result = BuildNextArpeggiatorResult(step_counter, result.note);
   }
-  if (step_ptr && step_ptr->has_note()) {
-    uint8_t pitch = step_ptr->note();
-    uint8_t velocity = step_ptr->velocity();
-    GeneratedNoteOff(pitch); // Simulate a human retriggering a key
-    if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
-      InternalNoteOn(pitch, velocity, step_ptr->is_slid());
-    }
-  }
+  return result;
 }
 
 void Part::ClockStepGateEndings() {
@@ -414,17 +424,8 @@ void Part::ClockStepGateEndings() {
     }
     // Peek at next step to see if it's a continuation
     // If more than one voice has a step ending, the peek is redundant
-    SequencerStep* next_step_ptr = NULL;
-    SequencerStep next_step;
-    if (seq_.num_steps) {
-      next_step = BuildSeqStep((seq_step_ + 1) % seq_.num_steps);
-      next_step_ptr = &next_step;
-    }
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      next_step = BuildArpState(next_step_ptr).step;
-      next_step_ptr = &next_step;
-    }
-    if (next_step_ptr && next_step_ptr->is_continuation()) {
+    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note;
+    if (next_step.is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
       gate_length_counter_[v] += PPQN();
@@ -435,8 +436,7 @@ void Part::ClockStepGateEndings() {
 }
 
 void Part::Start() {
-  arp_.ResetKey();
-  arp_.step_index = euclidean_step_index_ = -1;
+  arpeggiator_.Reset();
   
   looper_.Rewind();
   std::fill(
@@ -942,7 +942,7 @@ bool Part::Set(uint8_t address, uint8_t value) {
       break;
       
     case PART_SEQUENCER_ARP_DIRECTION:
-      arp_.key_increment = 1;
+      arpeggiator_.key_increment = 1;
       break;
 
     case PART_MIDI_SUSTAIN_MODE:

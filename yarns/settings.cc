@@ -304,7 +304,7 @@ const Setting Settings::settings_[] = {
   {
     "CH", "CHANNEL",
     SETTING_DOMAIN_PART, { PART_MIDI_CHANNEL, 0 },
-    SETTING_UNIT_MIDI_CHANNEL, 0, 16, NULL,
+    SETTING_UNIT_MIDI_CHANNEL_LAST_OMNI, 0, 16, NULL,
     0xff, 4,
   },
   {
@@ -613,13 +613,13 @@ const Setting Settings::settings_[] = {
   {
     "AP", "ARP PATTERN",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_ARP_PATTERN, 0 },
-    SETTING_UNIT_ARP_PATTERN, 0, LUT_ARPEGGIATOR_PATTERNS_SIZE, NULL,
+    SETTING_UNIT_ARP_PATTERN, 0, 31, NULL,
     106, 28,
   },
   {
     "RP", "RHYTHMIC PATTERN",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_ARP_PATTERN, 0 },
-    SETTING_UNIT_ARP_PATTERN, 0, LUT_ARPEGGIATOR_PATTERNS_SIZE, NULL,
+    SETTING_UNIT_ARP_PATTERN, 0, 31, NULL,
     0xff, 0xff,
   },
   {
@@ -679,7 +679,7 @@ const Setting Settings::settings_[] = {
   {
     "RC", "REMOTE CONTROL CHANNEL",
     SETTING_DOMAIN_MULTI, { MULTI_REMOTE_CONTROL_CHANNEL, 0 },
-    SETTING_UNIT_MIDI_CHANNEL_OFF, 0, 16, NULL,
+    SETTING_UNIT_MIDI_CHANNEL_FIRST_OFF, 0, 16, NULL,
     0xff, 0xff,
   },
   {
@@ -741,7 +741,7 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       }
       break;
 
-    case SETTING_UNIT_MIDI_CHANNEL:
+    case SETTING_UNIT_MIDI_CHANNEL_LAST_OMNI:
       if (value == kMidiChannelOmni) {
         strcpy(buffer, "ALL");
       } else {
@@ -749,7 +749,7 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       }
       break;
 
-    case SETTING_UNIT_MIDI_CHANNEL_OFF:
+    case SETTING_UNIT_MIDI_CHANNEL_FIRST_OFF:
       if (value == 0x00) {
         strcpy(buffer, "OFF");
       } else {
@@ -790,10 +790,15 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       break;
 
     case SETTING_UNIT_ARP_PATTERN:
-      if (value == 0) {
-        strcpy(buffer, "SEQUENCER");
-      } else {
-        PrintInteger(buffer, value);
+      {
+        int8_t pattern = LUT_ARPEGGIATOR_PATTERNS_SIZE - value;
+        if (pattern > 0) { // Pattern-driven, left side
+          PrintInteger(buffer, pattern);
+          if (buffer[0] == ' ') buffer[0] = 'P';
+        } else { // Sequencer-driven, right side
+          PrintInteger(buffer, abs(pattern));
+          if (buffer[0] == ' ') buffer[0] = 'S';
+        }
       }
       break;
 
