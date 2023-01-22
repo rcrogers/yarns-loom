@@ -662,7 +662,6 @@ class Part {
   SequencerArpeggiatorResult BuildNextStepResult(uint32_t step_counter) const;
   void ClockStepGateEndings();
   void Start();
-  void Stop();
   void StopRecording();
   void StartRecording();
   void DeleteSequence();
@@ -721,8 +720,7 @@ class Part {
 
   // Does arpeggiator use notes from the loop/step sequence?
   inline bool seq_driven_arp() const {
-    int8_t pattern = LUT_ARPEGGIATOR_PATTERNS_SIZE - seq_.arp_pattern;
-    return pattern <= 0;
+    return seq_.arp_pattern >= LUT_ARPEGGIATOR_PATTERNS_SIZE;
   }
 
   inline bool uses_poly_allocator() const {

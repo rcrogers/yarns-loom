@@ -261,7 +261,7 @@ void Multi::Stop() {
     return;
   }
   for (uint8_t i = 0; i < num_active_parts_; ++i) {
-    part_[i].Stop();
+    part_[i].StopSequencerArpeggiatorNotes();
   }
   midi_handler.OnStop();
   clock_pulse_counter_ = 0;
@@ -1038,17 +1038,13 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value
   bool layout = &setting == &setting_defs.get(SETTING_LAYOUT);
   bool sequencer_semantics = \
     &setting == &setting_defs.get(SETTING_SEQUENCER_PLAY_MODE) ||
-    &setting == &setting_defs.get(SETTING_SEQUENCER_CLOCK_QUANTIZATION) || (
-      &setting == &setting_defs.get(SETTING_SEQUENCER_ARP_PATTERN) && (
-        prev_value == 0 || value == 0
-      )
-    );
+    &setting == &setting_defs.get(SETTING_SEQUENCER_CLOCK_QUANTIZATION);
 
   if (running_ && layout) { Stop(); }
   if (recording_ && (
     layout || (recording_part_ == part && sequencer_semantics)
   )) { StopRecording(recording_part_); }
-  if (sequencer_semantics) { part_[part].StopSequencerArpeggiatorNotes(); }
+  if (sequencer_semantics) part_[part].AllNotesOff();
 
   switch (setting.domain) {
     case SETTING_DOMAIN_MULTI:

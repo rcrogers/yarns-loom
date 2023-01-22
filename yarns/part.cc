@@ -349,11 +349,8 @@ bool Part::Aftertouch(uint8_t channel, uint8_t velocity) {
 }
 
 void Part::Reset() {
-  Stop();
-  for (uint8_t i = 0; i < num_voices_; ++i) {
-    VoiceNoteOff(i);
-    voice_[i]->ResetAllControllers();
-  }
+  AllNotesOff();
+  ResetAllControllers();
 }
 
 void Part::Clock() { // From Multi::ClockFast
@@ -456,11 +453,6 @@ void Part::Start() {
   );
 
   generated_notes_.Clear();
-}
-
-void Part::Stop() {
-  StopSequencerArpeggiatorNotes();
-  AllNotesOff();
 }
 
 void Part::StopRecording() {
@@ -943,6 +935,14 @@ bool Part::Set(uint8_t address, uint8_t value) {
       
     case PART_SEQUENCER_ARP_DIRECTION:
       arpeggiator_.key_increment = 1;
+      break;
+
+    case PART_SEQUENCER_ARP_PATTERN:
+      if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR &&
+        // If changing seq_driven_arp
+        (previous_value >= LUT_ARPEGGIATOR_PATTERNS_SIZE) !=
+        (value >= LUT_ARPEGGIATOR_PATTERNS_SIZE)
+      ) StopSequencerArpeggiatorNotes();
       break;
 
     case PART_MIDI_SUSTAIN_MODE:

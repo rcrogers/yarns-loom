@@ -91,7 +91,7 @@ const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
     case ARPEGGIATOR_DIRECTION_RANDOM:
       {
         uint16_t random = Random::GetSample();
-        next.octave = random & 0xff;
+        next.octave = (random & 0xff) % num_octaves;
         next.key_index = random >> 8;
       }
       break;
