@@ -90,6 +90,7 @@ namespace yarns {
 
 #define MENU_END \
   SETTING_REMOTE_CONTROL_CHANNEL, \
+  SETTING_CONTROL_CHANGE_MODE, \
   SETTING_LAST
 
 #define MENU_LIVE \

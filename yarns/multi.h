@@ -55,7 +55,7 @@ struct PackedMulti {
 
   int8_t custom_pitch_table[12];
 
-  unsigned int // 7 bits to spare (plus 16 in flash_padding)
+  unsigned int // 7 bits to spare (plus 8 in flash_padding)
     layout : 4, // values free: 1
     clock_tempo : 8, // values free: 54
     clock_swing : 7, // values free: 28
@@ -67,7 +67,9 @@ struct PackedMulti {
     nudge_first_tick : 1,
     clock_manual_start : 1;
 
-  uint8_t flash_padding[2];
+  uint8_t control_change_mode; // Breaking: move to bitfield when convenient
+
+  uint8_t flash_padding[1];
 }__attribute__((packed));
 
 struct MultiSettings {
@@ -82,7 +84,8 @@ struct MultiSettings {
   uint8_t remote_control_channel; // first value = off
   uint8_t nudge_first_tick;
   uint8_t clock_manual_start;
-  uint8_t padding[10];
+  uint8_t control_change_mode;
+  uint8_t padding[9];
 
   void Pack(PackedMulti& packed) {
     for (uint8_t i = 0; i < 12; i++) {
@@ -98,6 +101,7 @@ struct MultiSettings {
     packed.remote_control_channel = remote_control_channel;
     packed.nudge_first_tick = nudge_first_tick;
     packed.clock_manual_start = clock_manual_start;
+    packed.control_change_mode = control_change_mode;
   }
 
   void Unpack(PackedMulti& packed) {
@@ -114,11 +118,19 @@ struct MultiSettings {
     remote_control_channel = packed.remote_control_channel;
     nudge_first_tick = packed.nudge_first_tick;
     clock_manual_start = packed.clock_manual_start;
+    control_change_mode = packed.control_change_mode;
   }
 };
 
 enum Tempo {
   TEMPO_EXTERNAL = 39
+};
+
+enum ControlChangeMode {
+  CONTROL_CHANGE_MODE_OFF,
+  CONTROL_CHANGE_MODE_ABSOLUTE,
+  CONTROL_CHANGE_MODE_RELATIVE_TWOS_COMPLEMENT,
+  CONTROL_CHANGE_MODE_LAST,
 };
 
 enum MultiSetting {
@@ -144,6 +156,7 @@ enum MultiSetting {
   MULTI_REMOTE_CONTROL_CHANNEL,
   MULTI_CLOCK_NUDGE_FIRST_TICK,
   MULTI_CLOCK_MANUAL_START,
+  MULTI_CONTROL_CHANGE_MODE,
 };
 
 enum Layout {

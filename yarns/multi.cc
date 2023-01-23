@@ -103,6 +103,7 @@ void Multi::Init(bool reset_calibration) {
   settings_.clock_override = 0;
   settings_.nudge_first_tick = 0;
   settings_.clock_manual_start = 0;
+  settings_.control_change_mode = CONTROL_CHANGE_MODE_ABSOLUTE;
 
   // A test sequence...
   // seq->num_steps = 4;
@@ -787,8 +788,9 @@ void Multi::UpdateTempo() {
 }
 
 void Multi::AfterDeserialize() {
-  Stop();
+  CONSTRAIN(settings_.control_change_mode, 0, CONTROL_CHANGE_MODE_LAST - 1);
 
+  Stop();
   UpdateTempo();
   AllocateParts();
   
@@ -874,10 +876,26 @@ void Multi::StopRecording(uint8_t part) {
   }
 }
 
-const bool RELATIVE = true;
-
 bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bits) {
   bool thru = true;
+
+  int8_t relative_increment;
+  switch (settings_.control_change_mode) {
+    case CONTROL_CHANGE_MODE_OFF:
+      return thru;
+    case CONTROL_CHANGE_MODE_ABSOLUTE:
+      relative_increment = 0;
+      break;
+    case CONTROL_CHANGE_MODE_RELATIVE_TWOS_COMPLEMENT:
+      relative_increment = IncrementFromTwosComplementRelativeCC(value_7bits);
+      break;
+    default:
+      relative_increment = 0;
+      break;
+  }
+
+  if (settings_.control_change_mode == CONTROL_CHANGE_MODE_OFF) return thru;
+
   if (
     is_remote_control_channel(channel) &&
     setting_defs.remote_control_cc_map[controller] != 0xff
@@ -888,7 +906,6 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
       if (!part_accepts_channel(part_index, channel)) continue;
 
       int16_t macro_zone;
-      int8_t relative_increment = IncrementFromTwosComplementRelativeCC(value_7bits);
 
       switch (controller) { // Intercept special CCs
       case kCCRecordOffOn: {
@@ -904,7 +921,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
         break;
 
       case kCCMacroRecord:
-        if (RELATIVE) {
+        if (relative_increment) {
           if (recording_ && recording_part_ == part_index) {
             macro_zone = part_[part_index].seq_overwrite() ? MACRO_RECORD_OVERWRITE : MACRO_RECORD_ON;
           } else {
@@ -921,7 +938,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
           macro_zone == MACRO_RECORD_DELETE &&
           // Only on increasing value, so that leaving an absolute controller in
           // the delete zone doesn't doom any subsequent recordings
-          (RELATIVE || value_7bits > macro_record_last_value_[part_index]))
+          (relative_increment || value_7bits > macro_record_last_value_[part_index]))
         {
           part_[part_index].DeleteRecording();
           ui.SplashPartString("RX", part_index);
@@ -933,7 +950,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
         break;
 
       case kCCMacroPlayMode:
-        if (RELATIVE) {
+        if (relative_increment) {
           macro_zone = part_[part_index].midi_settings().play_mode;
           if (part_[part_index].sequencer_settings().clock_quantization) {
             macro_zone = -macro_zone;
@@ -956,7 +973,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
 
       case kCCLooperPhaseOffset:
         if (part_[part_index].looped()) {
-          if (RELATIVE) {
+          if (relative_increment) {
             part_->mutable_looper().pos_offset += (relative_increment << 9); // Wraps
           } else {
             part_->mutable_looper().pos_offset = value_7bits << 9;
@@ -993,7 +1010,7 @@ void Multi::SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value_7bit
 
   uint8_t part = part_index == 0xff ? controller >> 5 : part_index;
   int16_t raw_value;
-  if (RELATIVE) {
+  if (settings_.control_change_mode > CONTROL_CHANGE_MODE_ABSOLUTE) {
     raw_value = IncrementSetting(setting, part, IncrementFromTwosComplementRelativeCC(value_7bits));
   } else {
     raw_value = ScaleAbsoluteCC(value_7bits, setting.min_value, setting.max_value);
