@@ -175,19 +175,17 @@ const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
   );
   next.key_index += next.key_increment;
 
-  // TODO step type algorithm
-
   uint8_t note = arpeggio_note->note;
   uint8_t velocity = arpeggio_note->velocity & 0x7f;
   if (part.seq_driven_arp()) {
     velocity = (velocity * seq_step.velocity()) >> 7;
+    if (seq_step.is_slid()) velocity |= 0x80;
   }
   note += 12 * next.octave;
   while (note > 127) {
     note -= 12;
   }
-  result.note.data[0] = note;
-  result.note.data[1] = velocity;
+  result.note = SequencerStep(note, velocity);
 
   return result;
 }
