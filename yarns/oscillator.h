@@ -121,9 +121,9 @@ class Oscillator {
     shape_ = shape;
   }
 
-  inline void NoteOn(ADSR& adsr, bool drone, int16_t timbre_target) {
+  inline void NoteOn(ADSR& adsr, bool drone, int16_t timbre_envelope_target) {
     gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
-    timbre_envelope_.NoteOn(adsr, 0, timbre_target);
+    timbre_envelope_.NoteOn(adsr, 0, timbre_envelope_target);
   }
   inline void NoteOff() {
     gain_envelope_.NoteOff();

@@ -115,7 +115,7 @@ class Voice {
   void Refresh();
   void NoteOn(
     int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
-    ADSR& adsr, int16_t timbre_target
+    ADSR& adsr, int16_t timbre_envelope_target
   );
   void NoteOff();
   void ControlChange(uint8_t controller, uint8_t value);

@@ -256,7 +256,7 @@ void CVOutput::Refresh() {
 
 void Voice::NoteOn(
   int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
-  ADSR& adsr, int16_t timbre_target
+  ADSR& adsr, int16_t timbre_envelope_target
 ) {
   note_source_ = note_portamento_;  
   note_target_ = note;
@@ -290,7 +290,7 @@ void Voice::NoteOn(
   }
   gate_ = true;
   adsr_ = adsr;
-  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_target);
+  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 }
