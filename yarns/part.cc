@@ -584,6 +584,104 @@ const SequencerStep Part::BuildSeqStep(uint8_t step_index) const {
   return SequencerStep((0x80 & step.data[0]) | (0x7f & note), step.data[1]);
 }
 
+void Part::RecordStep(const SequencerStep& step) {
+  if (!seq_recording_) return;
+
+  if (seq_overwrite_) { DeleteRecording(); }
+  SequencerStep* target = &seq_.step[seq_rec_step_];
+  target->data[0] = step.data[0];
+  target->data[1] |= step.data[1];
+  ++seq_rec_step_;
+  uint8_t last_step = seq_overdubbing_ ? seq_.num_steps : kNumSteps;
+  // Extend sequence.
+  if (!seq_overdubbing_ && seq_rec_step_ > seq_.num_steps) {
+    seq_.num_steps = seq_rec_step_;
+  }
+  // Wrap to first step.
+  if (seq_rec_step_ >= last_step) {
+    seq_rec_step_ = 0;
+  }
+}
+
+void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {
+  if (!looper_in_use()) return;
+  uint8_t generated_note_index = GeneratedNoteOn(pitch, velocity);
+  if (!generated_note_index) return;
+  looper_note_index_for_generated_note_index_[generated_note_index] = looper_note_index;
+  pitch = ApplySequencerInputResponse(pitch);
+  if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+    // Advance arp
+    SequencerStep step = SequencerStep(pitch, velocity);
+    // NB: since this path implies seq_driven_arp, there is no arp pattern,
+    // and step_counter_ doesn't matter
+    SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(step_counter_, step);
+    arpeggiator_ = result.arpeggiator;
+    pitch = result.note.note();
+    if (result.note.has_note()) {
+      bool slide = result.note.is_slid();
+      InternalNoteOn(pitch, result.note.velocity(), slide);
+      if (slide) {
+        // NB: currently impossible (see LooperPlayNoteOff)
+        InternalNoteOff(output_pitch_for_looper_note_[looper_note_index]);
+      }
+      output_pitch_for_looper_note_[looper_note_index] = pitch;
+    } //  else if tie, output_pitch_for_looper_note_ is already set to the tied pitch
+  } else if (looper_can_control(pitch)) {
+    InternalNoteOn(pitch, velocity);
+    output_pitch_for_looper_note_[looper_note_index] = pitch;
+  }
+}
+
+void Part::LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch) {
+  if (!looper_in_use()) { return; }
+  looper_note_index_for_generated_note_index_[generated_notes_.NoteOff(pitch)] = looper::kNullIndex;
+  pitch = output_pitch_for_looper_note_[looper_note_index];
+  if (pitch == looper::kNullIndex) { return; }
+  output_pitch_for_looper_note_[looper_note_index] = looper::kNullIndex;
+  if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+    // Peek at next looper note
+    uint8_t next_on_index = looper_.PeekNextOn();
+    const looper::Note& next_on_note = looper_.note_at(next_on_index);
+    SequencerStep next_step = SequencerStep(next_on_note.pitch, next_on_note.velocity);
+    // Predicting whether the looper will have looped around by this next note
+    // (and possibly caused an arp reset) is hard, but fortunately, a reset
+    // does not currently affect whether the arp output note is a
+    // continuation, so we don't care
+    //
+    // Also NB: step_counter_ doesn't matter (see LooperPlayNoteOn)
+    next_step = BuildNextArpeggiatorResult(step_counter_, next_step).note;
+    if (next_step.is_continuation()) {
+      // Leave this pitch in the care of the next looper note
+      //
+      // NB: currently impossible, since the arp can only return a
+      // continuation when driven by an input sequencer note that is a
+      // continuation, which the looper can't do
+      output_pitch_for_looper_note_[next_on_index] = pitch;
+    } else {
+      InternalNoteOff(pitch);
+    }
+  } else if (looper_can_control(pitch)) {
+    InternalNoteOff(pitch);
+  }
+}
+
+void Part::LooperRecordNoteOn(uint8_t pressed_key_index) {
+  if (seq_overwrite_) { DeleteRecording(); }
+  const stmlib::NoteEntry& e = manual_keys_.stack.note(pressed_key_index);
+  uint8_t looper_note_index = looper_.RecordNoteOn(e.note, e.velocity & 0x7f);
+  looper_note_recording_pressed_key_[pressed_key_index] = looper_note_index;
+  LooperPlayNoteOn(looper_note_index, e.note, e.velocity & 0x7f);
+}
+
+void Part::LooperRecordNoteOff(uint8_t pressed_key_index) {
+  const stmlib::NoteEntry& e = manual_keys_.stack.note(pressed_key_index);
+  uint8_t looper_note_index = looper_note_recording_pressed_key_[pressed_key_index];
+  if (looper_.RecordNoteOff(looper_note_index)) {
+    LooperPlayNoteOff(looper_note_index, e.note);
+  }
+  looper_note_recording_pressed_key_[pressed_key_index] = looper::kNullIndex;
+}
+
 void Part::ResetAllControllers() {
   ResetAllKeys();
   for (uint8_t i = 0; i < num_voices_; ++i) {
