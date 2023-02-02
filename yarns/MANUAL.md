@@ -27,7 +27,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - [Layouts](#layouts)
     - [Hold pedal](#hold-pedal)
     - [Event routing, filtering, and transformation](#event-routing-filtering-and-transformation)
-    - [`VOICING` allocation methods](#voicing-allocation-methods)
+    - [Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)](#polyphonic-voice-allocation-note-priority-and-voicing)
     - [Expanded support for Control Change events](#expanded-support-for-control-change-events)
     - [Clocking](#clocking)
     - [LFOs](#lfos)
@@ -72,23 +72,25 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 ### Oscillator synthesis models
 - Filtered noise: `TIMBRE` sets filter cutoff
   - Voice pitch sets filter resonance
-  - Sub-shapes: low-pass, notch, band-pass, high-pass
-- Phase distortion, resonant saw: `TIMBRE` sets filter cutoff
-  - Sub-shapes: low-pass, peaking, band-pass, high-pass
+  - Variants: low-pass, notch, band-pass, high-pass
 - Phase distortion, resonant pulse: `TIMBRE` sets filter cutoff
-  - Sub-shapes: low-pass, peaking, band-pass, high-pass
+  - Variants: low-pass, peaking, band-pass, high-pass
+- Phase distortion, resonant saw: `TIMBRE` sets filter cutoff
+  - Variants: low-pass, peaking, band-pass, high-pass
 - State-variable filter, low-pass: `TIMBRE` sets filter cutoff (resonance is fixed)
-  - Sub-shapes: pulse, saw
+  - Variants: pulse, saw
 - Pulse-width modulation: `TIMBRE` sets pulse width
-  - Sub-shapes: pulse, saw
+  - Variants: pulse, saw
+- Saw-pulse morph: `TIMBRE` morphs toward pulse
 - Hard sync: `TIMBRE` sets detuning of the secondary oscillator
-  - Sub-shapes: sine, pulse, saw
+  - Variants: sine, pulse, saw
 - Wavefolder: `TIMBRE` sets fold gain
-  - Sub-shapes: sine, triangle
-- Compressed sine (`tanh`): `TIMBRE` sets compression amount
+  - Variants: sine, triangle
 - Dirac comb: `TIMBRE` sets harmonic content
+- Compressed sine (`tanh`): `TIMBRE` sets compression amount
+- Exponential sine: `TIMBRE` sets exponentiation amount
 - Frequency modulation: `TIMBRE` sets modulation index
-  - Sub-shapes: 15 integer ratios, ordered from harmonic to inharmonic
+  - Variants: 11 integer ratios (ordered from harmonic to inharmonic), 8 ratios based on the inverse Minkowski question-mark function, 7 ratios that are integer divisions/multiples of pi
 
 ### Amplitude dynamics: envelope and tremolo
 - Configured via the `▽A (AMPLITUDE MENU)`
@@ -238,14 +240,30 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Any MIDI events ignored by the recording part can be received by other parts
   - Recording part now responds to MIDI start
 
-### `VOICING` allocation methods
-- New `NICE` option: voice-sticky like `POLY`, but without stealing
-- Allow `POLY`/etc voice allocation methods to be played legato
-- Fixed `UNISON` to respect `NOTE PRIORITY` and allocate notes without gaps; added new `FIRST` setting to `NOTE PRIORITY`
-- Improve `UNISON`/`SORTED` to avoid unnecessary reassignment/retrigger of voices during a partial chord change
-- `UNISON 2` and `SORTED` reassign voices on `NoteOff` if there are held notes that don't yet have a voice
+### Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)
+- Added new `FIRST` (oldest) setting to `NOTE PRIORITY`
+- Many polyphonic modes now respect `NOTE PRIORITY` and have been accordingly renamed
+  - `POLY` -> `STEAL RELEASE MUTE`
+    - Steal from the lowest-priority existing note IFF the incoming note has higher priority
+    - Don't reassign on release
+  - `SORTED` -> `PRIORITY ORDER`: always voice the highest-priority notes
+  - `U1` -> `UNISON RELEASE REASSIGN`
+  - `U2` -> `UNISON RELEASE MUTE`
+  - `STEAL MOST RECENT` -> `STEAL HIGHEST PRIORITY`
+    - Steal from the highest-priority existing note IFF the incoming note has higher priority
+  - `NICE` -> `STEAL RELEASE REASSIGN`
+    - Steal from the lowest-priority existing note IFF the incoming note has higher priority
+    - Reassign on release
+- Notes that steal a voice are considered legato
+- Fixed unison to allocate notes without gaps
+- Improve unison etc. to avoid unnecessary reassignment/retrigger of voices during a partial chord change
+- Unison etc. reassign voices on `NoteOff` if there are held notes that don't yet have a voice
   
 ### Expanded support for Control Change events
+- New global setting for `CC (CONTROL CHANGE MODE)`
+  - `OFF` (CCs are ignored)
+  - `ABSOLUTE` (as before)
+  - `RELATIVE TWOS COMPLEMENT` (1 = increment, 127 = decrement)
 - The result of a received CC is briefly displayed (value, setting abbreviation, and receiving part)
 - Recording control: start/stop recording mode, delete a recording
 - CC support for all new settings
@@ -259,6 +277,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Includes 1/8, 3/7, 2/3, 6/5, 4/3, and more
 - Sequencers' phases are based on a master clock, to allow returning to predictable phase relationships between sequences even after a stint in disparate time signatures
 - An explicit clock start (from panel switch or MIDI) can supersede an implicit clock start (from keyboard)
+- Stopping the clock no longer stops manually held keys, though it still stops notes generated by the sequencer/arpeggiator
 - Euclidean rhythms can be applied to the step sequencer as well as the arpeggiator
 
 ### LFOs
