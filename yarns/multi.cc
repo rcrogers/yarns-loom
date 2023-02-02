@@ -783,7 +783,8 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
 
 void Multi::UpdateTempo() {
   internal_clock_.set_tempo(settings_.clock_tempo);
-  if (running_) return; // If running, master LFO will get Tap instead
+  if (running_) return; // If running, master LFO will get Tap
+  // If not running, there's no Tap to update the increment, so do that here
   master_lfo_.SetPhaseIncrement(tick_phase_increment() >> kMasterLFOPeriodTicksBits);
 }
 
