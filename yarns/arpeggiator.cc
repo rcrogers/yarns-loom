@@ -73,7 +73,7 @@ const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
     if (!(pattern_mask & pattern)) return result;
   }
 
-  uint8_t num_keys = arp_keys.stack.size();
+  uint8_t num_keys = arp_keys.stack.size(); // Max: kNoteStackSize
   if (!num_keys) {
     next.Reset();
     return result;

@@ -806,7 +806,7 @@ void Part::InternalNoteOff(uint8_t note) {
     just_intonation_processor.NoteOff(note);
   }
   
-  bool had_extra_notes = mono_allocator_.size() > num_voices_;
+  bool had_unvoiced_notes = mono_allocator_.size() > num_voices_;
   const NoteEntry& before = priority_note();
   mono_allocator_.NoteOff(note);
   const NoteEntry& after = priority_note();
@@ -826,7 +826,7 @@ void Part::InternalNoteOff(uint8_t note) {
     KillAllInstancesOfNote(note);
     if (
       voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_REASSIGN ||
-      had_extra_notes
+      had_unvoiced_notes
     ) {
       DispatchSortedNotes(true);
     }
@@ -838,7 +838,7 @@ void Part::InternalNoteOff(uint8_t note) {
     if (voice_index < num_voices_) {
       VoiceNoteOff(voice_index);
       if (
-        had_extra_notes &&
+        had_unvoiced_notes &&
         voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN
       ) { // Reassign freed voice to the note that is now in the priority window
         const NoteEntry& nice = priority_note(num_voices_ - 1);
