@@ -356,7 +356,9 @@ void Part::Reset() {
 void Part::Clock() { // From Multi::ClockFast
   bool new_step = multi.tick_counter() % PPQN() == 0;
   if (new_step) {
-    step_counter_ = multi.tick_counter() / PPQN();
+    step_counter_ = seq_.step_offset + multi.tick_counter() / PPQN();
+
+    // Reset sequencer-driven arpeggiator (step or loop), if needed
     int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
     if (sequence_repeats_per_arp_reset > 0) {
       uint8_t quarter_notes_per_sequence_repeat =
@@ -393,8 +395,7 @@ SequencerArpeggiatorResult Part::BuildNextStepResult(uint32_t step_counter) cons
 
   if (seq_.euclidean_length != 0) {
     // If euclidean rhythm is enabled, advance euclidean state
-    uint8_t euclidean_step_index = step_counter % seq_.euclidean_length;
-    uint32_t pattern_mask = 1 << ((euclidean_step_index + seq_.euclidean_rotate) % seq_.euclidean_length);
+    uint32_t pattern_mask = 1 << (step_counter % seq_.euclidean_length);
     // Read euclidean pattern from ROM.
     uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) << 5;
     uint32_t pattern = lut_euclidean[offset + seq_.euclidean_fill];

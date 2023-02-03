@@ -234,7 +234,7 @@ struct PackedPart {
     arp_pattern : 5, // values free: 0
     euclidean_length : 5, // values free: 0
     euclidean_fill : 5, // values free: 0
-    euclidean_rotate : 5, // values free: 0
+    step_offset : 5, // values free: 0
     num_steps : 5, // values free: 1
     clock_quantization : 1,
     loop_length : 3; // values free: 0
@@ -474,7 +474,7 @@ enum PartSetting {
   PART_SEQUENCER_ARP_PATTERN,
   PART_SEQUENCER_EUCLIDEAN_LENGTH,
   PART_SEQUENCER_EUCLIDEAN_FILL,
-  PART_SEQUENCER_EUCLIDEAN_ROTATE,
+  PART_SEQUENCER_STEP_OFFSET,
   PART_SEQUENCER_NUM_STEPS,
   PART_SEQUENCER_CLOCK_QUANTIZATION,
   PART_SEQUENCER_LOOP_LENGTH,
@@ -489,7 +489,7 @@ struct SequencerSettings {
   uint8_t arp_pattern;
   uint8_t euclidean_length;
   uint8_t euclidean_fill;
-  uint8_t euclidean_rotate;
+  uint8_t step_offset;
   uint8_t num_steps;
   uint8_t clock_quantization;
   uint8_t loop_length;
@@ -512,7 +512,7 @@ struct SequencerSettings {
     packed.arp_pattern = arp_pattern;
     packed.euclidean_length = euclidean_length;
     packed.euclidean_fill = euclidean_fill;
-    packed.euclidean_rotate = euclidean_rotate;
+    packed.step_offset = step_offset;
     packed.num_steps = num_steps;
     packed.clock_quantization = clock_quantization;
     packed.loop_length = loop_length;
@@ -532,7 +532,7 @@ struct SequencerSettings {
     arp_pattern = packed.arp_pattern;
     euclidean_length = packed.euclidean_length;
     euclidean_fill = packed.euclidean_fill;
-    euclidean_rotate = packed.euclidean_rotate;
+    step_offset = packed.step_offset;
     num_steps = packed.num_steps;
     clock_quantization = packed.clock_quantization;
     loop_length = packed.loop_length;
