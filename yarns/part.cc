@@ -359,6 +359,11 @@ void Part::Clock() { // From Multi::ClockFast
     step_counter_ = seq_.step_offset + multi.tick_counter() / PPQN();
 
     // Reset sequencer-driven arpeggiator (step or loop), if needed
+    //
+    // NB: when using looper, this produces predictable changes in the arp
+    // output (i.e., resets the arp at a predictable point in the loop) IFF the
+    // looper's LFO is locked onto the clock's phase and frequency. Clocking
+    // changes may break the lock, and briefly cause mistimed arp resets
     int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
     if (sequence_repeats_per_arp_reset > 0) {
       uint8_t quarter_notes_per_sequence_repeat =
