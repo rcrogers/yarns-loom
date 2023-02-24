@@ -633,8 +633,8 @@ class Part {
   // applied here. It is up to the caller to call accepts() first to check
   // whether the message should be sent to the part.
   uint8_t HeldKeysNoteOn(HeldKeys &keys, uint8_t pitch, uint8_t velocity);
-  bool NoteOn(uint8_t channel, uint8_t note, uint8_t velocity);
-  bool NoteOff(uint8_t channel, uint8_t note, bool respect_sustain = true);
+  void NoteOn(uint8_t channel, uint8_t note, uint8_t velocity);
+  void NoteOff(uint8_t channel, uint8_t note, bool respect_sustain = true);
   uint8_t TransposeInputPitch(uint8_t pitch, int8_t transpose_octaves) const {
     CONSTRAIN(transpose_octaves, (0 - pitch) / 12, (127 - pitch) / 12);
     return pitch + 12 * transpose_octaves;
@@ -645,10 +645,10 @@ class Part {
   void InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato = false);
   void InternalNoteOff(uint8_t note);
   // Absolute CCs only
-  bool ControlChange(uint8_t channel, uint8_t controller, uint8_t value);
-  bool PitchBend(uint8_t channel, uint16_t pitch_bend);
-  bool Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity);
-  bool Aftertouch(uint8_t channel, uint8_t velocity);
+  void ControlChange(uint8_t channel, uint8_t controller, uint8_t value);
+  void PitchBend(uint8_t channel, uint16_t pitch_bend);
+  void Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity);
+  void Aftertouch(uint8_t channel, uint8_t velocity);
   void AllNotesOff();
   void StopSequencerArpeggiatorNotes();
   // Returns the 1-based index of the new note IFF there was room for it
@@ -795,9 +795,10 @@ class Part {
   inline uint8_t tx_channel() const {
     return midi_.channel == kMidiChannelOmni ? 0 : midi_.channel;
   }
-  inline bool direct_thru() const {
+  inline bool notes_thru() const {
     return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
   }
+  inline bool cc_thru() const { return midi_.out_mode != MIDI_OUT_MODE_OFF; }
   
   inline bool has_velocity_filtering() {
     return midi_.min_velocity != 0 || midi_.max_velocity != 127;

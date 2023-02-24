@@ -981,7 +981,8 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
         break;
 
       default:
-        thru = part_[part_index].ControlChange(channel, controller, value_7bits) && thru;
+        thru = thru && part_[part_index].cc_thru();
+        part_[part_index].ControlChange(channel, controller, value_7bits);
         SetFromCC(part_index, controller, value_7bits);
         break;
 

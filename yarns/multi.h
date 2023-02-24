@@ -244,12 +244,14 @@ class Multi {
     bool received = false;
     if (recording_ && part_accepts_note_on(recording_part_, channel, note, velocity)) {
       received = true;
-      thru = part_[recording_part_].NoteOn(channel, part_[recording_part_].TransposeInputPitch(note), velocity) && thru;
+      thru = thru && part_[recording_part_].notes_thru();
+      part_[recording_part_].NoteOn(channel, part_[recording_part_].TransposeInputPitch(note), velocity);
     } else {
       for (uint8_t i = 0; i < num_active_parts_; ++i) {
         if (!part_accepts_note_on(i, channel, note, velocity)) { continue; }
         received = true;
-        thru = part_[i].NoteOn(channel, part_[i].TransposeInputPitch(note), velocity) && thru;
+        thru = thru && part_[recording_part_].notes_thru();
+        part_[i].NoteOn(channel, part_[i].TransposeInputPitch(note), velocity);
       }
     }
     
@@ -272,7 +274,8 @@ class Multi {
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       has_notes = has_notes || part_[i].has_notes();
       if (!part_accepts_note(i, channel, note)) continue;
-      thru = part_[i].NoteOff(channel, part_[i].TransposeInputPitch(note)) && thru;
+      thru = thru && part_[i].notes_thru();
+      part_[i].NoteOff(channel, part_[i].TransposeInputPitch(note));
     }
     
     if (!has_notes && CanAutoStop()) {
@@ -308,7 +311,8 @@ class Multi {
     bool thru = true;
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       if (part_accepts_channel(i, channel)) {
-        thru = part_[i].PitchBend(channel, pitch_bend) && thru;
+        thru = thru && part_[i].cc_thru();
+        part_[i].PitchBend(channel, pitch_bend);
       }
     }
     return thru;
@@ -318,7 +322,8 @@ class Multi {
     bool thru = true;
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       if (part_accepts_note(i, channel, note)) {
-        thru = part_[i].Aftertouch(channel, note, velocity) && thru;
+        thru = thru && part_[i].cc_thru();
+        part_[i].Aftertouch(channel, note, velocity);
       }
     }
     return thru;
@@ -328,7 +333,8 @@ class Multi {
     bool thru = true;
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       if (part_accepts_channel(i, channel)) {
-        thru = part_[i].Aftertouch(channel, velocity) && thru;
+        thru = thru && part_[i].cc_thru();
+        part_[i].Aftertouch(channel, velocity);
       }
     }
     return thru;
@@ -471,7 +477,7 @@ class Multi {
   // necessary and the output stream will be delayed :(
   inline bool direct_thru() const {
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
-      if (!part_[i].direct_thru()) {
+      if (!part_[i].notes_thru()) {
         return false;
       }
     }

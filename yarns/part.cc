@@ -141,7 +141,7 @@ uint8_t Part::HeldKeysNoteOn(HeldKeys &keys, uint8_t pitch, uint8_t velocity) {
   return keys.stack.NoteOn(pitch, velocity);
 }
 
-bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
+void Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
   bool sent_from_step_editor = channel & 0x80;
   
   // scale velocity to compensate for its min/max range, so that voices using
@@ -163,11 +163,9 @@ bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
       InternalNoteOn(note, velocity);
     }
   }
-
-  return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
 }
 
-bool Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
+void Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
   bool sent_from_step_editor = channel & 0x80;
 
   uint8_t pressed_key_index = manual_keys_.stack.Find(note);
@@ -187,7 +185,6 @@ bool Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
       InternalNoteOff(note);
     }
   }
-  return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
 }
 
 void Part::HeldKeysSustainOn(HeldKeys &keys) {
@@ -248,7 +245,7 @@ void Part::ResetAllKeys() {
   ControlChange(0, kCCHoldPedal, hold_pedal_engaged_ ? 127 : 0);
 }
 
-bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
+void Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
   switch (controller) {
     case kCCBreathController:
     case kCCFootPedalMsb:
@@ -309,10 +306,9 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       AllNotesOff();
       break;
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
+void Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->PitchBend(pitch_bend);
   }
@@ -322,11 +318,9 @@ bool Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
     // Set slide flag
     seq_.step[seq_rec_step_].data[1] |= 0x80;
   }
-  
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
+void Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
   if (voicing_.allocation_mode != POLY_MODE_OFF) {
     uint8_t voice_index = \
         uses_poly_allocator() ? \
@@ -338,14 +332,12 @@ bool Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
   } else {
     Aftertouch(channel, velocity);
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::Aftertouch(uint8_t channel, uint8_t velocity) {
+void Part::Aftertouch(uint8_t channel, uint8_t velocity) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->Aftertouch(velocity);
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
 void Part::Reset() {
