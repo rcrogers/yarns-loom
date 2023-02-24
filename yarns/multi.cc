@@ -884,23 +884,20 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
   switch (settings_.control_change_mode) {
     case CONTROL_CHANGE_MODE_OFF:
       return thru;
-    case CONTROL_CHANGE_MODE_ABSOLUTE:
-      relative_increment = 0;
-      break;
     case CONTROL_CHANGE_MODE_RELATIVE_TWOS_COMPLEMENT:
       relative_increment = IncrementFromTwosComplementRelativeCC(value_7bits);
       break;
+    case CONTROL_CHANGE_MODE_ABSOLUTE:
     default:
       relative_increment = 0;
       break;
   }
 
-  if (settings_.control_change_mode == CONTROL_CHANGE_MODE_OFF) return thru;
-
   if (
     is_remote_control_channel(channel) &&
     setting_defs.remote_control_cc_map[controller] != 0xff
   ) {
+    // Always thru
     SetFromCC(0xff, controller, value_7bits);
   } else {
     for (uint8_t part_index = 0; part_index < num_active_parts_; ++part_index) {
