@@ -175,20 +175,16 @@ void Multi::Clock() {
       swing_counter_ = 0;
     }
     
-    if (song_pointer_) {
-      ClockSong();
+    if (internal_clock()) {
+      swing_predelay_[swing_counter_] = 0;
     } else {
-      if (internal_clock()) {
-        swing_predelay_[swing_counter_] = 0;
-      } else {
-        uint32_t interval = midi_clock_tick_duration_;
-        midi_clock_tick_duration_ = 0;
+      uint32_t interval = midi_clock_tick_duration_;
+      midi_clock_tick_duration_ = 0;
 
-        uint32_t modulation = swing_counter_ < 6
-            ? swing_counter_ : 12 - swing_counter_;
-        swing_predelay_[swing_counter_] = \
-            27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
-      }
+      uint32_t modulation = swing_counter_ < 6
+          ? swing_counter_ : 12 - swing_counter_;
+      swing_predelay_[swing_counter_] = \
+          27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
     }
     
     ++bar_position_;
@@ -253,7 +249,6 @@ void Multi::Start(bool started_by_keyboard) {
   for (uint8_t i = 0; i < num_active_parts_; ++i) {
     part_[i].Start();
   }
-  song_pointer_ = NULL;
   midi_clock_tick_duration_ = 0;
 }
 
@@ -270,7 +265,6 @@ void Multi::Stop() {
   stop_count_down_ = 0;
   running_ = false;
   started_by_keyboard_ = true;
-  song_pointer_ = NULL;
 }
 
 void Multi::ClockFast() {
@@ -799,51 +793,6 @@ void Multi::AfterDeserialize() {
     part_[i].AfterDeserialize();
     macro_record_last_value_[i] = 127;
   }
-}
-
-
-const uint8_t song[] = {
-  #include "song/song.h"
-  255,
-};
-
-void Multi::StartSong() {
-  Set(MULTI_LAYOUT, LAYOUT_QUAD_MONO);
-  part_[0].mutable_voicing_settings()->oscillator_shape = 0x83;
-  part_[1].mutable_voicing_settings()->oscillator_shape = 0x83;
-  part_[2].mutable_voicing_settings()->oscillator_shape = 0x84;
-  part_[3].mutable_voicing_settings()->oscillator_shape = 0x86;
-  AllocateParts();
-  settings_.clock_tempo = 140;
-  Stop();
-  Start(false);
-  
-  song_pointer_ = &song[0];
-  song_clock_ = 0;
-  song_delta_ = 0;
-}
-
-void Multi::ClockSong() {
-  while (song_clock_ >= song_delta_) {
-    if (*song_pointer_ == 255) {
-      song_pointer_ = &song[0];
-    }
-    if (*song_pointer_ == 254) {
-      song_delta_ += 6;
-    } else {
-      uint8_t part = *song_pointer_ >> 6;
-      uint8_t note = *song_pointer_ & 0x3f;
-      if (note == 0) {
-        part_[part].AllNotesOff();
-      } else {
-        part_[part].NoteOn(0, note + 24, 100);
-      }
-      song_clock_ = 0;
-      song_delta_ = 0;
-    }
-    ++song_pointer_;
-  }
-  ++song_clock_;
 }
 
 void Multi::StartRecording(uint8_t part) {

@@ -709,9 +709,6 @@ void Ui::OnSwitchPress(const Event& e) {
       } else {
         if (!multi.running()) {
           multi.Start(false);
-          if (multi.paques()) {
-            multi.StartSong();
-          }
         } else {
           multi.Stop();
         }

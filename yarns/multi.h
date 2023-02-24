@@ -186,13 +186,6 @@ class Multi {
   void PrintDebugByte(uint8_t byte);
   
   void Init(bool reset_calibration);
-  
-  inline uint8_t paques() const {
-    return settings_.clock_tempo == 49 && \
-        settings_.clock_swing == 49 && \
-        settings_.clock_output_division == 6 && \
-        settings_.clock_bar_duration == 9;
-  }
 
   inline bool is_remote_control_channel(uint8_t channel) const {
     return channel + 1 == settings_.remote_control_channel;
@@ -554,13 +547,10 @@ class Multi {
     return layout_configurator_.learning();
   }
   
-  void StartSong();
-
  private:
   void ChangeLayout(Layout old_layout, Layout new_layout);
   void UpdateTempo();
   void AllocateParts();
-  void ClockSong();
   void SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos);
   
   MultiSettings settings_;
@@ -611,10 +601,6 @@ class Multi {
   CVOutput cv_outputs_[kNumCVOutputs];
 
   LayoutConfigurator layout_configurator_;
-  
-  const uint8_t* song_pointer_;
-  uint32_t song_clock_;
-  uint8_t song_delta_;
 
   DISALLOW_COPY_AND_ASSIGN(Multi);
 };
