@@ -647,8 +647,8 @@ const Setting Settings::settings_[] = {
     108, 30,
   },
   {
-    "ER", "EUCLIDEAN ROTATE",
-    SETTING_DOMAIN_PART, { PART_SEQUENCER_EUCLIDEAN_ROTATE, 0 },
+    "SO", "STEP OFFSET",
+    SETTING_DOMAIN_PART, { PART_SEQUENCER_STEP_OFFSET, 0 },
     SETTING_UNIT_UINT8, 0, 31, NULL,
     109, 31,
   },

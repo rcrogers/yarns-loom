@@ -141,7 +141,7 @@ uint8_t Part::HeldKeysNoteOn(HeldKeys &keys, uint8_t pitch, uint8_t velocity) {
   return keys.stack.NoteOn(pitch, velocity);
 }
 
-bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
+void Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
   bool sent_from_step_editor = channel & 0x80;
   
   // scale velocity to compensate for its min/max range, so that voices using
@@ -163,11 +163,9 @@ bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
       InternalNoteOn(note, velocity);
     }
   }
-
-  return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
 }
 
-bool Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
+void Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
   bool sent_from_step_editor = channel & 0x80;
 
   uint8_t pressed_key_index = manual_keys_.stack.Find(note);
@@ -187,7 +185,6 @@ bool Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
       InternalNoteOff(note);
     }
   }
-  return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
 }
 
 void Part::HeldKeysSustainOn(HeldKeys &keys) {
@@ -248,7 +245,7 @@ void Part::ResetAllKeys() {
   ControlChange(0, kCCHoldPedal, hold_pedal_engaged_ ? 127 : 0);
 }
 
-bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
+void Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
   switch (controller) {
     case kCCBreathController:
     case kCCFootPedalMsb:
@@ -309,10 +306,9 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       AllNotesOff();
       break;
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
+void Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->PitchBend(pitch_bend);
   }
@@ -322,11 +318,9 @@ bool Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
     // Set slide flag
     seq_.step[seq_rec_step_].data[1] |= 0x80;
   }
-  
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
+void Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
   if (voicing_.allocation_mode != POLY_MODE_OFF) {
     uint8_t voice_index = \
         uses_poly_allocator() ? \
@@ -338,14 +332,12 @@ bool Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
   } else {
     Aftertouch(channel, velocity);
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::Aftertouch(uint8_t channel, uint8_t velocity) {
+void Part::Aftertouch(uint8_t channel, uint8_t velocity) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->Aftertouch(velocity);
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
 void Part::Reset() {
@@ -356,7 +348,14 @@ void Part::Reset() {
 void Part::Clock() { // From Multi::ClockFast
   bool new_step = multi.tick_counter() % PPQN() == 0;
   if (new_step) {
-    step_counter_ = multi.tick_counter() / PPQN();
+    step_counter_ = seq_.step_offset + multi.tick_counter() / PPQN();
+
+    // Reset sequencer-driven arpeggiator (step or loop), if needed
+    //
+    // NB: when using looper, this produces predictable changes in the arp
+    // output (i.e., resets the arp at a predictable point in the loop) IFF the
+    // looper's LFO is locked onto the clock's phase and frequency. Clocking
+    // changes may break the lock, and briefly cause mistimed arp resets
     int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
     if (sequence_repeats_per_arp_reset > 0) {
       uint8_t quarter_notes_per_sequence_repeat =
@@ -393,8 +392,7 @@ SequencerArpeggiatorResult Part::BuildNextStepResult(uint32_t step_counter) cons
 
   if (seq_.euclidean_length != 0) {
     // If euclidean rhythm is enabled, advance euclidean state
-    uint8_t euclidean_step_index = step_counter % seq_.euclidean_length;
-    uint32_t pattern_mask = 1 << ((euclidean_step_index + seq_.euclidean_rotate) % seq_.euclidean_length);
+    uint32_t pattern_mask = 1 << (step_counter % seq_.euclidean_length);
     // Read euclidean pattern from ROM.
     uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) << 5;
     uint32_t pattern = lut_euclidean[offset + seq_.euclidean_fill];
