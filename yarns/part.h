@@ -623,15 +623,6 @@ class Part {
   
   void Init();
   
-  // The return value indicates whether the message can be forwarded to the
-  // MIDI out (soft-thru). For example, when the arpeggiator is on, NoteOn
-  // or NoteOff can return false to make sure that the chord that triggers
-  // the arpeggiator does not find its way to the MIDI out. Instead it will 
-  // be sent note by note within InternalNoteOn and InternalNoteOff.
-  //
-  // Also, note that channel / keyrange / velocity range filtering is not
-  // applied here. It is up to the caller to call accepts() first to check
-  // whether the message should be sent to the part.
   uint8_t HeldKeysNoteOn(HeldKeys &keys, uint8_t pitch, uint8_t velocity);
   void NoteOn(uint8_t channel, uint8_t note, uint8_t velocity);
   void NoteOff(uint8_t channel, uint8_t note, bool respect_sustain = true);
@@ -795,6 +786,15 @@ class Part {
   inline uint8_t tx_channel() const {
     return midi_.channel == kMidiChannelOmni ? 0 : midi_.channel;
   }
+  // The return value indicates whether the message can be forwarded to the
+  // MIDI out (soft-thru). For example, when the arpeggiator is on, NoteOn
+  // or NoteOff can return false to make sure that the chord that triggers
+  // the arpeggiator does not find its way to the MIDI out. Instead it will 
+  // be sent note by note within InternalNoteOn and InternalNoteOff.
+  //
+  // Also, note that channel / keyrange / velocity range filtering is not
+  // applied here. It is up to the caller to call accepts() first to check
+  // whether the message should be sent to the part.
   inline bool notes_thru() const {
     return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
   }
