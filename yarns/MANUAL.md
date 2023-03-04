@@ -19,10 +19,10 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
       - [Sequencer-driven arpeggiator](#sequencer-driven-arpeggiator)
         - [Using `ARP PATTERN` to enable the sequencer-driven arpeggiator](#using-arp-pattern-to-enable-the-sequencer-driven-arpeggiator)
         - [How it works](#how-it-works)
-      - [Special `ARP DIRECTIONS` (`JUMP` and `GRID`) use the sequencer pitch as movement instructions](#special-arp-directions-jump-and-grid-use-the-sequencer-pitch-as-movement-instructions)
-        - [Behaviors shared by `JUMP` and `GRID`](#behaviors-shared-by-jump-and-grid)
-        - [`JUMP` movement](#jump-movement)
-        - [`GRID` movement](#grid-movement)
+      - [Programmable `ARP DIRECTIONS`](#programmable-arp-directions)
+        - [General concepts](#general-concepts)
+        - [`JUMP` direction](#jump-direction)
+        - [`GRID` direction](#grid-direction)
 - [MIDI](#midi)
     - [Layouts](#layouts)
     - [Hold pedal](#hold-pedal)
@@ -70,27 +70,28 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - `TV (TIMBRE VEL MOD)` attenuverter for velocity's modulation of the timbre envelope (velocity can polarize the timbre envelope)
 
 ### Oscillator synthesis models
-- Filtered noise: `TIMBRE` sets filter cutoff
-  - Voice pitch sets filter resonance
-  - Variants: low-pass, notch, band-pass, high-pass
+- Filtered noise: `TIMBRE` sets filter cutoff, voice pitch sets filter resonance
+  - Low-pass, notch, band-pass, high-pass
 - Phase distortion, resonant pulse: `TIMBRE` sets filter cutoff
-  - Variants: low-pass, peaking, band-pass, high-pass
+  - Low-pass, peaking, band-pass, high-pass
 - Phase distortion, resonant saw: `TIMBRE` sets filter cutoff
-  - Variants: low-pass, peaking, band-pass, high-pass
+  - Low-pass, peaking, band-pass, high-pass
 - State-variable filter, low-pass: `TIMBRE` sets filter cutoff (resonance is fixed)
-  - Variants: pulse, saw
+  - Pulse, saw
 - Pulse-width modulation: `TIMBRE` sets pulse width
-  - Variants: pulse, saw
+  - Pulse, saw
 - Saw-pulse morph: `TIMBRE` morphs toward pulse
 - Hard sync: `TIMBRE` sets detuning of the secondary oscillator
-  - Variants: sine, pulse, saw
+  - Sine, pulse, saw
 - Wavefolder: `TIMBRE` sets fold gain
-  - Variants: sine, triangle
+  - Sine, triangle
 - Dirac comb: `TIMBRE` sets harmonic content
 - Compressed sine (`tanh`): `TIMBRE` sets compression amount
 - Exponential sine: `TIMBRE` sets exponentiation amount
 - Frequency modulation: `TIMBRE` sets modulation index
-  - Variants: 11 integer ratios (ordered from harmonic to inharmonic), 8 ratios based on the inverse Minkowski question-mark function, 7 ratios that are integer divisions/multiples of pi
+  - 11 integer ratios (ordered from harmonic to inharmonic)
+  - 8 ratios based on the inverse Minkowski question-mark function
+  - 7 ratios that are integer divisions/multiples of pi
 
 ### Amplitude dynamics: envelope and tremolo
 - Configured via the `▽A (AMPLITUDE MENU)`
@@ -155,32 +156,34 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - The arpeggiator respects rests/ties in a step sequence
 - The velocity of the arpeggiator output is calculated by multiplying the velocities of the sequencer note and the held key
 
-#### Special `ARP DIRECTIONS` (`JUMP` and `GRID`) use the sequencer pitch as movement instructions
+#### Programmable `ARP DIRECTIONS` 
 
-##### Behaviors shared by `JUMP` and `GRID`
-  - Primarily useful when `ARP PATTERN` is sequencer-driven
+##### General concepts
+  - The arpeggiator always has some **active position**, e.g. "the 3rd key of the chord"
+  - Changes in the active position ("**movement**") are determined by the pitch of notes emitted by the sequencer 
     - If `ARP PATTERN` is not sequencer-driven, the sequencer pitch data is replaced by the position in the 16-step pattern rhythm 
-  - Sequencer notes are interpreted based on their:
-    - Color (black or white)
-    - Displayed octave number (with C as the first note of the octave)
-    - Pitch ordinal within octave and color, e.g.
-      - On a sequencer step that is the 2nd white note of octave 5, the pitch ordinal is 2
-      - On a sequencer step that is the 4th black note of octave 2, the pitch ordinal is 4
-  - The sequencer note's pitch ordinal is checked against the size of the arp chord to see if a note is emitted
-    - On a sequencer step with pitch ordinal N, the step is ignored unless there are N or more keys in the arp chord, e.g.:
-      - On a sequencer step that is the 3rd white key of its octave, a note is emitted IFF there are 3+ keys in the arp chord
-      - On sequencer step that is the 1st black key of its octave, a note is emitted IFF there are 1+ keys in the arp chord
+  - Sequencer pitch is interpreted based on its:
+    - Key **color** (is the key black or white?)
+    - Displayed **octave number** (with C as the first note of the octave)
+    - **Pitch ordinal** within octave and color, e.g.
+      - When the sequencer pitch is the 2nd white note of octave 5, the pitch ordinal is 2
+      - When the sequencer pitch is the 4th black note of octave 2, the pitch ordinal is 4
+  - The octave and color are used for different purposes by each direction
+  - The pitch ordinal sets the minimum arp chord size for which the arpeggiator will emit a note
+    - For a sequencer pitch with pitch ordinal N, the arpeggiator emits a note only if there are N or more keys in the arp chord, e.g.:
+      - When the sequencer pitch is the 3rd white key of its octave, a note is emitted only if there are 3+ keys in the arp chord
+      - When the sequencer pitch is the 1st black key of its octave, a note is emitted only if there are 1+ keys in the arp chord
     - Allows dynamic control of the arpeggiator's rhythmic pattern by varying the size of the arp chord
 
-##### `JUMP` movement
+##### `JUMP` direction
   - Uses a combination of relative and absolute movement through the chord
-    - Both colors advance the active position in the arp chord by octave-many places, wrapping around to the beginning of the chord
-    - White steps emit a note from the active position in the arp chord, e.g.:
-      - On a sequencer step that is the 5th white note of octave 2, where the starting active position is 1 out of the arp chord's 6 notes, the active position is first incremented by 2 to become 3, and then the 3rd note of the arp chord is emitted
-    - Black steps ignore the active position, instead treating the pitch ordinal as an absolute position in the arp chord, e.g.:
-      - On a sequencer step that the 3rd black note of octave 5, the emitted note is the 3rd note of the arp chord, while the active position is incremented by 5
+  - Both colors advance the active position in the arp chord by octave-many places, wrapping around to the beginning of the chord
+  - White steps emit a note from the active position in the arp chord, e.g.:
+    - When the sequencer pitch is the 5th white note of octave 2, and the active position is 1 out of the arp chord's 6 notes, the active position is first incremented by 2 to become 3, and then the 3rd note of the arp chord is emitted
+  - Black steps ignore the active position, instead treating the pitch ordinal as an absolute position in the arp chord, e.g.:
+    - When the sequencer pitch is the 3rd black note of octave 5, the emitted note is the 3rd note of the arp chord, while the active position is incremented by 5
 
-##### `GRID` movement
+##### `GRID` direction
   - Simulates an X-Y coordinate system
   - The arp chord is mapped onto the grid in linear fashion, repeated as necessary to fill the grid
   - Octave sets the size of the grid: 4th octave => 4x4 grid (minimum 1x1)
@@ -246,7 +249,8 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - `POLY` -> `STEAL RELEASE MUTE`
     - Steal from the lowest-priority existing note IFF the incoming note has higher priority
     - Don't reassign on release
-  - `SORTED` -> `PRIORITY ORDER`: always voice the highest-priority notes
+  - `SORTED` -> `PRIORITY ORDER`
+    - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
   - `U1` -> `UNISON RELEASE REASSIGN`
   - `U2` -> `UNISON RELEASE MUTE`
   - `STEAL MOST RECENT` -> `STEAL HIGHEST PRIORITY`
