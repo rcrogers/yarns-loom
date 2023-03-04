@@ -39,6 +39,7 @@ using namespace stmlib;
 enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,
   ENV_SEGMENT_DECAY,
+  ENV_SEGMENT_BRIDGE,
   ENV_SEGMENT_SUSTAIN,
   ENV_SEGMENT_RELEASE,
   ENV_SEGMENT_DEAD,
@@ -64,7 +65,14 @@ class Envelope {
   inline void NoteOff() {
     gate_ = false;
     switch (segment_) {
+      // TODO use BRIDGE for early release on attack as well?  
       case ENV_SEGMENT_ATTACK : next_tick_segment_ = ENV_SEGMENT_DECAY  ; break;
+      case ENV_SEGMENT_DECAY  : next_tick_segment_ = ENV_SEGMENT_BRIDGE ; break;
+      // on pre-sustain NoteOff, if we are below sustain level, the decay short-circuits due to overshoot detection, and this sounds pretty good? but if we are above sustain level, the decay phase will fully execute
+      // in the event of a NoteOff during decay, this will have a weird "sustain plateau"
+      // 
+      // release preempting decay is good when sustain is high or release is short
+      // release preempting decay could be bad (blaring note) when sustain is low and release is long
       case ENV_SEGMENT_SUSTAIN: next_tick_segment_ = ENV_SEGMENT_RELEASE; break;
       default: break;
     }
@@ -80,7 +88,10 @@ class Envelope {
     min_target <<= 16;
     // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
     segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
-    segment_target_[ENV_SEGMENT_DECAY] = segment_target_[ENV_SEGMENT_SUSTAIN] = min_target + scale * adsr.sustain;
+    segment_target_[ENV_SEGMENT_DECAY] =
+      segment_target_[ENV_SEGMENT_BRIDGE] =
+      segment_target_[ENV_SEGMENT_SUSTAIN] =
+      min_target + scale * adsr.sustain;
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
 
     if (!gate_) {
@@ -95,13 +106,17 @@ class Envelope {
   }
   
   inline void Trigger(EnvelopeSegment segment) {
+    if (gate_ && segment == ENV_SEGMENT_BRIDGE) {
+      segment = ENV_SEGMENT_SUSTAIN; // Skip bridge when gate is high
+    }
     if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
-      segment = ENV_SEGMENT_RELEASE; // Skip sustain
+      segment = ENV_SEGMENT_RELEASE; // Skip sustain when gate is low
     }
     segment_ = next_tick_segment_ = segment;
     switch (segment) {
       case ENV_SEGMENT_ATTACK : phase_increment_ = adsr_->attack  ; break;
       case ENV_SEGMENT_DECAY  : phase_increment_ = adsr_->decay   ; break;
+      case ENV_SEGMENT_BRIDGE : phase_increment_ = adsr_->release ; break;
       case ENV_SEGMENT_RELEASE: phase_increment_ = adsr_->release ; break;
       default: phase_increment_ = 0; return;
     }
@@ -141,10 +156,14 @@ class Envelope {
     while (segment_ != next_tick_segment_) { // Event loop
       Trigger(next_tick_segment_);
     }
-    if (!phase_increment_) return;
 
-    phase_ += phase_increment_;
-    if (phase_ < phase_increment_) phase_ = UINT32_MAX;
+    // Bridge segment stays at max slope until it reaches target
+    if (segment_ != ENV_SEGMENT_BRIDGE) {
+      if (!phase_increment_) return;
+      phase_ += phase_increment_;
+      if (phase_ < phase_increment_) phase_ = UINT32_MAX;
+    }
+
     int8_t shift = lut_expo_slope_shift[phase_ >> 24];
     if (shift != expo_slope_shift_) expo_dirty_ = true;
 
@@ -163,7 +182,11 @@ class Envelope {
       ? value_ > target_overshoot_threshold_
       : value_ < target_overshoot_threshold_
     ) {
-      value_ = target_; // TODO can cause jumps?
+      // Because the target is closer than the expo slope would have taken us,
+      // this tick, which we spend on jumping to the target, is flatter than
+      // nominal.  The alternative would be to, instead of jumping, immediately
+      // Tick() again
+      value_ = target_;
       next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }
