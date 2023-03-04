@@ -65,15 +65,11 @@ class Envelope {
   inline void NoteOff() {
     gate_ = false;
     switch (segment_) {
-      // TODO use BRIDGE for early release on attack as well?  
-      case ENV_SEGMENT_ATTACK : next_tick_segment_ = ENV_SEGMENT_DECAY  ; break;
-      case ENV_SEGMENT_DECAY  : next_tick_segment_ = ENV_SEGMENT_BRIDGE ; break;
-      // on pre-sustain NoteOff, if we are below sustain level, the decay short-circuits due to overshoot detection, and this sounds pretty good? but if we are above sustain level, the decay phase will fully execute
-      // in the event of a NoteOff during decay, this will have a weird "sustain plateau"
-      // 
-      // release preempting decay is good when sustain is high or release is short
-      // release preempting decay could be bad (blaring note) when sustain is low and release is long
-      case ENV_SEGMENT_SUSTAIN: next_tick_segment_ = ENV_SEGMENT_RELEASE; break;
+      case ENV_SEGMENT_ATTACK:
+      case ENV_SEGMENT_DECAY:
+        next_tick_segment_ = ENV_SEGMENT_BRIDGE; break;
+      case ENV_SEGMENT_SUSTAIN:
+        next_tick_segment_ = ENV_SEGMENT_RELEASE; break;
       default: break;
     }
   }
