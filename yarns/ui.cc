@@ -138,6 +138,12 @@ void Ui::Init() {
   mode_ = UI_MODE_PARAMETER_SELECT;
   active_part_ = 0;
 
+  setup_menu_.Init(SETTING_MENU_SETUP);
+  oscillator_menu_.Init(SETTING_MENU_OSCILLATOR);
+  envelope_menu_.Init(SETTING_MENU_ENVELOPE);
+  live_menu_.Init(SETTING_LAST);
+  current_menu_ = &live_menu_;
+
   previous_tap_time_ = 0;
   tap_tempo_count_ = 0;
   tap_tempo_resolved_ = true;

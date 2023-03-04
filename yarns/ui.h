@@ -110,14 +110,7 @@ class Ui {
   typedef void (Ui::*HandlerFn)(const stmlib::Event& event);
   typedef void (Ui::*PrintFn)();
   
-  Ui() :
-    setup_menu_(SETTING_MENU_SETUP),
-    oscillator_menu_(SETTING_MENU_OSCILLATOR),
-    envelope_menu_(SETTING_MENU_ENVELOPE),
-    live_menu_(SETTING_LAST)
-  {
-    current_menu_ = &live_menu_;
-  }
+  Ui() { }
   ~Ui() { }
   
   void Init();
@@ -293,7 +286,10 @@ class Ui {
   Setting const* splash_setting_def_;
   uint8_t splash_part_;
   
-  Menu setup_menu_, oscillator_menu_, envelope_menu_, live_menu_;
+  Menu setup_menu_;
+  Menu oscillator_menu_;
+  Menu envelope_menu_;
+  Menu live_menu_;
   Menu* current_menu_;
 
   uint8_t active_part_;
