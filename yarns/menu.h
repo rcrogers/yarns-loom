@@ -326,8 +326,8 @@ static const SettingIndex* setup_setting_list_for_layout[LAYOUT_LAST] = {
 
 class Menu {
  public:
-  void Init(SettingIndex t) {
-    menu_type_ = t;
+
+  Menu(SettingIndex t) : menu_type_(t) {
     pos_ = 0;
   }
 
@@ -366,7 +366,7 @@ class Menu {
   }
 
  private:
-  SettingIndex menu_type_;
+  const SettingIndex menu_type_;
   int8_t pos_;
 
 };
