@@ -128,20 +128,6 @@ enum SustainMode {
   SUSTAIN_MODE_LAST,
 };
 
-enum LegatoMode {
-  // A trigger is sent at each new note, and portamento is applied to the note
-  // CV irrespectively of the playing style.
-  LEGATO_MODE_OFF,
-  // Notes played legato are not retriggered, and portamento is applied only on
-  // notes played legato.
-  LEGATO_MODE_AUTO_PORTAMENTO,
-  // Notes played legato are not retriggered, portamento is applied to the note
-  // CV irrespectively of the playing style.
-  LEGATO_MODE_ON,
-
-  LEGATO_MODE_LAST
-};
-
 struct SequencerArpeggiatorResult { // Supports multiple return
   Arpeggiator arpeggiator; // Resulting arp state
   SequencerStep note; // Resulting note, including possible rest/tie
@@ -199,7 +185,8 @@ struct PackedPart {
     allocation_mode : 4, // values free: 6
     allocation_priority : 2, // values free: 0
     portamento : 7,
-    legato_mode : 2, // values free: 1
+    legato_retrigger : 1,
+    portamento_legato_only: 1,
     pitch_bend_range : 5, // values free: 8
     vibrato_range : 4, // values free: 3
     vibrato_mod : 7,
@@ -289,7 +276,8 @@ struct VoicingSettings {
   uint8_t allocation_mode;
   uint8_t allocation_priority;
   uint8_t portamento;
-  uint8_t legato_mode;
+  uint8_t legato_retrigger;
+  uint8_t portamento_legato_only;
   uint8_t pitch_bend_range;
   uint8_t vibrato_range;
   uint8_t vibrato_mod;
@@ -331,7 +319,8 @@ struct VoicingSettings {
     packed.allocation_mode = allocation_mode;
     packed.allocation_priority = allocation_priority;
     packed.portamento = portamento;
-    packed.legato_mode = legato_mode;
+    packed.legato_retrigger = legato_retrigger;
+    packed.portamento_legato_only = portamento_legato_only;
     packed.pitch_bend_range = pitch_bend_range;
     packed.vibrato_range = vibrato_range;
     packed.vibrato_mod = vibrato_mod;
@@ -373,7 +362,8 @@ struct VoicingSettings {
     allocation_mode = packed.allocation_mode;
     allocation_priority = packed.allocation_priority;
     portamento = packed.portamento;
-    legato_mode = packed.legato_mode;
+    legato_retrigger = packed.legato_retrigger;
+    portamento_legato_only = packed.portamento_legato_only;
     pitch_bend_range = packed.pitch_bend_range;
     vibrato_range = packed.vibrato_range;
     vibrato_mod = packed.vibrato_mod;
@@ -430,7 +420,8 @@ enum PartSetting {
   PART_VOICING_ALLOCATION_MODE,
   PART_VOICING_ALLOCATION_PRIORITY,
   PART_VOICING_PORTAMENTO,
-  PART_VOICING_LEGATO_MODE,
+  PART_VOICING_LEGATO_RETRIGGER,
+  PART_VOICING_PORTAMENTO_LEGATO_ONLY,
   PART_VOICING_PITCH_BEND_RANGE,
   PART_VOICING_VIBRATO_RANGE,
   PART_VOICING_VIBRATO_MOD,
@@ -623,15 +614,6 @@ class Part {
   
   void Init();
   
-  // The return value indicates whether the message can be forwarded to the
-  // MIDI out (soft-thru). For example, when the arpeggiator is on, NoteOn
-  // or NoteOff can return false to make sure that the chord that triggers
-  // the arpeggiator does not find its way to the MIDI out. Instead it will 
-  // be sent note by note within InternalNoteOn and InternalNoteOff.
-  //
-  // Also, note that channel / keyrange / velocity range filtering is not
-  // applied here. It is up to the caller to call accepts() first to check
-  // whether the message should be sent to the part.
   uint8_t HeldKeysNoteOn(HeldKeys &keys, uint8_t pitch, uint8_t velocity);
   void NoteOn(uint8_t channel, uint8_t note, uint8_t velocity);
   void NoteOff(uint8_t channel, uint8_t note, bool respect_sustain = true);
@@ -675,7 +657,8 @@ class Part {
     voicing_.allocation_mode = num_voices_ > 1 ? POLY_MODE_STEAL_RELEASE_SILENT : POLY_MODE_OFF;
     voicing_.allocation_priority = stmlib::NOTE_STACK_PRIORITY_LAST;
     voicing_.portamento = 0;
-    voicing_.legato_mode = LEGATO_MODE_OFF;
+    voicing_.legato_retrigger = true;
+    voicing_.portamento_legato_only = false;
   }
 
   inline bool seq_overwrite() const { return seq_overwrite_; }
@@ -795,6 +778,15 @@ class Part {
   inline uint8_t tx_channel() const {
     return midi_.channel == kMidiChannelOmni ? 0 : midi_.channel;
   }
+  // The return value indicates whether the message can be forwarded to the
+  // MIDI out (soft-thru). For example, when the arpeggiator is on, NoteOn
+  // or NoteOff can return false to make sure that the chord that triggers
+  // the arpeggiator does not find its way to the MIDI out. Instead it will 
+  // be sent note by note within InternalNoteOn and InternalNoteOff.
+  //
+  // Also, note that channel / keyrange / velocity range filtering is not
+  // applied here. It is up to the caller to call accepts() first to check
+  // whether the message should be sent to the part.
   inline bool notes_thru() const {
     return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
   }

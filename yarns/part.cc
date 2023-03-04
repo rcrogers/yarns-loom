@@ -75,7 +75,8 @@ void Part::Init() {
 
   voicing_.allocation_priority = NOTE_STACK_PRIORITY_LAST;
   voicing_.allocation_mode = POLY_MODE_OFF;
-  voicing_.legato_mode = LEGATO_MODE_OFF;
+  voicing_.legato_retrigger = true;
+  voicing_.portamento_legato_only = false;
   voicing_.portamento = 0;
   voicing_.pitch_bend_range = 2;
   voicing_.vibrato_range = 1;
@@ -765,18 +766,10 @@ void Part::VoiceNoteOn(
   uint8_t voice_index, uint8_t pitch, uint8_t vel,
   bool legato, bool reset_gate_counter
 ) {
-  uint8_t portamento = voicing_.portamento;
-  bool trigger = !legato;
-  switch (voicing_.legato_mode) {
-    case LEGATO_MODE_OFF:
-      trigger = true;
-      break;
-    case LEGATO_MODE_AUTO_PORTAMENTO:
-      if (trigger) { portamento = 0; }
-      break;
-    default:
-      break;
-  }
+  uint8_t portamento = legato || !voicing_.portamento_legato_only ?
+    voicing_.portamento : 0;
+  bool trigger = !legato || voicing_.legato_retrigger;
+
   // If this pitch is under manual control, don't extend the gate
   if (reset_gate_counter && !manual_keys_.stack.Find(pitch)) {
     gate_length_counter_[voice_index] = seq_.gate_length + 1;
