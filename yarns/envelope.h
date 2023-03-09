@@ -39,7 +39,7 @@ using namespace stmlib;
 enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,
   ENV_SEGMENT_DECAY,
-  ENV_SEGMENT_BRIDGE,
+  ENV_SEGMENT_EARLY_RELEASE,
   ENV_SEGMENT_SUSTAIN,
   ENV_SEGMENT_RELEASE,
   ENV_SEGMENT_DEAD,
@@ -67,7 +67,7 @@ class Envelope {
     switch (segment_) {
       case ENV_SEGMENT_ATTACK:
       case ENV_SEGMENT_DECAY:
-        next_tick_segment_ = ENV_SEGMENT_BRIDGE; break;
+        next_tick_segment_ = ENV_SEGMENT_EARLY_RELEASE; break;
       case ENV_SEGMENT_SUSTAIN:
         next_tick_segment_ = ENV_SEGMENT_RELEASE; break;
       default: break;
@@ -85,7 +85,7 @@ class Envelope {
     // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
     segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
     segment_target_[ENV_SEGMENT_DECAY] =
-      segment_target_[ENV_SEGMENT_BRIDGE] =
+      segment_target_[ENV_SEGMENT_EARLY_RELEASE] =
       segment_target_[ENV_SEGMENT_SUSTAIN] =
       min_target + scale * adsr.sustain;
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
@@ -102,8 +102,8 @@ class Envelope {
   }
   
   inline void Trigger(EnvelopeSegment segment) {
-    if (gate_ && segment == ENV_SEGMENT_BRIDGE) {
-      segment = ENV_SEGMENT_SUSTAIN; // Skip bridge when gate is high
+    if (gate_ && segment == ENV_SEGMENT_EARLY_RELEASE) {
+      segment = ENV_SEGMENT_SUSTAIN; // Skip early-release when gate is high
     }
     if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
       segment = ENV_SEGMENT_RELEASE; // Skip sustain when gate is low
@@ -112,7 +112,7 @@ class Envelope {
     switch (segment) {
       case ENV_SEGMENT_ATTACK : phase_increment_ = adsr_->attack  ; break;
       case ENV_SEGMENT_DECAY  : phase_increment_ = adsr_->decay   ; break;
-      case ENV_SEGMENT_BRIDGE : phase_increment_ = adsr_->release ; break;
+      case ENV_SEGMENT_EARLY_RELEASE : phase_increment_ = adsr_->release ; break;
       case ENV_SEGMENT_RELEASE: phase_increment_ = adsr_->release ; break;
       default: phase_increment_ = 0; return;
     }
@@ -153,8 +153,8 @@ class Envelope {
       Trigger(next_tick_segment_);
     }
 
-    // Bridge segment stays at max slope until it reaches target
-    if (segment_ != ENV_SEGMENT_BRIDGE) {
+    // Early-release segment stays at max slope until it reaches target
+    if (segment_ != ENV_SEGMENT_EARLY_RELEASE) {
       if (!phase_increment_) return;
       phase_ += phase_increment_;
       if (phase_ < phase_increment_) phase_ = UINT32_MAX;
