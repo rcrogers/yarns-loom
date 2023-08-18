@@ -1,5 +1,6 @@
 Mutable Instruments' Eurorack Modules.
 
+* [Blades](http://mutable-instruments.net/modules/blades): Dual multimode filter.
 * [Blinds](http://mutable-instruments.net/modules/blinds): Quad VC-polarizer.
 * [Braids](http://mutable-instruments.net/modules/braids): Macro-oscillator.
 * [Branches](http://mutable-instruments.net/modules/branches): Dual Bernoulli gate.
@@ -11,11 +12,14 @@ Mutable Instruments' Eurorack Modules.
 * [Grids](http://mutable-instruments.net/modules/grids): Topographic drum sequencer.
 * [Kinks](http://mutable-instruments.net/modules/kinks): Utility module - rectifier, analog logic, S&H, noise.
 * [Links](http://mutable-instruments.net/modules/links): Utility module - buffer, mixer.
+* [Marbles](http://mutable-instruments.net/modules/marbles): Random sampler.
 * [Peaks](http://mutable-instruments.net/modules/peaks): Dual trigger converter.
+* [Plaits](http://mutable-instruments.net/modules/plaits): Macro oscillator.
 * [Rings](http://mutable-instruments.net/modules/rings): Resonator.
 * [Ripples](http://mutable-instruments.net/modules/ripples): Liquid 2-pole BP, 2-pole LP and 4-pole LP filter.
 * [Shades](http://mutable-instruments.net/modules/shades): Triple attenuverter.
 * [Shelves](http://mutable-instruments.net/modules/shelves): EQ filter.
+* [Stages](http://mutable-instruments.net/modules/stages): Segment generator.
 * [Streams](http://mutable-instruments.net/modules/streams): Dual dynamics gate.
 * [Tides](http://mutable-instruments.net/modules/tides): Tidal modulator.
 * [Veils](http://mutable-instruments.net/modules/veils): Quad VCA.
@@ -32,7 +36,7 @@ Code (STM32F projects): MIT license.
 
 Hardware: cc-by-sa-3.0
 
-By: Olivier Gillet (olivier@mutable-instruments.net)
+By: Emilie Gillet (emilie.o.gillet@gmail.com)
 
 Guidelines for derivative works
 ===============================

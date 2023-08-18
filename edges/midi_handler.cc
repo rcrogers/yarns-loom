@@ -1,6 +1,6 @@
-// Copyright 2009 Olivier Gillet.
+// Copyright 2009 Emilie Gillet.
 //
-// Author: Olivier Gillet (ol.gillet@gmail.com)
+// Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -22,7 +22,7 @@
 namespace edges {
 
 /* static */
-bool MidiHandler::gate_[kNumChannels];
+uint8_t MidiHandler::gate_;
 
 /* static */
 int16_t MidiHandler::pitch_[kNumChannels];
@@ -42,4 +42,4 @@ bool MidiHandler::learning_;
 /* extern */
 MidiHandler midi_handler;
 
-}  // namespace anu
+}  // namespace edges

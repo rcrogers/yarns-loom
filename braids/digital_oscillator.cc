@@ -1,6 +1,6 @@
-// Copyright 2012 Olivier Gillet.
+// Copyright 2012 Emilie Gillet.
 //
-// Author: Olivier Gillet (ol.gillet@gmail.com)
+// Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -743,7 +743,6 @@ void DigitalOscillator::RenderFm(
   
   END_INTERPOLATE_PARAMETER_0
   
-  previous_parameter_[0] = parameter_[0];
   state_.modulator_phase = modulator_phase;
 }
 

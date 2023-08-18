@@ -1,6 +1,6 @@
-// Copyright 2012 Olivier Gillet.
+// Copyright 2012 Emilie Gillet.
 //
-// Author: Olivier Gillet (olivier@mutable-instruments.net)
+// Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -21,6 +21,8 @@
 
 #include "edges/midi_handler.h"
 #include "edges/settings.h"
+
+#include "avrlibx/system/time.h"
 
 namespace edges {
 
@@ -143,6 +145,13 @@ void Ui::OnSwitchReleased(uint8_t index) {
     midi_handler.Learn();
   } else {
     midi_handler.ToggleMidiMode();
+    leds_.Write(0);
+    for (uint8_t i = 0; i <= midi_mode(); ++i) {
+      leds_.Toggle();
+      ConstantDelay(100);
+      leds_.Toggle();
+      ConstantDelay(100);
+    }
   }
 }
 

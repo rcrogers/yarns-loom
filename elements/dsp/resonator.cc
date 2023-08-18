@@ -1,6 +1,6 @@
-// Copyright 2014 Olivier Gillet.
+// Copyright 2014 Emilie Gillet.
 //
-// Author: Olivier Gillet (ol.gillet@gmail.com)
+// Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,7 @@ void Resonator::Init() {
   set_brightness(0.5f);
   set_damping(0.3f);
   set_position(0.999f);
+  previous_position_ = 0.0f;
   set_resolution(kMaxModes);
   
   bow_signal_ = 0.0f;

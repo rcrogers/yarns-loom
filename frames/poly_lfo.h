@@ -1,6 +1,6 @@
-// Copyright 2013 Olivier Gillet.
+// Copyright 2013 Emilie Gillet.
 //
-// Author: Olivier Gillet (ol.gillet@gmail.com)
+// Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -72,7 +72,7 @@ class PolyLfo {
   inline const uint8_t* color() const {
     return &color_[0];
   }
-  inline const uint16_t dac_code(uint8_t index) const {
+  inline uint16_t dac_code(uint8_t index) const {
     return dac_code_[index];
   }
   static uint32_t FrequencyToPhaseIncrement(int32_t frequency);
