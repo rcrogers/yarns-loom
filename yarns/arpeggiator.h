@@ -44,7 +44,7 @@ class HeldKeys;
 class SequencerArpeggiatorResult;
 
 struct Arpeggiator {
-  int8_t key_index; // Combines with octave to select a note from the arp chord
+  int32_t key_index; // Combines with octave to select a note from the arp chord
   int8_t octave; // Current octave of the ARP RANGE
   int8_t key_increment;
 

@@ -340,9 +340,10 @@ void Ui::SetBrightnessFromSequencerPhase(const Part& part) {
 }
 
 const uint16_t kMasksNewLooperBeat[kDisplayWidth] = { 0x8000, 0x8000 };
-void Ui::PrintLooperRecordingStatus() {
+void Ui::PrintLoopSequencerStatus() {
   uint8_t note_index = recording_part().LooperCurrentNoteIndex();
-  if (note_index == looper::kNullIndex) {
+
+  if (note_index == looper::kNullIndex) { // Print the metronome
     uint16_t ticks = recording_part().PPQN();
     if (static_cast<uint16_t>(multi.tick_counter() % ticks) <= (ticks >> 4)) {
       display_.set_brightness(UINT16_MAX);
@@ -357,34 +358,37 @@ void Ui::PrintLooperRecordingStatus() {
     }
     return;
   }
-  const looper::Deck& looper_tape = recording_part().looper();
-  uint16_t note_fraction_completed = looper_tape.NoteFractionCompleted(note_index);
+
+  const looper::Deck& looper = recording_part().looper();
+  uint16_t note_fraction_completed = looper.NoteFractionCompleted(note_index);
   display_.set_brightness(UINT16_MAX - note_fraction_completed);
   if (recording_mode_is_displaying_pitch_) {
-    PrintNote(looper_tape.NotePitch(note_index));
+    PrintNote(looper.NotePitch(note_index));
   } else {
-    PrintInteger(looper_tape.NoteAgeOrdinal(note_index) + 1);
+    PrintInteger(looper.NoteAgeOrdinal(note_index) + 1);
   }
 }
 
-void Ui::PrintRecordingStatus() {
+void Ui::PrintStepSequencerStatus() {
   if (push_it_) {
     PrintPushItNote();
+    return;
+  }
+
+  if (
+    recording_part().num_steps() == 0 ||
+    recording_part().recording_step() == recording_part().playing_step()
+  ) {
+    display_.set_brightness(UINT16_MAX);
   } else {
-    if (
-      recording_part().num_steps() == 0 ||
-      recording_part().recording_step() == recording_part().playing_step()
-    ) {
-      display_.set_brightness(UINT16_MAX);
-    } else {
-      // If playing a sequencer step other than the selected one, 2/3 brightness
-      display_.set_brightness(43690);
-    }
-    if (recording_mode_is_displaying_pitch_) {
-      PrintRecordingStep();
-    } else {
-      PrintInteger(recording_part().recording_step() + 1);
-    }
+    // If playing a sequencer step other than the selected one, 2/3 brightness
+    display_.set_brightness(43690);
+  }
+
+  if (recording_mode_is_displaying_pitch_) {
+    PrintRecordingStep();
+  } else {
+    PrintInteger(recording_part().recording_step() + 1);
   }
 }
 
@@ -927,9 +931,9 @@ void Ui::DoEvents() {
     queue_.Touch();
     if (in_recording_mode()) {
       if (active_part().looped()) {
-        PrintLooperRecordingStatus();
+        PrintLoopSequencerStatus();
       } else {
-        PrintRecordingStatus();
+        PrintStepSequencerStatus();
       }
     } else {
       (this->*modes_[mode_].refresh_display)();
