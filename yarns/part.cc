@@ -433,6 +433,11 @@ void Part::ClockStepGateEndings() {
 
 void Part::Start() {
   arpeggiator_.Reset();
+  // Advance arp state by step-offset times
+  for (uint8_t i = 0; i < seq_.step_offset; ++i) {
+    SequencerArpeggiatorResult result = BuildNextStepResult(i);
+    arpeggiator_ = result.arpeggiator;
+  }
   
   looper_.Rewind();
   std::fill(
