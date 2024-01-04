@@ -431,6 +431,7 @@ void Multi::AssignVoicesToCVOutputs() {
       AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 1);
       AssignOutputVoice(2, kNumParaphonicVoices, DC_AUX_1, 0);
       AssignOutputVoice(3, kNumParaphonicVoices + 1, DC_PITCH, 1);
+      // Do not assign the last voice to any CV output, since it only outputs gates
       break;
 
     case LAYOUT_TRI_MONO:
@@ -505,7 +506,7 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
-      gate[0] = cv_outputs_[0].gate();
+      gate[0] = voice_[kNumSystemVoices - 1].gate();
       gate[1] = cv_outputs_[1].gate();
       gate[2] = settings_.clock_override ? clock() : cv_outputs_[2].trigger();
       gate[3] = cv_outputs_[3].gate();
@@ -594,12 +595,13 @@ void Multi::GetLedsBrightness(uint8_t* brightness) {
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
       {
-        const NoteEntry& last_note = part_[0].priority_note(NOTE_STACK_PRIORITY_LAST);
-        const uint8_t last_voice = part_[0].FindVoiceForNote(last_note.note);
-        brightness[0] = (
-          last_note.note == NOTE_STACK_FREE_SLOT ||
-          last_voice == VOICE_ALLOCATION_NOT_FOUND
-        ) ? 0 : part_[0].voice(last_voice)->velocity() << 1;
+        // const NoteEntry& last_note = part_[0].priority_note(NOTE_STACK_PRIORITY_LAST);
+        // const uint8_t last_voice = part_[0].FindVoiceForNote(last_note.note);
+        // brightness[0] = (
+        //   last_note.note == NOTE_STACK_FREE_SLOT ||
+        //   last_voice == VOICE_ALLOCATION_NOT_FOUND
+        // ) ? 0 : part_[0].voice(last_voice)->velocity() << 1;
+        brightness[0] = voice_[kNumSystemVoices - 1].gate() ? 255 : 0;
         brightness[1] = voice_[kNumParaphonicVoices].gate() ? (voice_[kNumParaphonicVoices].velocity() << 1) : 0;
         brightness[2] = voice_[kNumParaphonicVoices].aux_cv();
         brightness[3] = voice_[kNumParaphonicVoices + 1].gate() ? (voice_[kNumParaphonicVoices + 1].velocity() << 1) : 0;
@@ -688,7 +690,8 @@ void Multi::AllocateParts() {
         part_[0].AllocateVoices(&voice_[0], kNumParaphonicVoices, false);
         part_[1].AllocateVoices(&voice_[kNumParaphonicVoices], 1, false);
         part_[2].AllocateVoices(&voice_[kNumParaphonicVoices + 1], 1, false);
-        num_active_parts_ = 3;
+        part_[3].AllocateVoices(&voice_[kNumParaphonicVoices + 2], 1, false);
+        num_active_parts_ = 4;
       }
       break;
 

@@ -149,6 +149,14 @@ void Voice::garbage(uint8_t x) {
 }
 
 void Voice::Refresh() {
+  if (retrigger_delay_) {
+    --retrigger_delay_;
+  }  
+  if (trigger_pulse_) {
+    --trigger_pulse_;
+  }
+  if (!has_cv_output()) return;
+
   // Slew coarse inputs to avoid clicks
   tremolo_mod_current_ = stmlib::slew(
     tremolo_mod_current_, tremolo_mod_target_);
@@ -229,14 +237,6 @@ void Voice::Refresh() {
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
-
-  if (retrigger_delay_) {
-    --retrigger_delay_;
-  }
-  
-  if (trigger_pulse_) {
-    --trigger_pulse_;
-  }
   
   if (trigger_phase_increment_) {
     trigger_phase_ += trigger_phase_increment_;
@@ -258,6 +258,23 @@ void Voice::NoteOn(
   int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
   ADSR& adsr, int16_t timbre_envelope_target
 ) {
+  if (gate_ && trigger) {
+    retrigger_delay_ = 3;
+  }
+  if (trigger) {
+    trigger_pulse_ = trigger_duration_ * 2;
+    trigger_phase_ = 0;
+    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_];
+    NoteOff();
+  }
+  gate_ = true;
+  adsr_ = adsr;
+  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
+
+  if (!has_cv_output()) return;
+
   note_source_ = note_portamento_;  
   note_target_ = note;
   if (!portamento) {
@@ -278,21 +295,6 @@ void Voice::NoteOn(
   }
 
   mod_velocity_ = velocity;
-
-  if (gate_ && trigger) {
-    retrigger_delay_ = 3;
-  }
-  if (trigger) {
-    trigger_pulse_ = trigger_duration_ * 2;
-    trigger_phase_ = 0;
-    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_];
-    NoteOff();
-  }
-  gate_ = true;
-  adsr_ = adsr;
-  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 }
 
 void Voice::NoteOff() {

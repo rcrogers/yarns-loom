@@ -208,6 +208,13 @@ class Voice {
   inline bool uses_audio() const {
     return audio_output_ && oscillator_mode_ != OSCILLATOR_MODE_OFF;
   }
+  inline bool has_cv_output() const {
+    if (uses_audio()) return true;
+    for (uint8_t i = 0; i < DC_LAST; ++i) {
+      if (dc_outputs_[static_cast<DCRole>(i)]) return true;
+    }
+    return false;
+  }
 
   inline Oscillator* oscillator() {
     return &oscillator_;
