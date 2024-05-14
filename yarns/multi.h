@@ -50,6 +50,15 @@ const uint8_t kMaxBarDuration = 32;
 // Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
 const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
 
+struct SettingRange {
+  SettingRange(int16_t min, int16_t max) {
+    this->min = min;
+    this->max = max;
+  }
+  int16_t min;
+  int16_t max;
+};
+
 struct PackedMulti {
   PackedPart parts[kNumParts];
 
@@ -294,6 +303,7 @@ class Multi {
   }
   void SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value);
   uint8_t GetSetting(const Setting& setting, uint8_t part) const;
+  SettingRange GetSettingRange(const Setting& setting, uint8_t part) const;
   void ApplySetting(SettingIndex setting, uint8_t part, int16_t raw_value) {
     ApplySetting(setting_defs.get(setting), part, raw_value);
   };

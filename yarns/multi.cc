@@ -964,7 +964,8 @@ void Multi::SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value_7bit
   if (settings_.control_change_mode > CONTROL_CHANGE_MODE_ABSOLUTE) {
     raw_value = IncrementSetting(setting, part, IncrementFromTwosComplementRelativeCC(value_7bits));
   } else {
-    raw_value = ScaleAbsoluteCC(value_7bits, setting.min_value, setting.max_value);
+    SettingRange setting_range = GetSettingRange(setting, part);
+    raw_value = ScaleAbsoluteCC(value_7bits, setting_range.min, setting_range.max);
   }
   if (setting.unit == SETTING_UNIT_TEMPO) {
     raw_value &= 0xfe;
@@ -980,8 +981,8 @@ void Multi::ApplySettingAndSplash(const Setting& setting, uint8_t part, int16_t 
   ui.SplashSetting(setting, part);
 }
 
-void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value) {
-  // Apply dynamic min/max as needed
+// Determine dynamic min/max for a setting, based on other settings
+SettingRange Multi::GetSettingRange(const Setting& setting, uint8_t part) const {
   int16_t min_value = setting.min_value;
   int16_t max_value = setting.max_value;
   if (multi.part(part).num_voices() == 1) { // Part is monophonic
@@ -997,7 +998,21 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value
   ) {
     min_value = OSCILLATOR_MODE_DRONE;
   }
-  CONSTRAIN(raw_value, min_value, max_value);
+  if (
+    part_[part].midi_settings().play_mode == PLAY_MODE_ARPEGGIATOR &&
+    !part_[part].seq_has_notes() &&
+    &setting == &setting_defs.get(SETTING_SEQUENCER_ARP_PATTERN)
+  ) {
+    // If no notes are present, sequencer-driven setting values are not allowed
+    max_value = LUT_ARPEGGIATOR_PATTERNS_SIZE - 1;
+  }
+  return SettingRange(min_value, max_value);
+}
+
+void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value) {
+  // Apply dynamic min/max as needed
+  SettingRange setting_range = GetSettingRange(setting, part);
+  CONSTRAIN(raw_value, setting_range.min, setting_range.max);
   uint8_t value = static_cast<uint8_t>(raw_value);
 
   uint8_t prev_value = GetSetting(setting, part);
