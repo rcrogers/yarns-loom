@@ -661,10 +661,11 @@ class Part {
     voicing_.portamento_legato_only = false;
   }
 
+  inline bool seq_has_notes() const { return looped() ? looper_.num_notes() : seq_.num_steps; }
   inline bool seq_overwrite() const { return seq_overwrite_; }
   inline void toggle_seq_overwrite() { set_seq_overwrite(!seq_overwrite_); }
   inline void set_seq_overwrite(bool b) {
-    seq_overwrite_ = b && (looped() ? looper_.num_notes() : seq_.num_steps);
+    seq_overwrite_ = b && seq_has_notes();
   }
 
   inline const looper::Deck& looper() const { return looper_; }
