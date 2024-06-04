@@ -166,9 +166,6 @@ void Multi::Clock() {
     // The master LFO runs at a fraction of the clock frequency, which makes for
     // less jitter than 1-cycle-per-tick
     master_lfo_.Tap(tick_counter_, 1 << kMasterLFOPeriodTicksBits);
-    for (uint8_t p = 0; p < num_active_parts_; ++p) {
-      part_[p].mutable_looper().Clock();
-    }
     
     ++swing_counter_;
     if (swing_counter_ >= 12) {
@@ -319,8 +316,9 @@ void Multi::Refresh() {
 
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
     Part& part = part_[p];
-    part.mutable_looper().Refresh();
     if (new_tick) {
+      part_[p].mutable_looper().Clock(master_lfo_tick_counter_);
+
       uint8_t lfo_rate = part.voicing_settings().lfo_rate;
       FastSyncedLFO* part_lfos[part.num_voices()];
       for (uint8_t v = 0; v < part.num_voices(); ++v) {
@@ -340,6 +338,7 @@ void Multi::Refresh() {
         SpreadLFOs(part.voicing_settings().lfo_spread_types, &voice_lfos[0], LFO_ROLE_LAST);
       }
     }
+    part.mutable_looper().Refresh();
     for (uint8_t v = 0; v < part.num_voices(); ++v) {
       part.voice(v)->Refresh();
     }

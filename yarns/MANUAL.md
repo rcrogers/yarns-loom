@@ -255,6 +255,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - `U2` -> `UNISON RELEASE MUTE`
   - `STEAL MOST RECENT` -> `STEAL HIGHEST PRIORITY`
     - Steal from the highest-priority existing note IFF the incoming note has higher priority
+    - Don't reassign on release
   - `NICE` -> `STEAL RELEASE REASSIGN`
     - Steal from the lowest-priority existing note IFF the incoming note has higher priority
     - Reassign on release
