@@ -115,6 +115,10 @@ uint16_t Deck::period_ticks() const {
   return part_->PPQN() << part_->sequencer_settings().loop_length;
 }
 
+uint32_t Deck::lfo_note_phase() const {
+  return lfo_.GetPhase() << part_->sequencer_settings().loop_length;
+}
+
 void Deck::Clock(uint32_t tick_counter) {
   lfo_.Tap(tick_counter, period_ticks(), pos_offset << 16);
 }

@@ -344,8 +344,8 @@ void Ui::PrintLoopSequencerStatus() {
   uint8_t note_index = recording_part().LooperCurrentNoteIndex();
 
   if (note_index == looper::kNullIndex) { // Print the metronome
-    uint16_t ticks = recording_part().PPQN();
-    if (static_cast<uint16_t>(multi.tick_counter() % ticks) <= (ticks >> 4)) {
+    // Display metronome if the looper is in the first 1/16th of a beat
+    if (recording_part().looper().lfo_note_phase() >> (32 - 4) == 0) {
       display_.set_brightness(UINT16_MAX);
       if (recording_part().seq_overwrite()) {
         display_.Print("//");
