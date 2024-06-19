@@ -94,6 +94,7 @@ class Deck {
     return pos_;
   }
   uint16_t period_ticks() const;
+  uint32_t lfo_note_phase() const;
   void Clock(uint32_t tick_counter);
   inline void Refresh() {
     lfo_.Refresh();
