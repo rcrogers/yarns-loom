@@ -934,11 +934,16 @@ void Part::InternalNoteOff(uint8_t note) {
       VoiceNoteOff(voice_index);
       if (
         had_unvoiced_notes &&
-        voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN
-      ) { // Reassign freed voice to the note that is now in the priority window
-        const NoteEntry& nice = priority_note(num_voices_ - 1);
-        poly_allocator_.NoteOn(nice.note, NOT_ALLOCATED);
-        VoiceNoteOn(voice_index, nice.note, nice.velocity, true, false);
+        (voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN ||
+          voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY)
+      ) { // Reassign freed voice to the highest-priority note that is not voiced
+        const NoteEntry* priority_unvoiced_note = &after; // Just for initialization
+        for (uint8_t i = 0; i < mono_allocator_.size(); ++i) {
+          priority_unvoiced_note = &priority_note(i);
+          if (FindVoiceForNote(priority_unvoiced_note->note) == VOICE_ALLOCATION_NOT_FOUND) break;
+        }
+        poly_allocator_.NoteOn(priority_unvoiced_note->note, NOT_ALLOCATED);
+        VoiceNoteOn(voice_index, priority_unvoiced_note->note, priority_unvoiced_note->velocity, true, false);
       }
     } else {
        midi_handler.OnInternalNoteOff(tx_channel(), note);
