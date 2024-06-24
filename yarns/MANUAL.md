@@ -13,7 +13,8 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - [Amplitude dynamics: envelope and tremolo](#amplitude-dynamics-envelope-and-tremolo)
 - [Sequencer](#sequencer)
     - [Recording interface](#recording-interface)
-    - [Looper-style sequencing mode with real-time recording](#looper-style-sequencing-mode-with-real-time-recording)
+    - [Step sequencer changes](#step-sequencer-changes)
+    - [Loop sequencer mode with real-time recording](#loop-sequencer-mode-with-real-time-recording)
     - [Arpeggiator](#arpeggiator)
       - [Interaction between `ARP DIRECTION` and `NOTE PRIORITY`](#interaction-between-arp-direction-and-note-priority)
       - [Sequencer-driven arpeggiator](#sequencer-driven-arpeggiator)
@@ -28,6 +29,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - [Hold pedal](#hold-pedal)
     - [Event routing, filtering, and transformation](#event-routing-filtering-and-transformation)
     - [Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)](#polyphonic-voice-allocation-note-priority-and-voicing)
+    - [Legato and portamento](#legato-and-portamento)
     - [Expanded support for Control Change events](#expanded-support-for-control-change-events)
     - [Clocking](#clocking)
     - [LFOs](#lfos)
@@ -120,7 +122,10 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Display brightens while the selected step is being played
 - Wraps around when using encoder to scroll through steps
 
-### Looper-style sequencing mode with real-time recording
+### Step sequencer changes
+- Replaced the `EUCLIDEAN ROTATE` setting with a more general `STEP OFFSET` -- allows starting the step sequencer on any step
+
+### Loop sequencer mode with real-time recording
 - To enable, ensure `SM (SEQ MODE)` is set to `LOOP`
 - To use, press `REC` to enter real-time recording mode
   - Play notes to record them into the loop
@@ -200,7 +205,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Paraphonic part can use the new [envelopes](#amplitude-dynamics-envelope-and-tremolo)
   - Audio mode is always on for the paraphonic part
   - Output channels:
-    1. Part 1, 3 voices mixed to 1 audio output
+    1. CV: Part 1's 3 voices mixed to 1 audio output, Gate: Part 5's gate
     2. Part 2, monophonic CV/gate
     3. Part 2, modulation configurable via `3>`
     4. Part 3, monophonic CV/gate
@@ -263,6 +268,11 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Fixed unison to allocate notes without gaps
 - Improve unison etc. to avoid unnecessary reassignment/retrigger of voices during a partial chord change
 - Unison etc. reassign voices on `NoteOff` if there are held notes that don't yet have a voice
+- Allow monophonic parts to use all voicing modes
+
+### Legato and portamento
+- Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` (are notes retriggered when played legato?) and `PORTAMENTO LEGATO ONLY` (is portamento applied on all notes, or only on notes played legato?)
+  - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
   
 ### Expanded support for Control Change events
 - New global setting for `CC (CONTROL CHANGE MODE)`
