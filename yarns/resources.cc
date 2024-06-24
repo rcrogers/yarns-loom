@@ -37,7 +37,7 @@ namespace yarns {
 const char str_dummy[] = "dummy";
 
 
-const char* string_table[] = {
+const char* const string_table[] = {
   str_dummy,
 };
 
@@ -715,7 +715,7 @@ const uint16_t lut_svf_scale[] = {
 };
 
 
-const uint16_t* lookup_table_table[] = {
+const uint16_t* const lookup_table_table[] = {
   lut_env_expo,
   lut_arpeggiator_patterns,
   lut_consonance,
@@ -881,7 +881,7 @@ const int16_t lut_fm_modulator_intervals[] = {
 };
 
 
-const int16_t* lookup_table_signed_table[] = {
+const int16_t* const lookup_table_signed_table[] = {
   lut_scale_pythagorean,
   lut_scale_1_4_eb,
   lut_scale_1_4_e,
@@ -937,7 +937,7 @@ const char* const lut_clock_ratio_names[] = {
 };
 
 
-const char* const* lookup_table_string_table[] = {
+const char* const* const lookup_table_string_table[] = {
   lut_fm_ratio_names,
   lut_clock_ratio_names,
 };
@@ -2351,7 +2351,7 @@ const int16_t wav_bandlimited_comb_14[] = {
 };
 
 
-const int16_t* waveform_table[] = {
+const int16_t* const waveform_table[] = {
   wav_exponential,
   wav_ring,
   wav_steps,
@@ -2578,7 +2578,7 @@ const int16_t ws_tri_fold[] = {
 };
 
 
-const int16_t* waveshaper_table[] = {
+const int16_t* const waveshaper_table[] = {
   ws_violent_overdrive,
   ws_sine_fold,
   ws_tri_fold,
@@ -2923,7 +2923,7 @@ const uint32_t lut_euclidean[] = {
 };
 
 
-const uint32_t* lookup_table_32_table[] = {
+const uint32_t* const lookup_table_32_table[] = {
   lut_lfo_increments,
   lut_portamento_increments,
   lut_oscillator_increments,
@@ -2998,7 +2998,7 @@ const uint16_t chr_characters[] = {
 };
 
 
-const uint16_t* char_table[] = {
+const uint16_t* const char_table[] = {
   chr_characters,
 };
 

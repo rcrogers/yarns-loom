@@ -50,6 +50,15 @@ const uint8_t kMaxBarDuration = 32;
 // Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
 const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
 
+struct SettingRange {
+  SettingRange(int16_t min, int16_t max) {
+    this->min = min;
+    this->max = max;
+  }
+  int16_t min;
+  int16_t max;
+};
+
 struct PackedMulti {
   PackedPart parts[kNumParts];
 
@@ -173,7 +182,7 @@ enum Layout {
   LAYOUT_THREE_ONE,
   LAYOUT_TWO_TWO,
   LAYOUT_TWO_ONE,
-  LAYOUT_PARAPHONIC_PLUS_TWO,
+  LAYOUT_PARAPHONIC_PLUS_TWO, // TODO rename?
   LAYOUT_TRI_MONO,
   LAYOUT_LAST
 };
@@ -186,13 +195,6 @@ class Multi {
   void PrintDebugByte(uint8_t byte);
   
   void Init(bool reset_calibration);
-  
-  inline uint8_t paques() const {
-    return settings_.clock_tempo == 49 && \
-        settings_.clock_swing == 49 && \
-        settings_.clock_output_division == 6 && \
-        settings_.clock_bar_duration == 9;
-  }
 
   inline bool is_remote_control_channel(uint8_t channel) const {
     return channel + 1 == settings_.remote_control_channel;
@@ -244,12 +246,14 @@ class Multi {
     bool received = false;
     if (recording_ && part_accepts_note_on(recording_part_, channel, note, velocity)) {
       received = true;
-      thru = part_[recording_part_].NoteOn(channel, part_[recording_part_].TransposeInputPitch(note), velocity) && thru;
+      thru = thru && part_[recording_part_].notes_thru();
+      part_[recording_part_].NoteOn(channel, part_[recording_part_].TransposeInputPitch(note), velocity);
     } else {
       for (uint8_t i = 0; i < num_active_parts_; ++i) {
         if (!part_accepts_note_on(i, channel, note, velocity)) { continue; }
         received = true;
-        thru = part_[i].NoteOn(channel, part_[i].TransposeInputPitch(note), velocity) && thru;
+        thru = thru && part_[recording_part_].notes_thru();
+        part_[i].NoteOn(channel, part_[i].TransposeInputPitch(note), velocity);
       }
     }
     
@@ -272,7 +276,8 @@ class Multi {
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       has_notes = has_notes || part_[i].has_notes();
       if (!part_accepts_note(i, channel, note)) continue;
-      thru = part_[i].NoteOff(channel, part_[i].TransposeInputPitch(note)) && thru;
+      thru = thru && part_[i].notes_thru();
+      part_[i].NoteOff(channel, part_[i].TransposeInputPitch(note));
     }
     
     if (!has_notes && CanAutoStop()) {
@@ -298,6 +303,7 @@ class Multi {
   }
   void SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value);
   uint8_t GetSetting(const Setting& setting, uint8_t part) const;
+  SettingRange GetSettingRange(const Setting& setting, uint8_t part) const;
   void ApplySetting(SettingIndex setting, uint8_t part, int16_t raw_value) {
     ApplySetting(setting_defs.get(setting), part, raw_value);
   };
@@ -308,7 +314,8 @@ class Multi {
     bool thru = true;
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       if (part_accepts_channel(i, channel)) {
-        thru = part_[i].PitchBend(channel, pitch_bend) && thru;
+        thru = thru && part_[i].cc_thru();
+        part_[i].PitchBend(channel, pitch_bend);
       }
     }
     return thru;
@@ -318,7 +325,8 @@ class Multi {
     bool thru = true;
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       if (part_accepts_note(i, channel, note)) {
-        thru = part_[i].Aftertouch(channel, note, velocity) && thru;
+        thru = thru && part_[i].cc_thru();
+        part_[i].Aftertouch(channel, note, velocity);
       }
     }
     return thru;
@@ -328,7 +336,8 @@ class Multi {
     bool thru = true;
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
       if (part_accepts_channel(i, channel)) {
-        thru = part_[i].Aftertouch(channel, velocity) && thru;
+        thru = thru && part_[i].cc_thru();
+        part_[i].Aftertouch(channel, velocity);
       }
     }
     return thru;
@@ -430,7 +439,8 @@ class Multi {
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
   inline uint32_t tick_counter() { return tick_counter_; }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
-  inline uint32_t tick_phase_increment() const {
+  // NB: meaningless when external clocked!
+  inline uint32_t tempo_tick_phase_increment() const {
     return settings_.clock_tempo * kTempoToTickPhaseIncrement;
   }
   inline bool running() const { return running_; }
@@ -471,7 +481,7 @@ class Multi {
   // necessary and the output stream will be delayed :(
   inline bool direct_thru() const {
     for (uint8_t i = 0; i < num_active_parts_; ++i) {
-      if (!part_[i].direct_thru()) {
+      if (!part_[i].notes_thru()) {
         return false;
       }
     }
@@ -548,13 +558,10 @@ class Multi {
     return layout_configurator_.learning();
   }
   
-  void StartSong();
-
  private:
   void ChangeLayout(Layout old_layout, Layout new_layout);
   void UpdateTempo();
   void AllocateParts();
-  void ClockSong();
   void SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos);
   
   MultiSettings settings_;
@@ -605,10 +612,6 @@ class Multi {
   CVOutput cv_outputs_[kNumCVOutputs];
 
   LayoutConfigurator layout_configurator_;
-  
-  const uint8_t* song_pointer_;
-  uint32_t song_clock_;
-  uint8_t song_delta_;
 
   DISALLOW_COPY_AND_ASSIGN(Multi);
 };

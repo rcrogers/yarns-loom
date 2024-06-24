@@ -128,20 +128,6 @@ enum SustainMode {
   SUSTAIN_MODE_LAST,
 };
 
-enum LegatoMode {
-  // A trigger is sent at each new note, and portamento is applied to the note
-  // CV irrespectively of the playing style.
-  LEGATO_MODE_OFF,
-  // Notes played legato are not retriggered, and portamento is applied only on
-  // notes played legato.
-  LEGATO_MODE_AUTO_PORTAMENTO,
-  // Notes played legato are not retriggered, portamento is applied to the note
-  // CV irrespectively of the playing style.
-  LEGATO_MODE_ON,
-
-  LEGATO_MODE_LAST
-};
-
 struct SequencerArpeggiatorResult { // Supports multiple return
   Arpeggiator arpeggiator; // Resulting arp state
   SequencerStep note; // Resulting note, including possible rest/tie
@@ -199,7 +185,8 @@ struct PackedPart {
     allocation_mode : 4, // values free: 6
     allocation_priority : 2, // values free: 0
     portamento : 7,
-    legato_mode : 2, // values free: 1
+    legato_retrigger : 1,
+    portamento_legato_only: 1,
     pitch_bend_range : 5, // values free: 8
     vibrato_range : 4, // values free: 3
     vibrato_mod : 7,
@@ -213,7 +200,7 @@ struct PackedPart {
     aux_cv_2 : 4, // values free: 0
     tuning_factor : 4, // values free: 2
     oscillator_mode : 2, // values free: 1
-    oscillator_shape : 7, // Breaking: 1 bit unused
+    oscillator_shape : 7, // Breaking: 1 bit unused, values unused: 77
     tremolo_mod : kTimbreBits,
     vibrato_shape : kLFOShapeBits,
     timbre_lfo_shape : kLFOShapeBits,
@@ -234,7 +221,7 @@ struct PackedPart {
     arp_pattern : 5, // values free: 0
     euclidean_length : 5, // values free: 0
     euclidean_fill : 5, // values free: 0
-    euclidean_rotate : 5, // values free: 0
+    step_offset : 5, // values free: 0
     num_steps : 5, // values free: 1
     clock_quantization : 1,
     loop_length : 3; // values free: 0
@@ -289,7 +276,8 @@ struct VoicingSettings {
   uint8_t allocation_mode;
   uint8_t allocation_priority;
   uint8_t portamento;
-  uint8_t legato_mode;
+  uint8_t legato_retrigger;
+  uint8_t portamento_legato_only;
   uint8_t pitch_bend_range;
   uint8_t vibrato_range;
   uint8_t vibrato_mod;
@@ -331,7 +319,8 @@ struct VoicingSettings {
     packed.allocation_mode = allocation_mode;
     packed.allocation_priority = allocation_priority;
     packed.portamento = portamento;
-    packed.legato_mode = legato_mode;
+    packed.legato_retrigger = legato_retrigger;
+    packed.portamento_legato_only = portamento_legato_only;
     packed.pitch_bend_range = pitch_bend_range;
     packed.vibrato_range = vibrato_range;
     packed.vibrato_mod = vibrato_mod;
@@ -373,7 +362,8 @@ struct VoicingSettings {
     allocation_mode = packed.allocation_mode;
     allocation_priority = packed.allocation_priority;
     portamento = packed.portamento;
-    legato_mode = packed.legato_mode;
+    legato_retrigger = packed.legato_retrigger;
+    portamento_legato_only = packed.portamento_legato_only;
     pitch_bend_range = packed.pitch_bend_range;
     vibrato_range = packed.vibrato_range;
     vibrato_mod = packed.vibrato_mod;
@@ -430,7 +420,8 @@ enum PartSetting {
   PART_VOICING_ALLOCATION_MODE,
   PART_VOICING_ALLOCATION_PRIORITY,
   PART_VOICING_PORTAMENTO,
-  PART_VOICING_LEGATO_MODE,
+  PART_VOICING_LEGATO_RETRIGGER,
+  PART_VOICING_PORTAMENTO_LEGATO_ONLY,
   PART_VOICING_PITCH_BEND_RANGE,
   PART_VOICING_VIBRATO_RANGE,
   PART_VOICING_VIBRATO_MOD,
@@ -474,7 +465,7 @@ enum PartSetting {
   PART_SEQUENCER_ARP_PATTERN,
   PART_SEQUENCER_EUCLIDEAN_LENGTH,
   PART_SEQUENCER_EUCLIDEAN_FILL,
-  PART_SEQUENCER_EUCLIDEAN_ROTATE,
+  PART_SEQUENCER_STEP_OFFSET,
   PART_SEQUENCER_NUM_STEPS,
   PART_SEQUENCER_CLOCK_QUANTIZATION,
   PART_SEQUENCER_LOOP_LENGTH,
@@ -489,7 +480,7 @@ struct SequencerSettings {
   uint8_t arp_pattern;
   uint8_t euclidean_length;
   uint8_t euclidean_fill;
-  uint8_t euclidean_rotate;
+  uint8_t step_offset;
   uint8_t num_steps;
   uint8_t clock_quantization;
   uint8_t loop_length;
@@ -512,7 +503,7 @@ struct SequencerSettings {
     packed.arp_pattern = arp_pattern;
     packed.euclidean_length = euclidean_length;
     packed.euclidean_fill = euclidean_fill;
-    packed.euclidean_rotate = euclidean_rotate;
+    packed.step_offset = step_offset;
     packed.num_steps = num_steps;
     packed.clock_quantization = clock_quantization;
     packed.loop_length = loop_length;
@@ -532,7 +523,7 @@ struct SequencerSettings {
     arp_pattern = packed.arp_pattern;
     euclidean_length = packed.euclidean_length;
     euclidean_fill = packed.euclidean_fill;
-    euclidean_rotate = packed.euclidean_rotate;
+    step_offset = packed.step_offset;
     num_steps = packed.num_steps;
     clock_quantization = packed.clock_quantization;
     loop_length = packed.loop_length;
@@ -623,18 +614,9 @@ class Part {
   
   void Init();
   
-  // The return value indicates whether the message can be forwarded to the
-  // MIDI out (soft-thru). For example, when the arpeggiator is on, NoteOn
-  // or NoteOff can return false to make sure that the chord that triggers
-  // the arpeggiator does not find its way to the MIDI out. Instead it will 
-  // be sent note by note within InternalNoteOn and InternalNoteOff.
-  //
-  // Also, note that channel / keyrange / velocity range filtering is not
-  // applied here. It is up to the caller to call accepts() first to check
-  // whether the message should be sent to the part.
   uint8_t HeldKeysNoteOn(HeldKeys &keys, uint8_t pitch, uint8_t velocity);
-  bool NoteOn(uint8_t channel, uint8_t note, uint8_t velocity);
-  bool NoteOff(uint8_t channel, uint8_t note, bool respect_sustain = true);
+  void NoteOn(uint8_t channel, uint8_t note, uint8_t velocity);
+  void NoteOff(uint8_t channel, uint8_t note, bool respect_sustain = true);
   uint8_t TransposeInputPitch(uint8_t pitch, int8_t transpose_octaves) const {
     CONSTRAIN(transpose_octaves, (0 - pitch) / 12, (127 - pitch) / 12);
     return pitch + 12 * transpose_octaves;
@@ -645,10 +627,10 @@ class Part {
   void InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato = false);
   void InternalNoteOff(uint8_t note);
   // Absolute CCs only
-  bool ControlChange(uint8_t channel, uint8_t controller, uint8_t value);
-  bool PitchBend(uint8_t channel, uint16_t pitch_bend);
-  bool Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity);
-  bool Aftertouch(uint8_t channel, uint8_t velocity);
+  void ControlChange(uint8_t channel, uint8_t controller, uint8_t value);
+  void PitchBend(uint8_t channel, uint16_t pitch_bend);
+  void Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity);
+  void Aftertouch(uint8_t channel, uint8_t velocity);
   void AllNotesOff();
   void StopSequencerArpeggiatorNotes();
   // Returns the 1-based index of the new note IFF there was room for it
@@ -675,13 +657,15 @@ class Part {
     voicing_.allocation_mode = num_voices_ > 1 ? POLY_MODE_STEAL_RELEASE_SILENT : POLY_MODE_OFF;
     voicing_.allocation_priority = stmlib::NOTE_STACK_PRIORITY_LAST;
     voicing_.portamento = 0;
-    voicing_.legato_mode = LEGATO_MODE_OFF;
+    voicing_.legato_retrigger = true;
+    voicing_.portamento_legato_only = false;
   }
 
+  inline bool seq_has_notes() const { return looped() ? looper_.num_notes() : seq_.num_steps; }
   inline bool seq_overwrite() const { return seq_overwrite_; }
   inline void toggle_seq_overwrite() { set_seq_overwrite(!seq_overwrite_); }
   inline void set_seq_overwrite(bool b) {
-    seq_overwrite_ = b && (looped() ? looper_.num_notes() : seq_.num_steps);
+    seq_overwrite_ = b && seq_has_notes();
   }
 
   inline const looper::Deck& looper() const { return looper_; }
@@ -737,84 +721,10 @@ class Part {
       voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_SILENT;
   }
 
-  inline void LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {
-    if (!looper_in_use()) return;
-    uint8_t generated_note_index = GeneratedNoteOn(pitch, velocity);
-    if (!generated_note_index) return;
-    looper_note_index_for_generated_note_index_[generated_note_index] = looper_note_index;
-    pitch = ApplySequencerInputResponse(pitch);
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      // Advance arp
-      SequencerStep step = SequencerStep(pitch, velocity);
-      // NB: since this path implies seq_driven_arp, there is no arp pattern,
-      // and step_counter_ doesn't matter
-      SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(step_counter_, step);
-      arpeggiator_ = result.arpeggiator;
-      pitch = result.note.note();
-      if (result.note.has_note()) {
-        bool slide = result.note.is_slid();
-        InternalNoteOn(pitch, result.note.velocity(), slide);
-        if (slide) {
-          // NB: currently impossible (see LooperPlayNoteOff)
-          InternalNoteOff(output_pitch_for_looper_note_[looper_note_index]);
-        }
-        output_pitch_for_looper_note_[looper_note_index] = pitch;
-      } //  else if tie, output_pitch_for_looper_note_ is already set to the tied pitch
-    } else if (looper_can_control(pitch)) {
-      InternalNoteOn(pitch, velocity);
-      output_pitch_for_looper_note_[looper_note_index] = pitch;
-    }
-  }
-
-  inline void LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch) {
-    if (!looper_in_use()) { return; }
-    looper_note_index_for_generated_note_index_[generated_notes_.NoteOff(pitch)] = looper::kNullIndex;
-    pitch = output_pitch_for_looper_note_[looper_note_index];
-    if (pitch == looper::kNullIndex) { return; }
-    output_pitch_for_looper_note_[looper_note_index] = looper::kNullIndex;
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      // Peek at next looper note
-      uint8_t next_on_index = looper_.PeekNextOn();
-      const looper::Note& next_on_note = looper_.note_at(next_on_index);
-      SequencerStep next_step = SequencerStep(next_on_note.pitch, next_on_note.velocity);
-      // Predicting whether the looper will have looped around by this next note
-      // (and possibly caused an arp reset) is hard, but fortunately, a reset
-      // does not currently affect whether the arp output note is a
-      // continuation, so we don't care
-      //
-      // Also NB: step_counter_ doesn't matter (see LooperPlayNoteOn)
-      next_step = BuildNextArpeggiatorResult(step_counter_, next_step).note;
-      if (next_step.is_continuation()) {
-        // Leave this pitch in the care of the next looper note
-        //
-        // NB: currently impossible, since the arp can only return a
-        // continuation when driven by an input sequencer note that is a
-        // continuation, which the looper can't do
-        output_pitch_for_looper_note_[next_on_index] = pitch;
-      } else {
-        InternalNoteOff(pitch);
-      }
-    } else if (looper_can_control(pitch)) {
-      InternalNoteOff(pitch);
-    }
-  }
-
-  inline void LooperRecordNoteOn(uint8_t pressed_key_index) {
-    if (seq_overwrite_) { DeleteRecording(); }
-    const stmlib::NoteEntry& e = manual_keys_.stack.note(pressed_key_index);
-    uint8_t looper_note_index = looper_.RecordNoteOn(e.note, e.velocity & 0x7f);
-    looper_note_recording_pressed_key_[pressed_key_index] = looper_note_index;
-    LooperPlayNoteOn(looper_note_index, e.note, e.velocity & 0x7f);
-  }
-
-  inline void LooperRecordNoteOff(uint8_t pressed_key_index) {
-    const stmlib::NoteEntry& e = manual_keys_.stack.note(pressed_key_index);
-    uint8_t looper_note_index = looper_note_recording_pressed_key_[pressed_key_index];
-    if (looper_.RecordNoteOff(looper_note_index)) {
-      LooperPlayNoteOff(looper_note_index, e.note);
-    }
-    looper_note_recording_pressed_key_[pressed_key_index] = looper::kNullIndex;
-  }
+  void LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity);
+  void LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch);
+  void LooperRecordNoteOn(uint8_t pressed_key_index);
+  void LooperRecordNoteOff(uint8_t pressed_key_index);
 
   void DeleteRecording();
 
@@ -840,24 +750,7 @@ class Part {
   }
   void ResetAllKeys();
 
-  inline void RecordStep(const SequencerStep& step) {
-    if (seq_recording_) {
-      if (seq_overwrite_) { DeleteRecording(); }
-      SequencerStep* target = &seq_.step[seq_rec_step_];
-      target->data[0] = step.data[0];
-      target->data[1] |= step.data[1];
-      ++seq_rec_step_;
-      uint8_t last_step = seq_overdubbing_ ? seq_.num_steps : kNumSteps;
-      // Extend sequence.
-      if (!seq_overdubbing_ && seq_rec_step_ > seq_.num_steps) {
-        seq_.num_steps = seq_rec_step_;
-      }
-      // Wrap to first step.
-      if (seq_rec_step_ >= last_step) {
-        seq_rec_step_ = 0;
-      }
-    }
-  }
+  void RecordStep(const SequencerStep& step);
 
   inline void ModifyNoteAtCurrentStep(uint8_t note) {
     if (seq_recording_) {
@@ -886,9 +779,19 @@ class Part {
   inline uint8_t tx_channel() const {
     return midi_.channel == kMidiChannelOmni ? 0 : midi_.channel;
   }
-  inline bool direct_thru() const {
+  // The return value indicates whether the message can be forwarded to the
+  // MIDI out (soft-thru). For example, when the arpeggiator is on, NoteOn
+  // or NoteOff can return false to make sure that the chord that triggers
+  // the arpeggiator does not find its way to the MIDI out. Instead it will 
+  // be sent note by note within InternalNoteOn and InternalNoteOff.
+  //
+  // Also, note that channel / keyrange / velocity range filtering is not
+  // applied here. It is up to the caller to call accepts() first to check
+  // whether the message should be sent to the part.
+  inline bool notes_thru() const {
     return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
   }
+  inline bool cc_thru() const { return midi_.out_mode != MIDI_OUT_MODE_OFF; }
   
   inline bool has_velocity_filtering() {
     return midi_.min_velocity != 0 || midi_.max_velocity != 127;
