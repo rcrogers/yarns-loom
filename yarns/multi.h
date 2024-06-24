@@ -439,7 +439,8 @@ class Multi {
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
   inline uint32_t tick_counter() { return tick_counter_; }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
-  inline uint32_t tick_phase_increment() const {
+  // NB: meaningless when external clocked!
+  inline uint32_t tempo_tick_phase_increment() const {
     return settings_.clock_tempo * kTempoToTickPhaseIncrement;
   }
   inline bool running() const { return running_; }
