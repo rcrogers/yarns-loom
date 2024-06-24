@@ -73,7 +73,7 @@ const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
     if (!(pattern_mask & pattern)) return result;
   }
 
-  uint8_t num_keys = arp_keys.stack.size();
+  uint8_t num_keys = arp_keys.stack.size(); // Max: kNoteStackSize
   if (!num_keys) {
     next.Reset();
     return result;
@@ -101,7 +101,7 @@ const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
         if (seq_step.color_key_value() >= num_keys_all_octaves) return result;
 
         // Advance active position by octave # -- C4 -> pos + 4; C0 -> pos + 0
-        next.key_index = modulo(next.key_index + display_octave, num_keys_all_octaves);
+        next.key_index += display_octave; // This will overflow after ~years
         if (seq_step.is_white()) {
           next.key_increment = 0; // Move is already complete
         } else { // If black key

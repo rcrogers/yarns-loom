@@ -94,10 +94,6 @@ const char* const voicing_aux_cv_values[MOD_AUX_LAST] = {
   "17 FM 1/7", "25 FM 2/5", "27 FM 2/7"
 };
 
-const char* const legato_mode_values[LEGATO_MODE_LAST] = {
-  "OFF", "AUTO PORTAMENTO", "ON"
-};
-
 const char* const voicing_oscillator_mode_values[OSCILLATOR_MODE_LAST] = {
   "OFF", "DRONE", "ENVELOPED"
 };
@@ -381,10 +377,16 @@ const Setting Settings::settings_[] = {
     5, 10,
   },
   {
-    "LG", "LEGATO MODE",
-    SETTING_DOMAIN_PART, { PART_VOICING_LEGATO_MODE, 0 },
-    SETTING_UNIT_ENUMERATION, 0, LEGATO_MODE_LAST - 1, legato_mode_values,
+    "LG", "LEGATO RETRIGGER",
+    SETTING_DOMAIN_PART, { PART_VOICING_LEGATO_RETRIGGER, 0 },
+    SETTING_UNIT_ENUMERATION, 0, 1, boolean_values,
     20, 11,
+  },
+  {
+    "PL", "PORTAMENTO LEGATO ONLY",
+    SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO_LEGATO_ONLY, 0 },
+    SETTING_UNIT_ENUMERATION, 0, 1, boolean_values,
+    32, 0xff,
   },
   {
     "BR", "BEND RANGE",
@@ -647,8 +649,8 @@ const Setting Settings::settings_[] = {
     108, 30,
   },
   {
-    "ER", "EUCLIDEAN ROTATE",
-    SETTING_DOMAIN_PART, { PART_SEQUENCER_EUCLIDEAN_ROTATE, 0 },
+    "SO", "STEP OFFSET",
+    SETTING_DOMAIN_PART, { PART_SEQUENCER_STEP_OFFSET, 0 },
     SETTING_UNIT_UINT8, 0, 31, NULL,
     109, 31,
   },

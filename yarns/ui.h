@@ -224,8 +224,8 @@ class Ui {
   void PrintCalibrationNote();
   void PrintRecordingPart();
   void SetBrightnessFromSequencerPhase(const Part& part);
-  void PrintLooperRecordingStatus();
-  void PrintRecordingStatus();
+  void PrintLoopSequencerStatus();
+  void PrintStepSequencerStatus();
   void PrintNote(int16_t note);
   void PrintPushItNote();
   void PrintLearning();

@@ -42,21 +42,21 @@ namespace yarns {
 
 typedef uint8_t ResourceId;
 
-extern const char* string_table[];
+extern const char* const string_table[];
 
-extern const uint16_t* lookup_table_table[];
+extern const uint16_t* const lookup_table_table[];
 
-extern const int16_t* lookup_table_signed_table[];
+extern const int16_t* const lookup_table_signed_table[];
 
-extern const char* const* lookup_table_string_table[];
+extern const char* const* const lookup_table_string_table[];
 
-extern const int16_t* waveform_table[];
+extern const int16_t* const waveform_table[];
 
-extern const int16_t* waveshaper_table[];
+extern const int16_t* const waveshaper_table[];
 
-extern const uint32_t* lookup_table_32_table[];
+extern const uint32_t* const lookup_table_32_table[];
 
-extern const uint16_t* char_table[];
+extern const uint16_t* const char_table[];
 
 extern const char str_dummy[];
 extern const uint16_t lut_env_expo[];

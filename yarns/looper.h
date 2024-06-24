@@ -94,7 +94,8 @@ class Deck {
     return pos_;
   }
   uint16_t period_ticks() const;
-  void Clock();
+  uint32_t lfo_note_phase() const;
+  void Clock(uint32_t tick_counter);
   inline void Refresh() {
     lfo_.Refresh();
     uint16_t new_phase = lfo_.GetPhase() >> 16;
@@ -155,7 +156,7 @@ class Deck {
   Link next_link_[kMaxNotes];
 
   // Phase tracking
-  SyncedLFO<23, 12> lfo_; // Gentle sync
+  SyncedLFO<18, 11> lfo_; // Gentle sync
   uint16_t pos_;
   bool needs_advance_;
 

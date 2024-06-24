@@ -66,10 +66,12 @@ void Deck::RemoveAll() {
 
 void Deck::Rewind() {
   lfo_.Init();
-  // A stored LFO increment may have been invalidated by changes to clock
-  // settings (leading to a glitchy Start, esp if clock has slowed), so we
-  // preemptively update it
-  lfo_.SetPhaseIncrement(multi.tick_phase_increment() / period_ticks());
+  if (multi.internal_clock()) {
+    // A stored LFO increment may have been invalidated by changes to clock
+    // settings (leading to a glitchy Start, esp if clock has slowed), so we
+    // preemptively update it
+    lfo_.SetPhaseIncrement(multi.tempo_tick_phase_increment() / period_ticks());
+  }
   Advance(0, false);
 }
 
@@ -115,8 +117,12 @@ uint16_t Deck::period_ticks() const {
   return part_->PPQN() << part_->sequencer_settings().loop_length;
 }
 
-void Deck::Clock() {
-  lfo_.Tap(multi.tick_counter(), period_ticks(), pos_offset << 16);
+uint32_t Deck::lfo_note_phase() const {
+  return lfo_.GetPhase() << part_->sequencer_settings().loop_length;
+}
+
+void Deck::Clock(uint32_t tick_counter) {
+  lfo_.Tap(tick_counter, period_ticks(), pos_offset << 16);
 }
 
 void Deck::RemoveOldestNote() {
