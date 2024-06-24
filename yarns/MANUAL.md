@@ -271,7 +271,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Allow monophonic parts to use all voicing modes
 
 ### Legato and portamento
-- Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` and `PORTAMENTO LEGATO ONLY`
+- Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` (are notes retriggered when played legato?) and `PORTAMENTO LEGATO ONLY` (is portamento applied on all notes, or only on notes played legato?)
   - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
   
 ### Expanded support for Control Change events
