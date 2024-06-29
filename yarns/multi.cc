@@ -836,7 +836,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
     case CONTROL_CHANGE_MODE_OFF:
       return thru;
     case CONTROL_CHANGE_MODE_RELATIVE_TWOS_COMPLEMENT:
-      relative_increment = IncrementFromTwosComplementRelativeCC(value_7bits);
+      relative_increment = GetIncrementFromTwosComplementRelativeCC(value_7bits);
       break;
     case CONTROL_CHANGE_MODE_ABSOLUTE:
     default:
@@ -938,7 +938,7 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
         break;
 
       }
-    }
+    } // Next part
   }
   return thru;
 }
@@ -961,7 +961,7 @@ void Multi::SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value_7bit
   uint8_t part = part_index == 0xff ? controller >> 5 : part_index;
   int16_t raw_value;
   if (settings_.control_change_mode > CONTROL_CHANGE_MODE_ABSOLUTE) {
-    raw_value = IncrementSetting(setting, part, IncrementFromTwosComplementRelativeCC(value_7bits));
+    raw_value = IncrementSetting(setting, part, GetIncrementFromTwosComplementRelativeCC(value_7bits));
   } else {
     SettingRange setting_range = GetSettingRange(setting, part);
     raw_value = ScaleAbsoluteCC(value_7bits, setting_range.min, setting_range.max);
