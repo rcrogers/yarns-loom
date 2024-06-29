@@ -958,7 +958,9 @@ void Multi::SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value_7bit
   if (setting_index == 0xff) { return; }
   const Setting& setting = setting_defs.get(setting_index);
 
+  // This is ignored for multi settings
   uint8_t part = part_index == 0xff ? controller >> 5 : part_index;
+
   int16_t raw_value;
   if (settings_.control_change_mode > CONTROL_CHANGE_MODE_ABSOLUTE) {
     raw_value = IncrementSetting(setting, part, GetIncrementFromTwosComplementRelativeCC(value_7bits));
