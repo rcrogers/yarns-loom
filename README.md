@@ -2,19 +2,16 @@
 An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), with an emphasis on dynamic voicing, flexible composition, and expressive control.
 
 ### Features
-- [Looper-style sequencer with real-time recording and overdubbing](yarns/MANUAL.md#looper-style-sequencing-mode-with-real-time-recording)
-- [Braids-inspired oscillator waveforms with timbre modulation: 12 synthesis models, with over 50 variants](yarns/MANUAL.md#oscillator-controls)
-- [ADSR envelopes with velocity-sensitive segments and amplitude](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
-- [Tremolo with variable depth and shape](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
-- [New layouts, including a layout that features a 3-voice paraphonic part](yarns/MANUAL.md#layouts)
-- [Expanded options for polyphonic voice allocation](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
-- [New ways to use the hold pedal, including keyboard latch, sostenuto, and note filtering](yarns/MANUAL.md#hold-pedal)
-- [Velocity filtering](yarns/MANUAL.md#event-routing-filtering-and-transformation)
-- [Input octave switch](yarns/MANUAL.md#event-routing-filtering-and-transformation)
+- [Looper-style sequencer](yarns/MANUAL.md#looper-style-sequencing-mode-with-real-time-recording)
 - [Arpeggiator movement can be programmed via sequencer](yarns/MANUAL.md#sequencer-driven-arpeggiator)
-- [More options for how a sequence interacts with keyboard input](yarns/MANUAL.md#event-routing-filtering-and-transformation)
-- [Global control and display of the active part and its play mode](yarns/MANUAL.md#global-control-and-display-of-the-active-part-and-its-play-mode)
-- [Expanded CC support: recording control, macro functions, display of received values, relative/disabled mode](yarns/MANUAL.md#expanded-support-for-control-change-events)
+- [Braids-inspired oscillator waveforms](yarns/MANUAL.md#oscillator-controls)
+- [ADSR envelopes with velocity control](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
+- [Deeper support for MIDI CCs](yarns/MANUAL.md#expanded-support-for-control-change-events)
+- [Tremolo](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
+- [New layouts, including a layout with a 3-voice paraphonic part](yarns/MANUAL.md#layouts)
+- [More options for polyphonic voicing](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
+- [New ways to use the hold pedal](yarns/MANUAL.md#hold-pedal)
+- [Input octave switch](yarns/MANUAL.md#event-routing-filtering-and-transformation)
 - [Check the manual for more!](yarns/MANUAL.md)
 
 ### Caveats
