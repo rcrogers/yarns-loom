@@ -12,7 +12,7 @@ An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](ht
 - [More options for polyphonic voicing](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
 - [New ways to use the hold pedal](yarns/MANUAL.md#hold-pedal)
 - [Input octave switch](yarns/MANUAL.md#event-routing-filtering-and-transformation)
-- **[→ Check the manual for more!](yarns/MANUAL.md)**
+  - **[Check the manual for more! →](yarns/MANUAL.md)**
 
 ### Caveats
 - Installation of this firmware is at your own risk
