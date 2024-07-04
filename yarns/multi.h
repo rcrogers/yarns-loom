@@ -50,6 +50,34 @@ const uint8_t kMaxBarDuration = 32;
 // Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
 const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
 
+// Define type ControllerRouting that is either a Part index or a remote control flag
+class CCRouting {
+ public:
+  static CCRouting Part(uint8_t controller, uint8_t part) {
+    return CCRouting(controller, part);
+  }
+  static CCRouting Remote(uint8_t controller) {
+    return CCRouting(controller, kRemote);
+  }
+  bool is_remote() {
+    return _part_or_remote == kRemote;
+  }
+  uint8_t part() {
+    return is_remote() ? _controller >> 5 : _part_or_remote;
+  }
+  uint8_t controller() {
+    return _controller;
+  }
+ private:
+  static const uint8_t kRemote = 0xff;
+  CCRouting(uint8_t controller, uint8_t part_or_remote) {
+    this->_controller = controller;
+    this->_part_or_remote = part_or_remote;
+  }
+  uint8_t _part_or_remote;
+  uint8_t _controller;
+};
+
 struct SettingRange {
   SettingRange(int16_t min, int16_t max) {
     this->min = min;
@@ -289,7 +317,7 @@ class Multi {
   
   bool ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bits);
   int16_t ScaleAbsoluteCC(uint8_t value_7bits, int16_t min, int16_t max) const;
-  inline int8_t IncrementFromTwosComplementRelativeCC(uint8_t value_7bits) const {
+  inline int8_t GetIncrementFromTwosComplementRelativeCC(uint8_t value_7bits) const {
     return static_cast<int8_t>(value_7bits << 1) >> 1;
   }
   inline int16_t IncrementSetting(const Setting& setting, uint8_t part, int16_t increment) const {
@@ -301,9 +329,17 @@ class Multi {
     value += increment;
     return value;
   }
-  void SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value);
+
+  void SetFromCC(CCRouting cc, int16_t scaled_value);
+  int16_t UpdateController(CCRouting cc, uint8_t value_7bits);
+  SettingRange GetSettingOrMacroRange(CCRouting cc) const;
+  void InferControllerValue(CCRouting cc);
+  int16_t InferSettingOrMacroValue(CCRouting cc) const;
+  const Setting* GetSettingForController(CCRouting cc) const;
+
   uint8_t GetSetting(const Setting& setting, uint8_t part) const;
   SettingRange GetSettingRange(const Setting& setting, uint8_t part) const;
+
   void ApplySetting(SettingIndex setting, uint8_t part, int16_t raw_value) {
     ApplySetting(setting_defs.get(setting), part, raw_value);
   };
@@ -570,7 +606,6 @@ class Multi {
   bool started_by_keyboard_;
   bool recording_;
   uint8_t recording_part_;
-  uint8_t macro_record_last_value_[kNumParts];
   
   InternalClock internal_clock_;
   uint8_t internal_clock_ticks_;
@@ -606,6 +641,10 @@ class Multi {
   bool dirty_;
   
   uint8_t num_active_parts_;
+
+  // "Virtual knobs" to track changes made by CCs in relative mode
+  uint8_t remote_control_controller_value_[128];
+  uint8_t part_controller_value_[kNumParts][128];
   
   Part part_[kNumParts];
   Voice voice_[kNumSystemVoices];

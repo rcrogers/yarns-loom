@@ -82,6 +82,12 @@ void Multi::Init(bool reset_calibration) {
     part_[i].set_custom_pitch_table(settings_.custom_pitch_table);
   }
   fill(&swing_predelay_[0], &swing_predelay_[12], -1);
+
+  fill(&remote_control_controller_value_[0], &remote_control_controller_value_[128], 0);
+  for (uint8_t i = 0; i < kNumParts; ++i) {
+    fill(&part_controller_value_[i][0], &part_controller_value_[i][128], 0);
+  }
+
   for (uint8_t i = 0; i < kNumSystemVoices; ++i) {
     voice_[i].Init();
   }
@@ -793,7 +799,13 @@ void Multi::AfterDeserialize() {
   
   for (uint8_t i = 0; i < kNumParts; ++i) {
     part_[i].AfterDeserialize();
-    macro_record_last_value_[i] = 127;
+  }
+
+  for (uint8_t controller = 0; controller < 128; ++controller) {
+    InferControllerValue(CCRouting::Remote(controller));
+    for (uint8_t p = 0; p < kNumParts; ++p) {
+      InferControllerValue(CCRouting::Part(controller, p));
+    }
   }
 }
 
@@ -828,15 +840,54 @@ void Multi::StopRecording(uint8_t part) {
   }
 }
 
-bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bits) {
-  bool thru = true;
+void Multi::InferControllerValue(CCRouting cc) {
+  uint8_t* controller_values = cc.is_remote() ? remote_control_controller_value_ : part_controller_value_[cc.part()];
+  int16_t scaled_value = InferSettingOrMacroValue(cc);
+  SettingRange range = GetSettingOrMacroRange(cc);
+  int32_t value =
+    (((scaled_value << 1) + 1 - (range.min << 1)) << 6) /
+    (range.max - range.min + 1);
+  controller_values[cc.controller()] = value;
+    
+}
 
+int16_t Multi::InferSettingOrMacroValue(CCRouting cc) const {
+  const Setting* setting = GetSettingForController(cc);
+  uint8_t part_index = cc.part();
+  if (setting) return GetSetting(*setting, part_index);
+
+  if (cc.is_remote()) return 0;
+  
+  const Part& part = part_[part_index];
+  bool part_is_recording = recording_ && recording_part_ == part_index;
+  switch (cc.controller()) {
+    case kCCRecordOffOn:
+      return part_is_recording ? 1 : 0;
+    case kCCMacroRecord:
+      if (part_is_recording) {
+        return part.seq_overwrite() ? MACRO_RECORD_OVERWRITE : MACRO_RECORD_ON;
+      } else {
+        return MACRO_RECORD_OFF;
+      }
+    case kCCMacroPlayMode: {
+      int8_t macro_zone = part.midi_settings().play_mode;
+      if (part.sequencer_settings().clock_quantization) {
+        macro_zone = -macro_zone;
+      }
+      return macro_zone;
+    }
+    case kCCLooperPhaseOffset:
+      return part.looped() ? part.looper().pos_offset >> 9 : 0;
+    default:
+      return 0;
+  }
+}
+
+int16_t Multi::UpdateController(CCRouting cc, uint8_t value_7bits) {
   int8_t relative_increment;
   switch (settings_.control_change_mode) {
-    case CONTROL_CHANGE_MODE_OFF:
-      return thru;
     case CONTROL_CHANGE_MODE_RELATIVE_TWOS_COMPLEMENT:
-      relative_increment = IncrementFromTwosComplementRelativeCC(value_7bits);
+      relative_increment = GetIncrementFromTwosComplementRelativeCC(value_7bits);
       break;
     case CONTROL_CHANGE_MODE_ABSOLUTE:
     default:
@@ -844,25 +895,45 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
       break;
   }
 
+  uint8_t* controller_values = cc.is_remote() ? remote_control_controller_value_ : part_controller_value_[cc.part()];
+  uint8_t controller = cc.controller();
+  controller_values[controller] = relative_increment
+    ? SaturatingIncrement(controller_values[cc.controller()], relative_increment)
+    : value_7bits;
+  CONSTRAIN(controller_values[controller], 0, 127);
+
+  SettingRange range = GetSettingOrMacroRange(cc);
+  int16_t scaled_value = ScaleAbsoluteCC(controller_values[controller], range.min, range.max);
+  return scaled_value;
+}
+
+// May be routed to either remote control, or one or more parts
+bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bits) {
+  bool thru = true;
+
+  if (settings_.control_change_mode == CONTROL_CHANGE_MODE_OFF) return thru;
+
   if (
     is_remote_control_channel(channel) &&
     setting_defs.remote_control_cc_map[controller] != 0xff
   ) {
     // Always thru
-    SetFromCC(0xff, controller, value_7bits);
+    CCRouting cc = CCRouting::Remote(controller);
+    int16_t scaled_value = UpdateController(cc, value_7bits);
+    SetFromCC(cc, scaled_value);
   } else {
     for (uint8_t part_index = 0; part_index < num_active_parts_; ++part_index) {
       if (!part_accepts_channel(part_index, channel)) continue;
 
-      int16_t macro_zone;
+      CCRouting cc = CCRouting::Part(controller, part_index);
+      uint8_t old_controller_value = part_controller_value_[part_index][controller];
+      int16_t scaled_value = UpdateController(cc, value_7bits);
 
       switch (controller) { // Intercept special CCs
-      case kCCRecordOffOn: {
-        bool start = value_7bits >= 64;
-        start ? StartRecording(part_index) : StopRecording(part_index);
-        ui.SplashPartString(start ? "R+" : "R-", part_index);
+      case kCCRecordOffOn:
+        scaled_value ? StartRecording(part_index) : StopRecording(part_index);
+        ui.SplashPartString(scaled_value ? "R+" : "R-", part_index);
         break;
-      }
 
       case kCCDeleteRecording:
         part_[part_index].DeleteRecording();
@@ -870,75 +941,47 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
         break;
 
       case kCCMacroRecord:
-        if (relative_increment) {
-          if (recording_ && recording_part_ == part_index) {
-            macro_zone = part_[part_index].seq_overwrite() ? MACRO_RECORD_OVERWRITE : MACRO_RECORD_ON;
-          } else {
-            macro_zone = MACRO_RECORD_OFF;
-          }
-          macro_zone += relative_increment;
-          CONSTRAIN(macro_zone, MACRO_RECORD_OFF, MACRO_RECORD_DELETE);
-        } else {
-          macro_zone = ScaleAbsoluteCC(value_7bits, MACRO_RECORD_OFF, MACRO_RECORD_DELETE);
-        }
-
-        macro_zone >= MACRO_RECORD_ON ? StartRecording(part_index) : StopRecording(part_index);
+        scaled_value >= MACRO_RECORD_ON ? StartRecording(part_index) : StopRecording(part_index);
         if (
-          macro_zone == MACRO_RECORD_DELETE &&
+          scaled_value == MACRO_RECORD_DELETE &&
           // Only on increasing value, so that leaving an absolute controller in
           // the delete zone doesn't doom any subsequent recordings
-          (relative_increment || value_7bits > macro_record_last_value_[part_index]))
-        {
+          part_controller_value_[part_index][controller] > old_controller_value
+        ) {
           part_[part_index].DeleteRecording();
           ui.SplashPartString("RX", part_index);
         } else {
-          part_[part_index].set_seq_overwrite(macro_zone == MACRO_RECORD_OVERWRITE);
-          ui.SplashPartString(macro_zone == MACRO_RECORD_OVERWRITE ? "R*" : (macro_zone ? "R+" : "R-"), part_index);
+          part_[part_index].set_seq_overwrite(scaled_value == MACRO_RECORD_OVERWRITE);
+          ui.SplashPartString(scaled_value == MACRO_RECORD_OVERWRITE ? "R*" : (scaled_value ? "R+" : "R-"), part_index);
         }
-        macro_record_last_value_[part_index] = value_7bits;
         break;
 
       case kCCMacroPlayMode:
-        if (relative_increment) {
-          macro_zone = part_[part_index].midi_settings().play_mode;
-          if (part_[part_index].sequencer_settings().clock_quantization) {
-            macro_zone = -macro_zone;
-          }
-          macro_zone += relative_increment;
-          CONSTRAIN(macro_zone, MACRO_PLAY_MODE_STEP_SEQ, MACRO_PLAY_MODE_LOOP_SEQ);
-        } else {
-          macro_zone = ScaleAbsoluteCC(value_7bits, MACRO_PLAY_MODE_STEP_SEQ, MACRO_PLAY_MODE_LOOP_SEQ);
-        }
-
-        ApplySetting(SETTING_SEQUENCER_CLOCK_QUANTIZATION, part_index, macro_zone < MACRO_PLAY_MODE_MANUAL);
-        ApplySetting(SETTING_SEQUENCER_PLAY_MODE, part_index, abs(macro_zone));
+        ApplySetting(SETTING_SEQUENCER_CLOCK_QUANTIZATION, part_index, scaled_value < MACRO_PLAY_MODE_MANUAL);
+        ApplySetting(SETTING_SEQUENCER_PLAY_MODE, part_index, abs(scaled_value));
         char label[2];
-        if (macro_zone == MACRO_PLAY_MODE_MANUAL) strcpy(label, "--"); else {
-          label[0] = macro_zone < MACRO_PLAY_MODE_MANUAL ? 'S' : 'L';
-          label[1] = abs(macro_zone) == 1 ? 'A' : 'S';
+        if (scaled_value == MACRO_PLAY_MODE_MANUAL) strcpy(label, "--"); else {
+          label[0] = scaled_value < MACRO_PLAY_MODE_MANUAL ? 'S' : 'L';
+          label[1] = abs(scaled_value) == 1 ? 'A' : 'S';
         }
         ui.SplashPartString(label, part_index);
         break;
 
       case kCCLooperPhaseOffset:
         if (part_[part_index].looped()) {
-          if (relative_increment) {
-            part_->mutable_looper().pos_offset += (relative_increment << 9); // Wraps
-          } else {
-            part_->mutable_looper().pos_offset = value_7bits << 9;
-          }
+          part_->mutable_looper().pos_offset = scaled_value << 9;
           ui.SplashOn(SPLASH_LOOPER_PHASE_OFFSET);
         }
         break;
 
       default:
         thru = thru && part_[part_index].cc_thru();
-        part_[part_index].ControlChange(channel, controller, value_7bits);
-        SetFromCC(part_index, controller, value_7bits);
+        part_[part_index].ControlChange(channel, controller, value_7bits); // Relative not supported
+        SetFromCC(cc, scaled_value);
         break;
 
       }
-    }
+    } // Next part
   }
   return thru;
 }
@@ -951,68 +994,85 @@ int16_t Multi::ScaleAbsoluteCC(uint8_t value_7bits, int16_t min, int16_t max) co
   return scaled_value;
 }
 
-void Multi::SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value_7bits) {
-  uint8_t* map = part_index == 0xff ?
+const Setting* Multi::GetSettingForController(CCRouting cc) const {
+  uint8_t* map = cc.is_remote() ?
     setting_defs.remote_control_cc_map : setting_defs.part_cc_map;
-  uint8_t setting_index = map[controller];
-  if (setting_index == 0xff) { return; }
-  const Setting& setting = setting_defs.get(setting_index);
-
-  uint8_t part = part_index == 0xff ? controller >> 5 : part_index;
-  int16_t raw_value;
-  if (settings_.control_change_mode > CONTROL_CHANGE_MODE_ABSOLUTE) {
-    raw_value = IncrementSetting(setting, part, IncrementFromTwosComplementRelativeCC(value_7bits));
-  } else {
-    SettingRange setting_range = GetSettingRange(setting, part);
-    raw_value = ScaleAbsoluteCC(value_7bits, setting_range.min, setting_range.max);
-  }
-  if (setting.unit == SETTING_UNIT_TEMPO) {
-    raw_value &= 0xfe;
-    if (raw_value < TEMPO_EXTERNAL) {
-      raw_value = TEMPO_EXTERNAL;
-    }
-  }
-  ApplySettingAndSplash(setting, part, raw_value);
+  uint8_t setting_index = map[cc.controller()];
+  if (setting_index == 0xff) return NULL;
+  return &setting_defs.get(setting_index);
 }
 
-void Multi::ApplySettingAndSplash(const Setting& setting, uint8_t part, int16_t raw_value) {
-  ApplySetting(setting, part, raw_value);
+void Multi::SetFromCC(CCRouting cc, int16_t scaled_value) {
+  const Setting* setting_ptr = GetSettingForController(cc);
+  if (!setting_ptr) return;
+  const Setting& setting = *setting_ptr;
+
+  if (setting.unit == SETTING_UNIT_TEMPO) {
+    scaled_value &= 0xfe;
+    if (scaled_value < TEMPO_EXTERNAL) {
+      scaled_value = TEMPO_EXTERNAL;
+    }
+  }
+  ApplySettingAndSplash(setting, cc.part(), scaled_value);
+}
+
+void Multi::ApplySettingAndSplash(const Setting& setting, uint8_t part, int16_t scaled_value) {
+  ApplySetting(setting, part, scaled_value);
   ui.SplashSetting(setting, part);
+}
+
+SettingRange Multi::GetSettingOrMacroRange(CCRouting cc) const {
+  const Setting* setting = GetSettingForController(cc);
+  if (setting) return GetSettingRange(*setting, cc.part());
+  
+  switch (cc.controller()) {
+    case kCCRecordOffOn:
+      return SettingRange(0, 1);
+    case kCCMacroRecord:
+      return SettingRange(MACRO_RECORD_OFF, MACRO_RECORD_DELETE);
+    case kCCMacroPlayMode:
+      return SettingRange(MACRO_PLAY_MODE_STEP_SEQ, MACRO_PLAY_MODE_LOOP_SEQ);
+    case kCCLooperPhaseOffset:
+    default:
+      return SettingRange(0, 127);
+  }
 }
 
 // Determine dynamic min/max for a setting, based on other settings
 SettingRange Multi::GetSettingRange(const Setting& setting, uint8_t part) const {
   int16_t min_value = setting.min_value;
   int16_t max_value = setting.max_value;
-  if (multi.part(part).num_voices() == 1) { // Part is monophonic
-    // if (&setting == &setting_defs.get(SETTING_VOICING_ALLOCATION_MODE))
-    //   min_value = max_value = POLY_MODE_OFF;
-    if (&setting == &setting_defs.get(SETTING_VOICING_LFO_SPREAD_VOICES))
-      min_value = max_value = 0;
-  }
-  if (
-    multi.layout() == LAYOUT_PARAPHONIC_PLUS_TWO &&
-    part == 0 &&
-    &setting == &setting_defs.get(SETTING_VOICING_OSCILLATOR_MODE)
-  ) {
-    min_value = OSCILLATOR_MODE_DRONE;
-  }
-  if (
-    part_[part].midi_settings().play_mode == PLAY_MODE_ARPEGGIATOR &&
-    !part_[part].seq_has_notes() &&
-    &setting == &setting_defs.get(SETTING_SEQUENCER_ARP_PATTERN)
-  ) {
-    // If no notes are present, sequencer-driven setting values are not allowed
-    max_value = LUT_ARPEGGIATOR_PATTERNS_SIZE - 1;
+  if (setting.domain == SETTING_DOMAIN_PART) {
+    if (multi.part(part).num_voices() == 1) { // Part is monophonic
+      // if (&setting == &setting_defs.get(SETTING_VOICING_ALLOCATION_MODE))
+      //   min_value = max_value = POLY_MODE_OFF;
+      if (&setting == &setting_defs.get(SETTING_VOICING_LFO_SPREAD_VOICES))
+        min_value = max_value = 0;
+    }
+    if (
+      multi.layout() == LAYOUT_PARAPHONIC_PLUS_TWO &&
+      part == 0 &&
+      &setting == &setting_defs.get(SETTING_VOICING_OSCILLATOR_MODE)
+    ) {
+      min_value = OSCILLATOR_MODE_DRONE;
+    }
+    if (
+      part_[part].midi_settings().play_mode == PLAY_MODE_ARPEGGIATOR &&
+      !part_[part].seq_has_notes() &&
+      &setting == &setting_defs.get(SETTING_SEQUENCER_ARP_PATTERN)
+    ) {
+      // If no notes are present, sequencer-driven setting values are not allowed
+      max_value = LUT_ARPEGGIATOR_PATTERNS_SIZE - 1;
+    }
   }
   return SettingRange(min_value, max_value);
 }
 
-void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t raw_value) {
+void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t scaled_value) {
   // Apply dynamic min/max as needed
   SettingRange setting_range = GetSettingRange(setting, part);
-  CONSTRAIN(raw_value, setting_range.min, setting_range.max);
-  uint8_t value = static_cast<uint8_t>(raw_value);
+  CONSTRAIN(scaled_value, setting_range.min, setting_range.max);
+  uint8_t value = static_cast<uint8_t>(scaled_value);
 
   uint8_t prev_value = GetSetting(setting, part);
   if (prev_value == value) { return; }

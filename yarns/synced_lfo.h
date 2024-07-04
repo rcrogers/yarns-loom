@@ -30,6 +30,9 @@
 #ifndef YARNS_SYNCED_LFO_H_
 #define YARNS_SYNCED_LFO_H_
 
+#include "stmlib/stmlib.h"
+using namespace stmlib;
+
 namespace yarns {
 
 enum LFOShape {
@@ -89,15 +92,7 @@ class SyncedLFO {
     int32_t p_error = target_phase - phase_;
     int32_t error = (p_error >> PHASE_ERR_SHIFT) + (d_error >> FREQ_ERR_SHIFT);
 
-    if (error < 0 && abs(error) > phase_increment_) {
-      // underflow
-      phase_increment_ = 0;
-    } else if (error > 0 && (UINT32_MAX - error) < phase_increment_) {
-      // overflow
-      phase_increment_ = UINT32_MAX;
-    } else {
-      phase_increment_ += error;
-    }
+    phase_increment_ = SaturatingIncrement(phase_increment_, error);
 
     previous_phase_ = phase_;
     previous_target_phase_ = target_phase;
