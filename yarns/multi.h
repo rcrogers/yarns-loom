@@ -647,7 +647,7 @@ class Multi {
   // There is some wasted space here, because 1) not all controller numbers are mapped to a setting or macro, and 2) most remote controls map to part settings, which are also tracked in part_controller_value_
   uint8_t remote_control_controller_value_[128];
   uint8_t part_controller_value_[kNumParts][128];
-  
+
   Part part_[kNumParts];
   Voice voice_[kNumSystemVoices];
   CVOutput cv_outputs_[kNumCVOutputs];
