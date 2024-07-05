@@ -845,6 +845,7 @@ void Multi::InferControllerValue(CCRouting cc) {
   int16_t scaled_value = InferSettingOrMacroValue(cc);
   SettingRange range = GetSettingOrMacroRange(cc);
   int32_t value =
+    // Add 0.5 to scaled_value to place it in the middle of the range of absolute knob values allotted to this setting value
     (((scaled_value << 1) + 1 - (range.min << 1)) << 6) /
     (range.max - range.min + 1);
   controller_values[cc.controller()] = value;
