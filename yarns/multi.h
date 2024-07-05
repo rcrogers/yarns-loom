@@ -642,7 +642,7 @@ class Multi {
   
   uint8_t num_active_parts_;
 
-  // "Virtual knobs" to track changes made by CCs in relative mode.
+  // "Virtual knobs" to track the accumulated result of CCs in relative mode.
   //
   // There is some wasted space here, because 1) not all controller numbers are mapped to a setting or macro, and 2) most remote controls map to part settings, which are also tracked in part_controller_value_
   uint8_t remote_control_controller_value_[128];
