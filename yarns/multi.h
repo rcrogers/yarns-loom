@@ -50,7 +50,7 @@ const uint8_t kMaxBarDuration = 32;
 // Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
 const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
 
-// Define type ControllerRouting that is either a Part index or a remote control flag
+// Represents a controller number that has been routed to either remote control or a part, based on the channel the CC was received on
 class CCRouting {
  public:
   static CCRouting Part(uint8_t controller, uint8_t part) {
@@ -642,10 +642,12 @@ class Multi {
   
   uint8_t num_active_parts_;
 
-  // "Virtual knobs" to track changes made by CCs in relative mode
+  // "Virtual knobs" to track the accumulated result of CCs in relative mode.
+  //
+  // There is some wasted space here, because 1) not all controller numbers are mapped to a setting or macro, and 2) most remote controls map to part settings, which are also tracked in part_controller_value_
   uint8_t remote_control_controller_value_[128];
   uint8_t part_controller_value_[kNumParts][128];
-  
+
   Part part_[kNumParts];
   Voice voice_[kNumSystemVoices];
   CVOutput cv_outputs_[kNumCVOutputs];

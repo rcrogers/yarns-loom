@@ -845,10 +845,10 @@ void Multi::InferControllerValue(CCRouting cc) {
   int16_t scaled_value = InferSettingOrMacroValue(cc);
   SettingRange range = GetSettingOrMacroRange(cc);
   int32_t value =
+    // Add 0.5 to scaled_value to place it in the middle of the range of absolute knob values allotted to this setting value
     (((scaled_value << 1) + 1 - (range.min << 1)) << 6) /
     (range.max - range.min + 1);
   controller_values[cc.controller()] = value;
-    
 }
 
 int16_t Multi::InferSettingOrMacroValue(CCRouting cc) const {
@@ -857,7 +857,7 @@ int16_t Multi::InferSettingOrMacroValue(CCRouting cc) const {
   if (setting) return GetSetting(*setting, part_index);
 
   if (cc.is_remote()) return 0;
-  
+
   const Part& part = part_[part_index];
   bool part_is_recording = recording_ && recording_part_ == part_index;
   switch (cc.controller()) {
@@ -1024,7 +1024,7 @@ void Multi::ApplySettingAndSplash(const Setting& setting, uint8_t part, int16_t 
 SettingRange Multi::GetSettingOrMacroRange(CCRouting cc) const {
   const Setting* setting = GetSettingForController(cc);
   if (setting) return GetSettingRange(*setting, cc.part());
-  
+
   switch (cc.controller()) {
     case kCCRecordOffOn:
       return SettingRange(0, 1);
