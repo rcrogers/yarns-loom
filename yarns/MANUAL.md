@@ -300,7 +300,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Increases clock sync ratio when turning counter-clockwise of center, and increases frequency when turning clockwise
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
 - LFO "spreading": dephase or detune a part's LFOs 
-  - `LV (LFO SPREAD VOICES)`: dephase or detune LFOs between the selected part's voices
+  - `LV (LFO SPREAD VOICES)`: dephase or detune LFOs between the part's voices
     - Only available in polyphonic/paraphonic layouts
   - `LT (LFO SPREAD TYPES)`: for each voice in the part, dephase or detune between the vibrato, timbre, and tremolo LFOs
   - Turning these settings counter-clockwise from center dephases the LFOs
