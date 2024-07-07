@@ -299,11 +299,11 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - `LFO RATE` (formerly `VIBRATO SPEED`) has a shared zero at center
   - Increases clock sync ratio when turning counter-clockwise of center, and increases frequency when turning clockwise
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
-- LFO "spreading" (dephasing or detuning)
-  - `LV (LFO SPREAD VOICES)` sets the spread among the voices for the selected part
+- LFO "spreading": dephase or detune a part's LFOs 
+  - `LV (LFO SPREAD VOICES)`: dephase or detune LFOs between the selected part's voices
     - Only available in polyphonic/paraphonic layouts
-  - `LT (LFO SPREAD TYPES)` sets the spread among the vibrato, timbre, and tremolo LFOs for each voice in the part
-  - Turning these settings counter-clockwise from center progressively dephases the LFOs
+  - `LT (LFO SPREAD TYPES)`: for each voice in the part, dephase or detune between the vibrato, timbre, and tremolo LFOs
+  - Turning these settings counter-clockwise from center dephases the LFOs
     - Each LFO's phase is progressively more offset, by an amount ranging from 0° to 360° depending on the setting
     - Ideal for quadrature and three-phase modulation
     - When dephasing, the LFOs always share a common frequency
