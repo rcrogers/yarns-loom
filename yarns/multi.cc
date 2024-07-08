@@ -842,13 +842,7 @@ void Multi::StopRecording(uint8_t part) {
 
 void Multi::InferControllerValue(CCRouting cc) {
   uint8_t* controller_values = cc.is_remote() ? remote_control_controller_value_ : part_controller_value_[cc.part()];
-  int16_t scaled_value = InferSettingOrMacroValue(cc);
-  SettingRange range = GetSettingOrMacroRange(cc);
-  int32_t value =
-    // Add 0.5 to scaled_value to place it in the middle of the range of absolute knob values allotted to this setting value
-    (((scaled_value << 1) + 1 - (range.min << 1)) << 6) /
-    (range.max - range.min + 1);
-  controller_values[cc.controller()] = value;
+  controller_values[cc.controller()] = ScaleSettingToController(GetSettingOrMacroRange(cc), InferSettingOrMacroValue(cc));
 }
 
 int16_t Multi::InferSettingOrMacroValue(CCRouting cc) const {
@@ -884,26 +878,30 @@ int16_t Multi::InferSettingOrMacroValue(CCRouting cc) const {
 }
 
 int16_t Multi::UpdateController(CCRouting cc, uint8_t value_7bits) {
-  int8_t relative_increment;
-  switch (settings_.control_change_mode) {
-    case CONTROL_CHANGE_MODE_RELATIVE_TWOS_COMPLEMENT:
-      relative_increment = GetIncrementFromTwosComplementRelativeCC(value_7bits);
-      break;
-    case CONTROL_CHANGE_MODE_ABSOLUTE:
-    default:
-      relative_increment = 0;
-      break;
-  }
-
   uint8_t* controller_values = cc.is_remote() ? remote_control_controller_value_ : part_controller_value_[cc.part()];
   uint8_t controller = cc.controller();
-  controller_values[controller] = relative_increment
-    ? SaturatingIncrement(controller_values[cc.controller()], relative_increment)
-    : value_7bits;
-  CONSTRAIN(controller_values[controller], 0, 127);
-
+  int8_t relative_increment = static_cast<int8_t>(value_7bits << 1) >> 1;
   SettingRange range = GetSettingOrMacroRange(cc);
-  int16_t scaled_value = ScaleAbsoluteCC(controller_values[controller], range.min, range.max);
+
+  int16_t scaled_value = 0;
+  if (settings_.control_change_mode == CONTROL_CHANGE_MODE_RELATIVE_DIRECT) {
+    // Directly update the scaled value, and derive the controller value from it
+    // TODO need to cast this
+    scaled_value = InferSettingOrMacroValue(cc);
+    scaled_value = SaturatingIncrement(scaled_value, relative_increment);
+    CONSTRAIN(scaled_value, range.min, range.max);
+    // We keep this state updated so that 1) kCCMacroRecord can do its "increasing" check, and 2) there are no jumps if the CC mode is later changed to RELATIVE_SCALED
+    controller_values[controller] = ScaleSettingToController(range, scaled_value);
+  } else {
+    // Update the controller first, and derive the scaled value from it
+    controller_values[controller] = settings_.control_change_mode == CONTROL_CHANGE_MODE_RELATIVE_SCALED
+      ? SaturatingIncrement(controller_values[controller], relative_increment)
+      : value_7bits;
+    CONSTRAIN(controller_values[controller], 0, 127);
+    uint8_t delta = range.max - range.min + 1;
+    scaled_value = delta * controller_values[controller] >> 7;
+    scaled_value += range.min;
+  }
   return scaled_value;
 }
 
@@ -986,12 +984,12 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
   return thru;
 }
 
-int16_t Multi::ScaleAbsoluteCC(uint8_t value_7bits, int16_t min, int16_t max) const {
-  int16_t scaled_value;
-  uint8_t range = max - min + 1;
-  scaled_value = range * value_7bits >> 7;
-  scaled_value += min;
-  return scaled_value;
+uint8_t Multi::ScaleSettingToController(SettingRange range, int16_t scaled_value) const {
+  int32_t value =
+    // Add 0.5 to scaled_value to place it in the middle of the range of absolute knob values allotted to this setting value
+    (((scaled_value << 1) + 1 - (range.min << 1)) << 6) /
+    (range.max - range.min + 1);
+  return static_cast<uint8_t>(value);
 }
 
 const Setting* Multi::GetSettingForController(CCRouting cc) const {

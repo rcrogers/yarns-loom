@@ -166,7 +166,8 @@ enum Tempo {
 enum ControlChangeMode {
   CONTROL_CHANGE_MODE_OFF,
   CONTROL_CHANGE_MODE_ABSOLUTE,
-  CONTROL_CHANGE_MODE_RELATIVE_TWOS_COMPLEMENT,
+  CONTROL_CHANGE_MODE_RELATIVE_DIRECT,
+  CONTROL_CHANGE_MODE_RELATIVE_SCALED,
   CONTROL_CHANGE_MODE_LAST,
 };
 
@@ -316,10 +317,7 @@ class Multi {
   }
   
   bool ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bits);
-  int16_t ScaleAbsoluteCC(uint8_t value_7bits, int16_t min, int16_t max) const;
-  inline int8_t GetIncrementFromTwosComplementRelativeCC(uint8_t value_7bits) const {
-    return static_cast<int8_t>(value_7bits << 1) >> 1;
-  }
+  uint8_t ScaleSettingToController(SettingRange range, int16_t value) const;
   inline int16_t IncrementSetting(const Setting& setting, uint8_t part, int16_t increment) const {
     int16_t value = GetSetting(setting, part);
     if (

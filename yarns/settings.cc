@@ -45,7 +45,8 @@ const char* const layout_values[LAYOUT_LAST] = {
 const char* const control_change_mode_values[CONTROL_CHANGE_MODE_LAST] = {
   "OFF",
   "ABSOLUTE 0-127",
-  "RELATIVE TWOS COMP INC=1 DEC=127",
+  "RD RELATIVE DIRECT",
+  "RS RELATIVE SCALED",
 };
 
 const char* const midi_out_mode_values[] = {
