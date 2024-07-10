@@ -842,13 +842,13 @@ void Multi::StopRecording(uint8_t part) {
 
 void Multi::InferControllerValue(CCRouting cc) {
   uint8_t* controller_values = cc.is_remote() ? remote_control_controller_value_ : part_controller_value_[cc.part()];
-  controller_values[cc.controller()] = ScaleSettingToController(GetSettingOrMacroRange(cc), InferSettingOrMacroValue(cc));
+  controller_values[cc.controller()] = ScaleSettingToController(GetControllableRange(cc), GetControllableValue(cc));
 }
 
-int16_t Multi::InferSettingOrMacroValue(CCRouting cc) const {
+int16_t Multi::GetControllableValue(CCRouting cc) const {
   const Setting* setting = GetSettingForController(cc);
   uint8_t part_index = cc.part();
-  if (setting) return GetSetting(*setting, part_index);
+  if (setting) return GetSettingValue(*setting, part_index);
 
   if (cc.is_remote()) return 0;
 
@@ -881,13 +881,12 @@ int16_t Multi::UpdateController(CCRouting cc, uint8_t value_7bits) {
   uint8_t* controller_values = cc.is_remote() ? remote_control_controller_value_ : part_controller_value_[cc.part()];
   uint8_t controller = cc.controller();
   int8_t relative_increment = static_cast<int8_t>(value_7bits << 1) >> 1;
-  SettingRange range = GetSettingOrMacroRange(cc);
+  SettingRange range = GetControllableRange(cc);
 
   int16_t scaled_value = 0;
   if (settings_.control_change_mode == CONTROL_CHANGE_MODE_RELATIVE_DIRECT) {
     // Directly update the scaled value, and derive the controller value from it
-    // TODO need to cast this
-    scaled_value = InferSettingOrMacroValue(cc);
+    scaled_value = GetControllableValue(cc);
     scaled_value = SaturatingIncrement(scaled_value, relative_increment);
     CONSTRAIN(scaled_value, range.min, range.max);
     // We keep this state updated so that 1) kCCMacroRecord can do its "increasing" check, and 2) there are no jumps if the CC mode is later changed to RELATIVE_SCALED
@@ -1019,7 +1018,7 @@ void Multi::ApplySettingAndSplash(const Setting& setting, uint8_t part, int16_t 
   ui.SplashSetting(setting, part);
 }
 
-SettingRange Multi::GetSettingOrMacroRange(CCRouting cc) const {
+SettingRange Multi::GetControllableRange(CCRouting cc) const {
   const Setting* setting = GetSettingForController(cc);
   if (setting) return GetSettingRange(*setting, cc.part());
 
@@ -1070,10 +1069,9 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t scaled_va
   // Apply dynamic min/max as needed
   SettingRange setting_range = GetSettingRange(setting, part);
   CONSTRAIN(scaled_value, setting_range.min, setting_range.max);
-  uint8_t value = static_cast<uint8_t>(scaled_value);
 
-  uint8_t prev_value = GetSetting(setting, part);
-  if (prev_value == value) { return; }
+  int16_t prev_scaled_value = GetSettingValue(setting, part);
+  if (prev_scaled_value == scaled_value) return;
 
   bool layout = &setting == &setting_defs.get(SETTING_LAYOUT);
   bool sequencer_semantics = \
@@ -1086,9 +1084,10 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t scaled_va
   )) { StopRecording(recording_part_); }
   if (sequencer_semantics) part_[part].AllNotesOff();
 
+  uint8_t value_byte = static_cast<uint8_t>(scaled_value);
   switch (setting.domain) {
     case SETTING_DOMAIN_MULTI:
-      multi.Set(setting.address[0], value);
+      multi.Set(setting.address[0], value_byte);
       break;
     case SETTING_DOMAIN_PART:
       // When the module is configured in *triggers* mode, each part is mapped
@@ -1097,9 +1096,9 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t scaled_va
       // This is a bit more user friendly than letting the user set note min
       // and note max to the same value.
       if (setting.address[1]) {
-        multi.mutable_part(part)->Set(setting.address[1], value);
+        multi.mutable_part(part)->Set(setting.address[1], value_byte);
       }
-      multi.mutable_part(part)->Set(setting.address[0], value);
+      multi.mutable_part(part)->Set(setting.address[0], value_byte);
       break;
 
     default:
@@ -1107,8 +1106,8 @@ void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t scaled_va
   }
 }
 
-uint8_t Multi::GetSetting(const Setting& setting, uint8_t part) const {
-  uint8_t value = 0;
+int16_t Multi::GetSettingValue(const Setting& setting, uint8_t part) const {
+  int16_t value = 0;
   switch (setting.domain) {
     case SETTING_DOMAIN_MULTI:
       value = multi.Get(setting.address[0]);
@@ -1117,6 +1116,10 @@ uint8_t Multi::GetSetting(const Setting& setting, uint8_t part) const {
       value = multi.part(part).Get(setting.address[0]);
       break;
   }
+  if (
+    setting.unit == SETTING_UNIT_INT8 ||
+    setting.unit == SETTING_UNIT_LFO_SPREAD
+  ) value = static_cast<int8_t>(value);
   return value;
 }
 
