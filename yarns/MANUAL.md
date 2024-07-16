@@ -4,7 +4,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 #### Table of contents
 - [Interface](#interface)
-  - [Global control and display of the active part and its play mode](#global-control-and-display-of-the-active-part-and-its-play-mode)
+    - [Global control and display of the active part and its play mode](#global-control-and-display-of-the-active-part-and-its-play-mode)
     - [Tap tempo changes](#tap-tempo-changes)
     - [Other changes](#other-changes)
 - [Synth voice](#synth-voice)
@@ -37,7 +37,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 # Interface
 
-## Global control and display of the active part and its play mode
+### Global control and display of the active part and its play mode
 - Display periodically flashes the active part and its play mode
 - Hold `START` to switch the active part (the new active part will flash briefly on the screen).  The active part is used for:
   - Selecting the recording part when pressing `REC`
