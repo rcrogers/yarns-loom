@@ -273,6 +273,9 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 ### Legato and portamento
 - Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` (are notes retriggered when played legato?) and `PORTAMENTO LEGATO ONLY` (is portamento applied on all notes, or only on notes played legato?)
   - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
+- `PORTAMENTO` setting has a shared zero at center
+  - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
+- Broadened setting range from 51 to 64 values per curve shape
   
 ### Expanded support for Control Change events
 - New global setting for `CC (CONTROL CHANGE MODE)`
@@ -310,8 +313,3 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Turning clockwise from center detunes the LFOs
     - Each LFO's frequency is a multiple of the last, with that multiple being between 1x and 2x depending on the setting
     - Facilitates unstable, meandering modulation
-  
-### Portamento
-- `PORTAMENTO` setting has a shared zero at center
-  - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
-- Broadened setting range from 51 to 64 values per curve shape
