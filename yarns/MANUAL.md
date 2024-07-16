@@ -119,11 +119,12 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Hold `REC` to clear sequence
 - Hold `TAP` to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
 - First `REC` press switches the display to show the pitch (or `RS`/`TI`) instead of the step number (press again to exit recording)
-- Display brightens while the selected step is being played
-- Wraps around when using encoder to scroll through steps
 
 ### Step sequencer changes
 - Replaced the `EUCLIDEAN ROTATE` setting with a more general `STEP OFFSET` -- allows starting the step sequencer on any step
+- Display brightens while the selected step is being played
+- Wraps around when using encoder to scroll through steps
+- Capacity reduced from 64 to 30 notes, to free up space in the preset storage
 
 ### Loop sequencer mode with real-time recording
 - To enable, ensure `SM (SEQ MODE)` is set to `LOOP`
@@ -134,7 +135,6 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Loop length is set by the `L- (LOOP LENGTH)` in quarter notes, combined with the part's clock settings
 - Note start/end times are recorded at 13-bit resolution (1/8192 of the loop length)
 - Holds 30 notes max -- past this limit, overwrites oldest note
-- Step sequencer also reduced from 64 to 30 notes, to free up space in the preset storage
 
 ### Arpeggiator
 
