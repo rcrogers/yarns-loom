@@ -4,7 +4,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 #### Table of contents
 - [Interface](#interface)
-  - [Global control and display of the active part and its play mode](#global-control-and-display-of-the-active-part-and-its-play-mode)
+    - [Global control and display of the active part and its play mode](#global-control-and-display-of-the-active-part-and-its-play-mode)
     - [Tap tempo changes](#tap-tempo-changes)
     - [Other changes](#other-changes)
 - [Synth voice](#synth-voice)
@@ -37,7 +37,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 # Interface
 
-## Global control and display of the active part and its play mode
+### Global control and display of the active part and its play mode
 - Display periodically flashes the active part and its play mode
 - Hold `START` to switch the active part (the new active part will flash briefly on the screen).  The active part is used for:
   - Selecting the recording part when pressing `REC`
@@ -119,11 +119,12 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Hold `REC` to clear sequence
 - Hold `TAP` to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
 - First `REC` press switches the display to show the pitch (or `RS`/`TI`) instead of the step number (press again to exit recording)
-- Display brightens while the selected step is being played
-- Wraps around when using encoder to scroll through steps
 
 ### Step sequencer changes
 - Replaced the `EUCLIDEAN ROTATE` setting with a more general `STEP OFFSET` -- allows starting the step sequencer on any step
+- Display brightens while the selected step is being played
+- Wraps around when using encoder to scroll through steps
+- Capacity reduced from 64 to 30 notes, to free up space in the preset storage
 
 ### Loop sequencer mode with real-time recording
 - To enable, ensure `SM (SEQ MODE)` is set to `LOOP`
@@ -134,7 +135,6 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Loop length is set by the `L- (LOOP LENGTH)` in quarter notes, combined with the part's clock settings
 - Note start/end times are recorded at 13-bit resolution (1/8192 of the loop length)
 - Holds 30 notes max -- past this limit, overwrites oldest note
-- Step sequencer also reduced from 64 to 30 notes, to free up space in the preset storage
 
 ### Arpeggiator
 
@@ -273,6 +273,9 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 ### Legato and portamento
 - Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` (are notes retriggered when played legato?) and `PORTAMENTO LEGATO ONLY` (is portamento applied on all notes, or only on notes played legato?)
   - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
+- `PORTAMENTO` setting has a shared zero at center
+  - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
+- Broadened setting range from 51 to 64 values per curve shape
   
 ### Expanded support for Control Change events
 - New global setting for `CC (CONTROL CHANGE MODE)`
@@ -308,19 +311,14 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - `LFO RATE` (formerly `VIBRATO SPEED`) has a shared zero at center
   - Increases clock sync ratio when turning counter-clockwise of center, and increases frequency when turning clockwise
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
-- LFO "spreading" (dephasing or detuning)
-  - `LV (LFO SPREAD VOICES)` sets the spread among the voices for the selected part
+- LFO "spreading": dephase or detune a part's LFOs 
+  - `LV (LFO SPREAD VOICES)`: dephase or detune LFOs between the part's voices
     - Only available in polyphonic/paraphonic layouts
-  - `LT (LFO SPREAD TYPES)` sets the spread among the vibrato, timbre, and tremolo LFOs for each voice in the part
-  - Turning these settings counter-clockwise from center progressively dephases the LFOs
+  - `LT (LFO SPREAD TYPES)`: for each voice in the part, dephase or detune between the vibrato, timbre, and tremolo LFOs
+  - Turning these settings counter-clockwise from center dephases the LFOs
     - Each LFO's phase is progressively more offset, by an amount ranging from 0° to 360° depending on the setting
     - Ideal for quadrature and three-phase modulation
     - When dephasing, the LFOs always share a common frequency
   - Turning clockwise from center detunes the LFOs
     - Each LFO's frequency is a multiple of the last, with that multiple being between 1x and 2x depending on the setting
     - Facilitates unstable, meandering modulation
-  
-### Portamento
-- `PORTAMENTO` setting has a shared zero at center
-  - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
-- Broadened setting range from 51 to 64 values per curve shape
