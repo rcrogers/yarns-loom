@@ -34,17 +34,21 @@
 
 namespace yarns {
 
-const size_t kEnvBlockSize = 2;
-
 using namespace stmlib;
 
 enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,
   ENV_SEGMENT_DECAY,
+  ENV_SEGMENT_EARLY_RELEASE,
   ENV_SEGMENT_SUSTAIN,
   ENV_SEGMENT_RELEASE,
   ENV_SEGMENT_DEAD,
   ENV_NUM_SEGMENTS,
+};
+
+struct ADSR {
+  uint16_t peak, sustain; // Platonic, unscaled targets
+  uint32_t attack, decay, release; // Timing
 };
 
 class Envelope {
@@ -54,111 +58,167 @@ class Envelope {
 
   void Init() {
     gate_ = false;
-
-    target_[ENV_SEGMENT_RELEASE] = 0;
-    target_[ENV_SEGMENT_DEAD] = 0;
-
-    increment_[ENV_SEGMENT_SUSTAIN] = 0;
-    increment_[ENV_SEGMENT_DEAD] = 0;
+    value_ = segment_target_[ENV_SEGMENT_RELEASE] = 0;
+    Trigger(ENV_SEGMENT_DEAD);
   }
 
-  inline void GateOn() {
-    if (!gate_) {
-      gate_ = true;
-      Trigger(ENV_SEGMENT_ATTACK);
-      samples_.Flush();
-    }
-  }
-
-  inline void GateOff() {
+  inline void NoteOff() {
     gate_ = false;
     switch (segment_) {
       case ENV_SEGMENT_ATTACK:
-        Trigger(ENV_SEGMENT_DECAY);
-        break;
+      case ENV_SEGMENT_DECAY:
+        next_tick_segment_ = ENV_SEGMENT_EARLY_RELEASE; break;
       case ENV_SEGMENT_SUSTAIN:
-        Trigger(ENV_SEGMENT_RELEASE);
-        samples_.Flush();
-        break;
-      default:
-        break;
+        next_tick_segment_ = ENV_SEGMENT_RELEASE; break;
+      default: break;
     }
   }
 
-  inline EnvelopeSegment segment() const {
-    return static_cast<EnvelopeSegment>(segment_);
+  inline void NoteOn(
+    ADSR& adsr,
+    int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
+  ) {
+    adsr_ = &adsr;
+    int16_t scale = max_target - min_target;
+    positive_scale_ = scale >= 0;
+    min_target <<= 16;
+    // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
+    segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
+    segment_target_[ENV_SEGMENT_DECAY] =
+      segment_target_[ENV_SEGMENT_EARLY_RELEASE] =
+      segment_target_[ENV_SEGMENT_SUSTAIN] =
+      min_target + scale * adsr.sustain;
+    segment_target_[ENV_SEGMENT_RELEASE] = min_target;
+
+    if (!gate_) {
+      gate_ = true;
+      next_tick_segment_ = ENV_SEGMENT_ATTACK;
+    }
   }
 
-  // All params 7-bit
-  inline void SetADSR(uint16_t peak, uint8_t a, uint8_t d, uint8_t s, uint8_t r) {
-    target_[ENV_SEGMENT_ATTACK] = peak;
-    // TODO could interpolate these from 16-bit parameters
-    increment_[ENV_SEGMENT_ATTACK] = lut_portamento_increments[a];
-    increment_[ENV_SEGMENT_DECAY] = lut_portamento_increments[d];
-    target_[ENV_SEGMENT_DECAY] = target_[ENV_SEGMENT_SUSTAIN] = s << 9;
-    increment_[ENV_SEGMENT_RELEASE] = lut_portamento_increments[r];
+  inline int16_t tremolo(uint16_t strength) const {
+    int32_t relative_value = (value_ - segment_target_[ENV_SEGMENT_RELEASE]) >> 16;
+    return relative_value * -strength >> 16;
   }
   
   inline void Trigger(EnvelopeSegment segment) {
-    if (segment == ENV_SEGMENT_DEAD) {
-      value_ = 0;
+    if (gate_ && segment == ENV_SEGMENT_EARLY_RELEASE) {
+      segment = ENV_SEGMENT_SUSTAIN; // Skip early-release when gate is high
     }
-    if (!gate_) {
-      CONSTRAIN(target_[segment], 0, value_); // No rise without gate
-      if (segment == ENV_SEGMENT_SUSTAIN) {
-        segment = ENV_SEGMENT_RELEASE; // Skip sustain
-      }
+    if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
+      segment = ENV_SEGMENT_RELEASE; // Skip sustain when gate is low
     }
-    a_ = value_;
-    b_ = target_[segment];
-    phase_increment_ = increment_[segment];
-    segment_ = segment;
+    segment_ = next_tick_segment_ = segment;
+    switch (segment) {
+      case ENV_SEGMENT_ATTACK : phase_increment_ = adsr_->attack  ; break;
+      case ENV_SEGMENT_DECAY  : phase_increment_ = adsr_->decay   ; break;
+      case ENV_SEGMENT_EARLY_RELEASE : phase_increment_ = adsr_->release ; break;
+      case ENV_SEGMENT_RELEASE: phase_increment_ = adsr_->release ; break;
+      default: phase_increment_ = 0; return;
+    }
+    target_ = segment_target_[segment];
+
+    // In case the segment is not starting from its nominal value (e.g. an
+    // attack that interrupts a still-high release), adjust its timing and slope
+    // to try to match the nominal sound and feel
+    int32_t actual_delta = target_ - value_;
+    int32_t nominal_delta = target_ - segment_target_[
+      stmlib::modulo(static_cast<int8_t>(segment) - 1, ENV_SEGMENT_DEAD)
+    ];
+    positive_segment_slope_ = nominal_delta >= 0;
+    if (positive_segment_slope_ != (actual_delta >= 0)) {
+      // If deltas differ in sign, the direction is wrong -- skip segment
+      next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
+      return;
+    }
+    // Pick the larger delta, and thus the steeper slope that reaches the target
+    // more quickly.  If actual delta is smaller than nominal (e.g. from
+    // re-attacks that begin high), use nominal's steeper slope (e.g. so the
+    // attack sounds like a quick catch-up vs a flat, blaring hold stage). If
+    // actual is greater (rare in practice), use that
+    int32_t delta = positive_segment_slope_
+      ? std::max(nominal_delta, actual_delta)
+      : std::min(nominal_delta, actual_delta);
+
+    // Prepare inputs for Tick to convert slope
+    linear_slope_ = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
+    if (!linear_slope_) linear_slope_ = positive_segment_slope_ ? 1 : -1;
+    max_shift_ = __builtin_clzl(abs(linear_slope_));
+    expo_dirty_ = true;
     phase_ = 0;
   }
 
-  inline void RenderSamples(size_t size = kEnvBlockSize) {
-    if (samples_.writable() < size) return;
-
-    while (size--) {
-      phase_ += phase_increment_;
-      if (phase_ < phase_increment_) {
-        value_ = b_;
-        Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-      }
-      if (phase_increment_) {
-        value_ = Mix(a_, b_, Interpolate824(lut_env_expo, phase_));
-      }
-      samples_.Overwrite(value_);
+  inline void Tick() {
+    while (segment_ != next_tick_segment_) { // Event loop
+      Trigger(next_tick_segment_);
     }
+
+    // Early-release segment stays at max slope until it reaches target
+    if (segment_ != ENV_SEGMENT_EARLY_RELEASE) {
+      if (!phase_increment_) return;
+      phase_ += phase_increment_;
+      if (phase_ < phase_increment_) phase_ = UINT32_MAX;
+    }
+
+    int8_t shift = lut_expo_slope_shift[phase_ >> 24];
+    if (shift != expo_slope_shift_) expo_dirty_ = true;
+
+    if (expo_dirty_) { // Calculate a fresh expo slope
+      expo_dirty_ = false;
+      expo_slope_shift_ = shift;
+      expo_slope_ = 0;
+      if (linear_slope_ != 0) expo_slope_ = shift >= 0
+        ? linear_slope_ << std::min(static_cast<uint8_t>(shift), max_shift_)
+        : linear_slope_ >> static_cast<uint8_t>(-shift);
+      if (!expo_slope_) expo_slope_ = linear_slope_;
+      target_overshoot_threshold_ = target_ - expo_slope_;
+    }
+
+    if (positive_segment_slope_ // The slope is about to overshoot the target
+      ? value_ > target_overshoot_threshold_
+      : value_ < target_overshoot_threshold_
+    ) {
+      // Because the target is closer than the expo slope would have taken us,
+      // this tick, which we spend on jumping to the target, is flatter than
+      // nominal.  The alternative would be to, instead of jumping, immediately
+      // Tick() again
+      value_ = target_;
+      next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
+      return;
+    }
+
+    value_ += expo_slope_;
   }
 
-  inline void ReadSample() {
-    value_read_ = samples_.ImmediateRead();
-  }
-
-  inline uint16_t value() const { return value_read_; }
+  inline int16_t value() const { return value_ >> 16; }
 
  private:
   bool gate_;
-
-  // Phase increments for each segment.
-  uint32_t increment_[ENV_NUM_SEGMENTS];
+  ADSR* adsr_;
+  EnvelopeSegment next_tick_segment_;
   
   // Value that needs to be reached at the end of each segment.
-  uint16_t target_[ENV_NUM_SEGMENTS];
+  int32_t segment_target_[ENV_SEGMENT_DEAD];
+  bool positive_scale_, positive_segment_slope_;
   
   // Current segment.
-  size_t segment_;
+  EnvelopeSegment segment_;
   
-  // Start and end value of the current segment.
-  uint16_t a_;
-  uint16_t b_;
-  uint16_t value_;
-  uint16_t value_read_;
-  uint32_t phase_;
-  uint32_t phase_increment_;
+  // Target and current value of the current segment.
+  int32_t target_;
+  int32_t value_;
 
-  stmlib::RingBuffer<uint16_t, kEnvBlockSize * 2> samples_;
+  // Cache
+  int8_t expo_slope_shift_;
+  int32_t expo_slope_;
+  bool expo_dirty_;
+  int32_t target_overshoot_threshold_;
+  uint8_t max_shift_;
+
+  // The naive value increment per tick, before exponential conversion
+  int32_t linear_slope_;
+
+  uint32_t phase_, phase_increment_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
