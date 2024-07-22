@@ -257,7 +257,7 @@ void Ui::PrintParameterName() {
 }
 
 void Ui::PrintParameterValue() {
-  setting_defs.Print(setting(), multi.GetSetting(setting(), active_part_), buffer_);
+  setting_defs.Print(setting(), multi.GetSettingValue(setting(), active_part_), buffer_);
   display_.Print(buffer_, buffer_);
 }
 
@@ -468,7 +468,7 @@ void Ui::SplashOn(Splash splash) {
 
     case SPLASH_SETTING_VALUE:
       SetFadeForSetting(*splash_setting_def_);
-      setting_defs.Print(*splash_setting_def_, multi.GetSetting(*splash_setting_def_, splash_part_), buffer_);
+      setting_defs.Print(*splash_setting_def_, multi.GetSettingValue(*splash_setting_def_, splash_part_), buffer_);
       display_.Print(buffer_);
       display_.Scroll();
       break;
@@ -623,7 +623,8 @@ void Ui::OnIncrementParameterSelect(const Event& e) {
 }
 
 void Ui::OnIncrementParameterEdit(const stmlib::Event& e) {
-  int16_t value = multi.IncrementSetting(setting(), active_part_, e.data);
+  int16_t value = multi.GetSettingValue(setting(), active_part_);
+  value += e.data;
   multi.ApplySetting(setting(), active_part_, value);
 }
 

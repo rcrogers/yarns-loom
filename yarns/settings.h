@@ -160,6 +160,7 @@ class Settings {
   Settings() { }
   ~Settings() { }
 
+  // Maps a controller number to a setting index.
   uint8_t part_cc_map[128];
   uint8_t remote_control_cc_map[128];
   
