@@ -97,12 +97,12 @@ void StateVariableFilter::RenderSample(int16_t in) {
   bp += cutoff.value() * hp >> 15;
 }
 
-void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t gain) {
+void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
     pitch_ = pitch;
     // if (shape_ >= OSC_SHAPE_FM) {
     //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
     // }
-    gain_.SetTarget((scale_ * gain) >> 17);
+    gain_.SetTarget(gain_envelope_.tremolo(tremolo));
 
     int32_t strength = 0x7fff - (pitch << 1);
     CONSTRAIN(strength, 0, 0x7fff);
@@ -151,6 +151,26 @@ void Oscillator::Render() {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
+  gain_.ComputeSlope();
+  size_t size;
+  size = kAudioBlockSize;
+  while (size--) {
+    gain_envelope_.Tick();
+    gain_.Tick();
+    int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
+    CONSTRAIN(gain, 0, UINT16_MAX);
+    gain_buffer_.Overwrite(gain);
+  }
+  timbre_.ComputeSlope();
+  size = kAudioBlockSize;
+  while (size--) {
+    timbre_envelope_.Tick();
+    timbre_.Tick();
+    int32_t timbre = timbre_.value() + timbre_envelope_.value();
+    CONSTRAIN(timbre, 0, 32767);
+    timbre_buffer_.Overwrite(timbre);
+  }
+
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
@@ -158,7 +178,7 @@ void Oscillator::Render() {
 }
 
 #define SET_TIMBRE \
-  int16_t timbre = timbre_.target();
+  int16_t timbre = timbre_buffer_.ImmediatePeek();
 
 #define RENDER_CORE(body) \
   int32_t next_sample = next_sample_; \
@@ -167,20 +187,20 @@ void Oscillator::Render() {
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     body \
-    audio_buffer_.Overwrite((gain * this_sample) >> 15); \
+    audio_buffer_.Overwrite( \
+      (static_cast<int32_t>(gain) * this_sample) >> 16 \
+    ); \
   } \
   next_sample_ = next_sample; \
 
 #define RENDER_WITH_PHASE_GAIN(body) \
-  gain_.ComputeSlope(); \
   uint32_t phase = phase_; \
   uint32_t phase_increment = phase_increment_; \
   uint32_t modulator_phase = modulator_phase_; \
   uint32_t modulator_phase_increment = modulator_phase_increment_; \
   RENDER_CORE( \
     phase += phase_increment; \
-    gain_.Tick(); \
-    uint16_t gain = gain_.value(); \
+    uint16_t gain = gain_buffer_.ImmediateRead(); \
     body \
   ) \
   phase_ = phase; \
@@ -189,10 +209,8 @@ void Oscillator::Render() {
   modulator_phase_increment_ = modulator_phase_increment;
 
 #define RENDER_WITH_PHASE_GAIN_TIMBRE(body) \
-  timbre_.ComputeSlope(); \
   RENDER_WITH_PHASE_GAIN( \
-    timbre_.Tick(); \
-    int16_t timbre = timbre_.value(); \
+    int16_t timbre = timbre_buffer_.ImmediateRead(); \
     body \
   )
 
@@ -514,12 +532,10 @@ void Oscillator::RenderFilteredNoise() {
   int32_t cutoff = 0x1000 + (timbre >> 1); // 1/4...1/2
   StateVariableFilter svf = svf_;
   svf.RenderInit(cutoff, pitch_ << 1);
-  gain_.ComputeSlope();
   // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
   // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;
   RENDER_CORE(
-    gain_.Tick();
-    uint16_t gain = gain_.value();
+    uint16_t gain = gain_buffer_.ImmediateRead();
     svf.RenderSample(Random::GetSample());
     switch (shape_) {
       case OSC_SHAPE_NOISE_LP: this_sample = svf.lp; break;

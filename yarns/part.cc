@@ -784,7 +784,6 @@ void Part::VoiceNoteOn(
 
   int32_t timbre_14 = (voicing_.timbre_mod_envelope << 7) + vel * voicing_.timbre_mod_velocity;
   CONSTRAIN(timbre_14, -1 << 13, (1 << 13) - 1)
-  voice->set_timbre_mod_envelope(timbre_14 << 2);
 
   uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
   int32_t damping_22 = -voicing_.amplitude_mod_velocity * vel_concave_up;
@@ -792,15 +791,17 @@ void Part::VoiceNoteOn(
     damping_22 += voicing_.amplitude_mod_velocity << 16;
   }
 
-  voice->envelope()->SetADSR(
-    UINT16_MAX - (damping_22 >> (22 - 16)),
-    modulate_7bit(voicing_.env_init_attack, voicing_.env_mod_attack, vel),
-    modulate_7bit(voicing_.env_init_decay, voicing_.env_mod_decay, vel),
-    modulate_7bit(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel),
-    modulate_7bit(voicing_.env_init_release, voicing_.env_mod_release, vel)
-  );
+  ADSR adsr;
+  adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));
+  adsr.sustain = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
+  adsr.attack   = Interpolate88(lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << 2);
+  adsr.decay    = Interpolate88(lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << 2);
+  adsr.release  = Interpolate88(lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << 2);
 
-  voice->NoteOn(Tune(pitch), vel, portamento, trigger);
+  voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {

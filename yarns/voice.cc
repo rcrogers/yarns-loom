@@ -74,17 +74,16 @@ void Voice::Init() {
   amplitude_lfo_interpolator_.Init(kLowFreqRefresh);
   scaled_vibrato_lfo_interpolator_.Init(kLowFreqRefresh);
   
-  envelope_.Init();
   portamento_phase_ = 0;
   portamento_phase_increment_ = 1U << 31;
   portamento_exponential_shape_ = false;
-  
+
   trigger_duration_ = 2;
 }
 
 /* static */
 CVOutput::DCFn CVOutput::dc_fn_table_[] = {
-  &CVOutput::note_dac_code,
+  &CVOutput::pitch_dac_code,
   &CVOutput::velocity_dac_code,
   &CVOutput::aux_cv_dac_code,
   &CVOutput::aux_cv_dac_code_2,
@@ -98,9 +97,9 @@ void CVOutput::Init(bool reset_calibration) {
     }
   }
   dirty_ = false;
-
-  dac_interpolator_.Init(10); // 40 kHz / 4 kHz
   dc_role_ = DC_PITCH;
+  envelope_.Init();
+  tremolo_.Init(64);
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
@@ -108,6 +107,14 @@ void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
       &calibrated_dac_code[0],
       &calibrated_dac_code[kNumOctaves],
       &calibrated_dac_code_[0]);
+}
+
+uint16_t CVOutput::pitch_dac_code() {
+  int32_t note = dc_voice_->note();
+  if (dirty_ || note_ != note) dac_code_ = NoteToDacCode(note);
+  dirty_ = false;
+  note_ = note;
+  return dac_code_;
 }
 
 uint16_t CVOutput::NoteToDacCode(int32_t note) const {
@@ -180,7 +187,6 @@ void Voice::Refresh() {
   note += tuning_;
   
   // Render modulation sources
-  envelope_.ReadSample();
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
     lfos_[i].Refresh();
   }
@@ -189,7 +195,7 @@ void Voice::Refresh() {
   if (refresh_counter_ == 0) {
     uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
-    amplitude_lfo_interpolator_.SetTarget((UINT16_MAX - scaled_tremolo_lfo) >> 1);
+    amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
 
     int32_t timbre_lfo_15 = lfo_value(LFO_ROLE_TIMBRE) * timbre_mod_lfo_current_ >> (31 - 15);
@@ -211,26 +217,26 @@ void Voice::Refresh() {
 
   note += pitch_lfo_interpolator_.value();
 
-  int32_t timbre_envelope_31 = envelope_.value() * timbre_mod_envelope_;
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
-    (timbre_envelope_31 >> (31 - 15)) +
     timbre_lfo_interpolator_.value();
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
-  uint16_t tremolo_drone = amplitude_lfo_interpolator_.value() << 1;
-  uint16_t tremolo_envelope = envelope_.value() * tremolo_drone >> 16;
-  uint16_t gain = oscillator_mode_ == OSCILLATOR_MODE_ENVELOPED ?
-    tremolo_envelope : tremolo_drone;
-
-  oscillator_.Refresh(note, timbre_15, gain);
+  uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
+  if (aux_1_envelope()) {
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
+  }
+  if (aux_2_envelope()) {
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
+  }
+  oscillator_.Refresh(note, timbre_15, tremolo);
+  // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
-  mod_aux_[MOD_AUX_ENVELOPE] = tremolo_envelope;
   
   if (trigger_phase_increment_) {
     trigger_phase_ += trigger_phase_increment_;
@@ -244,24 +250,14 @@ void Voice::Refresh() {
 }
 
 void CVOutput::Refresh() {
-  if (is_audio()) return;
-  if (dc_role_ == DC_PITCH) {
-    int32_t note = dc_voice_->note();
-    if (dirty_ || note_ != note) {
-      note_dac_code_ = NoteToDacCode(note);
-    }
-    dirty_ = false;
-    note_ = note;
-  }
-  dac_interpolator_.SetTarget((this->*dc_fn_table_[dc_role_])() >> 1);
-  if (is_envelope()) dac_interpolator_.ComputeSlope();
+  if (is_audio() || is_envelope()) return;
+  dac_code_ = (this->*dc_fn_table_[dc_role_])();
 }
 
 void Voice::NoteOn(
-    int16_t note,
-    uint8_t velocity,
-    uint8_t portamento,
-    bool trigger) {
+  int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+  ADSR& adsr, int16_t timbre_envelope_target
+) {
   if (gate_ && trigger) {
     retrigger_delay_ = 3;
   }
@@ -269,10 +265,13 @@ void Voice::NoteOn(
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
     trigger_phase_increment_ = lut_portamento_increments[trigger_duration_];
-    envelope_.GateOff();
+    NoteOff();
   }
   gate_ = true;
-  envelope_.GateOn();
+  adsr_ = adsr;
+  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 
   if (!has_cv_output()) return;
 
@@ -300,7 +299,9 @@ void Voice::NoteOn(
 
 void Voice::NoteOff() {
   gate_ = false;
-  envelope_.GateOff();
+  oscillator_.NoteOff();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
 }
 
 void Voice::ControlChange(uint8_t controller, uint8_t value) {
