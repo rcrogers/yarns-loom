@@ -220,6 +220,7 @@ class Voice {
     return &oscillator_;
   }
   inline FastSyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
+  inline CombinedEnvelope* envelope() { return &envelope_; }
 
   inline void RenderSamples() {
     if (uses_audio()) oscillator_.Render();
@@ -232,6 +233,7 @@ class Voice {
   FastSyncedLFO lfos_[LFO_ROLE_LAST];
   Oscillator oscillator_;
   ADSR adsr_;
+  CombinedEnvelope envelope_;
 
   int32_t note_source_;
   int32_t note_target_;
@@ -340,19 +342,12 @@ class CVOutput {
       (dc_role_ == DC_AUX_1 && dc_voice_->aux_1_envelope()) ||
       (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope());
   }
-  inline void NoteOn(ADSR& adsr) {
-    envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
-  }
-  inline void NoteOff() { envelope_.NoteOff(); }
-  uint16_t RefreshEnvelope(uint16_t tremolo) {
-    tremolo_.SetTarget(envelope_.tremolo(tremolo));
+  void RefreshEnvelopeTremolo(uint16_t tremolo) {
+    tremolo_.SetTarget(dc_voice_->envelope()->tremolo(
+      dc_role_ == DC_AUX_1 ? ENV_ROLE_DC_AUX_1 : ENV_ROLE_DC_AUX_2,
+      tremolo
+    ));
     tremolo_.ComputeSlope();
-    return volts_dac_code(0) - envelope_value();
-  }
-  inline uint16_t envelope_value() {
-    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-    CONSTRAIN(value, 0, UINT16_MAX);
-    return value;
   }
 
   inline uint16_t GetAudioSample() {
@@ -365,8 +360,11 @@ class CVOutput {
 
   inline uint16_t GetEnvelopeSample() {
     tremolo_.Tick();
-    envelope_.Tick();
-    return envelope_value();
+    int32_t value = (tremolo_.value() + dc_voice_->envelope()->ReadSample(
+      dc_role_ == DC_AUX_1 ? ENV_ROLE_DC_AUX_1 : ENV_ROLE_DC_AUX_2
+    )) << 1;
+    CONSTRAIN(value, 0, UINT16_MAX);
+    return value;
   }
 
   void Refresh();
@@ -433,7 +431,6 @@ class CVOutput {
   bool dirty_;  // Set to true when the calibration settings have changed.
   uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
-  Envelope envelope_;
   Interpolator tremolo_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);

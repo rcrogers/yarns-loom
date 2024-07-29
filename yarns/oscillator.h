@@ -97,12 +97,8 @@ class Oscillator {
   inline void Init(uint16_t scale) {
     audio_buffer_.Init();
     scale_ = scale;
-    gain_.Init(64);
-    timbre_.Init(64);
-    gain_envelope_.Init();
-    timbre_envelope_.Init();
-    timbre_buffer_.Init();
-    gain_buffer_.Init();
+    gain_bias_.Init(64);
+    timbre_bias_.Init(64);
     svf_.Init(64);
     pitch_ = 60 << 7;
     phase_ = 0;
@@ -121,14 +117,7 @@ class Oscillator {
     shape_ = shape;
   }
 
-  inline void NoteOn(ADSR& adsr, bool drone, int16_t timbre_envelope_target) {
-    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
-    timbre_envelope_.NoteOn(adsr, 0, timbre_envelope_target);
-  }
-  inline void NoteOff() {
-    gain_envelope_.NoteOff();
-    timbre_envelope_.NoteOff();
-  }
+  inline uint16_t scale() const { return scale_; }
   
   void Render();
   
@@ -168,9 +157,9 @@ class Oscillator {
     return -static_cast<int32_t>(t * t >> 18);
   }
 
+  CombinedEnvelope* envelope_;
   OscillatorShape shape_;
-  Envelope gain_envelope_, timbre_envelope_;
-  Interpolator timbre_, gain_;
+  Interpolator timbre_bias_, gain_bias_;
   int16_t pitch_;
 
   uint32_t phase_;
@@ -184,7 +173,7 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
-  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_, gain_buffer_, timbre_buffer_;
+  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_;
   
   static RenderFn fn_table_[];
   

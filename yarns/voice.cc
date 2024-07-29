@@ -53,6 +53,8 @@ void Voice::Init() {
   note_ = -1;
   note_source_ = note_target_ = note_portamento_ = 60 << 7;
   gate_ = false;
+
+  envelope_.Init();
   
   mod_velocity_ = 0x7f;
   ResetAllControllers();
@@ -98,7 +100,6 @@ void CVOutput::Init(bool reset_calibration) {
   }
   dirty_ = false;
   dc_role_ = DC_PITCH;
-  envelope_.Init();
   tremolo_.Init(64);
 }
 
@@ -223,12 +224,8 @@ void Voice::Refresh() {
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
   uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
-  if (aux_1_envelope()) {
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
-  }
-  if (aux_2_envelope()) {
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
-  }
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->RefreshEnvelopeTremolo(tremolo);
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->RefreshEnvelopeTremolo(tremolo);
   oscillator_.Refresh(note, timbre_15, tremolo);
   // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
 
@@ -269,9 +266,30 @@ void Voice::NoteOn(
   }
   gate_ = true;
   adsr_ = adsr;
-  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
+
+  envelope_.NoteOn(adsr_);
+  if (uses_audio()) {
+    envelope_.SetScaling(
+      ENV_ROLE_OSCILLATOR_GAIN,
+      oscillator_mode_ == OSCILLATOR_MODE_DRONE ? oscillator_.scale() >> 1 : 0,
+      oscillator_.scale() >> 1
+    );
+    envelope_.SetScaling(
+      ENV_ROLE_OSCILLATOR_TIMBRE,
+      0,
+      timbre_envelope_target
+    );
+  }
+  if (aux_1_envelope()) envelope_.SetScaling(
+    ENV_ROLE_DC_AUX_1,
+    dc_output(DC_AUX_1)->volts_dac_code(0) >> 1,
+    dc_output(DC_AUX_1)->volts_dac_code(7) >> 1
+  );
+  if (aux_2_envelope()) envelope_.SetScaling(
+    ENV_ROLE_DC_AUX_2,
+    dc_output(DC_AUX_2)->volts_dac_code(0) >> 1,
+    dc_output(DC_AUX_2)->volts_dac_code(7) >> 1
+  );
 
   if (!has_cv_output()) return;
 
@@ -299,9 +317,7 @@ void Voice::NoteOn(
 
 void Voice::NoteOff() {
   gate_ = false;
-  oscillator_.NoteOff();
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
+  envelope_.NoteOff();
 }
 
 void Voice::ControlChange(uint8_t controller, uint8_t value) {
