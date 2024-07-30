@@ -427,7 +427,7 @@ class CVOutput {
   uint16_t NoteToDacCode(int32_t note) const;
 
   Voice* dc_voice_;
-  Voice* audio_voices_[kNumMaxVoicesPerPart];
+  Voice* audio_voices_[kNumParaphonicVoices];
   uint8_t num_audio_voices_;
   DCRole dc_role_;
 
