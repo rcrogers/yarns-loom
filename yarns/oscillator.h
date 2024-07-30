@@ -45,12 +45,12 @@ const size_t kAudioBlockSize = 64;
 
 class StateVariableFilter {
  public:
-  void Init(uint8_t interpolation_slope);
+  void Init();
   void RenderInit(int16_t frequency, int16_t resonance);
   void RenderSample(int16_t in);
   int32_t bp, lp, notch, hp;
  private:
-  Interpolator cutoff, damp;
+  Interpolator<int32_t, int16_t, kAudioBlockSize> cutoff, damp;
 };
 
 struct PhaseDistortionSquareModulator {
@@ -97,13 +97,13 @@ class Oscillator {
   inline void Init(uint16_t scale) {
     audio_buffer_.Init();
     scale_ = scale;
-    gain_.Init(64);
-    timbre_.Init(64);
+    gain_.Init();
+    timbre_.Init();
     gain_envelope_.Init();
     timbre_envelope_.Init();
     timbre_buffer_.Init();
     gain_buffer_.Init();
-    svf_.Init(64);
+    svf_.Init();
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
@@ -170,7 +170,7 @@ class Oscillator {
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;
-  Interpolator timbre_, gain_;
+  Interpolator<int32_t, int16_t, kAudioBlockSize> timbre_, gain_;
   int16_t pitch_;
 
   uint32_t phase_;
