@@ -64,7 +64,7 @@ lookup_tables_32.append(
 num_values = 128
 max_time = 5.0  # seconds
 
-gamma = 0.25
+gamma = -0.05
 min_time = 1.001 / refresh_rate
 min_increment = excursion / (max_time * refresh_rate)
 max_increment = excursion / (min_time * refresh_rate)
@@ -77,7 +77,7 @@ lookup_tables_32.append(
 
 envelope_rate = audio_rate
 min_time = 4.0 / envelope_rate
-print('min_time', min_time)
+# print('min_time', min_time)
 min_increment = excursion / (max_time * envelope_rate)
 max_increment = excursion / (min_time * envelope_rate)
 rates = numpy.linspace(numpy.power(max_increment, -gamma),
