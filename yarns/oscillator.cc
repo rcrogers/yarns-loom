@@ -74,9 +74,9 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFM,
 };
 
-void StateVariableFilter::Init(uint8_t interpolation_slope) {
-  cutoff.Init(interpolation_slope);
-  damp.Init(interpolation_slope);
+void StateVariableFilter::Init() {
+  cutoff.Init();
+  damp.Init();
 }
 
 // 15-bit params
