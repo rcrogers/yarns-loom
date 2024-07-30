@@ -62,7 +62,7 @@ class Display {
   
   inline bool scrolling() const { return scrolling_; }
   inline void set_blink(bool blinking) { blinking_ = blinking; }
-  inline void set_fade(uint16_t increment) { // Applied at 1kHz
+  inline void set_fade(uint16_t increment) { // Applied at 500Hz
     fading_increment_ = increment;
   }
  

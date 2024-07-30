@@ -71,13 +71,15 @@ uint16_t factory_testing_counter;
 
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
-  // UI polling and LED refresh at 1kHz.
+  // UI polling and LED refresh at 500Hz.
   static uint8_t counter;
-  if ((++counter & 7) == 0) {
+  if ((++counter & 15) == 0) {
     ui.Poll();
     system_clock.Tick();
   }
-  ui.PollFast(); // Display refresh at 8kHz
+  if ((counter & 1) == 0) {
+    ui.PollFast(); // Display refresh at 4kHz
+  }
   
   // Try to read some MIDI input if available.
   if (midi_io.readable()) {

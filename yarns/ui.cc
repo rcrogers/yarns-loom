@@ -996,14 +996,14 @@ void Ui::DoEvents() {
 void Ui::SetFadeForSetting(const Setting& setting) {
 if (setting.unit == SETTING_UNIT_TEMPO) {
     /*
-    For refresh at 1kHz
+    For refresh at 500Hz
     increment
-      = (bpm / 60) * (2^16 / 1000)
-      = bpm * 2^16 / 60000
-      = bpm * 2^11 / (60000 / 2^5)
-      = bpm * 2^11 / 1875
+      = (bpm / 60) * (2^16 / 500)
+      = bpm * 2^16 / 30000
+      = bpm * 2^12 / (30000 / 2^4)
+      = bpm * 2^12 / 1875
     */
-    display_.set_fade((multi.tempo() << 11) / 1875);
+    display_.set_fade((multi.tempo() << 12) / 1875);
   } else {
     display_.set_fade(0);
   }

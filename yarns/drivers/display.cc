@@ -45,8 +45,7 @@ const uint16_t kScrollingPreDelay = 600;
 const uint16_t kBlinkMask = 128;
 
 // PWM >6 bits causes visible flickering due to over-long PWM cycle at 8kHz
-const uint8_t kDisplayBrightnessPWMBits = 6;
-const uint8_t kDisplayBrightnessPWMMax = 1 << kDisplayBrightnessPWMBits;
+const uint8_t kDisplayBrightnessPWMBits = 5;
 
 const uint16_t kCharacterEnablePins[] = {
   GPIO_Pin_6,
@@ -162,7 +161,7 @@ void Display::RefreshFast() {
       GPIOB->BRR = kCharacterEnablePins[active_position_];
     }
   }
-  brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
+  brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % (1 << kDisplayBrightnessPWMBits);
 }
 
 void Display::Print(const char* short_buffer, const char* long_buffer) {
