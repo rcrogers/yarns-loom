@@ -25,12 +25,12 @@ An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](ht
 2. [Follow the manufacturer's instructions for installing new firmware](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/#firmware)
 
 ### Community
-- [Discussion thread on the Mutable Instruments forums](https://forum.mutable-instruments.net/t/loom-alternative-firmware-for-yarns-looper-paraphony-and-more/17723)
-- Forks, pull requests, feature ideas, and bug reports are welcome (though I can't guarantee a timely response)
+- [Discussion thread on ModWiggler](https://www.modwiggler.com/forum/viewtopic.php?t=255378)
+- Forks, pull requests, feature ideas, and bug reports are welcome (subject to my availability)
 - License: MIT License
 
 ### Acknowledgements
-- Thanks to [forum user `bloc`](https://forum.mutable-instruments.net/t/loom-alternative-firmware-for-yarns-looper-paraphony-and-more/17723/3) for beta testing, bug reports, support, and many great ideas
-- Thanks to [forum user `Airell`](https://forum.mutable-instruments.net/t/yarns-firmware-wish-list/8051/39) for the idea of per-part latching
-- Thanks to [forum user `sdejesus13`](https://forum.mutable-instruments.net/t/yarns-firmware-wish-list/8051/24) for encouraging the exploration of clock-based recording
+- Thanks to forum user `bloc` for beta testing, bug reports, support, and many great ideas
+- Thanks to forum user `Airell` for the idea of per-part latching
+- Thanks to forum user `sdejesus13` for encouraging the exploration of clock-based recording
 - And above all, thanks to Émilie Gillet for making a great open-source module!
