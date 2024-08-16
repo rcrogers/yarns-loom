@@ -2,15 +2,14 @@
 An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), with an emphasis on dynamic voicing, flexible composition, and expressive control.
 
 ### Features
-- [Looper-style sequencer](yarns/MANUAL.md#loop-sequencer-mode-with-real-time-recording)
-- [Arpeggiator movement can be programmed via sequencer](yarns/MANUAL.md#sequencer-driven-arpeggiator)
-- [Braids-inspired oscillator waveforms](yarns/MANUAL.md#oscillator-controls)
-- [ADSR envelopes with velocity control](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
-- [Deeper support for MIDI CCs](yarns/MANUAL.md#expanded-support-for-control-change-events)
-- [Tremolo](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
+- [Looper-style sequencer with real-time note recording](yarns/MANUAL.md#loop-sequencer-mode-with-real-time-recording)
+- [Arpeggiator movement can be programmed via sequencer notes](yarns/MANUAL.md#sequencer-driven-arpeggiator)
+- [Velocity-controlled ADSR envelopes](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
+- [New oscillator wave shapes, with amplitude and timbre modulated by LFO and envelope](yarns/MANUAL.md#oscillator-controls)
+- [Enhanced support for MIDI Control Change events](yarns/MANUAL.md#expanded-support-for-control-change-events)
 - [New layouts, including a layout with a 3-voice paraphonic part](yarns/MANUAL.md#layouts)
-- [More options for polyphonic voicing](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
-- [New ways to use the hold pedal](yarns/MANUAL.md#hold-pedal)
+- [More options for polyphonic mapping of notes to voices](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
+- [The hold pedal can be used for sostenuto, latching, and more](yarns/MANUAL.md#hold-pedal)
 - [Input octave switch](yarns/MANUAL.md#event-routing-filtering-and-transformation)
   - **[Check the manual for more! →](yarns/MANUAL.md)**
 
