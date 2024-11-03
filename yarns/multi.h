@@ -50,6 +50,34 @@ const uint8_t kMaxBarDuration = 32;
 // Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
 const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
 
+// Represents a controller number that has been routed to either remote control or a part, based on the channel the CC was received on
+class CCRouting {
+ public:
+  static CCRouting Part(uint8_t controller, uint8_t part) {
+    return CCRouting(controller, part);
+  }
+  static CCRouting Remote(uint8_t controller) {
+    return CCRouting(controller, kRemote);
+  }
+  bool is_remote() {
+    return part_or_remote_ == kRemote;
+  }
+  uint8_t part() {
+    return is_remote() ? controller_ >> 5 : part_or_remote_;
+  }
+  uint8_t controller() {
+    return controller_;
+  }
+ private:
+  static const uint8_t kRemote = 0xff;
+  CCRouting(uint8_t controller, uint8_t part_or_remote) {
+    this->controller_ = controller;
+    this->part_or_remote_ = part_or_remote;
+  }
+  uint8_t part_or_remote_;
+  uint8_t controller_;
+};
+
 struct SettingRange {
   SettingRange(int16_t min, int16_t max) {
     this->min = min;
@@ -138,7 +166,8 @@ enum Tempo {
 enum ControlChangeMode {
   CONTROL_CHANGE_MODE_OFF,
   CONTROL_CHANGE_MODE_ABSOLUTE,
-  CONTROL_CHANGE_MODE_RELATIVE_TWOS_COMPLEMENT,
+  CONTROL_CHANGE_MODE_RELATIVE_DIRECT,
+  CONTROL_CHANGE_MODE_RELATIVE_SCALED,
   CONTROL_CHANGE_MODE_LAST,
 };
 
@@ -288,22 +317,19 @@ class Multi {
   }
   
   bool ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bits);
-  int16_t ScaleAbsoluteCC(uint8_t value_7bits, int16_t min, int16_t max) const;
-  inline int8_t IncrementFromTwosComplementRelativeCC(uint8_t value_7bits) const {
-    return static_cast<int8_t>(value_7bits << 1) >> 1;
-  }
-  inline int16_t IncrementSetting(const Setting& setting, uint8_t part, int16_t increment) const {
-    int16_t value = GetSetting(setting, part);
-    if (
-      setting.unit == SETTING_UNIT_INT8 ||
-      setting.unit == SETTING_UNIT_LFO_SPREAD
-    ) value = static_cast<int8_t>(value);
-    value += increment;
-    return value;
-  }
-  void SetFromCC(uint8_t part_index, uint8_t controller, uint8_t value);
-  uint8_t GetSetting(const Setting& setting, uint8_t part) const;
+  int16_t UpdateController(CCRouting cc, uint8_t value_7bits);
+  void SetFromCC(CCRouting cc, int16_t scaled_value);
+  void InferControllerValue(CCRouting cc);
+
+  uint8_t ScaleSettingToController(SettingRange range, int16_t value) const;
+  const Setting* GetSettingForController(CCRouting cc) const;
+
+  int16_t GetControllableValue(CCRouting cc) const;
+  int16_t GetSettingValue(const Setting& setting, uint8_t part) const;
+
+  SettingRange GetControllableRange(CCRouting cc) const;
   SettingRange GetSettingRange(const Setting& setting, uint8_t part) const;
+
   void ApplySetting(SettingIndex setting, uint8_t part, int16_t raw_value) {
     ApplySetting(setting_defs.get(setting), part, raw_value);
   };
@@ -570,7 +596,6 @@ class Multi {
   bool started_by_keyboard_;
   bool recording_;
   uint8_t recording_part_;
-  uint8_t macro_record_last_value_[kNumParts];
   
   InternalClock internal_clock_;
   uint8_t internal_clock_ticks_;
@@ -606,7 +631,13 @@ class Multi {
   bool dirty_;
   
   uint8_t num_active_parts_;
-  
+
+  // "Virtual knobs" to track the accumulated result of CCs in relative mode.
+  //
+  // There is some wasted space here, because 1) not all controller numbers are mapped to a setting or macro, and 2) most remote controls map to part settings, which are also tracked in part_controller_value_
+  uint8_t remote_control_controller_value_[128];
+  uint8_t part_controller_value_[kNumParts][128];
+
   Part part_[kNumParts];
   Voice voice_[kNumSystemVoices];
   CVOutput cv_outputs_[kNumCVOutputs];

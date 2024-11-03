@@ -56,6 +56,8 @@ extern const int16_t* const waveshaper_table[];
 
 extern const uint32_t* const lookup_table_32_table[];
 
+extern const int8_t* const lookup_table_8_table[];
+
 extern const uint16_t* const char_table[];
 
 extern const char str_dummy[];
@@ -126,6 +128,8 @@ extern const uint32_t lut_lfo_increments[];
 extern const uint32_t lut_portamento_increments[];
 extern const uint32_t lut_oscillator_increments[];
 extern const uint32_t lut_euclidean[];
+extern const int8_t lut_fm_index_shifts[];
+extern const int8_t lut_fm_index_shift_halfbits[];
 extern const uint16_t chr_characters[];
 #define STR_DUMMY 0  // dummy
 #define LUT_ENV_EXPO 0
@@ -266,6 +270,10 @@ extern const uint16_t chr_characters[];
 #define LUT_OSCILLATOR_INCREMENTS_SIZE 97
 #define LUT_EUCLIDEAN 3
 #define LUT_EUCLIDEAN_SIZE 1024
+#define LUT_FM_INDEX_SHIFTS 0
+#define LUT_FM_INDEX_SHIFTS_SIZE 26
+#define LUT_FM_INDEX_SHIFT_HALFBITS 1
+#define LUT_FM_INDEX_SHIFT_HALFBITS_SIZE 26
 #define CHR_CHARACTERS 0
 #define CHR_CHARACTERS_SIZE 256
 
