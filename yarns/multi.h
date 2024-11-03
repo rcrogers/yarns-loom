@@ -60,22 +60,22 @@ class CCRouting {
     return CCRouting(controller, kRemote);
   }
   bool is_remote() {
-    return _part_or_remote == kRemote;
+    return part_or_remote_ == kRemote;
   }
   uint8_t part() {
-    return is_remote() ? _controller >> 5 : _part_or_remote;
+    return is_remote() ? controller_ >> 5 : part_or_remote_;
   }
   uint8_t controller() {
-    return _controller;
+    return controller_;
   }
  private:
   static const uint8_t kRemote = 0xff;
   CCRouting(uint8_t controller, uint8_t part_or_remote) {
-    this->_controller = controller;
-    this->_part_or_remote = part_or_remote;
+    this->controller_ = controller;
+    this->part_or_remote_ = part_or_remote;
   }
-  uint8_t _part_or_remote;
-  uint8_t _controller;
+  uint8_t part_or_remote_;
+  uint8_t controller_;
 };
 
 struct SettingRange {
@@ -317,25 +317,17 @@ class Multi {
   }
   
   bool ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bits);
-  uint8_t ScaleSettingToController(SettingRange range, int16_t value) const;
-  inline int16_t IncrementSetting(const Setting& setting, uint8_t part, int16_t increment) const {
-    int16_t value = GetSetting(setting, part);
-    if (
-      setting.unit == SETTING_UNIT_INT8 ||
-      setting.unit == SETTING_UNIT_LFO_SPREAD
-    ) value = static_cast<int8_t>(value);
-    value += increment;
-    return value;
-  }
-
-  void SetFromCC(CCRouting cc, int16_t scaled_value);
   int16_t UpdateController(CCRouting cc, uint8_t value_7bits);
-  SettingRange GetSettingOrMacroRange(CCRouting cc) const;
+  void SetFromCC(CCRouting cc, int16_t scaled_value);
   void InferControllerValue(CCRouting cc);
-  int16_t InferSettingOrMacroValue(CCRouting cc) const;
+
+  uint8_t ScaleSettingToController(SettingRange range, int16_t value) const;
   const Setting* GetSettingForController(CCRouting cc) const;
 
-  uint8_t GetSetting(const Setting& setting, uint8_t part) const;
+  int16_t GetControllableValue(CCRouting cc) const;
+  int16_t GetSettingValue(const Setting& setting, uint8_t part) const;
+
+  SettingRange GetControllableRange(CCRouting cc) const;
   SettingRange GetSettingRange(const Setting& setting, uint8_t part) const;
 
   void ApplySetting(SettingIndex setting, uint8_t part, int16_t raw_value) {
