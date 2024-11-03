@@ -3032,10 +3032,30 @@ const int8_t lut_expo_slope_shift[] = {
       -4,     -4,     -4,     -4,
       -4,     -4,     -4,     -4,
 };
+const int8_t lut_fm_index_shifts[] = {
+       5,      4,      3,      3,
+       2,      4,      3,      3,
+       4,      3,      4,      4,
+       4,      3,      3,      4,
+       3,      3,      3,      5,
+       5,      4,      3,      2,
+       2,      3,
+};
+const int8_t lut_fm_index_shift_halfbits[] = {
+       0,      0,      1,      0,
+       0,      0,      0,      0,
+       0,      1,      0,      0,
+       0,      1,      1,      0,
+       0,      0,      1,      1,
+       0,      1,      1,      1,
+       0,      0,
+};
 
 
 const int8_t* const lookup_table_8_table[] = {
   lut_expo_slope_shift,
+  lut_fm_index_shifts,
+  lut_fm_index_shift_halfbits,
 };
 
 const uint16_t chr_characters[] = {
