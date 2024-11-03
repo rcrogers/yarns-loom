@@ -36,6 +36,7 @@ import itertools
 lookup_tables_32 = []
 lookup_tables = []
 lookup_tables_signed = []
+lookup_tables_8 = []
 
 """----------------------------------------------------------------------------
 LFO and portamento increments.
@@ -553,7 +554,7 @@ def build_harmonic_fm(cm_ratio):
 
 fm_ratio_names = []
 fm_carrier_corrections = []
-fm_modulator_intervals = []
+fm_ratios = []
 
 fms = map(build_harmonic_fm, numpy.unique([Fraction(*x) for x in itertools.product(range(1, 10), range(1, 10))]))
 fms = sorted(fms, key=lambda (family, cm_ratio, carrier_correction): (family.numerator, family.denominator, cm_ratio))
@@ -574,7 +575,7 @@ for (family, cm_ratio, carrier_correction) in fms:
   fm_ratio_names.append(
     str(cm_ratio.numerator) + str(cm_ratio.denominator) + ' FM ' + str(cm_ratio.numerator) + '/' + str(cm_ratio.denominator)
   )
-  fm_modulator_intervals.append(128 * 12 * numpy.log2(1.0 / cm_ratio))
+  fm_ratios.append(1.0 / cm_ratio)
   # fm_carrier_corrections.append(128 * 12 * numpy.log2(carrier_correction))
 
 inv_minkowski_count = 0
@@ -586,7 +587,7 @@ for cm_ratio in reversed(used_ratios):
   # print([str(cm_ratio), 'inv_mink', inv_mink])
   # print([str(cm_ratio), '1 / inv_mink', 1 / inv_mink])
   # print('\n')
-  fm_modulator_intervals.append(128 * 12 * numpy.log2(1 / inv_mink))
+  fm_ratios.append(1.0 / inv_mink)
   fm_ratio_names.append('?' + str(inv_minkowski_count) + ' FM ?^-1(' + str(cm_ratio.numerator) + '/' + str(cm_ratio.denominator) + ')')
 
 for (name, mc_ratio) in ([
@@ -611,7 +612,7 @@ for (name, mc_ratio) in ([
   # Metallic means
   # ('M' + str(n), (n + numpy.sqrt(n ** 2 + 4)) / 2) for n in range(1, 10)
 ]):
-  fm_modulator_intervals.append(128 * 12 * numpy.log2(mc_ratio))
+  fm_ratios.append(mc_ratio)
   fm_ratio_names.append(name + ' FM')
 
 # for n in [2, 3, 5, 6, 7, 8]:
@@ -620,7 +621,16 @@ for (name, mc_ratio) in ([
 
 lookup_tables_string.append(('fm_ratio_names', fm_ratio_names))
 # lookup_tables_signed.append(('fm_carrier_corrections', fm_carrier_corrections))
+
+fm_modulator_intervals = [128 * 12 * numpy.log2(r) for r in fm_ratios]
 lookup_tables_signed.append(('fm_modulator_intervals', fm_modulator_intervals))
+
+FM_INDEX_SCALING_BASE = 40
+fm_index_shifts_f = numpy.log2(FM_INDEX_SCALING_BASE / numpy.array(fm_ratios))
+fm_index_shifts = numpy.floor(fm_index_shifts_f)
+fm_index_shift_halfbits = (fm_index_shifts_f - fm_index_shifts) > math.log(1.5, 2)
+lookup_tables_8.append(('fm_index_shifts', fm_index_shifts_f))
+lookup_tables_8.append(('fm_index_shift_halfbits', fm_index_shift_halfbits))
 
 
 clock_ratio_ticks = []
