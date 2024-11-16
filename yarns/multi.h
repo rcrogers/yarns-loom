@@ -211,7 +211,7 @@ enum Layout {
   LAYOUT_THREE_ONE,
   LAYOUT_TWO_TWO,
   LAYOUT_TWO_ONE,
-  LAYOUT_PARAPHONIC_PLUS_TWO, // TODO rename?
+  LAYOUT_PARAPHONIC_PLUS_TWO,
   LAYOUT_TRI_MONO,
   LAYOUT_LAST
 };
@@ -291,7 +291,7 @@ class Multi {
         internal_clock() &&
         !settings_.clock_manual_start) {
       // Start the arpeggiators.
-      Start(true);
+      Start(true, true);
     }
     
     stop_count_down_ = 0;
@@ -376,17 +376,19 @@ class Multi {
   }
   
   void Clock();
+  void SetTickCounter(uint16_t ticks);
   
   // A start initiated by a MIDI 0xfa event or the front panel start button will
   // start the sequencers. A start initiated by the keyboard will not start
   // the sequencers, and give priority to the arpeggiator. This allows the
   // arpeggiator to be played without erasing a sequence.
-  void Start(bool started_by_keyboard);
+  void Start(bool started_by_keyboard, bool reset_song_position);
   
   void Stop();
   
   void Continue() {
-    Start(false);
+    // TODO
+    Start(false, false);
   }
 
   inline bool CanAutoStop() const {
@@ -408,7 +410,7 @@ class Multi {
     }
     if (!running() && internal_clock()) {
       // Start the arpeggiators.
-      Start(true);
+      Start(true, true);
     }
   }
   
@@ -463,10 +465,10 @@ class Multi {
   
   inline Layout layout() const { return static_cast<Layout>(settings_.layout); }
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
-  inline uint32_t tick_counter() { return tick_counter_; }
+  inline uint32_t tick_counter() const { return tick_counter_; }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
   // NB: meaningless when external clocked!
-  inline uint32_t tempo_tick_phase_increment() const {
+  inline uint32_t phase_increment_for_tick_at_tempo() const {
     return settings_.clock_tempo * kTempoToTickPhaseIncrement;
   }
   inline bool running() const { return running_; }

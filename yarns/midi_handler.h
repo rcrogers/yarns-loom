@@ -112,6 +112,10 @@ class MidiHandler {
   
   static void BozoByte(uint8_t bozo_byte) { }
 
+  static void SongPosition(uint16_t sixteenth_note_counter) {
+    multi.SetTickCounter(sixteenth_note_counter * (24 / 4) / multi.settings().clock_input_division);
+  }
+
   static void Clock() {
     if (!multi.internal_clock()) {
       multi.Clock();
@@ -120,7 +124,7 @@ class MidiHandler {
   
   static void Start() {
     if (!multi.internal_clock()) {
-      multi.Start(false);
+      multi.Start(false, true);
     }
   }
   

@@ -39,7 +39,7 @@ namespace looper {
 void Deck::Init(Part* part) {
   part_ = part;
   RemoveAll();
-  Rewind();
+  SetPhase(0);
 }
 
 void Deck::RemoveAll() {
@@ -64,15 +64,15 @@ void Deck::RemoveAll() {
   );
 }
 
-void Deck::Rewind() {
-  lfo_.Init();
+void Deck::SetPhase(uint32_t phase) {
+  lfo_.SetPhase(phase);
   if (multi.internal_clock()) {
     // A stored LFO increment may have been invalidated by changes to clock
     // settings (leading to a glitchy Start, esp if clock has slowed), so we
     // preemptively update it
-    lfo_.SetPhaseIncrement(multi.tempo_tick_phase_increment() / period_ticks());
+    lfo_.SetPhaseIncrement(multi.phase_increment_for_tick_at_tempo() / period_ticks());
   }
-  Advance(0, false);
+  Advance(phase >> 16, false);
 }
 
 void Deck::Unpack(PackedPart& storage) {

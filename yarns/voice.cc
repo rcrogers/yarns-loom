@@ -58,7 +58,7 @@ void Voice::Init() {
   ResetAllControllers();
   
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
-    lfos_[i].Init();
+    lfos_[i].SetPhase(0);
     lfos_[i].SetPhaseIncrement(lut_lfo_increments[50]);
   }
   pitch_bend_range_ = 2;

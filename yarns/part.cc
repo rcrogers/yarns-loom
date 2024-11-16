@@ -349,7 +349,7 @@ void Part::Reset() {
 void Part::Clock() { // From Multi::ClockFast
   bool new_step = multi.tick_counter() % PPQN() == 0;
   if (new_step) {
-    step_counter_ = seq_.step_offset + multi.tick_counter() / PPQN();
+    step_counter_ = ticks_to_steps(multi.tick_counter());
 
     // Reset sequencer-driven arpeggiator (step or loop), if needed
     //
@@ -357,14 +357,8 @@ void Part::Clock() { // From Multi::ClockFast
     // output (i.e., resets the arp at a predictable point in the loop) IFF the
     // looper's LFO is locked onto the clock's phase and frequency. Clocking
     // changes may break the lock, and briefly cause mistimed arp resets
-    int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
-    if (sequence_repeats_per_arp_reset > 0) {
-      uint8_t quarter_notes_per_sequence_repeat =
-        looped() ? (1 << seq_.loop_length) : seq_.num_steps;
-      uint16_t quarter_notes_per_arp_reset =
-        sequence_repeats_per_arp_reset * quarter_notes_per_sequence_repeat;
-      if (step_counter_ % quarter_notes_per_arp_reset == 0) arpeggiator_.Reset();
-    }
+    uint16_t reset = steps_per_arp_reset();
+    if (reset && step_counter_ % reset == 0) arpeggiator_.Reset();
   }
 
   // The rest of the method is only for the step sequencer and/or arpeggiator
@@ -420,7 +414,7 @@ void Part::ClockStepGateEndings() {
     }
     // Peek at next step to see if it's a continuation
     // If more than one voice has a step ending, the peek is redundant
-    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note;
+    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note; // TODO needs to check arp reset?
     if (next_step.is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
@@ -431,15 +425,25 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-void Part::Start() {
+void Part::SetTickCounter(uint16_t ticks) {
+  // TODO respect phase_offset
+  looper_.SetPhase((ticks % looper_.period_ticks()) << 16);
+  
+  // Advance arp state to match step counter
+  // Could leverage arp resets as an optimization here
   arpeggiator_.Reset();
-  // Advance arp state by step-offset times
-  for (uint8_t i = 0; i < seq_.step_offset; ++i) {
+  uint32_t steps = ticks_to_steps(ticks);
+  uint16_t arp_reset = steps_per_arp_reset();
+  for (uint32_t i = 0; i < steps; i++) {
+    // TODO do resets need to take the offset into account instead of counting from 0?  both here and in Clock()?  changing to == seq_.step_offset doesn't seem to work
+    // This is giving correct semantics when starting on 5/9/13, otherwise iffy
+    if (arp_reset && i % arp_reset == 0) arpeggiator_.Reset();
     SequencerArpeggiatorResult result = BuildNextStepResult(i);
     arpeggiator_ = result.arpeggiator;
   }
-  
-  looper_.Rewind();
+}
+
+void Part::Start() {
   std::fill(
     &looper_note_recording_pressed_key_[0],
     &looper_note_recording_pressed_key_[kNoteStackMapping],
@@ -618,7 +622,7 @@ void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t ve
     SequencerStep step = SequencerStep(pitch, velocity);
     // NB: since this path implies seq_driven_arp, there is no arp pattern,
     // and step_counter_ doesn't matter
-    SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(step_counter_, step);
+    SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(0, step);
     arpeggiator_ = result.arpeggiator;
     pitch = result.note.note();
     if (result.note.has_note()) {
@@ -653,7 +657,7 @@ void Part::LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch) {
     // continuation, so we don't care
     //
     // Also NB: step_counter_ doesn't matter (see LooperPlayNoteOn)
-    next_step = BuildNextArpeggiatorResult(step_counter_, next_step).note;
+    next_step = BuildNextArpeggiatorResult(0, next_step).note;
     if (next_step.is_continuation()) {
       // Leave this pitch in the care of the next looper note
       //
