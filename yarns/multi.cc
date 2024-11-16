@@ -70,7 +70,7 @@ void Multi::PrintDebugByte(uint8_t byte) {
 
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
-  master_lfo_.Init();
+  master_lfo_.SetPhase(0);
   
   fill(
       &settings_.custom_pitch_table[0],
@@ -224,7 +224,19 @@ void Multi::Clock() {
   }
 }
 
-void Multi::Start(bool started_by_keyboard) {
+// While internal state uses 32 bits, incoming updates use 14 bits max
+// TBD should only be used while stopped?
+void Multi::SetTickCounter(uint16_t ticks) {
+  tick_counter_ = master_lfo_tick_counter_ = ticks - 1; // This got an accurate sequence, but timing was a tad off
+  // tick_counter_ = master_lfo_tick_counter_ = ticks;
+  master_lfo_.SetPhase(ticks % (1 << kMasterLFOPeriodTicksBits));
+  for (uint8_t i = 0; i < num_active_parts_; ++i) {
+    part_[i].SetTickCounter(tick_counter_);
+    
+  }
+}
+
+void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
   // Non-keyboard start can override a keyboard start
   started_by_keyboard_ = started_by_keyboard_ && started_by_keyboard;
   if (running_) {
@@ -237,11 +249,10 @@ void Multi::Start(bool started_by_keyboard) {
   midi_handler.OnStart();
 
   running_ = true;
+  // TODO what is lifecycle of these other variables?  should they be inferred in SongPosition?
   clock_input_prescaler_ = 0;
   clock_output_prescaler_ = 0;
   stop_count_down_ = 0;
-  tick_counter_ = master_lfo_tick_counter_ = -1;
-  master_lfo_.Init(-1); // Will output a tick on next Refresh
   bar_position_ = -1;
   swing_counter_ = -1;
   previous_output_division_ = 0;
@@ -263,6 +274,11 @@ void Multi::Stop() {
     part_[i].StopSequencerArpeggiatorNotes();
   }
   midi_handler.OnStop();
+
+  // TODO if offset changes while stopped, this arp state may become invalid
+  // TODO this should not be triggered by a Tascam pause
+  SetTickCounter(0); 
+
   clock_pulse_counter_ = 0;
   reset_pulse_counter_ = 0;
   stop_count_down_ = 0;
@@ -787,7 +803,7 @@ void Multi::UpdateTempo() {
   internal_clock_.set_tempo(settings_.clock_tempo);
   if (running_) return; // If running, master LFO will get Tap
   // If not running, there's no Tap to update the increment, so do that here
-  master_lfo_.SetPhaseIncrement(tempo_tick_phase_increment() >> kMasterLFOPeriodTicksBits);
+  master_lfo_.SetPhaseIncrement(phase_increment_for_tick_at_tempo() >> kMasterLFOPeriodTicksBits);
 }
 
 void Multi::AfterDeserialize() {
@@ -825,7 +841,7 @@ void Multi::StartRecording(uint8_t part) {
   }
   if (part_[part].looper_in_use()) {
     // Looper needs a running clock
-    Start(false);
+    Start(false, true);
   }
   part_[part].StartRecording();
   recording_ = true;

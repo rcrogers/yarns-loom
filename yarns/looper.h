@@ -86,7 +86,7 @@ class Deck {
   void Init(Part* part);
 
   void RemoveAll();
-  void Rewind();
+  void SetPhase(uint32_t phase);
   void Unpack(PackedPart& storage);
   void Pack(PackedPart& storage) const;
 

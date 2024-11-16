@@ -644,6 +644,17 @@ class Part {
   SequencerArpeggiatorResult BuildNextStepResult(uint32_t step_counter) const;
   void ClockStepGateEndings();
   void Start();
+  void SetTickCounter(uint16_t ticks);
+  inline uint32_t ticks_to_steps(uint32_t ticks) {
+    return seq_.step_offset + ticks / PPQN();
+  }
+  inline uint16_t steps_per_arp_reset() const {
+    int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
+    if (sequence_repeats_per_arp_reset <= 0) return 0;
+    uint8_t quarter_notes_per_sequence_repeat =
+      looped() ? (1 << seq_.loop_length) : seq_.num_steps;
+    return sequence_repeats_per_arp_reset * quarter_notes_per_sequence_repeat;
+  }
   void StopRecording();
   void StartRecording();
   void DeleteSequence();
@@ -902,9 +913,9 @@ class Part {
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = kC4) const;
   const SequencerStep BuildSeqStep(uint8_t step_index) const;
   const SequencerArpeggiatorResult BuildNextArpeggiatorResult(
-    uint32_t step_counter, const SequencerStep& seq_step) const {
+    uint32_t pattern_step_counter, const SequencerStep& seq_step) const {
     return arpeggiator_.BuildNextResult(
-      *this, arp_keys_, step_counter, seq_step);
+      *this, arp_keys_, pattern_step_counter, seq_step);
   }
 
   MidiSettings midi_;
