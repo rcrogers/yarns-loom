@@ -475,7 +475,8 @@ class Multi {
   inline bool recording() const { return recording_; }
   inline uint8_t recording_part() const { return recording_part_; }
   inline bool clock() const {
-    return clock_pulse_counter_ > 0 && \
+    uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
+    return (tick_counter_ % output_division) <= (output_division >> 1)  && \
         (!settings_.nudge_first_tick || \
           settings_.clock_bar_duration == 0 || \
           !reset());
@@ -618,18 +619,9 @@ class Multi {
   uint32_t master_lfo_tick_counter_;
 
   uint8_t clock_input_prescaler_;
-  uint16_t clock_output_prescaler_;
   uint8_t stop_count_down_;
   
-  uint16_t clock_pulse_counter_;
   uint16_t reset_pulse_counter_;
-  
-  uint16_t previous_output_division_;
-  bool needs_resync_;
-  
-  // Indicates that a setting has been changed and that the multi should
-  // be saved in memory.
-  bool dirty_;
   
   uint8_t num_active_parts_;
 
