@@ -192,19 +192,19 @@ void Multi::Clock() {
           27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
     }
     
-    ++bar_position_;
-    if (bar_position_ >= settings_.clock_bar_duration * 24) {
-      bar_position_ = 0;
-    }
-    if (bar_position_ == 0) {
+    if (
+      // Always output reset pulse on start, regardless of bar setting
+      tick_counter_ == 0 ||
+      (
+        settings_.clock_bar_duration <= kMaxBarDuration &&
+        tick_counter_ % (settings_.clock_bar_duration * 24) == 0
+      )
+    ) {
       reset_pulse_counter_ = settings_.nudge_first_tick ? 9 : 81;
       if (needs_resync_) {
         clock_output_prescaler_ = 0;
         needs_resync_ = false;
       }
-    }
-    if (settings_.clock_bar_duration > kMaxBarDuration) {
-      bar_position_ = 1;
     }
     
     ++clock_output_prescaler_;
@@ -255,7 +255,6 @@ void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
   clock_input_prescaler_ = 0;
   clock_output_prescaler_ = 0;
   stop_count_down_ = 0;
-  bar_position_ = -1;
   swing_counter_ = -1;
   previous_output_division_ = 0;
   needs_resync_ = false;
