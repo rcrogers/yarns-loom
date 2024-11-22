@@ -620,7 +620,6 @@ class Multi {
 
   uint8_t clock_input_prescaler_;
   uint16_t clock_output_prescaler_;
-  uint16_t bar_position_;
   uint8_t stop_count_down_;
   
   uint16_t clock_pulse_counter_;
