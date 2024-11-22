@@ -934,7 +934,7 @@ class Part {
   stmlib::NoteStack<kNoteStackSize> generated_notes_;  // by sequencer or arpeggiator.
   stmlib::NoteStack<kNoteStackSize> mono_allocator_;
   stmlib::VoiceAllocator<kNumMaxVoicesPerPart * 2> poly_allocator_;
-  uint8_t active_note_[kNumMaxVoicesPerPart];
+  uint8_t active_note_[kNumMaxVoicesPerPart]; // Tracks active note for each voice
   uint8_t cyclic_allocation_note_counter_;
   
   Arpeggiator arpeggiator_;
