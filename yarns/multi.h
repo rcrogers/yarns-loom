@@ -603,6 +603,7 @@ class Multi {
   uint8_t internal_clock_ticks_;
   uint16_t midi_clock_tick_duration_;
 
+  // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
   int16_t swing_predelay_[12];
   uint8_t swing_counter_;
   

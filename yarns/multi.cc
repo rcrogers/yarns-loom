@@ -181,9 +181,11 @@ void Multi::Clock() {
     if (internal_clock()) {
       swing_predelay_[swing_counter_] = 0;
     } else {
+      // Number of ClockFast calls since the last Clock
       uint32_t interval = midi_clock_tick_duration_;
       midi_clock_tick_duration_ = 0;
 
+      // Rectified triangle wave
       uint32_t modulation = swing_counter_ < 6
           ? swing_counter_ : 12 - swing_counter_;
       swing_predelay_[swing_counter_] = \
