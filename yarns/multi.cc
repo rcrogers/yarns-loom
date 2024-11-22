@@ -137,33 +137,6 @@ void Multi::Clock() {
   uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
   uint16_t input_division = settings_.clock_input_division;
   
-  if (previous_output_division_ &&
-      output_division != previous_output_division_) {
-    needs_resync_ = true;
-  }
-  previous_output_division_ = output_division;
-  
-  // Logic equation for computing a clock output with a 50% duty cycle.
-  if (output_division > 1) {
-    if (clock_output_prescaler_ == 0 && clock_input_prescaler_ == 0) {
-      clock_pulse_counter_ = 0xffff;
-    }
-    if (clock_output_prescaler_ >= (output_division >> 1) &&
-        clock_input_prescaler_ >= (input_division >> 1)) {
-      clock_pulse_counter_ = 0;
-    }
-  } else {
-    if (input_division > 1) {
-      clock_pulse_counter_ = \
-          clock_input_prescaler_ <= (input_division - 1) >> 1 ? 0xffff : 0;
-    } else {
-      // Because no division is used, neither on the output nor on the input,
-      // we don't have a sufficient fast time base to derive a 50% duty cycle
-      // output. Instead, we output 5ms pulses.
-      clock_pulse_counter_ = 40;
-    }
-  }
-  
   if (!clock_input_prescaler_) {
     midi_handler.OnClock();
 
@@ -197,15 +170,6 @@ void Multi::Clock() {
       )
     ) {
       reset_pulse_counter_ = settings_.nudge_first_tick ? 9 : 81;
-      if (needs_resync_) {
-        clock_output_prescaler_ = 0;
-        needs_resync_ = false;
-      }
-    }
-    
-    ++clock_output_prescaler_;
-    if (clock_output_prescaler_ >= output_division) {
-      clock_output_prescaler_ = 0;
     }
   }
 
@@ -249,10 +213,7 @@ void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
   running_ = true;
   // TODO what is lifecycle of these other variables?  should they be inferred in SongPosition?
   clock_input_prescaler_ = 0;
-  clock_output_prescaler_ = 0;
   stop_count_down_ = 0;
-  previous_output_division_ = 0;
-  needs_resync_ = false;
   
   fill(&swing_predelay_[0], &swing_predelay_[12], -1);
   
@@ -275,7 +236,6 @@ void Multi::Stop() {
   // TODO this should not be triggered by a Tascam pause
   SetTickCounter(0); 
 
-  clock_pulse_counter_ = 0;
   reset_pulse_counter_ = 0;
   stop_count_down_ = 0;
   running_ = false;
@@ -283,9 +243,6 @@ void Multi::Stop() {
 }
 
 void Multi::ClockFast() {
-  if (clock_pulse_counter_) {
-    --clock_pulse_counter_;
-  }
   if (reset_pulse_counter_) {
     --reset_pulse_counter_;
   }
