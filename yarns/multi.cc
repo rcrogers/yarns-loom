@@ -173,22 +173,18 @@ void Multi::Clock() {
     // less jitter than 1-cycle-per-tick
     master_lfo_.Tap(tick_counter_, 1 << kMasterLFOPeriodTicksBits);
     
-    ++swing_counter_;
-    if (swing_counter_ >= 12) {
-      swing_counter_ = 0;
-    }
-    
+    uint8_t swing_counter = tick_counter_ % 12;
     if (internal_clock()) {
-      swing_predelay_[swing_counter_] = 0;
+      swing_predelay_[swing_counter] = 0;
     } else {
       // Number of ClockFast calls since the last Clock
       uint32_t interval = midi_clock_tick_duration_;
       midi_clock_tick_duration_ = 0;
 
       // Rectified triangle wave
-      uint32_t modulation = swing_counter_ < 6
-          ? swing_counter_ : 12 - swing_counter_;
-      swing_predelay_[swing_counter_] = \
+      uint32_t modulation = swing_counter < 6
+          ? swing_counter : 12 - swing_counter;
+      swing_predelay_[swing_counter] = \
           27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
     }
     
@@ -255,7 +251,6 @@ void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
   clock_input_prescaler_ = 0;
   clock_output_prescaler_ = 0;
   stop_count_down_ = 0;
-  swing_counter_ = -1;
   previous_output_division_ = 0;
   needs_resync_ = false;
   

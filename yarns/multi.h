@@ -605,7 +605,6 @@ class Multi {
 
   // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
   int16_t swing_predelay_[12];
-  uint8_t swing_counter_;
   
   // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 517 days -- acceptable
   uint32_t tick_counter_;
