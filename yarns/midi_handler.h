@@ -115,7 +115,7 @@ class MidiHandler {
   static void SongPosition(uint16_t sixteenth_note_counter) {
     uint16_t input_ticks = sixteenth_note_counter * (24 / 4);
     uint16_t applied_ticks = input_ticks / multi.settings().clock_input_division;
-    multi.SetTickCounter(applied_ticks);
+    multi.SetSongPosition(applied_ticks);
   }
 
   static void Clock() {

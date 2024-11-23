@@ -713,7 +713,7 @@ void Ui::OnSwitchPress(const Event& e) {
         }
       } else {
         if (!multi.running()) {
-          multi.Start(false);
+          multi.Start(false, true);
         } else {
           multi.Stop();
         }

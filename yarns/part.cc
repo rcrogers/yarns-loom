@@ -357,12 +357,12 @@ void Part::Clock() { // From Multi::ClockFast
     // output (i.e., resets the arp at a predictable point in the loop) IFF the
     // looper's LFO is locked onto the clock's phase and frequency. Clocking
     // changes may break the lock, and briefly cause mistimed arp resets
-    uint16_t reset = steps_per_arp_reset();
-    if (reset && step_counter_ % reset == 0) arpeggiator_.Reset();
+    uint16_t arp_reset_steps = steps_per_arp_reset();
+    if (arp_reset_steps && step_counter_ % arp_reset_steps == 0) arpeggiator_.Reset();
   }
 
   // The rest of the method is only for the step sequencer and/or arpeggiator
-  if (looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL) return;
+  if (!doing_stepped_stuff()) return;
 
   if (new_step) {
     SequencerArpeggiatorResult result = BuildNextStepResult(step_counter_);
@@ -425,15 +425,15 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-void Part::SetTickCounter(uint16_t ticks) {
-  // TODO respect phase_offset
-  looper_.SetPhase((ticks % looper_.period_ticks()) << 16);
-  
+void Part::SetSongPosition(uint16_t ticks) {
+  if (!doing_stepped_stuff()) return;
+
   // Advance arp state to match step counter
-  // Could leverage arp resets as an optimization here
   arpeggiator_.Reset();
   uint32_t steps = ticks_to_steps(ticks);
   uint16_t arp_reset = steps_per_arp_reset();
+  // Could leverage arp resets as an optimization here
+  // if (arp_reset_steps) steps %= arp_reset_steps;
   for (uint32_t i = 0; i < steps; i++) {
     // TODO do resets need to take the offset into account instead of counting from 0?  both here and in Clock()?  changing to == seq_.step_offset doesn't seem to work
     // This is giving correct semantics when starting on 5/9/13, otherwise iffy
@@ -443,6 +443,7 @@ void Part::SetTickCounter(uint16_t ticks) {
   }
 }
 
+// Reset state for notes being actively output or recorded
 void Part::Start() {
   std::fill(
     &looper_note_recording_pressed_key_[0],

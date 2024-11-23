@@ -134,9 +134,6 @@ void Multi::Clock() {
     return;
   }
   
-  uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
-  uint16_t input_division = settings_.clock_input_division;
-  
   if (!clock_input_prescaler_) {
     midi_handler.OnClock();
 
@@ -186,16 +183,15 @@ void Multi::Clock() {
   }
 }
 
-// While internal state uses 32 bits, incoming updates use 14 bits max
-// TBD should only be used while stopped?
-void Multi::SetTickCounter(uint16_t ticks) {
+// While tick_counter_ uses 32 bits, MIDI updates use 14 bits max
+void Multi::SetSongPosition(uint16_t ticks) {
+  if (running_) return;
+  if (tick_counter_ == ticks) return;
+
   tick_counter_ = master_lfo_tick_counter_ = ticks - 1; // This got an accurate sequence, but timing was a tad off
-  // tick_counter_ = master_lfo_tick_counter_ = ticks;
-  master_lfo_.SetPhase(ticks % (1 << kMasterLFOPeriodTicksBits));
-  for (uint8_t i = 0; i < num_active_parts_; ++i) {
-    part_[i].SetTickCounter(tick_counter_);
-    
-  }
+  master_lfo_.SetPhase((ticks % (1 << kMasterLFOPeriodTicksBits)) - 1);
+  ClockLFOs(true);
+  // wait, they will get another ClockLFOs right after this (when the master LFO fires), is that good?
 }
 
 void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
@@ -211,9 +207,12 @@ void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
   midi_handler.OnStart();
 
   running_ = true;
-  // TODO what is lifecycle of these other variables?  should they be inferred in SongPosition?
-  clock_input_prescaler_ = 0;
-  stop_count_down_ = 0;
+
+  if (reset_song_position) {
+    SetSongPosition(0);
+    clock_input_prescaler_ = 0;
+    stop_count_down_ = 0;
+  }
   
   fill(&swing_predelay_[0], &swing_predelay_[12], -1);
   
@@ -231,10 +230,6 @@ void Multi::Stop() {
     part_[i].StopSequencerArpeggiatorNotes();
   }
   midi_handler.OnStop();
-
-  // TODO if offset changes while stopped, this arp state may become invalid
-  // TODO this should not be triggered by a Tascam pause
-  SetTickCounter(0); 
 
   reset_pulse_counter_ = 0;
   stop_count_down_ = 0;
@@ -260,7 +255,7 @@ void Multi::ClockFast() {
   }
 }
 
-void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos) {
+void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos, bool force_phase) {
   if (spread >= 0) { // Detune
     uint8_t spread_8 = spread << 1;
     uint16_t spread_expo_16 = UINT16_MAX - lut_env_expo[((127 - spread_8) << 1)];
@@ -274,7 +269,45 @@ void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos
     uint32_t phase_offset = (spread + 1) << (32 - 6);
     for (uint8_t i = 1; i < num_lfos; ++i) {
       phase += phase_offset;
-      (*(base_lfo + i))->SetTargetPhase(phase);
+      FastSyncedLFO* lfo = *(base_lfo + i);
+      if (force_phase) {
+        lfo->SetPhase(phase);
+      } else {
+        lfo->SetTargetPhase(phase);
+      }
+    }
+  }
+}
+
+void Multi::ClockLFOs(bool force_phase) {
+  for (uint8_t p = 0; p < num_active_parts_; ++p) {
+    Part& part = part_[p];
+
+    looper::Deck &looper = part_[p].mutable_looper();
+    uint32_t looper_target_phase = looper.ComputeTargetPhase(master_lfo_tick_counter_);
+    if (force_phase) {
+      looper.SetPhase(looper_target_phase);
+    } else {
+      looper.SetTargetPhase(looper_target_phase);
+    }
+
+    uint8_t lfo_rate = part.voicing_settings().lfo_rate;
+    FastSyncedLFO* part_lfos[part.num_voices()];
+    for (uint8_t v = 0; v < part.num_voices(); ++v) {
+      part_lfos[v] = part.voice(v)->lfo(static_cast<LFORole>(0));
+    }
+    if (lfo_rate < 64) {
+      part_lfos[0]->Tap(master_lfo_tick_counter_, lut_clock_ratio_ticks[(64 - lfo_rate - 1) >> 1]);
+    } else {
+      part_lfos[0]->SetPhaseIncrement(lut_lfo_increments[lfo_rate - 64]);
+    }
+    SpreadLFOs(part.voicing_settings().lfo_spread_voices, &part_lfos[0], part.num_voices(), force_phase);
+    for (uint8_t v = 0; v < part.num_voices(); ++v) {
+      FastSyncedLFO* voice_lfos[LFO_ROLE_LAST];
+      for (uint8_t l = 0; l < LFO_ROLE_LAST; ++l) {
+        voice_lfos[l] = part.voice(v)->lfo(static_cast<LFORole>(l));
+      }
+      SpreadLFOs(part.voicing_settings().lfo_spread_types, &voice_lfos[0], LFO_ROLE_LAST, force_phase);
     }
   }
 }
@@ -284,35 +317,16 @@ void Multi::Refresh() {
   // Since the master LFO runs at 1/n of clock freq, we compensate by treating
   // each 1/n of its phase as a new tick, to make these output ticks 1:1 with
   // the original clock ticks
-  bool new_tick =
+  if (
     (master_lfo_.GetPhase() << kMasterLFOPeriodTicksBits) <
-    (master_lfo_.GetPhaseIncrement() << kMasterLFOPeriodTicksBits);
-  if (new_tick) master_lfo_tick_counter_++;
+    (master_lfo_.GetPhaseIncrement() << kMasterLFOPeriodTicksBits)
+  ) {
+    master_lfo_tick_counter_++;
+    ClockLFOs(false);
+  };
 
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
     Part& part = part_[p];
-    if (new_tick) {
-      part_[p].mutable_looper().Clock(master_lfo_tick_counter_);
-
-      uint8_t lfo_rate = part.voicing_settings().lfo_rate;
-      FastSyncedLFO* part_lfos[part.num_voices()];
-      for (uint8_t v = 0; v < part.num_voices(); ++v) {
-        part_lfos[v] = part.voice(v)->lfo(static_cast<LFORole>(0));
-      }
-      if (lfo_rate < 64) {
-        part_lfos[0]->Tap(master_lfo_tick_counter_, lut_clock_ratio_ticks[(64 - lfo_rate - 1) >> 1]);
-      } else {
-        part_lfos[0]->SetPhaseIncrement(lut_lfo_increments[lfo_rate - 64]);
-      }
-      SpreadLFOs(part.voicing_settings().lfo_spread_voices, &part_lfos[0], part.num_voices());
-      for (uint8_t v = 0; v < part.num_voices(); ++v) {
-        FastSyncedLFO* voice_lfos[LFO_ROLE_LAST];
-        for (uint8_t l = 0; l < LFO_ROLE_LAST; ++l) {
-          voice_lfos[l] = part.voice(v)->lfo(static_cast<LFORole>(l));
-        }
-        SpreadLFOs(part.voicing_settings().lfo_spread_types, &voice_lfos[0], LFO_ROLE_LAST);
-      }
-    }
     part.mutable_looper().Refresh();
     for (uint8_t v = 0; v < part.num_voices(); ++v) {
       part.voice(v)->Refresh();
@@ -794,7 +808,7 @@ void Multi::StartRecording(uint8_t part) {
   }
   if (part_[part].looper_in_use()) {
     // Looper needs a running clock
-    Start(false, true);
+    Start(false, false);
   }
   part_[part].StartRecording();
   recording_ = true;

@@ -121,8 +121,12 @@ uint32_t Deck::lfo_note_phase() const {
   return lfo_.GetPhase() << part_->sequencer_settings().loop_length;
 }
 
-void Deck::Clock(uint32_t tick_counter) {
-  lfo_.Tap(tick_counter, period_ticks(), pos_offset << 16);
+uint32_t Deck::ComputeTargetPhase(uint32_t tick_counter) const {
+  return lfo_.ComputeTargetPhase(tick_counter, period_ticks(), pos_offset << 16);
+}
+
+void Deck::SetTargetPhase(uint32_t phase) {
+  lfo_.SetTargetPhase(phase);
 }
 
 void Deck::RemoveOldestNote() {
