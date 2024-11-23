@@ -376,12 +376,14 @@ class Multi {
   }
   
   void Clock();
-  void SetTickCounter(uint16_t ticks);
+  void SetSongPosition(uint16_t ticks);
   
   // A start initiated by a MIDI 0xfa event or the front panel start button will
   // start the sequencers. A start initiated by the keyboard will not start
   // the sequencers, and give priority to the arpeggiator. This allows the
   // arpeggiator to be played without erasing a sequence.
+  //
+  // If already running, will not reset clock state
   void Start(bool started_by_keyboard, bool reset_song_position);
   
   void Stop();
@@ -434,6 +436,7 @@ class Multi {
   void AfterDeserialize();
   void ClockFast();
   void Refresh();
+  void ClockLFOs(bool force_phase);
   void RefreshInternalClock() {
     if (running() && internal_clock() && internal_clock_.Process()) {
       ++internal_clock_ticks_;
@@ -476,7 +479,8 @@ class Multi {
   inline uint8_t recording_part() const { return recording_part_; }
   inline bool clock() const {
     uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
-    return (tick_counter_ % output_division) <= (output_division >> 1)  && \
+    uint16_t ticks_mod_output_div = tick_counter_ % output_division;
+    return ticks_mod_output_div <= (output_division >> 1) && \
         (!settings_.nudge_first_tick || \
           settings_.clock_bar_duration == 0 || \
           !reset());
@@ -591,7 +595,7 @@ class Multi {
   void ChangeLayout(Layout old_layout, Layout new_layout);
   void UpdateTempo();
   void AllocateParts();
-  void SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos);
+  void SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos, bool force_phase);
   
   MultiSettings settings_;
   

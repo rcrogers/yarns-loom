@@ -644,16 +644,15 @@ class Part {
   SequencerArpeggiatorResult BuildNextStepResult(uint32_t step_counter) const;
   void ClockStepGateEndings();
   void Start();
-  void SetTickCounter(uint16_t ticks);
+  void SetSongPosition(uint16_t ticks);
   inline uint32_t ticks_to_steps(uint32_t ticks) {
     return seq_.step_offset + ticks / PPQN();
   }
   inline uint16_t steps_per_arp_reset() const {
     int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
     if (sequence_repeats_per_arp_reset <= 0) return 0;
-    uint8_t quarter_notes_per_sequence_repeat =
-      looped() ? (1 << seq_.loop_length) : seq_.num_steps;
-    return sequence_repeats_per_arp_reset * quarter_notes_per_sequence_repeat;
+    uint8_t steps_per_sequence_repeat = looped() ? (1 << seq_.loop_length) : seq_.num_steps;
+    return sequence_repeats_per_arp_reset * steps_per_sequence_repeat;
   }
   void StopRecording();
   void StartRecording();
@@ -707,7 +706,9 @@ class Part {
   inline bool looper_in_use() const {
     return looped() && sequencer_in_use();
   }
-
+  inline bool doing_stepped_stuff() const {
+    return !(looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL);
+  }
   inline bool sequencer_in_use() const {
     return midi_.play_mode == PLAY_MODE_SEQUENCER ||
       (midi_.play_mode == PLAY_MODE_ARPEGGIATOR && seq_driven_arp());

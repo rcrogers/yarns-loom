@@ -95,7 +95,8 @@ class Deck {
   }
   uint16_t period_ticks() const;
   uint32_t lfo_note_phase() const;
-  void Clock(uint32_t tick_counter);
+  uint32_t ComputeTargetPhase(uint32_t tick_counter) const;
+  void SetTargetPhase(uint32_t phase);
   inline void Refresh() {
     lfo_.Refresh();
     uint16_t new_phase = lfo_.GetPhase() >> 16;
