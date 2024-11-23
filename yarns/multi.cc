@@ -192,6 +192,9 @@ void Multi::SetSongPosition(uint16_t ticks) {
   master_lfo_.SetPhase((ticks % (1 << kMasterLFOPeriodTicksBits)) - 1);
   ClockLFOs(true);
   // wait, they will get another ClockLFOs right after this (when the master LFO fires), is that good?
+  for (uint8_t p = 0; p < num_active_parts_; ++p) {
+    part_[p].SetSongPosition(ticks);
+  }
 }
 
 void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
