@@ -184,16 +184,24 @@ void Multi::Clock() {
 }
 
 // While tick_counter_ uses 32 bits, MIDI updates use 14 bits max
-void Multi::SetSongPosition(uint16_t ticks) {
+void Multi::SetSongPosition(uint16_t sixteenth_note_counter) {
   if (running_) return;
-  if (tick_counter_ == ticks) return;
 
-  tick_counter_ = master_lfo_tick_counter_ = ticks - 1; // This got an accurate sequence, but timing was a tad off
-  master_lfo_.SetPhase((ticks % (1 << kMasterLFOPeriodTicksBits)) - 1);
+  uint16_t raw_ticks = sixteenth_note_counter * (24 / 4);
+
+  uint16_t next_tick_target = raw_ticks / settings_.clock_input_division;
+  // if (tick_counter_ == next_tick_target - 1) return; // Already at target
+
+  // div = 4, 16th note = 3, raw_ticks = 18, next_tick_target = 4, prescaler = 2
+  // TODO off by one?
+  clock_input_prescaler_ = raw_ticks % settings_.clock_input_division;
+
+  tick_counter_ = master_lfo_tick_counter_ = next_tick_target - 1; // This got an accurate sequence, but timing was a tad off
+  master_lfo_.SetPhase((next_tick_target % (1 << kMasterLFOPeriodTicksBits)) - 1);
   ClockLFOs(true);
   // wait, they will get another ClockLFOs right after this (when the master LFO fires), is that good?
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    part_[p].SetSongPosition(ticks);
+    part_[p].SetSongPosition(next_tick_target);
   }
 }
 
@@ -213,7 +221,6 @@ void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
 
   if (reset_song_position) {
     SetSongPosition(0);
-    clock_input_prescaler_ = 0;
     stop_count_down_ = 0;
   }
   
