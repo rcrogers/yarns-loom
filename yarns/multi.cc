@@ -192,11 +192,9 @@ void Multi::SetSongPosition(uint16_t sixteenth_note_counter) {
   uint16_t next_tick_target = raw_ticks / settings_.clock_input_division;
   // if (tick_counter_ == next_tick_target - 1) return; // Already at target
 
-  // div = 4, 16th note = 3, raw_ticks = 18, next_tick_target = 4, prescaler = 2
-  // TODO off by one?
   clock_input_prescaler_ = raw_ticks % settings_.clock_input_division;
 
-  tick_counter_ = master_lfo_tick_counter_ = next_tick_target - 1; // This got an accurate sequence, but timing was a tad off
+  tick_counter_ = master_lfo_tick_counter_ = next_tick_target - 1; 
   master_lfo_.SetPhase((next_tick_target % (1 << kMasterLFOPeriodTicksBits)) - 1);
   ClockLFOs(true);
   // wait, they will get another ClockLFOs right after this (when the master LFO fires), is that good?

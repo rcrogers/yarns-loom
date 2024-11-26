@@ -428,26 +428,10 @@ void Part::ClockStepGateEndings() {
 void Part::SetSongPosition(uint16_t next_tick_target) {
   if (!doing_stepped_stuff()) return; // TODO looper-controlled arp may need advance
 
-  // tascam sends song pos
-  // good:              30  31  32      34      36
-  // bad:           29              33      35      37
-  // targ step hex: 10  11  11  12  12  13  13  14  14
-  // targ step dec: 16  17  17  18  18  19  19  20  20
-  //
-  // conclusion: if step is an off beat (and not a reset), we get fucked up
-
-  // Advance arp state to match step counter
   arpeggiator_.Reset();
-  // uint32_t next_step = ticks_to_steps(next_tick_target);
-  // multi.PrintDebugByte(next_step);
-  // rounding down ^ is bad!  we may be halfway through the rounded-down step!
   uint16_t next_step = seq_.step_offset + (next_tick_target + PPQN() - 1) / PPQN();
   uint16_t arp_reset_steps = steps_per_arp_reset();
-  // Could leverage arp resets as an optimization here
-  // if (arp_reset_steps) steps %= arp_reset_steps;
   for (uint32_t step_counter = 0; step_counter < next_step; step_counter++) {
-    // TODO do resets need to take the offset into account instead of counting from 0?  both here and in Clock()?  changing to == seq_.step_offset doesn't seem to work
-    // This is giving correct semantics when starting on 5/9/13, otherwise iffy
     if (arp_reset_steps && step_counter % arp_reset_steps == 0) arpeggiator_.Reset();
     SequencerArpeggiatorResult result = BuildNextStepResult(step_counter);
     arpeggiator_ = result.arpeggiator;
