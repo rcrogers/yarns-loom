@@ -389,7 +389,6 @@ class Multi {
   void Stop();
   
   void Continue() {
-    // TODO
     Start(false, false);
   }
 
