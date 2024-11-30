@@ -105,8 +105,7 @@ struct PackedMulti {
     clock_manual_start : 1;
 
   uint8_t control_change_mode; // Breaking: move to bitfield when convenient
-
-  uint8_t flash_padding[1];
+  int8_t clock_offset;
 }__attribute__((packed));
 
 struct MultiSettings {
@@ -122,7 +121,8 @@ struct MultiSettings {
   uint8_t nudge_first_tick;
   uint8_t clock_manual_start;
   uint8_t control_change_mode;
-  uint8_t padding[9];
+  int8_t clock_offset;
+  uint8_t padding[8];
 
   void Pack(PackedMulti& packed) {
     for (uint8_t i = 0; i < 12; i++) {
@@ -139,6 +139,7 @@ struct MultiSettings {
     packed.nudge_first_tick = nudge_first_tick;
     packed.clock_manual_start = clock_manual_start;
     packed.control_change_mode = control_change_mode;
+    packed.clock_offset = clock_offset;
   }
 
   void Unpack(PackedMulti& packed) {
@@ -156,6 +157,7 @@ struct MultiSettings {
     nudge_first_tick = packed.nudge_first_tick;
     clock_manual_start = packed.clock_manual_start;
     control_change_mode = packed.control_change_mode;
+    clock_offset = packed.clock_offset;
   }
 };
 
@@ -195,6 +197,7 @@ enum MultiSetting {
   MULTI_CLOCK_NUDGE_FIRST_TICK,
   MULTI_CLOCK_MANUAL_START,
   MULTI_CONTROL_CHANGE_MODE,
+  MULTI_CLOCK_OFFSET,
 };
 
 enum Layout {
@@ -467,7 +470,7 @@ class Multi {
   
   inline Layout layout() const { return static_cast<Layout>(settings_.layout); }
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
-  inline uint32_t tick_counter() const { return tick_counter_; }
+  inline int32_t tick_counter() const { return tick_counter_; }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
   // NB: meaningless when external clocked!
   inline uint32_t phase_increment_for_tick_at_tempo() const {
@@ -478,7 +481,7 @@ class Multi {
   inline uint8_t recording_part() const { return recording_part_; }
   inline bool clock() const {
     uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
-    uint16_t ticks_mod_output_div = tick_counter_ % output_division;
+    uint16_t ticks_mod_output_div = modulo(tick_counter_, output_division);
     return ticks_mod_output_div <= (output_division >> 1) && \
         (!settings_.nudge_first_tick || \
           settings_.clock_bar_duration == 0 || \
@@ -610,8 +613,8 @@ class Multi {
   // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
   int16_t swing_predelay_[12];
   
-  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 517 days -- acceptable
-  uint32_t tick_counter_;
+  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 259 days -- acceptable
+  int32_t tick_counter_;
 
   // The master LFO sits between the clock and the part-specific synced LFOs.
   // While the clock is running, the master LFO syncs to the clock's phase/freq,
@@ -619,7 +622,7 @@ class Multi {
   // on its last sync
   FastSyncedLFO master_lfo_;
   // Roughly 1:1 with tick_counter_, but can free-run without the clock
-  uint32_t master_lfo_tick_counter_;
+  int32_t master_lfo_tick_counter_;
 
   uint8_t clock_input_prescaler_;
   uint8_t stop_count_down_;

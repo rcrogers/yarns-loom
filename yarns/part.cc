@@ -30,6 +30,7 @@
 #include "yarns/part.h"
 
 #include <algorithm>
+#include <stdlib.h>
 
 #include "stmlib/midi/midi.h"
 #include "stmlib/utils/random.h"
@@ -347,7 +348,7 @@ void Part::Reset() {
 }
 
 void Part::Clock() { // From Multi::ClockFast
-  bool new_step = multi.tick_counter() % PPQN() == 0;
+  bool new_step = modulo(multi.tick_counter(), PPQN()) == 0;
   if (new_step) {
     step_counter_ = ticks_to_steps(multi.tick_counter());
 
@@ -425,13 +426,14 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-void Part::SetSongPosition(uint16_t next_tick_target) {
+void Part::SetSongPosition(uint16_t ticks) {
   if (!doing_stepped_stuff()) return; // TODO looper-controlled arp may need advance
 
   arpeggiator_.Reset();
-  uint16_t next_step = seq_.step_offset + (next_tick_target + PPQN() - 1) / PPQN();
+  int16_t last_step_triggered = ticks / PPQN();
   uint16_t arp_reset_steps = steps_per_arp_reset();
-  for (uint32_t step_counter = 0; step_counter < next_step; step_counter++) {
+  // Ticks may be negative, but steps only happen from 0 on
+  for (uint32_t step_counter = 0; step_counter <= last_step_triggered; step_counter++) {
     if (arp_reset_steps && step_counter % arp_reset_steps == 0) arpeggiator_.Reset();
     SequencerArpeggiatorResult result = BuildNextStepResult(step_counter);
     arpeggiator_ = result.arpeggiator;

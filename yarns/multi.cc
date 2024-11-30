@@ -110,6 +110,7 @@ void Multi::Init(bool reset_calibration) {
   settings_.nudge_first_tick = 0;
   settings_.clock_manual_start = 0;
   settings_.control_change_mode = CONTROL_CHANGE_MODE_ABSOLUTE;
+  settings_.clock_offset = 0;
 
   // A test sequence...
   // seq->num_steps = 4;
@@ -143,30 +144,32 @@ void Multi::Clock() {
     // less jitter than 1-cycle-per-tick
     master_lfo_.Tap(tick_counter_, 1 << kMasterLFOPeriodTicksBits);
     
-    uint8_t swing_counter = tick_counter_ % 12;
-    if (internal_clock()) {
-      swing_predelay_[swing_counter] = 0;
-    } else {
-      // Number of ClockFast calls since the last Clock
-      uint32_t interval = midi_clock_tick_duration_;
-      midi_clock_tick_duration_ = 0;
+    if (tick_counter_ >= 0) {
+      uint8_t swing_counter = modulo(tick_counter_, 12);
+      if (internal_clock()) {
+        swing_predelay_[swing_counter] = 0;
+      } else {
+        // Number of ClockFast calls since the last Clock
+        uint32_t interval = midi_clock_tick_duration_;
+        midi_clock_tick_duration_ = 0;
 
-      // Rectified triangle wave
-      uint32_t modulation = swing_counter < 6
-          ? swing_counter : 12 - swing_counter;
-      swing_predelay_[swing_counter] = \
-          27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
-    }
-    
-    if (
-      // Always output reset pulse on start, regardless of bar setting
-      tick_counter_ == 0 ||
-      (
-        settings_.clock_bar_duration <= kMaxBarDuration &&
-        tick_counter_ % (settings_.clock_bar_duration * 24) == 0
-      )
-    ) {
-      reset_pulse_counter_ = settings_.nudge_first_tick ? 9 : 81;
+        // Rectified triangle wave
+        uint32_t modulation = swing_counter < 6
+            ? swing_counter : 12 - swing_counter;
+        swing_predelay_[swing_counter] = \
+            27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
+      }
+
+      if (
+        // Always output reset pulse on start, regardless of bar setting
+        tick_counter_ == 0 ||
+        (
+          settings_.clock_bar_duration <= kMaxBarDuration &&
+          modulo(tick_counter_, settings_.clock_bar_duration * 24) == 0
+        )
+      ) {
+        reset_pulse_counter_ = settings_.nudge_first_tick ? 9 : 81;
+      }
     }
   }
 
@@ -187,19 +190,28 @@ void Multi::Clock() {
 void Multi::SetSongPosition(uint16_t sixteenth_note_counter) {
   if (running_) return;
 
-  uint16_t raw_ticks = sixteenth_note_counter * (24 / 4);
+  int16_t raw_ticks = sixteenth_note_counter * (24 / 4);
+  raw_ticks += settings_.clock_offset;
+  raw_ticks -= 1; // Because Clock() will pre-increment, we want to be on the previous tick
 
-  uint16_t next_tick_target = raw_ticks / settings_.clock_input_division;
-  // if (tick_counter_ == next_tick_target - 1) return; // Already at target
-
-  clock_input_prescaler_ = raw_ticks % settings_.clock_input_division;
-
-  tick_counter_ = master_lfo_tick_counter_ = next_tick_target - 1; 
-  master_lfo_.SetPhase((next_tick_target % (1 << kMasterLFOPeriodTicksBits)) - 1);
+  // For clock div 4:
+  // -5: quot 1, rem 3, ticks -2, prescaler 3
+  // -3: quot 0, rem 1, ticks -1, prescaler 1
+  // -1: quot 0, rem 3, ticks -1, prescaler 3
+  // +0: quot 0, rem 0, ticks 0, prescaler 0
+  // +2: quot 0, rem 2, ticks 0, prescaler 2
+  // +4: quot 1, rem 0, ticks 1, prescaler 0
+  // +5: quot 1, rem 1, ticks 1, prescaler 1
+  
+  int16_t ticks = divide_floor(raw_ticks, settings_.clock_input_division);
+  tick_counter_ = master_lfo_tick_counter_ = ticks;
+  clock_input_prescaler_ = modulo(raw_ticks, settings_.clock_input_division);
+  
+  master_lfo_.SetPhase(modulo(tick_counter_, 1 << kMasterLFOPeriodTicksBits));
   ClockLFOs(true);
   // wait, they will get another ClockLFOs right after this (when the master LFO fires), is that good?
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    part_[p].SetSongPosition(next_tick_target);
+    part_[p].SetSongPosition(ticks);
   }
 }
 

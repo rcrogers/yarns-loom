@@ -121,7 +121,7 @@ uint32_t Deck::lfo_note_phase() const {
   return lfo_.GetPhase() << part_->sequencer_settings().loop_length;
 }
 
-uint32_t Deck::ComputeTargetPhase(uint32_t tick_counter) const {
+uint32_t Deck::ComputeTargetPhase(int32_t tick_counter) const {
   return lfo_.ComputeTargetPhase(tick_counter, period_ticks(), pos_offset << 16);
 }
 
