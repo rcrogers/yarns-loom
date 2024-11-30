@@ -427,10 +427,14 @@ void Part::ClockStepGateEndings() {
 }
 
 void Part::SetSongPosition(uint16_t ticks) {
+  arpeggiator_.Reset();
+
   if (!doing_stepped_stuff()) return; // TODO looper-controlled arp may need advance
 
-  arpeggiator_.Reset();
-  int16_t last_step_triggered = ticks / PPQN();
+  int16_t last_step_triggered_signed = ticks / PPQN();
+  if (last_step_triggered_signed < 0) return;
+  uint16_t last_step_triggered = static_cast<uint16_t>(last_step_triggered_signed);
+
   uint16_t arp_reset_steps = steps_per_arp_reset();
   // Ticks may be negative, but steps only happen from 0 on
   for (uint32_t step_counter = 0; step_counter <= last_step_triggered; step_counter++) {

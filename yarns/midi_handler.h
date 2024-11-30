@@ -130,7 +130,7 @@ class MidiHandler {
   
   static void Continue() {
     if (!multi.internal_clock()) {
-      multi.Continue();
+      multi.Start(false, false);
     }
   }
   

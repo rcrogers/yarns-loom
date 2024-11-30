@@ -390,10 +390,6 @@ class Multi {
   void Start(bool started_by_keyboard, bool reset_song_position);
   
   void Stop();
-  
-  void Continue() {
-    Start(false, false);
-  }
 
   inline bool CanAutoStop() const {
     return started_by_keyboard_ && internal_clock();
