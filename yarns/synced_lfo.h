@@ -77,13 +77,13 @@ class SyncedLFO {
     } 
   }
 
-  uint32_t ComputeTargetPhase(uint32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) const {
-    uint16_t tick_phase = tick_counter % period_ticks;
+  uint32_t ComputeTargetPhase(int32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) const {
+    uint16_t tick_phase = modulo(tick_counter, period_ticks);
     uint32_t target_phase = ((tick_phase << 16) / period_ticks) << 16;
     return target_phase + phase_offset;
   }
 
-  void Tap(uint32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) {
+  void Tap(int32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) {
     SetTargetPhase(ComputeTargetPhase(tick_counter, period_ticks, phase_offset));
   }
 

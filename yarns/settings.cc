@@ -281,6 +281,12 @@ const Setting Settings::settings_[] = {
     0xff, 0,
   },
   {
+    "C+", "CLOCK OFFSET",
+    SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OFFSET, 0 },
+    SETTING_UNIT_INT8, -64, 63, NULL,
+    0xff, 0xff,
+  },
+  {
     "B-", "BAR DURATION",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_BAR_DURATION, 0 },
     SETTING_UNIT_BAR_DURATION, 0, kMaxBarDuration + 1, NULL,

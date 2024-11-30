@@ -645,7 +645,7 @@ class Part {
   void ClockStepGateEndings();
   void Start();
   void SetSongPosition(uint16_t ticks);
-  inline uint32_t ticks_to_steps(uint32_t ticks) {
+  inline uint32_t ticks_to_steps(int32_t ticks) {
     return seq_.step_offset + ticks / PPQN();
   }
   inline uint16_t steps_per_arp_reset() const {
@@ -856,6 +856,7 @@ class Part {
   inline bool recording() const { return seq_recording_; }
   inline bool overdubbing() const { return seq_overdubbing_; }
   inline uint8_t recording_step() const { return seq_rec_step_; }
+  // TODO this depends on step_counter_ state, does it matter for song pos?
   inline uint8_t playing_step() const { return step_counter_ % seq_.num_steps; }
   inline uint8_t num_steps() const { return seq_.num_steps; }
   inline void increment_recording_step_index(uint8_t n) {
@@ -942,7 +943,7 @@ class Part {
   
   bool seq_recording_;
   bool seq_overdubbing_;
-  uint32_t step_counter_;
+  int32_t step_counter_;
   uint8_t seq_rec_step_;
   bool seq_overwrite_;
   
