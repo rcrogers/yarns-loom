@@ -466,7 +466,9 @@ class Multi {
   
   inline Layout layout() const { return static_cast<Layout>(settings_.layout); }
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
-  inline int32_t tick_counter() const { return tick_counter_; }
+  inline int32_t post_offset_tick_counter() const {
+    return pre_offset_tick_counter_ + settings_.clock_offset;
+  }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
   // NB: meaningless when external clocked!
   inline uint32_t phase_increment_for_tick_at_tempo() const {
@@ -477,7 +479,7 @@ class Multi {
   inline uint8_t recording_part() const { return recording_part_; }
   inline bool clock() const {
     uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
-    uint16_t ticks_mod_output_div = modulo(tick_counter_, output_division);
+    uint16_t ticks_mod_output_div = modulo(post_offset_tick_counter(), output_division);
     return ticks_mod_output_div <= (output_division >> 1) && \
         (!settings_.nudge_first_tick || \
           settings_.clock_bar_duration == 0 || \
@@ -610,7 +612,7 @@ class Multi {
   int16_t swing_predelay_[12];
   
   // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 259 days -- acceptable
-  int32_t tick_counter_;
+  uint32_t pre_offset_tick_counter_;
 
   // The master LFO sits between the clock and the part-specific synced LFOs.
   // While the clock is running, the master LFO syncs to the clock's phase/freq,
