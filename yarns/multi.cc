@@ -70,7 +70,8 @@ void Multi::PrintDebugByte(uint8_t byte) {
 
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
-  master_lfo_.SetPhase(0);
+
+  SetSongPosition(0);
   
   fill(
       &settings_.custom_pitch_table[0],
@@ -135,17 +136,19 @@ void Multi::Clock() {
     return;
   }
   
-  if (!clock_input_prescaler_) {
+  // Pre-increment so that the tick count will stay valid until the next Clock()
+  clock_input_ticks_++;
+  // TODO this may need to take offset into account?
+  if (clock_input_ticks_ % settings_.clock_input_division == 0) {
     midi_handler.OnClock();
 
     // Sync LFOs
-    ++pre_offset_tick_counter_;
     // The master LFO runs at a fraction of the clock frequency, which makes for
     // less jitter than 1-cycle-per-tick
-    master_lfo_.Tap(post_offset_tick_counter(), 1 << kMasterLFOPeriodTicksBits);
+    master_lfo_.Tap(tick_counter(), 1 << kMasterLFOPeriodTicksBits);
     
-    if (post_offset_tick_counter() >= 0) {
-      uint8_t swing_counter = modulo(post_offset_tick_counter(), 12);
+    if (tick_counter() >= 0) {
+      uint8_t swing_counter = modulo(tick_counter(), 12);
       if (internal_clock()) {
         swing_predelay_[swing_counter] = 0;
       } else {
@@ -161,21 +164,16 @@ void Multi::Clock() {
       }
 
       if (
-        // Always output reset pulse on start, regardless of bar setting
-        post_offset_tick_counter() == 0 ||
+        // Always output reset pulse on tick 0, regardless of bar setting
+        tick_counter() == 0 ||
         (
           settings_.clock_bar_duration <= kMaxBarDuration &&
-          modulo(post_offset_tick_counter(), settings_.clock_bar_duration * 24) == 0
+          modulo(tick_counter(), settings_.clock_bar_duration * 24) == 0
         )
       ) {
         reset_pulse_counter_ = settings_.nudge_first_tick ? 9 : 81;
       }
     }
-  }
-
-  ++clock_input_prescaler_;
-  if (clock_input_prescaler_ >= settings_.clock_input_division) {
-    clock_input_prescaler_ = 0;
   }
   
   if (stop_count_down_) {
@@ -190,25 +188,10 @@ void Multi::Clock() {
 void Multi::SetSongPosition(uint16_t sixteenth_note_counter) {
   if (running_) return;
 
-  uint16_t raw_ticks = sixteenth_note_counter * (24 / 4);
-  raw_ticks -= 1; // Because Clock() will pre-increment, we want to be on the previous tick
-
-  // For clock div 4:
-  // -5: quot 1, rem 3, ticks -2, prescaler 3
-  // -3: quot 0, rem 1, ticks -1, prescaler 1
-  // -1: quot 0, rem 3, ticks -1, prescaler 3
-  // +0: quot 0, rem 0, ticks 0, prescaler 0
-  // +2: quot 0, rem 2, ticks 0, prescaler 2
-  // +4: quot 1, rem 0, ticks 1, prescaler 0
-  // +5: quot 1, rem 1, ticks 1, prescaler 1
+  clock_input_ticks_ = sixteenth_note_counter * (24 / 4);
+  clock_input_ticks_ -= 1; // Because Clock() will pre-increment, we want to be on the previous tick
   
-  pre_offset_tick_counter_ = divide_floor(raw_ticks, settings_.clock_input_division);
-  // TODO prescaler phase may depend on offset?? NB: offset is post division
-  // another issue: real time clock div changes not respected
-  // one overall solution: track input ticks, apply div/offset in real time
-  clock_input_prescaler_ = modulo(raw_ticks, settings_.clock_input_division);
-  
-  master_lfo_tick_counter_ = post_offset_tick_counter();
+  master_lfo_tick_counter_ = tick_counter();
   master_lfo_.SetPhase(modulo(master_lfo_tick_counter_, 1 << kMasterLFOPeriodTicksBits));
 
   ClockLFOs(true);

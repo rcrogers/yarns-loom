@@ -348,9 +348,9 @@ void Part::Reset() {
 }
 
 void Part::Clock() { // From Multi::ClockFast
-  bool new_step = modulo(multi.post_offset_tick_counter(), PPQN()) == 0;
+  bool new_step = modulo(multi.tick_counter(), PPQN()) == 0;
   if (new_step) {
-    step_counter_ = ticks_to_steps(multi.post_offset_tick_counter());
+    step_counter_ = ticks_to_steps(multi.tick_counter());
 
     // Reset sequencer-driven arpeggiator (step or loop), if needed
     //
@@ -429,7 +429,7 @@ void Part::ClockStepGateEndings() {
 void Part::SetSongPosition() {
   arpeggiator_.Reset();
 
-  int32_t ticks = multi.post_offset_tick_counter();
+  int32_t ticks = multi.tick_counter();
   if (ticks < 0) return;
 
   if (!doing_stepped_stuff()) return; // TODO looper-controlled arp may need advance

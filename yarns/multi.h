@@ -466,8 +466,9 @@ class Multi {
   
   inline Layout layout() const { return static_cast<Layout>(settings_.layout); }
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
-  inline int32_t post_offset_tick_counter() const {
-    return pre_offset_tick_counter_ + settings_.clock_offset;
+  // After applying clock input division, then clock offset
+  inline int32_t tick_counter() const {
+    return (clock_input_ticks_ / settings_.clock_input_division) + settings_.clock_offset;
   }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
   // NB: meaningless when external clocked!
@@ -479,7 +480,7 @@ class Multi {
   inline uint8_t recording_part() const { return recording_part_; }
   inline bool clock() const {
     uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
-    uint16_t ticks_mod_output_div = modulo(post_offset_tick_counter(), output_division);
+    uint16_t ticks_mod_output_div = modulo(tick_counter(), output_division);
     return ticks_mod_output_div <= (output_division >> 1) && \
         (!settings_.nudge_first_tick || \
           settings_.clock_bar_duration == 0 || \
@@ -611,8 +612,8 @@ class Multi {
   // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
   int16_t swing_predelay_[12];
   
-  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 259 days -- acceptable
-  uint32_t pre_offset_tick_counter_;
+  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 517 days
+  uint32_t clock_input_ticks_;
 
   // The master LFO sits between the clock and the part-specific synced LFOs.
   // While the clock is running, the master LFO syncs to the clock's phase/freq,
@@ -622,7 +623,6 @@ class Multi {
   // Roughly 1:1 with tick_counter_, but can free-run without the clock
   int32_t master_lfo_tick_counter_;
 
-  uint8_t clock_input_prescaler_;
   uint8_t stop_count_down_;
   
   uint16_t reset_pulse_counter_;
