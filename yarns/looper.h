@@ -115,6 +115,7 @@ class Deck {
 
   void RemoveOldestNote();
   void RemoveNewestNote();
+  void Advance(uint16_t new_pos, bool play);
   inline void AdvanceToPresent(bool play) {
     if (!needs_advance_) { return; }
     uint16_t new_pos = lfo_.GetPhase() >> 16;
@@ -140,7 +141,6 @@ class Deck {
   inline uint8_t index_mod(int8_t i) const {
     return stmlib::modulo(i, kMaxNotes);
   }
-  void Advance(uint16_t new_pos, bool play);
   bool Passed(uint16_t target, uint16_t before, uint16_t after) const;
   void LinkOn(uint8_t index);
   void LinkOff(uint8_t index);
