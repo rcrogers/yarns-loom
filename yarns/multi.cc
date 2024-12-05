@@ -71,8 +71,6 @@ void Multi::PrintDebugByte(uint8_t byte) {
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
 
-  SetSongPosition(0);
-  
   fill(
       &settings_.custom_pitch_table[0],
       &settings_.custom_pitch_table[12],
@@ -113,6 +111,10 @@ void Multi::Init(bool reset_calibration) {
   settings_.control_change_mode = CONTROL_CHANGE_MODE_ABSOLUTE;
   settings_.clock_offset = 0;
 
+  // TODO try init clock_input_ticks_ etc instead, see where dev does it
+  // update -- dev does not init tick_counter_
+  SetSongPosition(0);
+
   // A test sequence...
   // seq->num_steps = 4;
   // seq->step[0].data[0] = 48;
@@ -138,7 +140,7 @@ void Multi::Clock() {
   
   // Pre-increment so that the tick count will stay valid until the next Clock()
   clock_input_ticks_++;
-  // TODO this may need to take offset into account?
+  // clock_offset does not impact whether there is a new tick
   if (clock_input_ticks_ % settings_.clock_input_division == 0) {
     midi_handler.OnClock();
 
@@ -197,7 +199,7 @@ void Multi::SetSongPosition(uint16_t sixteenth_note_counter) {
   ClockLFOs(true);
   // wait, they will get another ClockLFOs right after this (when the master LFO fires), is that good?
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    part_[p].SetSongPosition();
+    part_[p].AdvanceArpForSongPosition();
   }
 }
 

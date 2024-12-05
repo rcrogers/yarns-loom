@@ -644,7 +644,7 @@ class Part {
   SequencerArpeggiatorResult BuildNextStepResult(uint32_t step_counter) const;
   void ClockStepGateEndings();
   void Start();
-  void SetSongPosition();
+  void AdvanceArpForSongPosition();
   inline uint32_t ticks_to_steps(int32_t ticks) {
     return seq_.step_offset + ticks / PPQN();
   }

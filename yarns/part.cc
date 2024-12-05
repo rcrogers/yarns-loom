@@ -426,21 +426,36 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-void Part::SetSongPosition() {
+void Part::AdvanceArpForSongPosition() {
+  if (midi_.play_mode != PLAY_MODE_ARPEGGIATOR) return;
+
   arpeggiator_.Reset();
 
   int32_t ticks = multi.tick_counter();
+  // We can't generally predict an arp state before 0
   if (ticks < 0) return;
 
-  if (!doing_stepped_stuff()) return; // TODO looper-controlled arp may need advance
-
-  uint16_t last_step_triggered = ticks / PPQN();
-  uint16_t arp_reset_steps = steps_per_arp_reset();
-  // Ticks may be negative, but steps only happen from 0 on
-  for (uint32_t step_counter = 0; step_counter <= last_step_triggered; step_counter++) {
-    if (arp_reset_steps && step_counter % arp_reset_steps == 0) arpeggiator_.Reset();
-    SequencerArpeggiatorResult result = BuildNextStepResult(step_counter);
-    arpeggiator_ = result.arpeggiator;
+  if (looper_in_use()) {
+    uint16_t ticks_per_cycle = looper_.period_ticks();
+    div_t cycles = std::div(static_cast<uint32_t>(ticks), ticks_per_cycle);
+    for (uint16_t i = 0; i < cycles.quot; i++) {
+      looper_.Advance(0, false);
+    }
+    if (cycles.rem) {
+      looper_.Advance((UINT16_MAX / ticks_per_cycle) * cycles.rem, false);
+    }
+    // TODO BuildNextArpeggiatorResult via Advance
+    // TODO audit looper phase offset
+    // TODO handle resets
+  } else {
+    uint16_t last_step_triggered = ticks / PPQN();
+    uint16_t arp_reset_steps = steps_per_arp_reset();
+    // Ticks may be negative, but steps only happen from 0 on
+    for (uint16_t step = 0; step <= last_step_triggered; step++) {
+      if (arp_reset_steps && step % arp_reset_steps == 0) arpeggiator_.Reset();
+      SequencerArpeggiatorResult result = BuildNextStepResult(step);
+      arpeggiator_ = result.arpeggiator;
+    }
   }
 }
 
