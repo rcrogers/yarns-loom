@@ -291,7 +291,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - [Implementation Chart](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 
 ### Clocking
-- Added a variety of integer ratios for `O/` and `C/`, as well as for `LFO RATE` when clock-synced
+- Added a variety of integer ratios for `OUTPUT CLK RATIO` and `CLK RATIO`, as well as for `LFO RATE` when clock-synced
   - Includes 1/8, 3/7, 2/3, 6/5, 4/3, and more
 - Sequencers' phases are based on a master clock, to allow returning to predictable phase relationships between sequences even after a stint in disparate time signatures
 - An explicit clock start (from panel switch or MIDI) can supersede an implicit clock start (from keyboard)
