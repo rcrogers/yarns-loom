@@ -648,11 +648,14 @@ class Part {
   inline uint32_t ticks_to_steps(int32_t ticks) {
     return seq_.step_offset + ticks / PPQN();
   }
+  inline int8_t sequence_repeats_per_arp_reset() const {
+    int8_t n = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
+    if (n <= 0) return 0;
+    return n;
+  }
   inline uint16_t steps_per_arp_reset() const {
-    int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
-    if (sequence_repeats_per_arp_reset <= 0) return 0;
     uint8_t steps_per_sequence_repeat = looped() ? (1 << seq_.loop_length) : seq_.num_steps;
-    return sequence_repeats_per_arp_reset * steps_per_sequence_repeat;
+    return sequence_repeats_per_arp_reset() * steps_per_sequence_repeat;
   }
   void StopRecording();
   void StartRecording();
@@ -733,6 +736,7 @@ class Part {
       voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_SILENT;
   }
 
+  void AdvanceArpForLooperNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity);
   void LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity);
   void LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch);
   void LooperRecordNoteOn(uint8_t pressed_key_index);
