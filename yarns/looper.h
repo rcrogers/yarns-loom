@@ -38,6 +38,8 @@ namespace yarns {
 
 class Part;
 struct PackedPart;
+typedef void (Part::*NoteOnFn)(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity);
+typedef void (Part::*NoteOffFn)(uint8_t looper_note_index, uint8_t pitch);
 
 namespace looper {
 
@@ -95,7 +97,7 @@ class Deck {
   }
   uint16_t period_ticks() const;
   uint32_t lfo_note_phase() const;
-  uint32_t ComputeTargetPhase(int32_t tick_counter) const;
+  uint32_t ComputeTargetPhaseWithOffset(int32_t tick_counter) const;
   void SetTargetPhase(uint32_t phase);
   inline void Refresh() {
     lfo_.Refresh();
@@ -115,11 +117,11 @@ class Deck {
 
   void RemoveOldestNote();
   void RemoveNewestNote();
-  void Advance(uint16_t new_pos, bool play);
-  inline void AdvanceToPresent(bool play) {
+  void Advance(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn);
+  inline void AdvanceToPresent(NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
     if (!needs_advance_) { return; }
     uint16_t new_pos = lfo_.GetPhase() >> 16;
-    Advance(new_pos, play);
+    Advance(new_pos, note_on_fn, note_off_fn);
   }
   uint8_t RecordNoteOn(uint8_t pitch, uint8_t velocity);
   bool RecordNoteOff(uint8_t index);

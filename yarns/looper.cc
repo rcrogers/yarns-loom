@@ -72,7 +72,7 @@ void Deck::SetPhase(uint32_t phase) {
     // preemptively update it
     lfo_.SetPhaseIncrement(multi.phase_increment_for_tick_at_tempo() / period_ticks());
   }
-  Advance(phase >> 16, false);
+  Advance(phase >> 16, NULL, NULL);
 }
 
 void Deck::Unpack(PackedPart& storage) {
@@ -90,9 +90,9 @@ void Deck::Unpack(PackedPart& storage) {
     note.velocity = packed_note.velocity;
 
     if (ordinal < size_) {
-      Advance(note.on_pos, false);
+      Advance(note.on_pos, NULL, NULL);
       LinkOn(index);
-      Advance(note.off_pos, false);
+      Advance(note.off_pos, NULL, NULL);
       LinkOff(index);
     }
   }
@@ -121,7 +121,7 @@ uint32_t Deck::lfo_note_phase() const {
   return lfo_.GetPhase() << part_->sequencer_settings().loop_length;
 }
 
-uint32_t Deck::ComputeTargetPhase(int32_t tick_counter) const {
+uint32_t Deck::ComputeTargetPhaseWithOffset(int32_t tick_counter) const {
   return lfo_.ComputeTargetPhase(tick_counter, period_ticks(), pos_offset << 16);
 }
 
@@ -154,7 +154,7 @@ uint8_t Deck::PeekNextOff() const {
   return next_link_[head_.off].off;
 }
 
-void Deck::Advance(uint16_t new_pos, bool play) {
+void Deck::Advance(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
   uint8_t seen_index;
   uint8_t next_index;
 
@@ -173,8 +173,8 @@ void Deck::Advance(uint16_t new_pos, bool play) {
     }
     head_.off = next_index;
 
-    if (play) {
-      part_->LooperPlayNoteOff(next_index, next_note.pitch);
+    if (note_off_fn) {
+      (part_->*note_off_fn)(next_index, next_note.pitch);
     }
   }
 
@@ -197,11 +197,12 @@ void Deck::Advance(uint16_t new_pos, bool play) {
       // If the next 'on' note doesn't yet have an off link, it's still held,
       // and has been for an entire loop
       RecordNoteOff(next_index);
+      // TODO what if shouldn't play here?
       part_->LooperPlayNoteOff(next_index, next_note.pitch);
     }
 
-    if (play) {
-      part_->LooperPlayNoteOn(next_index, next_note.pitch, next_note.velocity);
+    if (note_on_fn) {
+      (part_->*note_on_fn)(next_index, next_note.pitch, next_note.velocity);
     }
   }
 

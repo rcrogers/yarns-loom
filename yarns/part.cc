@@ -436,21 +436,24 @@ void Part::AdvanceArpForSongPosition() {
   if (ticks < 0) return;
 
   if (looper_in_use()) {
+    // First, move to the looper's start position
+    looper_.Advance(looper_.ComputeTargetPhaseWithOffset(0), NULL, NULL);
+
     uint16_t ticks_per_cycle = looper_.period_ticks();
     div_t cycles = std::div(static_cast<uint32_t>(ticks), ticks_per_cycle);
-    for (uint16_t i = 0; i < cycles.quot; i++) {
-      looper_.Advance(0, false);
+    for (uint16_t i = 0; i <= cycles.quot; i++) {
+      if (i % sequence_repeats_per_arp_reset() == 0) arpeggiator_.Reset();
+
+      // If we're handling a zero remainder, don't try to advance to 0
+      if (i == cycles.quot and !cycles.rem) continue;
+
+      uint16_t raw_phase = i < cycles.quot ? 0 : ((UINT16_MAX / ticks_per_cycle) * cycles.rem);
+      uint16_t phase = looper_.ComputeTargetPhaseWithOffset(raw_phase);
+      looper_.Advance(phase, &Part::AdvanceArpForLooperNoteOn, NULL);
     }
-    if (cycles.rem) {
-      looper_.Advance((UINT16_MAX / ticks_per_cycle) * cycles.rem, false);
-    }
-    // TODO BuildNextArpeggiatorResult via Advance
-    // TODO audit looper phase offset
-    // TODO handle resets
   } else {
     uint16_t last_step_triggered = ticks / PPQN();
     uint16_t arp_reset_steps = steps_per_arp_reset();
-    // Ticks may be negative, but steps only happen from 0 on
     for (uint16_t step = 0; step <= last_step_triggered; step++) {
       if (arp_reset_steps && step % arp_reset_steps == 0) arpeggiator_.Reset();
       SequencerArpeggiatorResult result = BuildNextStepResult(step);
@@ -626,6 +629,12 @@ void Part::RecordStep(const SequencerStep& step) {
   if (seq_rec_step_ >= last_step) {
     seq_rec_step_ = 0;
   }
+}
+
+void Part::AdvanceArpForLooperNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {
+  SequencerStep step = SequencerStep(pitch, velocity);
+  SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(0, step);
+  arpeggiator_ = result.arpeggiator;
 }
 
 void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {

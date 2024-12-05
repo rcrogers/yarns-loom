@@ -292,7 +292,7 @@ void Multi::ClockLFOs(bool force_phase) {
     Part& part = part_[p];
 
     looper::Deck &looper = part_[p].mutable_looper();
-    uint32_t looper_target_phase = looper.ComputeTargetPhase(master_lfo_tick_counter_);
+    uint32_t looper_target_phase = looper.ComputeTargetPhaseWithOffset(master_lfo_tick_counter_);
     if (force_phase) {
       looper.SetPhase(looper_target_phase);
     } else {
