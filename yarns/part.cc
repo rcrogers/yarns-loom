@@ -430,11 +430,7 @@ void Part::AdvanceArpForSongPosition() {
   if (midi_.play_mode != PLAY_MODE_ARPEGGIATOR) return;
 
   arpeggiator_.Reset();
-
   int32_t ticks = multi.tick_counter();
-  // We can't generally predict an arp state before 0
-  if (ticks < 0) return;
-
   if (looper_in_use()) {
     // First, move to the looper's start position
     looper_.Advance(looper_.ComputeTargetPhaseWithOffset(0), NULL, NULL);
@@ -449,11 +445,12 @@ void Part::AdvanceArpForSongPosition() {
 
       uint16_t raw_phase = i < cycles.quot ? 0 : ((UINT16_MAX / ticks_per_cycle) * cycles.rem);
       uint16_t phase = looper_.ComputeTargetPhaseWithOffset(raw_phase);
-      looper_.Advance(phase, &Part::AdvanceArpForLooperNoteOn, NULL);
+      looper_.Advance(phase, &Part::AdvanceArpForLooperNoteOnWithoutReturn, NULL);
     }
   } else {
-    uint16_t last_step_triggered = ticks / PPQN();
+    int16_t last_step_triggered = seq_.step_offset + DIV_FLOOR(ticks, PPQN());
     uint16_t arp_reset_steps = steps_per_arp_reset();
+    // Loop will skip if the last step triggered is less than 0 -- can't predict arp states before 0
     for (uint16_t step = 0; step <= last_step_triggered; step++) {
       if (arp_reset_steps && step % arp_reset_steps == 0) arpeggiator_.Reset();
       SequencerArpeggiatorResult result = BuildNextStepResult(step);
@@ -631,12 +628,6 @@ void Part::RecordStep(const SequencerStep& step) {
   }
 }
 
-void Part::AdvanceArpForLooperNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {
-  SequencerStep step = SequencerStep(pitch, velocity);
-  SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(0, step);
-  arpeggiator_ = result.arpeggiator;
-}
-
 void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {
   if (!looper_in_use()) return;
   uint8_t generated_note_index = GeneratedNoteOn(pitch, velocity);
@@ -645,10 +636,7 @@ void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t ve
   pitch = ApplySequencerInputResponse(pitch);
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
     // Advance arp
-    SequencerStep step = SequencerStep(pitch, velocity);
-    // NB: since this path implies seq_driven_arp, there is no arp pattern,
-    // and step_counter_ doesn't matter
-    SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(0, step);
+    SequencerArpeggiatorResult result = AdvanceArpForLooperNoteOn(pitch, velocity);
     arpeggiator_ = result.arpeggiator;
     pitch = result.note.note();
     if (result.note.has_note()) {

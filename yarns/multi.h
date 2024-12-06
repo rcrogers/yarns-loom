@@ -447,9 +447,10 @@ class Multi {
       --internal_clock_ticks_;
     }
 
+    bool started = tick_counter() >= 0;
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       if (running()) {
-        bool play = part_[p].looper_in_use();
+        bool play = started && part_[p].looper_in_use();
         part_[p].mutable_looper().AdvanceToPresent(
           play ? &Part::LooperPlayNoteOn : NULL,
           play ? &Part::LooperPlayNoteOff : NULL
@@ -472,7 +473,7 @@ class Multi {
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
   // After applying clock input division, then clock offset
   inline int32_t tick_counter() const {
-    return (clock_input_ticks_ / settings_.clock_input_division) + settings_.clock_offset;
+    return DIV_FLOOR(clock_input_ticks_, settings_.clock_input_division) + settings_.clock_offset;
   }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
   // NB: meaningless when external clocked!
@@ -616,8 +617,8 @@ class Multi {
   // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
   int16_t swing_predelay_[12];
   
-  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 517 days
-  uint32_t clock_input_ticks_;
+  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 259 days
+  int32_t clock_input_ticks_;
 
   // The master LFO sits between the clock and the part-specific synced LFOs.
   // While the clock is running, the master LFO syncs to the clock's phase/freq,

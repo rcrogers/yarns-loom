@@ -736,7 +736,17 @@ class Part {
       voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_SILENT;
   }
 
-  void AdvanceArpForLooperNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity);
+  inline SequencerArpeggiatorResult AdvanceArpForLooperNoteOn(uint8_t pitch, uint8_t velocity) {
+    // NB: since this path implies seq_driven_arp, there is no arp pattern,
+    // and pattern_step_counter doesn't matter
+    SequencerStep step = SequencerStep(pitch, velocity);
+    SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(0, step);
+    arpeggiator_ = result.arpeggiator;
+    return result;
+  }
+  inline void AdvanceArpForLooperNoteOnWithoutReturn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {
+    AdvanceArpForLooperNoteOn(pitch, velocity);
+  }
   void LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity);
   void LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch);
   void LooperRecordNoteOn(uint8_t pressed_key_index);
