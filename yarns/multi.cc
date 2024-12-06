@@ -144,13 +144,15 @@ void Multi::Clock() {
   if (clock_input_ticks_ % settings_.clock_input_division == 0) {
     midi_handler.OnClock();
 
+    int32_t ticks = tick_counter();
+
     // Sync LFOs
     // The master LFO runs at a fraction of the clock frequency, which makes for
     // less jitter than 1-cycle-per-tick
-    master_lfo_.Tap(tick_counter(), 1 << kMasterLFOPeriodTicksBits);
+    master_lfo_.Tap(ticks, 1 << kMasterLFOPeriodTicksBits);
     
-    if (tick_counter() >= 0) {
-      uint8_t swing_counter = modulo(tick_counter(), 12);
+    if (ticks >= 0) {
+      uint8_t swing_counter = modulo(ticks, 12);
       if (internal_clock()) {
         swing_predelay_[swing_counter] = 0;
       } else {
@@ -170,7 +172,7 @@ void Multi::Clock() {
         tick_counter() == 0 ||
         (
           settings_.clock_bar_duration <= kMaxBarDuration &&
-          modulo(tick_counter(), settings_.clock_bar_duration * 24) == 0
+          modulo(ticks, settings_.clock_bar_duration * 24) == 0
         )
       ) {
         reset_pulse_counter_ = settings_.nudge_first_tick ? 9 : 81;
