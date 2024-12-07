@@ -426,7 +426,7 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-void Part::AdvanceArpForSongPosition() {
+void Part::FastForwardArpForSongPosition() {
   if (midi_.play_mode != PLAY_MODE_ARPEGGIATOR) return;
 
   arpeggiator_.Reset();
