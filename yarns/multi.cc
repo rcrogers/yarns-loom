@@ -201,7 +201,7 @@ void Multi::SetSongPosition(uint16_t sixteenth_note_counter) {
   ClockLFOs(true);
   // wait, they will get another ClockLFOs right after this (when the master LFO fires), is that good?
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    part_[p].AdvanceArpForSongPosition();
+    part_[p].FastForwardArpForSongPosition();
   }
 }
 
