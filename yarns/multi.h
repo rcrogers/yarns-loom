@@ -484,6 +484,7 @@ class Multi {
   inline bool recording() const { return recording_; }
   inline uint8_t recording_part() const { return recording_part_; }
   inline bool clock() const {
+    if (!running_) return false;
     uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
     int32_t ticks = running_ ? tick_counter() : backup_clock_lfo_ticks_;
     uint16_t ticks_mod_output_div = modulo(ticks, output_division);
