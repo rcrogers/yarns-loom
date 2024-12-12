@@ -39,7 +39,7 @@ namespace looper {
 void Deck::Init(Part* part) {
   part_ = part;
   RemoveAll();
-  SetPhase(0);
+  SetPhase(ComputeTargetPhaseWithOffset(0));
 }
 
 void Deck::RemoveAll() {

@@ -478,14 +478,15 @@ class Multi {
   inline uint8_t tempo() const { return settings_.clock_tempo; }
   // NB: meaningless when external clocked!
   inline uint32_t phase_increment_for_tick_at_tempo() const {
-    return settings_.clock_tempo * kTempoToTickPhaseIncrement;
+    return (settings_.clock_tempo * kTempoToTickPhaseIncrement) / settings_.clock_input_division;
   }
   inline bool running() const { return running_; }
   inline bool recording() const { return recording_; }
   inline uint8_t recording_part() const { return recording_part_; }
   inline bool clock() const {
     uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
-    uint16_t ticks_mod_output_div = modulo(tick_counter(), output_division);
+    int32_t ticks = running_ ? tick_counter() : backup_clock_lfo_ticks_;
+    uint16_t ticks_mod_output_div = modulo(ticks, output_division);
     return ticks_mod_output_div <= (output_division >> 1) && \
         (!settings_.nudge_first_tick || \
           settings_.clock_bar_duration == 0 || \
@@ -617,16 +618,16 @@ class Multi {
   // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
   int16_t swing_predelay_[12];
   
-  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 259 days
+  // Input ticks (without division/offset) since Start. At 240 BPM * 24 PPQN =
+  // 96 Hz, this overflows after 259 days
   int32_t clock_input_ticks_;
 
-  // The master LFO sits between the clock and the part-specific synced LFOs.
-  // While the clock is running, the master LFO syncs to the clock's phase/freq,
-  // and while the clock is stopped, the master LFO continues free-running based
-  // on its last sync
-  FastSyncedLFO master_lfo_;
-  // Roughly 1:1 with tick_counter_, but can free-run without the clock
-  int32_t master_lfo_tick_counter_;
+  // While the clock is running, the backup LFO syncs to the clock's phase/freq,
+  // and while the clock is stopped, the backup LFO continues free-running based
+  // on its last sync, to provide a tick counter for looper/modulation LFOs
+  FastSyncedLFO backup_clock_lfo_;
+  // 1:1 with divided ticks, but can free-run without the clock
+  int32_t backup_clock_lfo_ticks_;
 
   uint8_t stop_count_down_;
   
