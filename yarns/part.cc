@@ -432,19 +432,19 @@ void Part::FastForwardArpForSongPosition() {
   arpeggiator_.Reset();
   int32_t ticks = multi.tick_counter();
   if (looper_in_use()) {
+    if (ticks < 0) return;
+
     // First, move to the looper's start position
     looper_.Advance(looper_.ComputeTargetPhaseWithOffset(0), NULL, NULL);
 
-    uint16_t ticks_per_cycle = looper_.period_ticks();
-    div_t cycles = std::div(static_cast<uint32_t>(ticks), ticks_per_cycle);
+    div_t cycles = std::div(static_cast<uint32_t>(ticks), looper_.period_ticks());
     for (uint16_t i = 0; i <= cycles.quot; i++) {
       if (i % sequence_repeats_per_arp_reset() == 0) arpeggiator_.Reset();
 
       // If we're handling a zero remainder, don't try to advance to 0
       if (i == cycles.quot and !cycles.rem) continue;
 
-      uint16_t raw_phase = i < cycles.quot ? 0 : ((UINT16_MAX / ticks_per_cycle) * cycles.rem);
-      uint16_t phase = looper_.ComputeTargetPhaseWithOffset(raw_phase);
+      uint32_t phase = looper_.ComputeTargetPhaseWithOffset(cycles.quot ? 0 : cycles.rem);
       looper_.Advance(phase, &Part::AdvanceArpForLooperNoteOnWithoutReturn, NULL);
     }
   } else {
