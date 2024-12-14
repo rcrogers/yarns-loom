@@ -72,7 +72,7 @@ void Deck::SetPhase(uint32_t phase) {
     // preemptively update it
     lfo_.SetPhaseIncrement(multi.phase_increment_for_tick_at_tempo() / period_ticks());
   }
-  Advance(phase >> 16, NULL, NULL);
+  ProcessNotes(phase >> 16, NULL, NULL);
 }
 
 void Deck::Unpack(PackedPart& storage) {
@@ -90,9 +90,9 @@ void Deck::Unpack(PackedPart& storage) {
     note.velocity = packed_note.velocity;
 
     if (ordinal < size_) {
-      Advance(note.on_pos, NULL, NULL);
+      ProcessNotes(note.on_pos, NULL, NULL);
       LinkOn(index);
-      Advance(note.off_pos, NULL, NULL);
+      ProcessNotes(note.off_pos, NULL, NULL);
       LinkOff(index);
     }
   }
@@ -154,18 +154,17 @@ uint8_t Deck::PeekNextOff() const {
   return next_link_[head_.off].off;
 }
 
-void Deck::Advance(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
-  uint8_t seen_index;
-  uint8_t next_index;
+void Deck::ProcessNotes(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
+  uint8_t first_seen_index;
 
-  seen_index = looper::kNullIndex;
+  first_seen_index = looper::kNullIndex;
   while (true) {
-    next_index = PeekNextOff();
-    if (next_index == kNullIndex || next_index == seen_index) {
+    const uint8_t next_index = PeekNextOff();
+    if (next_index == kNullIndex || next_index == first_seen_index) {
       break;
     }
-    if (seen_index == kNullIndex) {
-      seen_index = next_index;
+    if (first_seen_index == kNullIndex) {
+      first_seen_index = next_index;
     }
     const Note& next_note = notes_[next_index];
     if (!Passed(next_note.off_pos, pos_, new_pos)) {
@@ -178,16 +177,16 @@ void Deck::Advance(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn)
     }
   }
 
-  seen_index = looper::kNullIndex;
+  first_seen_index = looper::kNullIndex;
   while (true) {
-    next_index = PeekNextOn();
-    if (next_index == kNullIndex || next_index == seen_index) {
+    const uint8_t next_index = PeekNextOn();
+    if (next_index == kNullIndex || next_index == first_seen_index) {
       break;
     }
-    if (seen_index == kNullIndex) {
-      seen_index = next_index;
+    if (first_seen_index == kNullIndex) {
+      first_seen_index = next_index;
     }
-    Note& next_note = notes_[next_index];
+    const Note& next_note = notes_[next_index];
     if (!Passed(next_note.on_pos, pos_, new_pos)) {
       break;
     }
@@ -197,8 +196,14 @@ void Deck::Advance(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn)
       // If the next 'on' note doesn't yet have an off link, it's still held,
       // and has been for an entire loop
       RecordNoteOff(next_index);
-      // TODO what if shouldn't play here?
-      part_->LooperPlayNoteOff(next_index, next_note.pitch);
+      if (note_off_fn) {
+        (part_->*note_off_fn)(next_index, next_note.pitch);
+      }
+    }
+    uint16_t pos_since_on = new_pos - next_note.on_pos;
+    if (pos_since_on >= next_note.length()) {
+      // If we have gone further past the note's beginning than the note itself does, we already processed the note's Off, so we don't play the note at all
+      continue;
     }
 
     if (note_on_fn) {
@@ -245,9 +250,8 @@ bool Deck::RecordNoteOff(uint8_t index) {
 
 uint16_t Deck::NoteFractionCompleted(uint8_t index) const {
   const Note& note = notes_[index];
-  uint16_t completed = pos_ - note.on_pos;
-  uint16_t length = note.off_pos - 1 - note.on_pos;
-  return (static_cast<uint32_t>(completed) << 16) / length;
+  uint16_t pos_since_on = pos_ - note.on_pos;
+  return (static_cast<uint32_t>(pos_since_on) << 16) / note.length();
 }
 
 uint8_t Deck::NotePitch(uint8_t index) const {

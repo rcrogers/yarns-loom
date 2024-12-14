@@ -435,7 +435,7 @@ void Part::FastForwardArpForSongPosition() {
     if (ticks < 0) return;
 
     // First, move to the looper's start position
-    looper_.Advance(looper_.ComputeTargetPhaseWithOffset(0), NULL, NULL);
+    looper_.ProcessNotes(looper_.ComputeTargetPhaseWithOffset(0), NULL, NULL);
 
     div_t cycles = std::div(static_cast<uint32_t>(ticks), looper_.period_ticks());
     for (uint16_t i = 0; i <= cycles.quot; i++) {
@@ -445,7 +445,7 @@ void Part::FastForwardArpForSongPosition() {
       if (i == cycles.quot and !cycles.rem) continue;
 
       uint32_t phase = looper_.ComputeTargetPhaseWithOffset(cycles.quot ? 0 : cycles.rem);
-      looper_.Advance(phase, &Part::AdvanceArpForLooperNoteOnWithoutReturn, NULL);
+      looper_.ProcessNotes(phase >> 16, &Part::AdvanceArpForLooperNoteOnWithoutReturn, NULL);
     }
   } else {
     int16_t last_step_triggered = seq_.step_offset + DIV_FLOOR(ticks, PPQN());
