@@ -111,9 +111,7 @@ void Multi::Init(bool reset_calibration) {
   settings_.control_change_mode = CONTROL_CHANGE_MODE_ABSOLUTE;
   settings_.clock_offset = 0;
 
-  // TODO try init clock_input_ticks_ etc instead, see where dev does it
-  // update -- dev does not init tick_counter_
-  SetSongPosition(0);
+  clock_input_ticks_ = backup_clock_lfo_ticks_ = -1;
 
   // A test sequence...
   // seq->num_steps = 4;
@@ -230,10 +228,15 @@ void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
   midi_handler.OnStart();
 
   running_ = true;
+  stop_count_down_ = 0;
 
   if (reset_song_position) {
     SetSongPosition(0);
-    stop_count_down_ = 0;
+  } else {
+    // Looper/modulation LFOs may have progressed an arbitrary amount since the
+    // last Stop or SongPosition, so we resync them in anticipation of the first
+    // Clock (and assume that Refresh won't advance them before that)
+    ClockLFOs(true);
   }
   
   fill(&swing_predelay_[0], &swing_predelay_[12], -1);
@@ -363,6 +366,17 @@ void Multi::Refresh() {
     backup_clock_lfo_ticks_++;
     ClockLFOs(false);
   };
+}
+
+bool Multi::clock() const {
+  if (!running_) return false;
+  uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
+  int32_t ticks = running_ ? tick_counter() : backup_clock_lfo_ticks_;
+  uint16_t ticks_mod_output_div = modulo(ticks, output_division);
+  return ticks_mod_output_div <= (output_division >> 1) && \
+      (!settings_.nudge_first_tick || \
+        settings_.clock_bar_duration == 0 || \
+        !reset());
 }
 
 bool Multi::Set(uint8_t address, uint8_t value) {

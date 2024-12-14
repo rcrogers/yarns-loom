@@ -65,6 +65,9 @@ struct Note {
   uint16_t off_pos;
   uint8_t pitch;
   uint8_t velocity;
+  uint16_t length() const {
+    return off_pos - 1 - on_pos;
+  }
 };
 
 const uint8_t kBitsPos = 13;
@@ -117,11 +120,11 @@ class Deck {
 
   void RemoveOldestNote();
   void RemoveNewestNote();
-  void Advance(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn);
-  inline void AdvanceToPresent(NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
+  void ProcessNotes(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn);
+  inline void ProcessNotesUntilLFOPhase(NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
     if (!needs_advance_) { return; }
     uint16_t new_pos = lfo_.GetPhase() >> 16;
-    Advance(new_pos, note_on_fn, note_off_fn);
+    ProcessNotes(new_pos, note_on_fn, note_off_fn);
   }
   uint8_t RecordNoteOn(uint8_t pitch, uint8_t velocity);
   bool RecordNoteOff(uint8_t index);

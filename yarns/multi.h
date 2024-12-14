@@ -451,7 +451,7 @@ class Multi {
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       if (running()) {
         bool play = started && part_[p].looper_in_use();
-        part_[p].mutable_looper().AdvanceToPresent(
+        part_[p].mutable_looper().ProcessNotesUntilLFOPhase(
           play ? &Part::LooperPlayNoteOn : NULL,
           play ? &Part::LooperPlayNoteOff : NULL
         );
@@ -483,16 +483,7 @@ class Multi {
   inline bool running() const { return running_; }
   inline bool recording() const { return recording_; }
   inline uint8_t recording_part() const { return recording_part_; }
-  inline bool clock() const {
-    if (!running_) return false;
-    uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
-    int32_t ticks = running_ ? tick_counter() : backup_clock_lfo_ticks_;
-    uint16_t ticks_mod_output_div = modulo(ticks, output_division);
-    return ticks_mod_output_div <= (output_division >> 1) && \
-        (!settings_.nudge_first_tick || \
-          settings_.clock_bar_duration == 0 || \
-          !reset());
-  }
+  bool clock() const;
   inline bool reset() const {
     return reset_pulse_counter_ > 0;
   }
