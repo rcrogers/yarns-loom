@@ -203,6 +203,7 @@ void Deck::ProcessNotes(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_of
     uint16_t pos_since_on = new_pos - next_note.on_pos;
     if (pos_since_on >= next_note.length()) {
       // If we have gone further past the note's beginning than the note itself does, we already processed the note's Off, so we don't play the note at all
+      // TODO not good to skip side effects!  should instead do another immediate Off, or do Ons first, or process On/Off in one strictly sequential pass
       continue;
     }
 
