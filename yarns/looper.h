@@ -173,9 +173,7 @@ class Deck {
     Note& curr_note = notes_[curr.note_index];
     // curr.on ? (curr_note.after_on = next) : (curr_note.after_off = next);
     Event* next_field = curr.on ? &curr_note.after_on : &curr_note.after_off;
-    // TODO is this overwriting the contents of the event instead of the pointer?
-    // *next_field = next;
-    curr.on ? (curr_note.after_on = next) : (curr_note.after_off = next);
+    *next_field = next;
     return *next_field;
   }
 
