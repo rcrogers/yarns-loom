@@ -51,27 +51,23 @@ const uint8_t kMaxNotes = 30;
 STATIC_ASSERT(kMaxNotes < (1 << kBitsNoteIndex), bits);
 
 struct Event {
-  Event() {
-    note_index = kNullIndex;
-    on = false;
-  }
-  Event(uint8_t ni, bool o) {
-    note_index = note_index;
-    on = o;
-  }
-  bool operator == (Event e) {
-    return e.note_index == note_index && e.on == on;
-  }
+  // Event() {
+  //   note_index = kNullIndex;
+  //   on = false;
+  // }
+  // Event(uint8_t ni, bool o) {
+  //   note_index = note_index;
+  //   on = o;
+  // }
   uint8_t note_index;
   bool on;
-  bool exists() const { return note_index != kNullIndex; }
+  bool exists() { return note_index != kNullIndex; }
 };
 typedef Event NoteEvents[kMaxNotes];
 
 struct Note {
   Note() { }
   uint16_t on_pos, off_pos;
-  Event after_on, after_off;
   uint8_t pitch, velocity;
   uint16_t length() const {
     return off_pos - 1 - on_pos;
@@ -150,18 +146,30 @@ class Deck {
     return notes_[index];
   }
 
-  const Event& event_after(Event& e) const {
-    const Note& note = notes_[e.note_index];
-    return e.on ? note.after_on : note.after_off;
+  const NoteEvents& event_array_after(Event& e) const {
+    return e.on ? after_on_ : after_off_;
   }
 
-  // const Event& event_before(Event& target) const {
-  //   Event* current = &target;
-  //   while (true) {
-  //     Event* next = &const_cast<Event&>(event_after(*current));
-  //     if (next == &target) return *current;
-  //     current = next;
-  //   }
+  // NoteEvents& mutable_event_array_after(Event& e) {
+  //   return e.on ? event_after_on_for_note_ : event_after_off_for_note_;
+  // }
+
+  const Event& event_after(Event& e) const {
+    return event_array_after(e)[e.note_index];
+  }
+
+  const Event& event_before(Event& target) const {
+    const NoteEvents& events = event_array_after(target);
+    Event* current = &target;
+    while (true) {
+      Event* next = &const_cast<Event&>(event_after(*current));
+      if (next == &target) return *current;
+      current = next;
+    }
+  }
+
+  // Event& mutable_event_after(Event& e) {
+  //   return mutable_event_array_after(e)[e.note_index];
   // }
 
   const uint16_t event_pos(Event& e) const {
@@ -170,41 +178,9 @@ class Deck {
   }
 
   Event& Prepend(Event& curr, Event& next) {
-    Note& curr_note = notes_[curr.note_index];
-    // curr.on ? (curr_note.after_on = next) : (curr_note.after_off = next);
-    Event* next_field = curr.on ? &curr_note.after_on : &curr_note.after_off;
-    *next_field = next;
-    return *next_field;
-  }
-
-  // void RemoveEvent(Event& e) {
-  //   if (!e.exists()) return;
-  //   Event* before_on = &const_cast<Event&>(event_before(e));
-  //   *before_on = e;
-  //   // Prepend(*before_on, after_on);
-  //   if (latest_event_->note_index == target_index && latest_event_->on) {
-  //     latest_event_ = before_on;
-  //   }
-  // }
-
-  // void RemoveEvent(uint8_t target_index, bool on) {
-  void RemoveEvent(Event target) {
-    Event& after_target = const_cast<Event&>(event_after(target));
-    if (!after_target.exists()) return;
-
-    Event* search = &after_target;
-    while (true) {
-      Event* after_search = &const_cast<Event&>(event_after(*search));
-      if (*after_search == target) { // Search is prev
-        if (*latest_event_ptr_ == target) {
-          latest_event_ptr_ = search;
-        }
-        // TODO is this the right override?  not Prepend?
-        *search = after_target;
-        break;
-      }
-      search = after_search;
-    }    
+    Event* event_array = const_cast<NoteEvents&>(event_array_after(curr));
+    event_array[curr.note_index] = next;
+    return event_array[curr.note_index];
   }
 
   uint16_t pos_offset;
@@ -215,7 +191,7 @@ class Deck {
     return stmlib::modulo(i, kMaxNotes);
   }
   bool Passed(uint16_t target, uint16_t before, uint16_t after) const;
-  void AddEvent(Event e);
+  void AddEvent(Event& e);
   void RemoveNote(uint8_t index);
   void KillNote(uint8_t index);
 
@@ -225,7 +201,9 @@ class Deck {
   uint8_t oldest_index_;
   uint8_t size_;
   // Linked lists track current and upcoming notes
-  Event* latest_event_ptr_; // Points to the latest on/off
+  Event* latest_event_; // Points to the latest on/off
+  
+  NoteEvents after_on_, after_off_;
 
   // Phase tracking
   SyncedLFO<18, 11> lfo_; // Gentle sync
