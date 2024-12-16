@@ -50,32 +50,24 @@ const uint8_t kNullIndex = UINT8_MAX;
 const uint8_t kMaxNotes = 30;
 STATIC_ASSERT(kMaxNotes < (1 << kBitsNoteIndex), bits);
 
-struct Event {
-  // Event() {
-  //   note_index = kNullIndex;
-  //   on = false;
-  // }
-  // Event(uint8_t ni, bool o) {
-  //   note_index = note_index;
-  //   on = o;
-  // }
-  uint8_t note_index;
-  bool on;
-  bool exists() { return note_index != kNullIndex; }
+struct Link {
+  Link() {
+    on = off = kNullIndex;
+  }
+  // Note indexes
+  uint8_t on;
+  uint8_t off;
 };
-typedef Event NoteEvents[kMaxNotes];
 
 struct Note {
   Note() { }
-  uint16_t on_pos, off_pos;
-  uint8_t pitch, velocity;
+  uint16_t on_pos;
+  uint16_t off_pos;
+  uint8_t pitch;
+  uint8_t velocity;
   uint16_t length() const {
     return off_pos - 1 - on_pos;
   }
-  // Event after_on, after_off;
-  // Event& next_event_for(bool on_off) {
-  //   return on_off ? after_on : after_off;
-  // }
 };
 
 const uint8_t kBitsPos = 13;
@@ -136,7 +128,8 @@ class Deck {
   }
   uint8_t RecordNoteOn(uint8_t pitch, uint8_t velocity);
   bool RecordNoteOff(uint8_t index);
-  uint8_t PeekNextEvent(bool on) const;
+  uint8_t PeekNextOn() const;
+  uint8_t PeekNextOff() const;
 
   uint16_t NoteFractionCompleted(uint8_t index) const;
   uint8_t NotePitch(uint8_t index) const;
@@ -144,43 +137,6 @@ class Deck {
 
   inline const Note& note_at(uint8_t index) const {
     return notes_[index];
-  }
-
-  const NoteEvents& event_array_after(Event& e) const {
-    return e.on ? after_on_ : after_off_;
-  }
-
-  // NoteEvents& mutable_event_array_after(Event& e) {
-  //   return e.on ? event_after_on_for_note_ : event_after_off_for_note_;
-  // }
-
-  const Event& event_after(Event& e) const {
-    return event_array_after(e)[e.note_index];
-  }
-
-  const Event& event_before(Event& target) const {
-    const NoteEvents& events = event_array_after(target);
-    Event* current = &target;
-    while (true) {
-      Event* next = &const_cast<Event&>(event_after(*current));
-      if (next == &target) return *current;
-      current = next;
-    }
-  }
-
-  // Event& mutable_event_after(Event& e) {
-  //   return mutable_event_array_after(e)[e.note_index];
-  // }
-
-  const uint16_t event_pos(Event& e) const {
-    const Note& note = notes_[e.note_index];
-    return e.on ? note.on_pos : note.off_pos;
-  }
-
-  Event& Prepend(Event& curr, Event& next) {
-    Event* event_array = const_cast<NoteEvents&>(event_array_after(curr));
-    event_array[curr.note_index] = next;
-    return event_array[curr.note_index];
   }
 
   uint16_t pos_offset;
@@ -191,7 +147,8 @@ class Deck {
     return stmlib::modulo(i, kMaxNotes);
   }
   bool Passed(uint16_t target, uint16_t before, uint16_t after) const;
-  void AddEvent(Event& e);
+  void LinkOn(uint8_t index);
+  void LinkOff(uint8_t index);
   void RemoveNote(uint8_t index);
   void KillNote(uint8_t index);
 
@@ -201,9 +158,8 @@ class Deck {
   uint8_t oldest_index_;
   uint8_t size_;
   // Linked lists track current and upcoming notes
-  Event* latest_event_; // Points to the latest on/off
-  
-  NoteEvents after_on_, after_off_;
+  Link head_; // Points to the latest on/off
+  Link next_link_[kMaxNotes];
 
   // Phase tracking
   SyncedLFO<18, 11> lfo_; // Gentle sync
