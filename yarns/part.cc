@@ -662,7 +662,7 @@ void Part::LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch) {
   output_pitch_for_looper_note_[looper_note_index] = looper::kNullIndex;
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
     // Peek at next looper note
-    uint8_t next_on_index = looper_.PeekNextEvent(true);
+    uint8_t next_on_index = looper_.PeekNextOn();
     const looper::Note& next_on_note = looper_.note_at(next_on_index);
     SequencerStep next_step = SequencerStep(next_on_note.pitch, next_on_note.velocity);
     // Predicting whether the looper will have looped around by this next note

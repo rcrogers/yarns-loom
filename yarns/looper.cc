@@ -52,9 +52,20 @@ void Deck::RemoveAll() {
     &notes_[kMaxNotes],
     Note()
   );
-  latest_event_ptr_ = NULL;
+  latest_event_ = NULL;
   oldest_index_ = 0;
   size_ = 0;
+
+  std::fill(
+    &after_on_[0],
+    &after_on_[kMaxNotes],
+    Event()
+  );
+  std::fill(
+    &after_off_[0],
+    &after_off_[kMaxNotes],
+    Event()
+  );
 }
 
 void Deck::SetPhase(uint32_t phase) {
@@ -84,9 +95,9 @@ void Deck::Unpack(PackedPart& storage) {
 
     if (ordinal < size_) {
       ProcessNotes(note.on_pos, NULL, NULL);
-      AddEvent(Event(index, true));
+      AddEvent((Event){ index, true });
       ProcessNotes(note.off_pos, NULL, NULL);
-      AddEvent(Event(index, false));
+      AddEvent((Event){ index, false });
     }
   }
 }
@@ -134,34 +145,36 @@ void Deck::RemoveNewestNote() {
 }
 
 uint8_t Deck::PeekNextEvent(bool on) const {
-  Event* event = latest_event_ptr_;
+  Event* event = latest_event_;
   while (event) {
     event = &const_cast<Event&>(event_after(*event));
     if (event->on == on) return event->note_index;
-    if (event == latest_event_ptr_) break;
+    if (event == latest_event_) break;
   }
   return kNullIndex;
 }
 
 void Deck::ProcessNotes(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
-  if (!latest_event_ptr_) return; // No events
+  if (!latest_event_) return; // No events
   Event* first_seen_event_ptr = NULL;
   while (true) {
-    Event& event = const_cast<Event&>(event_after(*latest_event_ptr_));
+    Event& event = const_cast<Event&>(event_after(*latest_event_));
     if (&event == first_seen_event_ptr) break;
     if (!first_seen_event_ptr) first_seen_event_ptr = &event;
 
     uint8_t note_index = event.note_index;
     const Note& note = notes_[note_index];
     if (!Passed(event_pos(event), pos_, new_pos)) break;
-    latest_event_ptr_ = &event; // TODO maybe postpone?
+    latest_event_ = &event; // TODO maybe postpone?
 
     if (event.on) {
-      if (!notes_[note_index].after_off.exists())
+      if (!after_off_[note_index].exists())
         // If the next 'on' note doesn't yet have an off link, it's still held,
         // and has been for an entire loop
         RecordNoteOff(note_index); // TODO advance pos_ before doing this?
-        if (note_off_fn) (part_->*note_off_fn)(note_index, note.pitch);
+        if (note_off_fn) {
+          (part_->*note_off_fn)(note_index, note.pitch);
+        }
       }
       if (note_on_fn) (part_->*note_on_fn)(note_index, note.pitch, note.velocity);
     else {
@@ -179,13 +192,13 @@ uint8_t Deck::RecordNoteOn(uint8_t pitch, uint8_t velocity) {
   }
   uint8_t index = index_mod(oldest_index_ + size_);
 
-  AddEvent(Event(index, true));
+  AddEvent((Event){ index, true });
   Note& note = notes_[index];
   note.pitch = pitch;
   note.velocity = velocity;
   note.on_pos = pos_;
   note.off_pos = pos_;
-  note.after_off.note_index = kNullIndex;
+  after_off_[index].note_index = kNullIndex;
   size_++;
 
   return index;
@@ -195,13 +208,13 @@ uint8_t Deck::RecordNoteOn(uint8_t pitch, uint8_t velocity) {
 bool Deck::RecordNoteOff(uint8_t index) {
   if (
     // Note was already removed
-    !notes_[index].after_on.exists() ||
+    !after_on_[index].exists() ||
     // off link was already set by Advance
-    notes_[index].after_off.exists()
+    after_off_[index].exists()
   ) {
     return false;
   }
-  AddEvent(Event(index, false));
+  AddEvent((Event){ index, false });
   notes_[index].off_pos = pos_;
   return true;
 }
@@ -228,12 +241,12 @@ bool Deck::Passed(uint16_t target, uint16_t before, uint16_t after) const {
   }
 }
 
-void Deck::AddEvent(Event e) {
-  if (latest_event_ptr_ == NULL) {
-    latest_event_ptr_ = &Prepend(e, e);
+void Deck::AddEvent(Event& e) {
+  if (latest_event_ == NULL) {
+    latest_event_ = &Prepend(e, e);
   } else {
-    Prepend(e, const_cast<Event&>(event_after(*latest_event_ptr_)));
-    latest_event_ptr_ = &Prepend(*latest_event_ptr_, e);
+    Prepend(e, const_cast<Event&>(event_after(*latest_event_)));
+    latest_event_ = &Prepend(*latest_event_, e);
   }
 }
 
@@ -241,7 +254,7 @@ void Deck::KillNote(uint8_t target_index) {
   Note& target_note = notes_[target_index];
   if (
     // Note is being recorded
-    !notes_[target_index].after_off.exists() ||
+    !after_off_[target_index].exists() ||
     // Note is being played
     Passed(pos_, target_note.on_pos, target_note.off_pos)
   ) {
@@ -259,12 +272,71 @@ void Deck::RemoveNote(uint8_t target_index) {
 
   KillNote(target_index);
 
+  Event* before_on_for_target_note;
+  Event* before_off_for_target_note;
+  for (uint8_t i = 0; i < size_; ++i) {
+    uint8_t search_note_index = index_mod(oldest_index_ + i);
+    
+    Event& after_on_for_search_note = after_on_[search_note_index];
+    if (after_on_for_search_note.note_index == target_index) {
+      if (after_on_for_search_note.on) before_on_for_target_note = &after_on_for_search_note;
+      else before_off_for_target_note = &after_on_for_search_note;
+    }
+
+    Event& after_off_for_search_note = after_off_[search_note_index];
+    if (after_off_for_search_note.note_index == target_index) {
+      if (after_off_for_search_note.on) before_on_for_target_note = &after_off_for_search_note;
+      else before_off_for_target_note = &after_off_for_search_note;
+    }
+
+    // if (before_on && before_off) break;
+  }
+
+  // if (before_on_for_target_note) {
+  //   before_on_for_target_note = event_after(
+  // }
+
   size_--;
+  uint8_t search_prev_index;
+  uint8_t search_next_index;
 
-  RemoveEvent(Event(target_index, true));
-  RemoveEvent(Event(target_index, false));
+  search_prev_index = target_index;
+  while (true) {
+    search_next_index = next_link_[search_prev_index].on;
+    if (search_next_index == target_index) {
+      break;
+    }
+    search_prev_index = search_next_index;
+  }
+  next_link_[search_prev_index].on = next_link_[target_index].on;
+  if (target_index == search_prev_index) {
+    // If this was the last note
+    latest_event_.on = kNullIndex;
+  } else if (target_index == latest_event_.on) {
+    latest_event_.on = search_prev_index;
+  }
 
-  if (!size_) latest_event_ptr_ = NULL;
+  if (next_link_[target_index].off == kNullIndex) {
+    // Don't try to relink off
+    return;
+  }
+
+  search_prev_index = target_index;
+  while (true) {
+    search_next_index = next_link_[search_prev_index].off;
+    if (search_next_index == target_index) {
+      break;
+    }
+    search_prev_index = search_next_index;
+  }
+  next_link_[search_prev_index].off = next_link_[target_index].off;
+  next_link_[target_index].off = kNullIndex;
+  if (target_index == search_prev_index) {
+    // If this was the last note
+    latest_event_.off = kNullIndex;
+  } else if (target_index == latest_event_.off) {
+    latest_event_.off = search_prev_index;
+  }
 }
 
 } // namespace looper
