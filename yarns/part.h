@@ -870,7 +870,6 @@ class Part {
   inline bool recording() const { return seq_recording_; }
   inline bool overdubbing() const { return seq_overdubbing_; }
   inline uint8_t recording_step() const { return seq_rec_step_; }
-  // TODO this depends on step_counter_ state, does it matter for song pos?
   inline uint8_t playing_step() const { return step_counter_ % seq_.num_steps; }
   inline uint8_t num_steps() const { return seq_.num_steps; }
   inline void increment_recording_step_index(uint8_t n) {
