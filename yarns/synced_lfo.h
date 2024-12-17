@@ -44,7 +44,7 @@ enum LFOShape {
   LFO_SHAPE_LAST
 };
 
-template<uint8_t PHASE_ERR_SHIFT, uint8_t FREQ_ERR_SHIFT>
+template<uint8_t PHASE_ERR_DOWNSHIFT, uint8_t FREQ_ERR_DOWNSHIFT>
 class SyncedLFO {
  public:
 
@@ -92,7 +92,7 @@ class SyncedLFO {
     uint32_t target_increment = target_phase - previous_target_phase_;
     int32_t d_error = target_increment - (phase_ - previous_phase_);
     int32_t p_error = target_phase - phase_;
-    int32_t error = (p_error >> PHASE_ERR_SHIFT) + (d_error >> FREQ_ERR_SHIFT);
+    int32_t error = (p_error >> PHASE_ERR_DOWNSHIFT) + (d_error >> FREQ_ERR_DOWNSHIFT);
 
     phase_increment_ = SaturatingIncrement(phase_increment_, error);
 
