@@ -91,7 +91,7 @@ class Deck {
   void Init(Part* part);
 
   void RemoveAll();
-  void JumpToPhase(uint32_t phase);
+  void JumpToTick(int32_t tick_counter, NoteOnFn on_fn, NoteOffFn off_fn);
   void Unpack(PackedPart& storage);
   void Pack(PackedPart& storage) const;
 
@@ -101,7 +101,6 @@ class Deck {
   uint16_t period_ticks() const;
   uint32_t lfo_note_phase() const;
   void Clock(int32_t tick_counter);
-  uint32_t ComputeTargetPhaseWithOffset(int32_t tick_counter) const;
   inline void Refresh() {
     lfo_.Refresh();
     uint16_t new_phase = lfo_.GetPhase() >> 16;

@@ -38,7 +38,7 @@ namespace looper {
 void Deck::Init(Part* part) {
   part_ = part;
   RemoveAll();
-  JumpToPhase(ComputeTargetPhaseWithOffset(0));
+  JumpToTick(0, NULL, NULL);
 }
 
 void Deck::RemoveAll() {
@@ -63,9 +63,10 @@ void Deck::RemoveAll() {
   );
 }
 
-void Deck::JumpToPhase(uint32_t phase) {
+void Deck::JumpToTick(int32_t tick_counter, NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
+  uint32_t phase = lfo_.ComputeTargetPhase(tick_counter, period_ticks(), pos_offset << 16);
   lfo_.SetPhase(phase);
-  ProcessNotes(phase >> 16, NULL, NULL);
+  ProcessNotes(phase >> 16, note_on_fn, note_off_fn);
 }
 
 void Deck::Unpack(PackedPart& storage) {
@@ -118,10 +119,6 @@ void Deck::Clock(int32_t tick_counter) {
   lfo_.Tap(tick_counter, period_ticks(), pos_offset << 16);
 }
 
-uint32_t Deck::ComputeTargetPhaseWithOffset(int32_t tick_counter) const {
-  return lfo_.ComputeTargetPhase(tick_counter, period_ticks(), pos_offset << 16);
-}
-
 void Deck::RemoveOldestNote() {
   RemoveNote(oldest_index_);
   if (size_) {
@@ -156,15 +153,16 @@ void Deck::ProcessNotes(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_of
     const Note& on = notes_[on_index];
     const Note& off = notes_[off_index];
 
+    bool full_cycle = new_pos == pos_;
     bool can_on = (
       on_index != kNullIndex &&
       on_index != first_seen_on_index &&
-      Passed(on.on_pos, pos_, new_pos)
+      (full_cycle || Passed(on.on_pos, pos_, new_pos))
     );
     bool can_off = (
       off_index != kNullIndex &&
       off_index != first_seen_off_index &&
-      Passed(off.off_pos, pos_, new_pos)
+      (full_cycle || Passed(off.off_pos, pos_, new_pos))
     );
 
     if (can_on && (
