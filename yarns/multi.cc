@@ -229,7 +229,7 @@ void Multi::Start(bool started_by_keyboard) {
 
   ClockVoiceLFOs(ticks_for_lfo, true);
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    part_[p].CueActiveSequencer();
+    part_[p].CueSequencer();
   }
   
   fill(&swing_predelay_[0], &swing_predelay_[12], -1);
