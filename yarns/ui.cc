@@ -713,7 +713,8 @@ void Ui::OnSwitchPress(const Event& e) {
         }
       } else {
         if (!multi.running()) {
-          multi.Start(false, true);
+          multi.set_song_position_for_next_start(0);
+          multi.Start(false);
         } else {
           multi.Stop();
         }

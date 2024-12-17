@@ -91,7 +91,7 @@ class Deck {
   void Init(Part* part);
 
   void RemoveAll();
-  void SetPhase(uint32_t phase);
+  void JumpToPhase(uint32_t phase);
   void Unpack(PackedPart& storage);
   void Pack(PackedPart& storage) const;
 
@@ -100,8 +100,8 @@ class Deck {
   }
   uint16_t period_ticks() const;
   uint32_t lfo_note_phase() const;
+  void Clock(int32_t tick_counter);
   uint32_t ComputeTargetPhaseWithOffset(int32_t tick_counter) const;
-  void SetTargetPhase(uint32_t phase);
   inline void Refresh() {
     lfo_.Refresh();
     uint16_t new_phase = lfo_.GetPhase() >> 16;
@@ -125,6 +125,7 @@ class Deck {
     if (!needs_advance_) { return; }
     uint16_t new_pos = lfo_.GetPhase() >> 16;
     ProcessNotes(new_pos, note_on_fn, note_off_fn);
+    needs_advance_ = false;
   }
   uint8_t RecordNoteOn(uint8_t pitch, uint8_t velocity);
   bool RecordNoteOff(uint8_t index);
