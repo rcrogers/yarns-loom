@@ -426,7 +426,10 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-void Part::ApplySongPosition() {
+// Fast-forward the sequencer/arpeggiator state to the current song position. If
+// using the sequencer-driven arpeggiator, produces the cumulative arp state
+// based on any held keys
+void Part::CueActiveSequencer() {
   arpeggiator_.Reset();
   if (looper_in_use()) {
     // First, move to the looper's start position, without side effects

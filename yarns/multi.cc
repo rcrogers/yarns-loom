@@ -217,16 +217,19 @@ void Multi::Start(bool started_by_keyboard) {
   running_ = true;
   stop_count_down_ = 0;
 
-  clock_input_ticks_ = song_pos_for_next_start_ * (24 / 4);
-  clock_input_ticks_ -= 1; // Because Clock() will pre-increment, we want to be on the previous tick
-
+  // NB: we assume that set_next_clock_input_tick has already been called if
+  // needed, so clock_input_ticks_ is ready to use
   backup_clock_lfo_ticks_ = tick_counter();
-  int32_t ticks_for_lfo = tick_counter(1); // Undo pre-increment
+
+  // For LFO purposes, we want to be directly on the target phase, so we act as
+  // though we already received the next Clock tick
+  int32_t ticks_for_lfo = tick_counter(1);
+
   backup_clock_lfo_.SetPhase(modulo(ticks_for_lfo, 1 << kBackupClockLFOPeriodTicksBits));
 
   ClockVoiceLFOs(ticks_for_lfo, true);
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    part_[p].ApplySongPosition();
+    part_[p].CueActiveSequencer();
   }
   
   fill(&swing_predelay_[0], &swing_predelay_[12], -1);
@@ -245,6 +248,10 @@ void Multi::Stop() {
     part_[i].StopSequencerArpeggiatorNotes();
   }
   midi_handler.OnStop();
+
+  // NB: we don't alter clock_input_ticks_ here. It will be overwritten if
+  // either 1) we resume via a hard Start instead of a Continue or 2) we receive
+  // a SongPosition
 
   reset_pulse_counter_ = 0;
   stop_count_down_ = 0;

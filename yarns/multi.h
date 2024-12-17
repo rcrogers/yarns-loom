@@ -293,7 +293,7 @@ class Multi {
         !running() &&
         internal_clock() &&
         !settings_.clock_manual_start) {
-      set_song_position_for_next_start(0);
+      set_next_clock_input_tick(0);
       // Start the arpeggiators.
       Start(true);
     }
@@ -380,8 +380,12 @@ class Multi {
   }
   
   void Clock();
-  inline void set_song_position_for_next_start(uint16_t n) {
-    song_pos_for_next_start_ = n;
+  inline void set_next_clock_input_tick(uint16_t n) {
+    // next_clock_input_tick_for_start_ = n;
+
+    // We haven't actually received the target tick yet -- Clock() will
+    // pre-increment -- so the last Clock we received is one prior
+    clock_input_ticks_ = n - 1;
   }
   
   // A start initiated by a MIDI 0xfa event or the front panel start button will
@@ -413,7 +417,7 @@ class Multi {
     }
     if (!running() && internal_clock()) {
       // Start the arpeggiators.
-      set_song_position_for_next_start(0);
+      set_next_clock_input_tick(0);
       Start(true);
     }
   }
@@ -610,10 +614,11 @@ class Multi {
   // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
   int16_t swing_predelay_[12];
   
-  // Input ticks (without division/offset) since Start. At 240 BPM * 24 PPQN =
-  // 96 Hz, this overflows after 259 days
+  // The 0-based index of the last received Clock event, ignoring
+  // division/offset. Negative if we have not yet received a Clock. At 240 BPM *
+  // 24 PPQN = 96 Hz, this overflows after 259 days
   int32_t clock_input_ticks_;
-  uint16_t song_pos_for_next_start_; // Count of sixteenth notes, 14 bits max
+  // int32_t next_clock_input_tick_for_start_;
 
   // While the clock is running, the backup LFO syncs to the clock's phase/freq,
   // and while the clock is stopped, the backup LFO continues free-running based
