@@ -287,6 +287,10 @@ void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos
       (*(base_lfo + i))->SetPhaseIncrement(phase_increment);
     }
   } else { // Dephase
+    // If forcing phase, we assume base already had its phase forced as needed
+    //
+    // NB: base LFO's GetTargetPhase would give us a more accurate measure IFF
+    // base is synced, but we don't have a good way to determine that here
     uint32_t phase = (*base_lfo)->GetPhase();
     uint32_t phase_offset = (spread + 1) << (32 - 6);
     for (uint8_t i = 1; i < num_lfos; ++i) {
@@ -310,7 +314,12 @@ void Multi::ClockVoiceLFOs(int32_t ticks, bool force_phase) {
       part_lfos[v] = part.voice(v)->lfo(static_cast<LFORole>(0));
     }
     if (lfo_rate < 64) {
-      part_lfos[0]->Tap(ticks, lut_clock_ratio_ticks[(64 - lfo_rate - 1) >> 1]);
+      uint32_t phase = part_lfos[0]->ComputeTargetPhase(ticks, lut_clock_ratio_ticks[(64 - lfo_rate - 1) >> 1]);
+      if (force_phase) {
+        part_lfos[0]->SetPhase(phase);
+      } else {
+        part_lfos[0]->SetTargetPhase(phase);
+      }
     } else {
       part_lfos[0]->SetPhaseIncrement(lut_lfo_increments[lfo_rate - 64]);
     }
