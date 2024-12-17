@@ -293,8 +293,9 @@ class Multi {
         !running() &&
         internal_clock() &&
         !settings_.clock_manual_start) {
+      set_song_position_for_next_start(0);
       // Start the arpeggiators.
-      Start(true, true);
+      Start(true);
     }
     
     stop_count_down_ = 0;
@@ -379,7 +380,9 @@ class Multi {
   }
   
   void Clock();
-  void SetSongPosition(uint16_t ticks);
+  inline void set_song_position_for_next_start(uint16_t n) {
+    song_pos_for_next_start_ = n;
+  }
   
   // A start initiated by a MIDI 0xfa event or the front panel start button will
   // start the sequencers. A start initiated by the keyboard will not start
@@ -387,7 +390,7 @@ class Multi {
   // arpeggiator to be played without erasing a sequence.
   //
   // If already running, will not reset clock state
-  void Start(bool started_by_keyboard, bool reset_song_position);
+  void Start(bool started_by_keyboard);
   
   void Stop();
 
@@ -410,7 +413,8 @@ class Multi {
     }
     if (!running() && internal_clock()) {
       // Start the arpeggiators.
-      Start(true, true);
+      set_song_position_for_next_start(0);
+      Start(true);
     }
   }
   
@@ -434,7 +438,7 @@ class Multi {
   void AfterDeserialize();
   void ClockFast();
   void Refresh();
-  void ClockLFOs(bool force_phase);
+  void ClockVoiceLFOs(int32_t, bool);
   void RefreshInternalClock() {
     if (running() && internal_clock() && internal_clock_.Process()) {
       ++internal_clock_ticks_;
@@ -472,14 +476,10 @@ class Multi {
   inline Layout layout() const { return static_cast<Layout>(settings_.layout); }
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
   // After applying clock input division, then clock offset
-  inline int32_t tick_counter() const {
-    return DIV_FLOOR(clock_input_ticks_, settings_.clock_input_division) + settings_.clock_offset;
+  inline int32_t tick_counter(int8_t input_bias = 0) const {
+    return DIV_FLOOR(clock_input_ticks_ + input_bias, settings_.clock_input_division) + settings_.clock_offset;
   }
   inline uint8_t tempo() const { return settings_.clock_tempo; }
-  // NB: meaningless when external clocked!
-  inline uint32_t phase_increment_for_tick_at_tempo() const {
-    return (settings_.clock_tempo * kTempoToTickPhaseIncrement) / settings_.clock_input_division;
-  }
   inline bool running() const { return running_; }
   inline bool recording() const { return recording_; }
   inline uint8_t recording_part() const { return recording_part_; }
@@ -613,6 +613,7 @@ class Multi {
   // Input ticks (without division/offset) since Start. At 240 BPM * 24 PPQN =
   // 96 Hz, this overflows after 259 days
   int32_t clock_input_ticks_;
+  uint16_t song_pos_for_next_start_; // Count of sixteenth notes, 14 bits max
 
   // While the clock is running, the backup LFO syncs to the clock's phase/freq,
   // and while the clock is stopped, the backup LFO continues free-running based

@@ -426,31 +426,35 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-void Part::FastForwardArpForSongPosition() {
-  if (midi_.play_mode != PLAY_MODE_ARPEGGIATOR) return;
-
+void Part::ApplySongPosition() {
   arpeggiator_.Reset();
-  int32_t ticks = multi.tick_counter();
   if (looper_in_use()) {
-    if (ticks < 0) return;
+    int32_t ticks = multi.tick_counter(1);
+    if (ticks >= 0 && midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+      // First, move to the looper's start position
+      looper_.ProcessNotes(looper_.ComputeTargetPhaseWithOffset(0), NULL, NULL);
 
-    // First, move to the looper's start position
-    looper_.ProcessNotes(looper_.ComputeTargetPhaseWithOffset(0), NULL, NULL);
+      div_t cycles = std::div(static_cast<uint32_t>(ticks), looper_.period_ticks());
+      for (uint16_t i = 0; i <= cycles.quot; i++) {
+        if (i % sequence_repeats_per_arp_reset() == 0) arpeggiator_.Reset();
 
-    div_t cycles = std::div(static_cast<uint32_t>(ticks), looper_.period_ticks());
-    for (uint16_t i = 0; i <= cycles.quot; i++) {
-      if (i % sequence_repeats_per_arp_reset() == 0) arpeggiator_.Reset();
+        // If we're handling a zero remainder, don't try to advance to 0
+        if (i == cycles.quot and !cycles.rem) continue;
 
-      // If we're handling a zero remainder, don't try to advance to 0
-      if (i == cycles.quot and !cycles.rem) continue;
-
-      uint32_t phase = looper_.ComputeTargetPhaseWithOffset(cycles.quot ? 0 : cycles.rem);
-      looper_.ProcessNotes(phase >> 16, &Part::AdvanceArpForLooperNoteOnWithoutReturn, NULL);
+        uint32_t phase = looper_.ComputeTargetPhaseWithOffset(cycles.quot ? 0 : cycles.rem);
+        looper_.ProcessNotes(phase >> 16, &Part::AdvanceArpForLooperNoteOnWithoutReturn, NULL);
+      }
+    } else {
+      // Looper does not need to produce side effects, so we fast-forward
+      looper_.JumpToPhase(looper_.ComputeTargetPhaseWithOffset(ticks));
     }
   } else {
-    int16_t last_step_triggered = seq_.step_offset + DIV_FLOOR(ticks, PPQN());
+    // The only state produced by the step sequencer is the arp
+    if (midi_.play_mode != PLAY_MODE_ARPEGGIATOR) return;
+
+    int16_t last_step_triggered = seq_.step_offset + DIV_FLOOR(multi.tick_counter(), PPQN());
     uint16_t arp_reset_steps = steps_per_arp_reset();
-    // Loop will skip if the last step triggered is less than 0 -- can't predict arp states before 0
+    // NOOP if the last step triggered is less than 0 -- can't predict arp states before 0
     for (uint16_t step = 0; step <= last_step_triggered; step++) {
       if (arp_reset_steps && step % arp_reset_steps == 0) arpeggiator_.Reset();
       SequencerArpeggiatorResult result = BuildNextStepResult(step);

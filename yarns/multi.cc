@@ -157,7 +157,10 @@ void Multi::Clock() {
     }
 
     // Sync LFOs
-    ClockLFOs(false);
+    ClockVoiceLFOs(ticks, false);
+    for (uint8_t p = 0; p < num_active_parts_; ++p) {
+      part_[p].mutable_looper().Clock(ticks);
+    }
     // The backup LFO runs at a fraction of the clock frequency, which makes for
     // less jitter than 1-cycle-per-tick
     backup_clock_lfo_.Tap(ticks, 1 << kBackupClockLFOPeriodTicksBits);
@@ -199,23 +202,7 @@ void Multi::Clock() {
   }
 }
 
-// While tick_counter_ uses 32 bits, MIDI updates use 14 bits max
-void Multi::SetSongPosition(uint16_t sixteenth_note_counter) {
-  if (running_) return;
-
-  clock_input_ticks_ = sixteenth_note_counter * (24 / 4);
-  clock_input_ticks_ -= 1; // Because Clock() will pre-increment, we want to be on the previous tick
-  
-  backup_clock_lfo_ticks_ = tick_counter();
-  backup_clock_lfo_.SetPhase(modulo(backup_clock_lfo_ticks_, 1 << kBackupClockLFOPeriodTicksBits));
-
-  ClockLFOs(true);
-  for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    part_[p].FastForwardArpForSongPosition();
-  }
-}
-
-void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
+void Multi::Start(bool started_by_keyboard) {
   // Non-keyboard start can override a keyboard start
   started_by_keyboard_ = started_by_keyboard_ && started_by_keyboard;
   if (running_) {
@@ -230,13 +217,16 @@ void Multi::Start(bool started_by_keyboard, bool reset_song_position) {
   running_ = true;
   stop_count_down_ = 0;
 
-  if (reset_song_position) {
-    SetSongPosition(0);
-  } else {
-    // Looper/modulation LFOs may have progressed an arbitrary amount since the
-    // last Stop or SongPosition, so we resync them in anticipation of the first
-    // Clock (and assume that Refresh won't advance them before that)
-    ClockLFOs(true);
+  clock_input_ticks_ = song_pos_for_next_start_ * (24 / 4);
+  clock_input_ticks_ -= 1; // Because Clock() will pre-increment, we want to be on the previous tick
+
+  backup_clock_lfo_ticks_ = tick_counter();
+  int32_t ticks_for_lfo = tick_counter(1); // Undo pre-increment
+  backup_clock_lfo_.SetPhase(modulo(ticks_for_lfo, 1 << kBackupClockLFOPeriodTicksBits));
+
+  ClockVoiceLFOs(ticks_for_lfo, true);
+  for (uint8_t p = 0; p < num_active_parts_; ++p) {
+    part_[p].ApplySongPosition();
   }
   
   fill(&swing_predelay_[0], &swing_predelay_[12], -1);
@@ -304,19 +294,9 @@ void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos
   }
 }
 
-void Multi::ClockLFOs(bool force_phase) {
-  int32_t ticks = running_ ? tick_counter() : backup_clock_lfo_ticks_;
+void Multi::ClockVoiceLFOs(int32_t ticks, bool force_phase) {
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
     Part& part = part_[p];
-
-    looper::Deck &looper = part_[p].mutable_looper();
-    uint32_t looper_target_phase = looper.ComputeTargetPhaseWithOffset(ticks);
-    if (force_phase) {
-      looper.SetPhase(looper_target_phase);
-    } else {
-      looper.SetTargetPhase(looper_target_phase);
-    }
-
     uint8_t lfo_rate = part.voicing_settings().lfo_rate;
     FastSyncedLFO* part_lfos[part.num_voices()];
     for (uint8_t v = 0; v < part.num_voices(); ++v) {
@@ -363,8 +343,12 @@ void Multi::Refresh() {
     (backup_clock_lfo_.GetPhase() << kBackupClockLFOPeriodTicksBits) <
     (backup_clock_lfo_.GetPhaseIncrement() << kBackupClockLFOPeriodTicksBits)
   ) {
+    // Backup clock emits a tick
     backup_clock_lfo_ticks_++;
-    ClockLFOs(false);
+    ClockVoiceLFOs(backup_clock_lfo_ticks_, false);
+    for (uint8_t p = 0; p < num_active_parts_; ++p) {
+      part_[p].mutable_looper().Clock(backup_clock_lfo_ticks_);
+    }
   };
 }
 
@@ -810,8 +794,13 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
 void Multi::UpdateTempo() {
   internal_clock_.set_tempo(settings_.clock_tempo);
   if (running_) return; // If running, backup LFO will get Tap
+  if (!multi.internal_clock()) return; // We don't know the new tempo
+
   // If not running, there's no Tap to update the increment, so do that here
-  backup_clock_lfo_.SetPhaseIncrement(phase_increment_for_tick_at_tempo() >> kBackupClockLFOPeriodTicksBits);
+  uint32_t phase_increment = settings_.clock_tempo * kTempoToTickPhaseIncrement;
+  phase_increment /= settings_.clock_input_division;
+  phase_increment >>= kBackupClockLFOPeriodTicksBits;
+  backup_clock_lfo_.SetPhaseIncrement(phase_increment);
 }
 
 void Multi::AfterDeserialize() {
@@ -849,7 +838,7 @@ void Multi::StartRecording(uint8_t part) {
   }
   if (part_[part].looper_in_use()) {
     // Looper needs a running clock
-    Start(false, false);
+    Start(false);
   }
   part_[part].StartRecording();
   recording_ = true;

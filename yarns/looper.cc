@@ -29,7 +29,6 @@
 #include "yarns/looper.h"
 
 #include "yarns/resources.h"
-#include "yarns/multi.h"
 #include "yarns/part.h"
 
 namespace yarns {
@@ -39,7 +38,7 @@ namespace looper {
 void Deck::Init(Part* part) {
   part_ = part;
   RemoveAll();
-  SetPhase(ComputeTargetPhaseWithOffset(0));
+  JumpToPhase(ComputeTargetPhaseWithOffset(0));
 }
 
 void Deck::RemoveAll() {
@@ -64,14 +63,8 @@ void Deck::RemoveAll() {
   );
 }
 
-void Deck::SetPhase(uint32_t phase) {
+void Deck::JumpToPhase(uint32_t phase) {
   lfo_.SetPhase(phase);
-  if (multi.internal_clock()) {
-    // A stored LFO increment may have been invalidated by changes to clock
-    // settings (leading to a glitchy Start, esp if clock has slowed), so we
-    // preemptively update it
-    lfo_.SetPhaseIncrement(multi.phase_increment_for_tick_at_tempo() / period_ticks());
-  }
   ProcessNotes(phase >> 16, NULL, NULL);
 }
 
@@ -121,12 +114,12 @@ uint32_t Deck::lfo_note_phase() const {
   return lfo_.GetPhase() << part_->sequencer_settings().loop_length;
 }
 
-uint32_t Deck::ComputeTargetPhaseWithOffset(int32_t tick_counter) const {
-  return lfo_.ComputeTargetPhase(tick_counter, period_ticks(), pos_offset << 16);
+void Deck::Clock(int32_t tick_counter) {
+  lfo_.Tap(tick_counter, period_ticks(), pos_offset << 16);
 }
 
-void Deck::SetTargetPhase(uint32_t phase) {
-  lfo_.SetTargetPhase(phase);
+uint32_t Deck::ComputeTargetPhaseWithOffset(int32_t tick_counter) const {
+  return lfo_.ComputeTargetPhase(tick_counter, period_ticks(), pos_offset << 16);
 }
 
 void Deck::RemoveOldestNote() {
@@ -155,65 +148,46 @@ uint8_t Deck::PeekNextOff() const {
 }
 
 void Deck::ProcessNotes(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_off_fn) {
-  uint8_t first_seen_index;
-
-  first_seen_index = looper::kNullIndex;
+  uint8_t first_seen_on_index, first_seen_off_index;
+  first_seen_on_index = first_seen_off_index = looper::kNullIndex;
   while (true) {
-    const uint8_t next_index = PeekNextOff();
-    if (next_index == kNullIndex || next_index == first_seen_index) {
-      break;
-    }
-    if (first_seen_index == kNullIndex) {
-      first_seen_index = next_index;
-    }
-    const Note& next_note = notes_[next_index];
-    if (!Passed(next_note.off_pos, pos_, new_pos)) {
-      break;
-    }
-    head_.off = next_index;
+    const uint8_t on_index = PeekNextOn();
+    const uint8_t off_index = PeekNextOff();
+    const Note& on = notes_[on_index];
+    const Note& off = notes_[off_index];
 
-    if (note_off_fn) {
-      (part_->*note_off_fn)(next_index, next_note.pitch);
-    }
-  }
+    bool can_on = (
+      on_index != kNullIndex &&
+      on_index != first_seen_on_index &&
+      Passed(on.on_pos, pos_, new_pos)
+    );
+    bool can_off = (
+      off_index != kNullIndex &&
+      off_index != first_seen_off_index &&
+      Passed(off.off_pos, pos_, new_pos)
+    );
 
-  first_seen_index = looper::kNullIndex;
-  while (true) {
-    const uint8_t next_index = PeekNextOn();
-    if (next_index == kNullIndex || next_index == first_seen_index) {
-      break;
-    }
-    if (first_seen_index == kNullIndex) {
-      first_seen_index = next_index;
-    }
-    const Note& next_note = notes_[next_index];
-    if (!Passed(next_note.on_pos, pos_, new_pos)) {
-      break;
-    }
-    head_.on = next_index;
-
-    if (next_link_[next_index].off == kNullIndex) {
-      // If the next 'on' note doesn't yet have an off link, it's still held,
-      // and has been for an entire loop
-      RecordNoteOff(next_index);
-      if (note_off_fn) {
-        (part_->*note_off_fn)(next_index, next_note.pitch);
+    if (can_on && (
+      // TODO if these are for the same note, shit could get screwy?
+      !can_off || (on.on_pos - pos_) < (off.off_pos - pos_)
+    )) {
+      if (first_seen_on_index == looper::kNullIndex) first_seen_on_index = on_index;
+      if (next_link_[on_index].off == kNullIndex) {
+        // If the next 'on' note doesn't yet have an off link, it's still held,
+        // and has been for an entire loop
+        RecordNoteOff(on_index);
+        if (note_off_fn) (part_->*note_off_fn)(on_index, on.pitch);
       }
-    }
-    uint16_t pos_since_on = new_pos - next_note.on_pos;
-    if (pos_since_on >= next_note.length()) {
-      // If we have gone further past the note's beginning than the note itself does, we already processed the note's Off, so we don't play the note at all
-      // TODO not good to skip side effects!  should instead do another immediate Off, or do Ons first, or process On/Off in one strictly sequential pass
-      continue;
-    }
-
-    if (note_on_fn) {
-      (part_->*note_on_fn)(next_index, next_note.pitch, next_note.velocity);
-    }
+      head_.on = on_index;
+      if (note_on_fn) (part_->*note_on_fn)(on_index, on.pitch, on.velocity);
+    } else if (can_off) {
+      if (first_seen_off_index == looper::kNullIndex) first_seen_off_index = off_index;
+      head_.off = off_index;
+      if (note_off_fn) (part_->*note_off_fn)(off_index, off.pitch);
+    } else break; // Neither upcoming event is eligible yet
   }
 
   pos_ = new_pos;
-  needs_advance_ = false;
 }
 
 uint8_t Deck::RecordNoteOn(uint8_t pitch, uint8_t velocity) {
