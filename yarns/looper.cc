@@ -168,7 +168,6 @@ void Deck::ProcessNotes(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_of
     );
 
     if (can_on && (
-      // TODO if these are for the same note, shit could get screwy?
       !can_off || (on.on_pos - pos_) < (off.off_pos - pos_)
     )) {
       if (first_seen_on_index == looper::kNullIndex) first_seen_on_index = on_index;
