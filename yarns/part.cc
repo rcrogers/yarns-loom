@@ -429,24 +429,21 @@ void Part::ClockStepGateEndings() {
 void Part::ApplySongPosition() {
   arpeggiator_.Reset();
   if (looper_in_use()) {
-    int32_t ticks = multi.tick_counter(1);
-    if (ticks >= 0 && midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      // First, move to the looper's start position
-      looper_.ProcessNotes(looper_.ComputeTargetPhaseWithOffset(0), NULL, NULL);
+    // First, move to the looper's start position, without side effects
+    looper_.JumpToTick(0, NULL, NULL);
 
-      div_t cycles = std::div(static_cast<uint32_t>(ticks), looper_.period_ticks());
-      for (uint16_t i = 0; i <= cycles.quot; i++) {
-        if (i % sequence_repeats_per_arp_reset() == 0) arpeggiator_.Reset();
+    // Don't generate side effects for negative ticks
+    int32_t ticks = std::max(static_cast<int32_t>(0), multi.tick_counter(1));
 
-        // If we're handling a zero remainder, don't try to advance to 0
-        if (i == cycles.quot and !cycles.rem) continue;
+    NoteOnFn on_fn = midi_.play_mode == PLAY_MODE_ARPEGGIATOR ? &Part::AdvanceArpForLooperNoteOnWithoutReturn : NULL;
+    div_t cycles = std::div(static_cast<uint32_t>(ticks), looper_.period_ticks());
+    for (uint16_t i = 0; i <= cycles.quot; i++) {
+      if (i % sequence_repeats_per_arp_reset() == 0) arpeggiator_.Reset();
 
-        uint32_t phase = looper_.ComputeTargetPhaseWithOffset(cycles.quot ? 0 : cycles.rem);
-        looper_.ProcessNotes(phase >> 16, &Part::AdvanceArpForLooperNoteOnWithoutReturn, NULL);
-      }
-    } else {
-      // Looper does not need to produce side effects, so we fast-forward
-      looper_.JumpToPhase(looper_.ComputeTargetPhaseWithOffset(ticks));
+      uint16_t cycle_ticks = i < cycles.quot ? looper_.period_ticks() : cycles.rem;
+      if (!cycle_ticks) continue; // Remainder is zero
+
+      looper_.JumpToTick(cycle_ticks, on_fn, NULL);
     }
   } else {
     // The only state produced by the step sequencer is the arp
