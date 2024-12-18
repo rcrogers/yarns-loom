@@ -53,7 +53,7 @@ struct Arpeggiator {
   const SequencerArpeggiatorResult BuildNextResult(
     const Part& part,
     const HeldKeys& arp_keys,
-    uint32_t step_counter,
+    uint32_t pattern_step_counter,
     const SequencerStep seq_step
   ) const;
 

@@ -45,7 +45,8 @@ const char* const layout_values[LAYOUT_LAST] = {
 const char* const control_change_mode_values[CONTROL_CHANGE_MODE_LAST] = {
   "OFF",
   "ABSOLUTE 0-127",
-  "RELATIVE TWOS COMP INC=1 DEC=127",
+  "RD RELATIVE DIRECT",
+  "RS RELATIVE SCALED",
 };
 
 const char* const midi_out_mode_values[] = {
@@ -278,6 +279,12 @@ const Setting Settings::settings_[] = {
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OUTPUT_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     0xff, 0,
+  },
+  {
+    "C+", "CLOCK OFFSET",
+    SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OFFSET, 0 },
+    SETTING_UNIT_INT8, -64, 63, NULL,
+    0xff, 0xff,
   },
   {
     "B-", "BAR DURATION",

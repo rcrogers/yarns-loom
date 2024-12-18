@@ -281,7 +281,16 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - New global setting for `CC (CONTROL CHANGE MODE)`
   - `OFF` (CCs are ignored)
   - `ABSOLUTE` (as before)
-  - `RELATIVE TWOS COMPLEMENT` (1 = increment, 127 = decrement)
+  - `RELATIVE DIRECT`
+    - For use with endless encoders
+    - Uses the "twos complement" standard for translating MIDI values into a relative change
+      - MIDI value 1 => setting + 1 (increment)
+      - MIDI value 127 => setting - 1 (decrement)
+    - Settings will increase or decrease by one value for each click of the encoder
+    - Depending on how many values the setting has, the encoder may take anywhere from 1 to 127 clicks to scan the range of setting values
+  - `RELATIVE SCALED`
+    - Similar to `RELATIVE DIRECT`, but always takes 127 encoder clicks to scan the range of setting values, no matter how many setting values there are
+    - Effectively gives all controllers the same travel distance from minimum to maximum
 - The result of a received CC is briefly displayed (value, setting abbreviation, and receiving part)
 - Recording control: start/stop recording mode, delete a recording
 - CC support for all new settings

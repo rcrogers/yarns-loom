@@ -49,7 +49,7 @@ void Arpeggiator::Reset() {
 const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
   const Part& part,
   const HeldKeys& arp_keys,
-  uint32_t step_counter, // May differ from part's current step (for peeking)
+  uint32_t pattern_step_counter, // May differ from part's current step (for peeking)
   SequencerStep seq_step
 ) const {
   // In case of early return, the arp does not advance, and the note is a REST
@@ -64,7 +64,7 @@ const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
       return result;
     }
   } else { // Use an arp pattern
-    uint8_t pattern_step_index = step_counter % 16;
+    uint8_t pattern_step_index = pattern_step_counter % 16;
     // Build a dummy input step for JUMP/GRID
     seq_step.data[0] = kC4 + 1 + pattern_step_index;
     seq_step.data[1] = 0x7f; // Full velocity
