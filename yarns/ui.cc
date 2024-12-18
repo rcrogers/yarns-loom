@@ -713,6 +713,7 @@ void Ui::OnSwitchPress(const Event& e) {
         }
       } else {
         if (!multi.running()) {
+          multi.set_next_clock_input_tick(0);
           multi.Start(false);
         } else {
           multi.Stop();

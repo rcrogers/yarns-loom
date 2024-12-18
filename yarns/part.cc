@@ -30,6 +30,7 @@
 #include "yarns/part.h"
 
 #include <algorithm>
+#include <stdlib.h>
 
 #include "stmlib/midi/midi.h"
 #include "stmlib/utils/random.h"
@@ -347,9 +348,9 @@ void Part::Reset() {
 }
 
 void Part::Clock() { // From Multi::ClockFast
-  bool new_step = multi.tick_counter() % PPQN() == 0;
+  bool new_step = modulo(multi.tick_counter(), PPQN()) == 0;
   if (new_step) {
-    step_counter_ = seq_.step_offset + multi.tick_counter() / PPQN();
+    step_counter_ = ticks_to_steps(multi.tick_counter());
 
     // Reset sequencer-driven arpeggiator (step or loop), if needed
     //
@@ -357,18 +358,12 @@ void Part::Clock() { // From Multi::ClockFast
     // output (i.e., resets the arp at a predictable point in the loop) IFF the
     // looper's LFO is locked onto the clock's phase and frequency. Clocking
     // changes may break the lock, and briefly cause mistimed arp resets
-    int8_t sequence_repeats_per_arp_reset = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
-    if (sequence_repeats_per_arp_reset > 0) {
-      uint8_t quarter_notes_per_sequence_repeat =
-        looped() ? (1 << seq_.loop_length) : seq_.num_steps;
-      uint16_t quarter_notes_per_arp_reset =
-        sequence_repeats_per_arp_reset * quarter_notes_per_sequence_repeat;
-      if (step_counter_ % quarter_notes_per_arp_reset == 0) arpeggiator_.Reset();
-    }
+    uint16_t arp_reset_steps = steps_per_arp_reset();
+    if (arp_reset_steps && step_counter_ % arp_reset_steps == 0) arpeggiator_.Reset();
   }
 
   // The rest of the method is only for the step sequencer and/or arpeggiator
-  if (looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL) return;
+  if (!doing_stepped_stuff()) return;
 
   if (new_step) {
     SequencerArpeggiatorResult result = BuildNextStepResult(step_counter_);
@@ -420,7 +415,7 @@ void Part::ClockStepGateEndings() {
     }
     // Peek at next step to see if it's a continuation
     // If more than one voice has a step ending, the peek is redundant
-    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note;
+    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note; // TODO needs to check arp reset?
     if (next_step.is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
@@ -431,15 +426,45 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-void Part::Start() {
+// Fast-forward the sequencer/arpeggiator state to the current song position. If
+// using the sequencer-driven arpeggiator, produces the cumulative arp state
+// based on any held keys
+void Part::CueSequencer() {
   arpeggiator_.Reset();
-  // Advance arp state by step-offset times
-  for (uint8_t i = 0; i < seq_.step_offset; ++i) {
-    SequencerArpeggiatorResult result = BuildNextStepResult(i);
-    arpeggiator_ = result.arpeggiator;
+  if (looper_in_use()) {
+    // First, move to the looper's start position, without side effects
+    looper_.JumpToTick(0, NULL, NULL);
+
+    // Don't generate side effects for negative ticks
+    int32_t ticks = std::max(static_cast<int32_t>(0), multi.tick_counter(1));
+
+    NoteOnFn on_fn = midi_.play_mode == PLAY_MODE_ARPEGGIATOR ? &Part::AdvanceArpForLooperNoteOnWithoutReturn : NULL;
+    div_t cycles = std::div(static_cast<uint32_t>(ticks), looper_.period_ticks());
+    for (uint16_t i = 0; i <= cycles.quot; i++) {
+      if (i % sequence_repeats_per_arp_reset() == 0) arpeggiator_.Reset();
+
+      uint16_t cycle_ticks = i < cycles.quot ? looper_.period_ticks() : cycles.rem;
+      if (!cycle_ticks) continue; // Remainder is zero
+
+      looper_.JumpToTick(cycle_ticks, on_fn, NULL);
+    }
+  } else {
+    // The only state produced by the step sequencer is the arp
+    if (midi_.play_mode != PLAY_MODE_ARPEGGIATOR) return;
+
+    int16_t last_step_triggered = seq_.step_offset + DIV_FLOOR(multi.tick_counter(), PPQN());
+    uint16_t arp_reset_steps = steps_per_arp_reset();
+    // NOOP if the last step triggered is less than 0 -- can't predict arp states before 0
+    for (uint16_t step = 0; step <= last_step_triggered; step++) {
+      if (arp_reset_steps && step % arp_reset_steps == 0) arpeggiator_.Reset();
+      SequencerArpeggiatorResult result = BuildNextStepResult(step);
+      arpeggiator_ = result.arpeggiator;
+    }
   }
-  
-  looper_.Rewind();
+}
+
+// Reset state for notes being actively output or recorded
+void Part::Start() {
   std::fill(
     &looper_note_recording_pressed_key_[0],
     &looper_note_recording_pressed_key_[kNoteStackMapping],
@@ -615,10 +640,7 @@ void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t ve
   pitch = ApplySequencerInputResponse(pitch);
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
     // Advance arp
-    SequencerStep step = SequencerStep(pitch, velocity);
-    // NB: since this path implies seq_driven_arp, there is no arp pattern,
-    // and step_counter_ doesn't matter
-    SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(step_counter_, step);
+    SequencerArpeggiatorResult result = AdvanceArpForLooperNoteOn(pitch, velocity);
     arpeggiator_ = result.arpeggiator;
     pitch = result.note.note();
     if (result.note.has_note()) {
@@ -653,7 +675,7 @@ void Part::LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch) {
     // continuation, so we don't care
     //
     // Also NB: step_counter_ doesn't matter (see LooperPlayNoteOn)
-    next_step = BuildNextArpeggiatorResult(step_counter_, next_step).note;
+    next_step = BuildNextArpeggiatorResult(0, next_step).note;
     if (next_step.is_continuation()) {
       // Leave this pitch in the care of the next looper note
       //

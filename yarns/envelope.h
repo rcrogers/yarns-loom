@@ -123,7 +123,7 @@ class Envelope {
     // to try to match the nominal sound and feel
     int32_t actual_delta = target_ - value_;
     int32_t nominal_delta = target_ - segment_target_[
-      stmlib::modulo(static_cast<int8_t>(segment) - 1, ENV_SEGMENT_DEAD)
+      stmlib::modulo(static_cast<int8_t>(segment) - 1, static_cast<int8_t>(ENV_SEGMENT_DEAD))
     ];
     positive_segment_slope_ = nominal_delta >= 0;
     if (positive_segment_slope_ != (actual_delta >= 0)) {

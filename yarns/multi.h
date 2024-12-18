@@ -105,8 +105,7 @@ struct PackedMulti {
     clock_manual_start : 1;
 
   uint8_t control_change_mode; // Breaking: move to bitfield when convenient
-
-  uint8_t flash_padding[1];
+  int8_t clock_offset;
 }__attribute__((packed));
 
 struct MultiSettings {
@@ -122,7 +121,8 @@ struct MultiSettings {
   uint8_t nudge_first_tick;
   uint8_t clock_manual_start;
   uint8_t control_change_mode;
-  uint8_t padding[9];
+  int8_t clock_offset;
+  uint8_t padding[8];
 
   void Pack(PackedMulti& packed) {
     for (uint8_t i = 0; i < 12; i++) {
@@ -139,6 +139,7 @@ struct MultiSettings {
     packed.nudge_first_tick = nudge_first_tick;
     packed.clock_manual_start = clock_manual_start;
     packed.control_change_mode = control_change_mode;
+    packed.clock_offset = clock_offset;
   }
 
   void Unpack(PackedMulti& packed) {
@@ -156,6 +157,7 @@ struct MultiSettings {
     nudge_first_tick = packed.nudge_first_tick;
     clock_manual_start = packed.clock_manual_start;
     control_change_mode = packed.control_change_mode;
+    clock_offset = packed.clock_offset;
   }
 };
 
@@ -195,6 +197,7 @@ enum MultiSetting {
   MULTI_CLOCK_NUDGE_FIRST_TICK,
   MULTI_CLOCK_MANUAL_START,
   MULTI_CONTROL_CHANGE_MODE,
+  MULTI_CLOCK_OFFSET,
 };
 
 enum Layout {
@@ -211,7 +214,7 @@ enum Layout {
   LAYOUT_THREE_ONE,
   LAYOUT_TWO_TWO,
   LAYOUT_TWO_ONE,
-  LAYOUT_PARAPHONIC_PLUS_TWO, // TODO rename?
+  LAYOUT_PARAPHONIC_PLUS_TWO,
   LAYOUT_TRI_MONO,
   LAYOUT_LAST
 };
@@ -290,6 +293,7 @@ class Multi {
         !running() &&
         internal_clock() &&
         !settings_.clock_manual_start) {
+      set_next_clock_input_tick(0);
       // Start the arpeggiators.
       Start(true);
     }
@@ -376,18 +380,23 @@ class Multi {
   }
   
   void Clock();
+  inline void set_next_clock_input_tick(uint16_t n) {
+    // next_clock_input_tick_for_start_ = n;
+
+    // We haven't actually received the target tick yet -- Clock() will
+    // pre-increment -- so the last Clock we received is one prior
+    clock_input_ticks_ = n - 1;
+  }
   
   // A start initiated by a MIDI 0xfa event or the front panel start button will
   // start the sequencers. A start initiated by the keyboard will not start
   // the sequencers, and give priority to the arpeggiator. This allows the
   // arpeggiator to be played without erasing a sequence.
+  //
+  // If already running, will not reset clock state
   void Start(bool started_by_keyboard);
   
   void Stop();
-  
-  void Continue() {
-    Start(false);
-  }
 
   inline bool CanAutoStop() const {
     return started_by_keyboard_ && internal_clock();
@@ -408,6 +417,7 @@ class Multi {
     }
     if (!running() && internal_clock()) {
       // Start the arpeggiators.
+      set_next_clock_input_tick(0);
       Start(true);
     }
   }
@@ -432,6 +442,7 @@ class Multi {
   void AfterDeserialize();
   void ClockFast();
   void Refresh();
+  void ClockVoiceLFOs(int32_t, bool);
   void RefreshInternalClock() {
     if (running() && internal_clock() && internal_clock_.Process()) {
       ++internal_clock_ticks_;
@@ -444,9 +455,14 @@ class Multi {
       --internal_clock_ticks_;
     }
 
+    bool started = tick_counter() >= 0;
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       if (running()) {
-        part_[p].mutable_looper().AdvanceToPresent(part_[p].looper_in_use());
+        bool play = started && part_[p].looper_in_use();
+        part_[p].mutable_looper().ProcessNotesUntilLFOPhase(
+          play ? &Part::LooperPlayNoteOn : NULL,
+          play ? &Part::LooperPlayNoteOff : NULL
+        );
       }
       for (uint8_t v = 0; v < part_[p].num_voices(); ++v) {
         part_[p].voice(v)->RenderSamples();
@@ -463,21 +479,15 @@ class Multi {
   
   inline Layout layout() const { return static_cast<Layout>(settings_.layout); }
   inline bool internal_clock() const { return settings_.clock_tempo > TEMPO_EXTERNAL; }
-  inline uint32_t tick_counter() { return tick_counter_; }
-  inline uint8_t tempo() const { return settings_.clock_tempo; }
-  // NB: meaningless when external clocked!
-  inline uint32_t tempo_tick_phase_increment() const {
-    return settings_.clock_tempo * kTempoToTickPhaseIncrement;
+  // After applying clock input division, then clock offset
+  inline int32_t tick_counter(int8_t input_bias = 0) const {
+    return DIV_FLOOR(clock_input_ticks_ + input_bias, settings_.clock_input_division) + settings_.clock_offset;
   }
+  inline uint8_t tempo() const { return settings_.clock_tempo; }
   inline bool running() const { return running_; }
   inline bool recording() const { return recording_; }
   inline uint8_t recording_part() const { return recording_part_; }
-  inline bool clock() const {
-    return clock_pulse_counter_ > 0 && \
-        (!settings_.nudge_first_tick || \
-          settings_.clock_bar_duration == 0 || \
-          !reset());
-  }
+  bool clock() const;
   inline bool reset() const {
     return reset_pulse_counter_ > 0;
   }
@@ -588,7 +598,7 @@ class Multi {
   void ChangeLayout(Layout old_layout, Layout new_layout);
   void UpdateTempo();
   void AllocateParts();
-  void SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos);
+  void SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos, bool force_phase);
   
   MultiSettings settings_;
   
@@ -601,34 +611,25 @@ class Multi {
   uint8_t internal_clock_ticks_;
   uint16_t midi_clock_tick_duration_;
 
+  // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
   int16_t swing_predelay_[12];
-  uint8_t swing_counter_;
   
-  // Ticks since Start. At 240 BPM * 24 PPQN = 96 Hz, this overflows after 517 days -- acceptable
-  uint32_t tick_counter_;
+  // The 0-based index of the last received Clock event, ignoring
+  // division/offset. Negative if we have not yet received a Clock. At 240 BPM *
+  // 24 PPQN = 96 Hz, this overflows after 259 days
+  int32_t clock_input_ticks_;
+  // int32_t next_clock_input_tick_for_start_;
 
-  // The master LFO sits between the clock and the part-specific synced LFOs.
-  // While the clock is running, the master LFO syncs to the clock's phase/freq,
-  // and while the clock is stopped, the master LFO continues free-running based
-  // on its last sync
-  FastSyncedLFO master_lfo_;
-  // Roughly 1:1 with tick_counter_, but can free-run without the clock
-  uint32_t master_lfo_tick_counter_;
+  // While the clock is running, the backup LFO syncs to the clock's phase/freq,
+  // and while the clock is stopped, the backup LFO continues free-running based
+  // on its last sync, to provide a tick counter for looper/modulation LFOs
+  FastSyncedLFO backup_clock_lfo_;
+  // 1:1 with divided ticks, but can free-run without the clock
+  int32_t backup_clock_lfo_ticks_;
 
-  uint8_t clock_input_prescaler_;
-  uint16_t clock_output_prescaler_;
-  uint16_t bar_position_;
   uint8_t stop_count_down_;
   
-  uint16_t clock_pulse_counter_;
   uint16_t reset_pulse_counter_;
-  
-  uint16_t previous_output_division_;
-  bool needs_resync_;
-  
-  // Indicates that a setting has been changed and that the multi should
-  // be saved in memory.
-  bool dirty_;
   
   uint8_t num_active_parts_;
 

@@ -44,7 +44,7 @@ enum LFOShape {
   LFO_SHAPE_LAST
 };
 
-template<uint8_t PHASE_ERR_SHIFT, uint8_t FREQ_ERR_SHIFT>
+template<uint8_t PHASE_ERR_DOWNSHIFT, uint8_t FREQ_ERR_DOWNSHIFT>
 class SyncedLFO {
  public:
 
@@ -52,11 +52,9 @@ class SyncedLFO {
 
   SyncedLFO() { }
   ~SyncedLFO() { }
-  void Init(uint32_t phase = 0) {
-    phase_ = phase;
-  }
-
+  void SetPhase(uint32_t phase) { phase_ = phase; }
   uint32_t GetPhase() const { return phase_; }
+  uint32_t GetTargetPhase() const { return previous_target_phase_; }
   uint32_t GetPhaseIncrement() const { return phase_increment_; }
   void SetPhaseIncrement(uint32_t i) { phase_increment_ = i; }
   void Refresh() { phase_ += phase_increment_; }
@@ -79,10 +77,14 @@ class SyncedLFO {
     } 
   }
 
-  void Tap(uint32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) {
-    uint16_t tick_phase = tick_counter % period_ticks;
+  uint32_t ComputeTargetPhase(int32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) const {
+    uint16_t tick_phase = modulo(tick_counter, period_ticks);
     uint32_t target_phase = ((tick_phase << 16) / period_ticks) << 16;
-    SetTargetPhase(target_phase + phase_offset);
+    return target_phase + phase_offset;
+  }
+
+  void Tap(int32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) {
+    SetTargetPhase(ComputeTargetPhase(tick_counter, period_ticks, phase_offset));
   }
 
   void SetTargetPhase(uint32_t target_phase) {
@@ -90,7 +92,7 @@ class SyncedLFO {
     uint32_t target_increment = target_phase - previous_target_phase_;
     int32_t d_error = target_increment - (phase_ - previous_phase_);
     int32_t p_error = target_phase - phase_;
-    int32_t error = (p_error >> PHASE_ERR_SHIFT) + (d_error >> FREQ_ERR_SHIFT);
+    int32_t error = (p_error >> PHASE_ERR_DOWNSHIFT) + (d_error >> FREQ_ERR_DOWNSHIFT);
 
     phase_increment_ = SaturatingIncrement(phase_increment_, error);
 

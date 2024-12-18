@@ -62,7 +62,7 @@ enum MacroPlayMode {
   MACRO_PLAY_MODE_LOOP_SEQ
 };
 
-const uint8_t kMasterLFOPeriodTicksBits = 4;
+const uint8_t kBackupClockLFOPeriodTicksBits = 4;
 
 void Multi::PrintDebugByte(uint8_t byte) {
   ui.PrintDebugByte(byte);
@@ -70,8 +70,7 @@ void Multi::PrintDebugByte(uint8_t byte) {
 
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
-  master_lfo_.Init();
-  
+
   fill(
       &settings_.custom_pitch_table[0],
       &settings_.custom_pitch_table[12],
@@ -110,6 +109,9 @@ void Multi::Init(bool reset_calibration) {
   settings_.nudge_first_tick = 0;
   settings_.clock_manual_start = 0;
   settings_.control_change_mode = CONTROL_CHANGE_MODE_ABSOLUTE;
+  settings_.clock_offset = 0;
+
+  clock_input_ticks_ = backup_clock_lfo_ticks_ = -1;
 
   // A test sequence...
   // seq->num_steps = 4;
@@ -134,86 +136,62 @@ void Multi::Clock() {
     return;
   }
   
-  uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
-  uint16_t input_division = settings_.clock_input_division;
-  
-  if (previous_output_division_ &&
-      output_division != previous_output_division_) {
-    needs_resync_ = true;
-  }
-  previous_output_division_ = output_division;
-  
-  // Logic equation for computing a clock output with a 50% duty cycle.
-  if (output_division > 1) {
-    if (clock_output_prescaler_ == 0 && clock_input_prescaler_ == 0) {
-      clock_pulse_counter_ = 0xffff;
-    }
-    if (clock_output_prescaler_ >= (output_division >> 1) &&
-        clock_input_prescaler_ >= (input_division >> 1)) {
-      clock_pulse_counter_ = 0;
-    }
-  } else {
-    if (input_division > 1) {
-      clock_pulse_counter_ = \
-          clock_input_prescaler_ <= (input_division - 1) >> 1 ? 0xffff : 0;
-    } else {
-      // Because no division is used, neither on the output nor on the input,
-      // we don't have a sufficient fast time base to derive a 50% duty cycle
-      // output. Instead, we output 5ms pulses.
-      clock_pulse_counter_ = 40;
-    }
-  }
-  
-  if (!clock_input_prescaler_) {
+  // Pre-increment so that the tick count will stay valid until the next Clock()
+  clock_input_ticks_++;
+  // clock_offset does not impact whether there is a new tick
+  if (clock_input_ticks_ % settings_.clock_input_division == 0) {
     midi_handler.OnClock();
 
-    // Sync LFOs
-    ++tick_counter_;
-    // The master LFO runs at a fraction of the clock frequency, which makes for
-    // less jitter than 1-cycle-per-tick
-    master_lfo_.Tap(tick_counter_, 1 << kMasterLFOPeriodTicksBits);
-    
-    ++swing_counter_;
-    if (swing_counter_ >= 12) {
-      swing_counter_ = 0;
-    }
-    
-    if (internal_clock()) {
-      swing_predelay_[swing_counter_] = 0;
-    } else {
-      uint32_t interval = midi_clock_tick_duration_;
-      midi_clock_tick_duration_ = 0;
+    int32_t ticks = tick_counter();
 
-      uint32_t modulation = swing_counter_ < 6
-          ? swing_counter_ : 12 - swing_counter_;
-      swing_predelay_[swing_counter_] = \
-          27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
+    backup_clock_lfo_ticks_ = ticks;
+    if (
+      (backup_clock_lfo_.GetPhase() << kBackupClockLFOPeriodTicksBits) >=
+      (UINT32_MAX >> 1)
+    ) {
+      // We assume that the backup LFO is locked on, thus the LFO-emitted tick
+      // is in either the near past or near future of the Clock tick.  If the
+      // backup LFO is more than halfway through a cycle, we assume that it will
+      // emit the tick soon, so we subtract 1 to avoid double-counting it
+      backup_clock_lfo_ticks_ -= 1;
     }
+
+    // Sync LFOs
+    ClockVoiceLFOs(ticks, false);
+    for (uint8_t p = 0; p < num_active_parts_; ++p) {
+      part_[p].mutable_looper().Clock(ticks);
+    }
+    // The backup LFO runs at a fraction of the clock frequency, which makes for
+    // less jitter than 1-cycle-per-tick
+    backup_clock_lfo_.Tap(ticks, 1 << kBackupClockLFOPeriodTicksBits);
     
-    ++bar_position_;
-    if (bar_position_ >= settings_.clock_bar_duration * 24) {
-      bar_position_ = 0;
-    }
-    if (bar_position_ == 0) {
-      reset_pulse_counter_ = settings_.nudge_first_tick ? 9 : 81;
-      if (needs_resync_) {
-        clock_output_prescaler_ = 0;
-        needs_resync_ = false;
+    if (ticks >= 0) {
+      uint8_t swing_counter = modulo(ticks, 12);
+      if (internal_clock()) {
+        swing_predelay_[swing_counter] = 0;
+      } else {
+        // Number of ClockFast calls since the last Clock
+        uint32_t interval = midi_clock_tick_duration_;
+        midi_clock_tick_duration_ = 0;
+
+        // Rectified triangle wave
+        uint32_t modulation = swing_counter < 6
+            ? swing_counter : 12 - swing_counter;
+        swing_predelay_[swing_counter] = \
+            27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
+      }
+
+      if (
+        // Always output reset pulse on tick 0, regardless of bar setting
+        ticks == 0 ||
+        (
+          settings_.clock_bar_duration <= kMaxBarDuration &&
+          modulo(ticks, settings_.clock_bar_duration * 24) == 0
+        )
+      ) {
+        reset_pulse_counter_ = settings_.nudge_first_tick ? 9 : 81;
       }
     }
-    if (settings_.clock_bar_duration > kMaxBarDuration) {
-      bar_position_ = 1;
-    }
-    
-    ++clock_output_prescaler_;
-    if (clock_output_prescaler_ >= output_division) {
-      clock_output_prescaler_ = 0;
-    }
-  }
-
-  ++clock_input_prescaler_;
-  if (clock_input_prescaler_ >= settings_.clock_input_division) {
-    clock_input_prescaler_ = 0;
   }
   
   if (stop_count_down_) {
@@ -237,15 +215,22 @@ void Multi::Start(bool started_by_keyboard) {
   midi_handler.OnStart();
 
   running_ = true;
-  clock_input_prescaler_ = 0;
-  clock_output_prescaler_ = 0;
   stop_count_down_ = 0;
-  tick_counter_ = master_lfo_tick_counter_ = -1;
-  master_lfo_.Init(-1); // Will output a tick on next Refresh
-  bar_position_ = -1;
-  swing_counter_ = -1;
-  previous_output_division_ = 0;
-  needs_resync_ = false;
+
+  // NB: we assume that set_next_clock_input_tick has already been called if
+  // needed, so clock_input_ticks_ is ready to use
+  backup_clock_lfo_ticks_ = tick_counter();
+
+  // For LFO purposes, we want to be directly on the target phase, so we act as
+  // though we already received the next Clock tick
+  int32_t ticks_for_lfo = tick_counter(1);
+
+  backup_clock_lfo_.SetPhase(modulo(ticks_for_lfo, 1 << kBackupClockLFOPeriodTicksBits));
+
+  ClockVoiceLFOs(ticks_for_lfo, true);
+  for (uint8_t p = 0; p < num_active_parts_; ++p) {
+    part_[p].CueSequencer();
+  }
   
   fill(&swing_predelay_[0], &swing_predelay_[12], -1);
   
@@ -263,7 +248,11 @@ void Multi::Stop() {
     part_[i].StopSequencerArpeggiatorNotes();
   }
   midi_handler.OnStop();
-  clock_pulse_counter_ = 0;
+
+  // NB: we don't alter clock_input_ticks_ here. It will be overwritten if
+  // either 1) we resume via a hard Start instead of a Continue or 2) we receive
+  // a SongPosition
+
   reset_pulse_counter_ = 0;
   stop_count_down_ = 0;
   running_ = false;
@@ -271,9 +260,6 @@ void Multi::Stop() {
 }
 
 void Multi::ClockFast() {
-  if (clock_pulse_counter_) {
-    --clock_pulse_counter_;
-  }
   if (reset_pulse_counter_) {
     --reset_pulse_counter_;
   }
@@ -291,7 +277,7 @@ void Multi::ClockFast() {
   }
 }
 
-void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos) {
+void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos, bool force_phase) {
   if (spread >= 0) { // Detune
     uint8_t spread_8 = spread << 1;
     uint16_t spread_expo_16 = UINT16_MAX - lut_env_expo[((127 - spread_8) << 1)];
@@ -301,58 +287,96 @@ void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos
       (*(base_lfo + i))->SetPhaseIncrement(phase_increment);
     }
   } else { // Dephase
+    // If forcing phase, we assume base already had its phase forced as needed
+    //
+    // NB: base LFO's GetTargetPhase would give us a more accurate measure IFF
+    // base is synced, but we don't have a good way to determine that here
     uint32_t phase = (*base_lfo)->GetPhase();
     uint32_t phase_offset = (spread + 1) << (32 - 6);
     for (uint8_t i = 1; i < num_lfos; ++i) {
       phase += phase_offset;
-      (*(base_lfo + i))->SetTargetPhase(phase);
+      FastSyncedLFO* lfo = *(base_lfo + i);
+      if (force_phase) {
+        lfo->SetPhase(phase);
+      } else {
+        lfo->SetTargetPhase(phase);
+      }
+    }
+  }
+}
+
+void Multi::ClockVoiceLFOs(int32_t ticks, bool force_phase) {
+  for (uint8_t p = 0; p < num_active_parts_; ++p) {
+    Part& part = part_[p];
+    uint8_t lfo_rate = part.voicing_settings().lfo_rate;
+    FastSyncedLFO* part_lfos[part.num_voices()];
+    for (uint8_t v = 0; v < part.num_voices(); ++v) {
+      part_lfos[v] = part.voice(v)->lfo(static_cast<LFORole>(0));
+    }
+    if (lfo_rate < 64) {
+      uint32_t phase = part_lfos[0]->ComputeTargetPhase(ticks, lut_clock_ratio_ticks[(64 - lfo_rate - 1) >> 1]);
+      if (force_phase) {
+        part_lfos[0]->SetPhase(phase);
+      } else {
+        part_lfos[0]->SetTargetPhase(phase);
+      }
+    } else {
+      part_lfos[0]->SetPhaseIncrement(lut_lfo_increments[lfo_rate - 64]);
+    }
+    SpreadLFOs(part.voicing_settings().lfo_spread_voices, &part_lfos[0], part.num_voices(), force_phase);
+    for (uint8_t v = 0; v < part.num_voices(); ++v) {
+      FastSyncedLFO* voice_lfos[LFO_ROLE_LAST];
+      for (uint8_t l = 0; l < LFO_ROLE_LAST; ++l) {
+        voice_lfos[l] = part.voice(v)->lfo(static_cast<LFORole>(l));
+      }
+      SpreadLFOs(part.voicing_settings().lfo_spread_types, &voice_lfos[0], LFO_ROLE_LAST, force_phase);
     }
   }
 }
 
 void Multi::Refresh() {
-  master_lfo_.Refresh();
-  // Since the master LFO runs at 1/n of clock freq, we compensate by treating
-  // each 1/n of its phase as a new tick, to make these output ticks 1:1 with
-  // the original clock ticks
-  bool new_tick =
-    (master_lfo_.GetPhase() << kMasterLFOPeriodTicksBits) <
-    (master_lfo_.GetPhaseIncrement() << kMasterLFOPeriodTicksBits);
-  if (new_tick) master_lfo_tick_counter_++;
-
-  for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    Part& part = part_[p];
-    if (new_tick) {
-      part_[p].mutable_looper().Clock(master_lfo_tick_counter_);
-
-      uint8_t lfo_rate = part.voicing_settings().lfo_rate;
-      FastSyncedLFO* part_lfos[part.num_voices()];
-      for (uint8_t v = 0; v < part.num_voices(); ++v) {
-        part_lfos[v] = part.voice(v)->lfo(static_cast<LFORole>(0));
-      }
-      if (lfo_rate < 64) {
-        part_lfos[0]->Tap(master_lfo_tick_counter_, lut_clock_ratio_ticks[(64 - lfo_rate - 1) >> 1]);
-      } else {
-        part_lfos[0]->SetPhaseIncrement(lut_lfo_increments[lfo_rate - 64]);
-      }
-      SpreadLFOs(part.voicing_settings().lfo_spread_voices, &part_lfos[0], part.num_voices());
-      for (uint8_t v = 0; v < part.num_voices(); ++v) {
-        FastSyncedLFO* voice_lfos[LFO_ROLE_LAST];
-        for (uint8_t l = 0; l < LFO_ROLE_LAST; ++l) {
-          voice_lfos[l] = part.voice(v)->lfo(static_cast<LFORole>(l));
-        }
-        SpreadLFOs(part.voicing_settings().lfo_spread_types, &voice_lfos[0], LFO_ROLE_LAST);
-      }
-    }
-    part.mutable_looper().Refresh();
-    for (uint8_t v = 0; v < part.num_voices(); ++v) {
-      part.voice(v)->Refresh();
-    }
-  }
-
   for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
     cv_outputs_[i].Refresh();
   }
+
+  // Advance LFOs, except during interval between Start and the first Clock
+  if (!running_ || tick_counter() >= 0) {
+    backup_clock_lfo_.Refresh();
+    for (uint8_t p = 0; p < num_active_parts_; ++p) {
+      Part& part = part_[p];
+      part.mutable_looper().Refresh();
+      for (uint8_t v = 0; v < part.num_voices(); ++v) {
+        part.voice(v)->Refresh();
+      }
+    }
+  }
+
+  // Since the backup LFO runs at 1/n of clock freq, we compensate by treating
+  // each 1/n of its phase as a new tick, to make these output ticks 1:1 with
+  // the original clock ticks
+  if (
+    !running_ &&
+    (backup_clock_lfo_.GetPhase() << kBackupClockLFOPeriodTicksBits) <
+    (backup_clock_lfo_.GetPhaseIncrement() << kBackupClockLFOPeriodTicksBits)
+  ) {
+    // Backup clock emits a tick
+    backup_clock_lfo_ticks_++;
+    ClockVoiceLFOs(backup_clock_lfo_ticks_, false);
+    for (uint8_t p = 0; p < num_active_parts_; ++p) {
+      part_[p].mutable_looper().Clock(backup_clock_lfo_ticks_);
+    }
+  };
+}
+
+bool Multi::clock() const {
+  if (!running_) return false;
+  uint16_t output_division = lut_clock_ratio_ticks[settings_.clock_output_division];
+  int32_t ticks = running_ ? tick_counter() : backup_clock_lfo_ticks_;
+  uint16_t ticks_mod_output_div = modulo(ticks, output_division);
+  return ticks_mod_output_div <= (output_division >> 1) && \
+      (!settings_.nudge_first_tick || \
+        settings_.clock_bar_duration == 0 || \
+        !reset());
 }
 
 bool Multi::Set(uint8_t address, uint8_t value) {
@@ -785,9 +809,14 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
 
 void Multi::UpdateTempo() {
   internal_clock_.set_tempo(settings_.clock_tempo);
-  if (running_) return; // If running, master LFO will get Tap
+  if (running_) return; // If running, backup LFO will get Tap
+  if (!multi.internal_clock()) return; // We don't know the new tempo
+
   // If not running, there's no Tap to update the increment, so do that here
-  master_lfo_.SetPhaseIncrement(tempo_tick_phase_increment() >> kMasterLFOPeriodTicksBits);
+  uint32_t phase_increment = settings_.clock_tempo * kTempoToTickPhaseIncrement;
+  phase_increment /= settings_.clock_input_division;
+  phase_increment >>= kBackupClockLFOPeriodTicksBits;
+  backup_clock_lfo_.SetPhaseIncrement(phase_increment);
 }
 
 void Multi::AfterDeserialize() {

@@ -644,6 +644,19 @@ class Part {
   SequencerArpeggiatorResult BuildNextStepResult(uint32_t step_counter) const;
   void ClockStepGateEndings();
   void Start();
+  void CueSequencer();
+  inline uint32_t ticks_to_steps(int32_t ticks) {
+    return seq_.step_offset + ticks / PPQN();
+  }
+  inline int8_t sequence_repeats_per_arp_reset() const {
+    int8_t n = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
+    if (n <= 0) return 0;
+    return n;
+  }
+  inline uint16_t steps_per_arp_reset() const {
+    uint8_t steps_per_sequence_repeat = looped() ? (1 << seq_.loop_length) : seq_.num_steps;
+    return sequence_repeats_per_arp_reset() * steps_per_sequence_repeat;
+  }
   void StopRecording();
   void StartRecording();
   void DeleteSequence();
@@ -696,7 +709,9 @@ class Part {
   inline bool looper_in_use() const {
     return looped() && sequencer_in_use();
   }
-
+  inline bool doing_stepped_stuff() const {
+    return !(looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL);
+  }
   inline bool sequencer_in_use() const {
     return midi_.play_mode == PLAY_MODE_SEQUENCER ||
       (midi_.play_mode == PLAY_MODE_ARPEGGIATOR && seq_driven_arp());
@@ -721,6 +736,17 @@ class Part {
       voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_SILENT;
   }
 
+  inline SequencerArpeggiatorResult AdvanceArpForLooperNoteOn(uint8_t pitch, uint8_t velocity) {
+    // NB: since this path implies seq_driven_arp, there is no arp pattern,
+    // and pattern_step_counter doesn't matter
+    SequencerStep step = SequencerStep(pitch, velocity);
+    SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(0, step);
+    arpeggiator_ = result.arpeggiator;
+    return result;
+  }
+  inline void AdvanceArpForLooperNoteOnWithoutReturn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {
+    AdvanceArpForLooperNoteOn(pitch, velocity);
+  }
   void LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity);
   void LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch);
   void LooperRecordNoteOn(uint8_t pressed_key_index);
@@ -902,9 +928,9 @@ class Part {
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = kC4) const;
   const SequencerStep BuildSeqStep(uint8_t step_index) const;
   const SequencerArpeggiatorResult BuildNextArpeggiatorResult(
-    uint32_t step_counter, const SequencerStep& seq_step) const {
+    uint32_t pattern_step_counter, const SequencerStep& seq_step) const {
     return arpeggiator_.BuildNextResult(
-      *this, arp_keys_, step_counter, seq_step);
+      *this, arp_keys_, pattern_step_counter, seq_step);
   }
 
   MidiSettings midi_;
@@ -923,14 +949,14 @@ class Part {
   stmlib::NoteStack<kNoteStackSize> generated_notes_;  // by sequencer or arpeggiator.
   stmlib::NoteStack<kNoteStackSize> mono_allocator_;
   stmlib::VoiceAllocator<kNumMaxVoicesPerPart * 2> poly_allocator_;
-  uint8_t active_note_[kNumMaxVoicesPerPart];
+  uint8_t active_note_[kNumMaxVoicesPerPart]; // Tracks active note for each voice
   uint8_t cyclic_allocation_note_counter_;
   
   Arpeggiator arpeggiator_;
   
   bool seq_recording_;
   bool seq_overdubbing_;
-  uint32_t step_counter_;
+  int32_t step_counter_;
   uint8_t seq_rec_step_;
   bool seq_overwrite_;
   
