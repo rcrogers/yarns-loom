@@ -381,8 +381,6 @@ class Multi {
   
   void Clock();
   inline void set_next_clock_input_tick(uint16_t n) {
-    // next_clock_input_tick_for_start_ = n;
-
     // We haven't actually received the target tick yet -- Clock() will
     // pre-increment -- so the last Clock we received is one prior
     clock_input_ticks_ = n - 1;
@@ -611,14 +609,14 @@ class Multi {
   uint8_t internal_clock_ticks_;
   uint16_t midi_clock_tick_duration_;
 
-  // For each of the next 12 ticks, tracks the remaining number of ClockFast cycles until that tick should occur
+  // For each of the last 12 ticks, tracks the remaining number of ClockFast
+  // cycles until that tick should occur
   int16_t swing_predelay_[12];
   
   // The 0-based index of the last received Clock event, ignoring
   // division/offset. Negative if we have not yet received a Clock. At 240 BPM *
   // 24 PPQN = 96 Hz, this overflows after 259 days
   int32_t clock_input_ticks_;
-  // int32_t next_clock_input_tick_for_start_;
 
   // While the clock is running, the backup LFO syncs to the clock's phase/freq,
   // and while the clock is stopped, the backup LFO continues free-running based
