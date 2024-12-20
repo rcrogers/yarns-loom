@@ -221,7 +221,7 @@ struct PackedPart {
     arp_pattern : 5, // values free: 0
     euclidean_length : 5, // values free: 0
     euclidean_fill : 5, // values free: 0
-    step_offset : 5, // values free: 0
+    step_offset : 5, // values free: 2 (see kNumSteps)
     num_steps : 5, // values free: 1
     clock_quantization : 1,
     loop_length : 3; // values free: 0

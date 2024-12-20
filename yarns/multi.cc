@@ -924,7 +924,7 @@ int16_t Multi::UpdateController(CCRouting cc, uint8_t value_7bits) {
     // Update the controller first, and derive the scaled value from it
     controller_values[controller] = settings_.control_change_mode == CONTROL_CHANGE_MODE_RELATIVE_SCALED
       ? SaturatingIncrement(controller_values[controller], relative_increment)
-      : value_7bits;
+      : value_7bits; // CONTROL_CHANGE_MODE_ABSOLUTE
     CONSTRAIN(controller_values[controller], 0, 127);
     uint8_t delta = range.max - range.min + 1;
     scaled_value = delta * controller_values[controller] >> 7;

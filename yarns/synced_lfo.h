@@ -48,8 +48,6 @@ template<uint8_t PHASE_ERR_DOWNSHIFT, uint8_t FREQ_ERR_DOWNSHIFT>
 class SyncedLFO {
  public:
 
-  uint8_t clock_division_;
-
   SyncedLFO() { }
   ~SyncedLFO() { }
   void SetPhase(uint32_t phase) { phase_ = phase; }
