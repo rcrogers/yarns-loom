@@ -358,8 +358,7 @@ void Part::Clock() { // From Multi::ClockFast
     // output (i.e., resets the arp at a predictable point in the loop) IFF the
     // looper's LFO is locked onto the clock's phase and frequency. Clocking
     // changes may break the lock, and briefly cause mistimed arp resets
-    uint16_t arp_reset_steps = steps_per_arp_reset();
-    if (arp_reset_steps && step_counter_ % arp_reset_steps == 0) arpeggiator_.Reset();
+    if (arp_should_reset_on_step(step_counter_)) arpeggiator_.Reset();
   }
 
   // The rest of the method is only for the step sequencer and/or arpeggiator
@@ -402,7 +401,8 @@ SequencerArpeggiatorResult Part::BuildNextStepResult(uint32_t step_counter) cons
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
     // If seq-driven and there are no steps, early return
     if (seq_driven_arp() && !seq_.num_steps) return result;
-    result = BuildNextArpeggiatorResult(step_counter, result.note);
+    if (arp_should_reset_on_step(step_counter)) result.arpeggiator.Reset();
+    result = result.arpeggiator.BuildNextResult(*this, arp_keys_, step_counter, result.note);
   }
   return result;
 }
@@ -415,7 +415,7 @@ void Part::ClockStepGateEndings() {
     }
     // Peek at next step to see if it's a continuation
     // If more than one voice has a step ending, the peek is redundant
-    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note; // TODO needs to check arp reset?
+    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note;
     if (next_step.is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
@@ -675,7 +675,7 @@ void Part::LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch) {
     // continuation, so we don't care
     //
     // Also NB: step_counter_ doesn't matter (see LooperPlayNoteOn)
-    next_step = BuildNextArpeggiatorResult(0, next_step).note;
+    next_step = arpeggiator_.BuildNextResult(*this, arp_keys_, 0, next_step).note;
     if (next_step.is_continuation()) {
       // Leave this pitch in the care of the next looper note
       //
