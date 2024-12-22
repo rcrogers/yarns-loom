@@ -300,20 +300,6 @@ void Ui::PrintPartAndPlayMode(uint8_t part) {
   display_.Print(buffer_);
 }
 
-void Ui::PrintRecordingStep() {
-  SequencerStep step = recording_part().sequencer_settings().step[recording_part().recording_step()];
-  if (step.is_rest()) {
-    display_.Print("RS");
-    return;
-  }
-  if (step.is_tie()) {
-    display_.Print("TI");
-    return;
-  }
-  PrintNote(step.note());
-  return;
-}
-
 void Ui::PrintArpeggiatorMovementStep(SequencerStep step) {
   if (step.is_white()) {
     Settings::PrintSignedInteger(buffer_, step.white_key_value());
@@ -375,20 +361,25 @@ void Ui::PrintStepSequencerStatus() {
     return;
   }
 
+  uint8_t rec_step = recording_part().recording_step();
   if (
     recording_part().num_steps() == 0 ||
-    recording_part().recording_step() == recording_part().playing_step()
+    rec_step == recording_part().playing_step()
   ) {
     display_.set_brightness(UINT16_MAX);
   } else {
     // If playing a sequencer step other than the selected one, 2/3 brightness
     display_.set_brightness(43690);
   }
+  const SequencerStep& step = recording_part().sequencer_settings().step[rec_step];
+  display_.set_fade(step.is_slid() ? kRefreshFreq << 1 : 0);
 
   if (recording_mode_is_displaying_pitch_) {
-    PrintRecordingStep();
+    if (step.is_rest()) display_.Print("RS");
+    else if (step.is_tie()) display_.Print("TI");
+    else PrintNote(step.note());
   } else {
-    PrintInteger(recording_part().recording_step() + 1);
+    PrintInteger(rec_step + 1);
   }
 }
 
@@ -598,7 +589,7 @@ void Ui::OnClickRecording(const Event& e) {
     push_it_ = false;
     mutable_recording_part()->RecordStep(SequencerStep(push_it_note_, 100));
   } else {
-    SequencerStep step = recording_part().sequencer_settings().step[recording_part().recording_step()];
+    const SequencerStep& step = recording_part().sequencer_settings().step[recording_part().recording_step()];
     if (step.has_note()) {
       push_it_note_ = step.note();
     } else {
@@ -776,14 +767,18 @@ void Ui::OnSwitchHeld(const Event& e) {
 
     case UI_SWITCH_START_STOP:
       if (recording_any) {
-        StopRecording();
+        if (recording_part().looped()) {
+          // Do nothing
+        } else {
+          // Toggle slide flag on recording step
+          SequencerStep* step = &mutable_recording_part()->mutable_sequencer_settings()->step[recording_part().recording_step()];
+          step->set_slid(!step->is_slid());
+        }
+      } else {
+        // Increment active part
+        active_part_ = (1 + active_part_) % multi.num_active_parts();
+        SplashOn(SPLASH_ACTIVE_PART, active_part_);
       }
-      // Increment active part
-      active_part_ = (1 + active_part_) % multi.num_active_parts();
-      if (recording_any) {
-        multi.StartRecording(active_part_);
-      }
-      SplashOn(SPLASH_ACTIVE_PART, active_part_);
       break;
 
     case UI_SWITCH_TAP_TEMPO:
@@ -940,6 +935,7 @@ void Ui::DoEvents() {
     } else {
       (this->*modes_[mode_].refresh_display)();
       display_.set_brightness(UINT16_MAX);
+      mode_ == UI_MODE_PARAMETER_EDIT ? SetFadeForSetting(setting()) : display_.set_fade(0);
     }
     if (scroll_display) {
       display_.Scroll();
@@ -948,24 +944,6 @@ void Ui::DoEvents() {
         mode_ == UI_MODE_CALIBRATION_ADJUST_LEVEL ||
         mode_ == UI_MODE_LEARNING
     );
-    if (multi.recording()) {
-      display_.set_fade(0);
-    // } else if (
-    //   mode_ == UI_MODE_MAIN_MENU || (
-    //     mode_ == UI_MODE_PARAMETER_SELECT && (
-    //       &setting() == &setting_defs.get(SETTING_MENU_SETUP) ||
-    //       &setting() == &setting_defs.get(SETTING_MENU_OSCILLATOR) ||
-    //       &setting() == &setting_defs.get(SETTING_MENU_ENVELOPE) ||
-    //       current_menu_ != &live_menu_
-    //     )
-    //   )
-    // ) {
-    //   display_.set_fade(kDefaultFade);
-    } else if (mode_ == UI_MODE_PARAMETER_EDIT) {
-      SetFadeForSetting(setting());
-    } else {
-      display_.set_fade(0);
-    }
     return;
   }
   if (display_.scrolling()) { return; }

@@ -639,6 +639,7 @@ class Part {
   void Reset();
   // Pulses Per Quarter Note
   uint16_t PPQN() const { return lut_clock_ratio_ticks[seq_.clock_division]; }
+  uint8_t gate_length() const { return seq_.gate_length + 1; }
   void Clock();
   // Advance step sequencer and/or arpeggiator
   SequencerArpeggiatorResult BuildNextStepResult(uint32_t step_counter) const;

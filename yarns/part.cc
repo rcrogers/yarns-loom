@@ -317,8 +317,7 @@ void Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
   
   if (seq_recording_ &&
       (pitch_bend > 8192 + 2048 || pitch_bend < 8192 - 2048)) {
-    // Set slide flag
-    seq_.step[seq_rec_step_].data[1] |= 0x80;
+    seq_.step[seq_rec_step_].set_slid(true);
   }
 }
 
@@ -799,7 +798,7 @@ void Part::VoiceNoteOn(
 
   // If this pitch is under manual control, don't extend the gate
   if (reset_gate_counter && !manual_keys_.stack.Find(pitch)) {
-    gate_length_counter_[voice_index] = seq_.gate_length + 1;
+    gate_length_counter_[voice_index] = gate_length();
   }
   active_note_[voice_index] = pitch;
   Voice* voice = voice_[voice_index];
@@ -840,6 +839,13 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
   const NoteEntry& after = priority_note();
   if (voicing_.allocation_mode == POLY_MODE_OFF) {
     bool stealing = mono_allocator_.size() > 1;
+    // If a previous note was a sequencer step tie/slide, it will have skipped
+    // its normal ending, so we end all generated notes except the new note
+    for (uint8_t i = 1; i <= generated_notes_.max_size(); ++i) {
+      if (generated_notes_.note(i).note != after.note) {
+        GeneratedNoteOff(generated_notes_.note(i).note);
+      }
+    }
     // Check if the note that has been played should be triggered according
     // to selected voice priority rules.
     if (before.note != after.note) {
