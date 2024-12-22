@@ -317,8 +317,7 @@ void Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
   
   if (seq_recording_ &&
       (pitch_bend > 8192 + 2048 || pitch_bend < 8192 - 2048)) {
-    // Set slide flag
-    seq_.step[seq_rec_step_].data[1] |= 0x80;
+    seq_.step[seq_rec_step_].set_slid(true);
   }
 }
 
@@ -358,8 +357,7 @@ void Part::Clock() { // From Multi::ClockFast
     // output (i.e., resets the arp at a predictable point in the loop) IFF the
     // looper's LFO is locked onto the clock's phase and frequency. Clocking
     // changes may break the lock, and briefly cause mistimed arp resets
-    uint16_t arp_reset_steps = steps_per_arp_reset();
-    if (arp_reset_steps && step_counter_ % arp_reset_steps == 0) arpeggiator_.Reset();
+    if (arp_should_reset_on_step(step_counter_)) arpeggiator_.Reset();
   }
 
   // The rest of the method is only for the step sequencer and/or arpeggiator
@@ -402,7 +400,8 @@ SequencerArpeggiatorResult Part::BuildNextStepResult(uint32_t step_counter) cons
   if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
     // If seq-driven and there are no steps, early return
     if (seq_driven_arp() && !seq_.num_steps) return result;
-    result = BuildNextArpeggiatorResult(step_counter, result.note);
+    if (arp_should_reset_on_step(step_counter)) result.arpeggiator.Reset();
+    result = result.arpeggiator.BuildNextResult(*this, arp_keys_, step_counter, result.note);
   }
   return result;
 }
@@ -415,7 +414,7 @@ void Part::ClockStepGateEndings() {
     }
     // Peek at next step to see if it's a continuation
     // If more than one voice has a step ending, the peek is redundant
-    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note; // TODO needs to check arp reset?
+    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note;
     if (next_step.is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
@@ -675,7 +674,7 @@ void Part::LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch) {
     // continuation, so we don't care
     //
     // Also NB: step_counter_ doesn't matter (see LooperPlayNoteOn)
-    next_step = BuildNextArpeggiatorResult(0, next_step).note;
+    next_step = arpeggiator_.BuildNextResult(*this, arp_keys_, 0, next_step).note;
     if (next_step.is_continuation()) {
       // Leave this pitch in the care of the next looper note
       //
@@ -799,7 +798,7 @@ void Part::VoiceNoteOn(
 
   // If this pitch is under manual control, don't extend the gate
   if (reset_gate_counter && !manual_keys_.stack.Find(pitch)) {
-    gate_length_counter_[voice_index] = seq_.gate_length + 1;
+    gate_length_counter_[voice_index] = gate_length();
   }
   active_note_[voice_index] = pitch;
   Voice* voice = voice_[voice_index];
@@ -841,6 +840,13 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
   const NoteEntry& after = priority_note();
   if (voicing_.allocation_mode == POLY_MODE_OFF) {
     bool stealing = mono_allocator_.size() > 1;
+    // If a previous note was a sequencer step tie/slide, it will have skipped
+    // its normal ending, so we end all generated notes except the new note
+    for (uint8_t i = 1; i <= generated_notes_.max_size(); ++i) {
+      if (generated_notes_.note(i).note != after.note) {
+        GeneratedNoteOff(generated_notes_.note(i).note);
+      }
+    }
     // Check if the note that has been played should be triggered according
     // to selected voice priority rules.
     if (before.note != after.note) {

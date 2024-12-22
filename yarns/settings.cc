@@ -39,7 +39,22 @@
 namespace yarns {
 
 const char* const layout_values[LAYOUT_LAST] = {
-  "1M", "2M", "4M", "2P", "4P", "2>", "4>", "8>", "4T", "4V", "31", "22", "21", "*2", "3M"
+  "1M 1 MONO PART",
+  "2M 2 MONO PARTS",
+  "4M 4 MONO PARTS",
+  "2P 2-VOICE POLY",
+  "4P 4-VOICE POLY",
+  "2> 2-VOICE POLYCHAINED",
+  "4> 4-VOICE POLYCHAINED",
+  "8> 8-VOICE POLYCHAINED",
+  "4T 4 TRIGGERS",
+  "4V 4 CONTROL VOLTAGES",
+  "31 3-VOICE POLY + 1 MONO PART",
+  "22 2-VOICE POLY + 2 MONO PARTS",
+  "21 2-VOICE POLY + 1 MONO PART",
+  "*2 PARAPHONIC + 2 MONO PARTS",
+  "3M 3 MONO PARTS",
+  "*1 PARAPHONIC + 1 MONO PART",
 };
 
 const char* const control_change_mode_values[CONTROL_CHANGE_MODE_LAST] = {

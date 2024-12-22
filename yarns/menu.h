@@ -281,6 +281,18 @@ static const SettingIndex paraphonic_plus_two[] = {
   MENU_END
 };
 
+static const SettingIndex paraphonic_plus_one[] = {
+  MENU_LAYOUT_CLOCK,
+  SETTING_CLOCK_OVERRIDE,
+  MENU_MIDI,
+  MENU_VOICING_ALLOCATION_MIXED,
+  MENU_MODULATION,
+  SETTING_VOICING_CV_OUT_3,
+  SETTING_VOICING_CV_OUT_4,
+  MENU_TUNING,
+  MENU_END
+};
+
 static const SettingIndex two_one[] = {
   MENU_LAYOUT_CLOCK,
   MENU_MIDI,
@@ -324,6 +336,7 @@ static const SettingIndex* setup_setting_list_for_layout[LAYOUT_LAST] = {
   two_one,
   paraphonic_plus_two,
   tri_mono,
+  paraphonic_plus_one,
 };
 
 class Menu {

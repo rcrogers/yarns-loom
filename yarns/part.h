@@ -639,6 +639,7 @@ class Part {
   void Reset();
   // Pulses Per Quarter Note
   uint16_t PPQN() const { return lut_clock_ratio_ticks[seq_.clock_division]; }
+  uint8_t gate_length() const { return seq_.gate_length + 1; }
   void Clock();
   // Advance step sequencer and/or arpeggiator
   SequencerArpeggiatorResult BuildNextStepResult(uint32_t step_counter) const;
@@ -648,6 +649,8 @@ class Part {
   inline uint32_t ticks_to_steps(int32_t ticks) {
     return seq_.step_offset + ticks / PPQN();
   }
+
+  // Returns 0 if arp is not sequencer-driven
   inline int8_t sequence_repeats_per_arp_reset() const {
     int8_t n = seq_.arp_pattern - LUT_ARPEGGIATOR_PATTERNS_SIZE;
     if (n <= 0) return 0;
@@ -657,6 +660,11 @@ class Part {
     uint8_t steps_per_sequence_repeat = looped() ? (1 << seq_.loop_length) : seq_.num_steps;
     return sequence_repeats_per_arp_reset() * steps_per_sequence_repeat;
   }
+
+  inline bool arp_should_reset_on_step(uint32_t step_counter) const {
+    return steps_per_arp_reset() && !(step_counter % steps_per_arp_reset());
+  }
+
   void StopRecording();
   void StartRecording();
   void DeleteSequence();
@@ -740,7 +748,7 @@ class Part {
     // NB: since this path implies seq_driven_arp, there is no arp pattern,
     // and pattern_step_counter doesn't matter
     SequencerStep step = SequencerStep(pitch, velocity);
-    SequencerArpeggiatorResult result = BuildNextArpeggiatorResult(0, step);
+    SequencerArpeggiatorResult result = arpeggiator_.BuildNextResult(*this, arp_keys_, 0, step);
     arpeggiator_ = result.arpeggiator;
     return result;
   }
@@ -927,11 +935,6 @@ class Part {
 
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = kC4) const;
   const SequencerStep BuildSeqStep(uint8_t step_index) const;
-  const SequencerArpeggiatorResult BuildNextArpeggiatorResult(
-    uint32_t pattern_step_counter, const SequencerStep& seq_step) const {
-    return arpeggiator_.BuildNextResult(
-      *this, arp_keys_, pattern_step_counter, seq_step);
-  }
 
   MidiSettings midi_;
   VoicingSettings voicing_;

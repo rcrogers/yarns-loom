@@ -40,11 +40,9 @@ namespace yarns {
 using namespace std;
 using namespace stmlib;
 
-const uint16_t kRefreshPeriod = 900; // msec
-const uint16_t kRefreshOneThird = 300;
-const uint16_t kRefreshTwoThirds = 600;
-const uint32_t kEncoderLongPressTime = kRefreshPeriod * 2 / 3;
-const uint32_t kDefaultFade = (1 << 15) / kRefreshPeriod; // 1/2 frequency
+const uint16_t kRefreshMsec = 900;
+const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
+const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
 
 const char* const kVersion = "Loom 2_7_1";
 
@@ -175,7 +173,7 @@ void Ui::Poll() {
   if (!encoder_long_press_event_sent_) {
     if (encoder_.pressed()) {
       uint32_t duration = system_clock.milliseconds() - encoder_press_time_;
-      if (duration >= kEncoderLongPressTime && !encoder_long_press_event_sent_) {
+      if (duration >= kLongPressMsec && !encoder_long_press_event_sent_) {
         queue_.AddEvent(CONTROL_ENCODER_LONG_CLICK, 0, 0);
         encoder_long_press_event_sent_ = true;
       }
@@ -193,8 +191,8 @@ void Ui::Poll() {
   // Switch press and long press.
   switches_.Debounce();
   PollSwitch(UI_SWITCH_REC        , rec_press_time_       , rec_long_press_event_sent_        );
-  PollSwitch(UI_SWITCH_START_STOP , start_stop_press_time_, start_stop_long_press_event_sent_ );
-  PollSwitch(UI_SWITCH_TAP_TEMPO  , tap_tempo_press_time_ , tap_tempo_long_press_event_sent_  );
+  PollSwitch(UI_SWITCH_START_STOP_TIE , start_stop_press_time_, start_stop_long_press_event_sent_ );
+  PollSwitch(UI_SWITCH_TAP_TEMPO_REST , tap_tempo_press_time_ , tap_tempo_long_press_event_sent_  );
 
   display_.RefreshSlow();
   
@@ -227,7 +225,7 @@ void Ui::PollSwitch(const UiSwitch ui_switch, uint32_t& press_time, bool& long_p
   if (!long_press_event_sent) {
     if (switches_.pressed(ui_switch)) {
       uint32_t duration = system_clock.milliseconds() - press_time;
-      if (duration >= kEncoderLongPressTime && !long_press_event_sent) {
+      if (duration >= kLongPressMsec && !long_press_event_sent) {
         queue_.AddEvent(CONTROL_SWITCH_HOLD, ui_switch, 0);
         long_press_event_sent = true;
       }
@@ -300,20 +298,6 @@ void Ui::PrintPartAndPlayMode(uint8_t part) {
   display_.Print(buffer_);
 }
 
-void Ui::PrintRecordingStep() {
-  SequencerStep step = recording_part().sequencer_settings().step[recording_part().recording_step()];
-  if (step.is_rest()) {
-    display_.Print("RS");
-    return;
-  }
-  if (step.is_tie()) {
-    display_.Print("TI");
-    return;
-  }
-  PrintNote(step.note());
-  return;
-}
-
 void Ui::PrintArpeggiatorMovementStep(SequencerStep step) {
   if (step.is_white()) {
     Settings::PrintSignedInteger(buffer_, step.white_key_value());
@@ -375,20 +359,25 @@ void Ui::PrintStepSequencerStatus() {
     return;
   }
 
+  uint8_t rec_step = recording_part().recording_step();
   if (
     recording_part().num_steps() == 0 ||
-    recording_part().recording_step() == recording_part().playing_step()
+    rec_step == recording_part().playing_step()
   ) {
     display_.set_brightness(UINT16_MAX);
   } else {
     // If playing a sequencer step other than the selected one, 2/3 brightness
     display_.set_brightness(43690);
   }
+  const SequencerStep& step = recording_part().sequencer_settings().step[rec_step];
+  display_.set_fade(step.is_slid() ? kRefreshFreq << 1 : 0);
 
   if (recording_mode_is_displaying_pitch_) {
-    PrintRecordingStep();
+    if (step.is_rest()) display_.Print("RS");
+    else if (step.is_tie()) display_.Print("TI");
+    else PrintNote(step.note());
   } else {
-    PrintInteger(recording_part().recording_step() + 1);
+    PrintInteger(rec_step + 1);
   }
 }
 
@@ -598,7 +587,7 @@ void Ui::OnClickRecording(const Event& e) {
     push_it_ = false;
     mutable_recording_part()->RecordStep(SequencerStep(push_it_note_, 100));
   } else {
-    SequencerStep step = recording_part().sequencer_settings().step[recording_part().recording_step()];
+    const SequencerStep& step = recording_part().sequencer_settings().step[recording_part().recording_step()];
     if (step.has_note()) {
       push_it_note_ = step.note();
     } else {
@@ -700,7 +689,7 @@ void Ui::OnSwitchPress(const Event& e) {
       }
       break;
       
-    case UI_SWITCH_START_STOP:
+    case UI_SWITCH_START_STOP_TIE:
       if (multi.recording()) {
         if (recording_part().looped()) {
           mutable_recording_part()->mutable_looper().RemoveOldestNote();
@@ -721,7 +710,7 @@ void Ui::OnSwitchPress(const Event& e) {
       }
       break;
       
-    case UI_SWITCH_TAP_TEMPO:
+    case UI_SWITCH_TAP_TEMPO_REST:
       if (multi.recording()) {
         if (recording_part().looped()) {
           mutable_recording_part()->mutable_looper().RemoveNewestNote();
@@ -774,19 +763,23 @@ void Ui::OnSwitchHeld(const Event& e) {
       }
       break;
 
-    case UI_SWITCH_START_STOP:
+    case UI_SWITCH_START_STOP_TIE:
       if (recording_any) {
-        StopRecording();
+        if (recording_part().looped()) {
+          // Do nothing
+        } else {
+          // Toggle slide flag on recording step
+          SequencerStep* step = &mutable_recording_part()->mutable_sequencer_settings()->step[recording_part().recording_step()];
+          step->set_slid(!step->is_slid());
+        }
+      } else {
+        // Increment active part
+        active_part_ = (1 + active_part_) % multi.num_active_parts();
+        SplashOn(SPLASH_ACTIVE_PART, active_part_);
       }
-      // Increment active part
-      active_part_ = (1 + active_part_) % multi.num_active_parts();
-      if (recording_any) {
-        multi.StartRecording(active_part_);
-      }
-      SplashOn(SPLASH_ACTIVE_PART, active_part_);
       break;
 
-    case UI_SWITCH_TAP_TEMPO:
+    case UI_SWITCH_TAP_TEMPO_REST:
       if (recording_any) {
         mutable_recording_part()->toggle_seq_overwrite();
       } else {
@@ -903,7 +896,7 @@ void Ui::DoEvents() {
   }
 
   if (splash_) { // Check whether to end this splash (and maybe chain another)
-    if (queue_.idle_time() < kRefreshPeriod || display_.scrolling()) {
+    if (queue_.idle_time() < kRefreshMsec || display_.scrolling()) {
       return; // Splash isn't over yet
     }
     // Chaining
@@ -922,7 +915,7 @@ void Ui::DoEvents() {
     }
   }
 
-  if (queue_.idle_time() > kRefreshPeriod) {
+  if (queue_.idle_time() > kRefreshMsec) {
     if (!display_.scrolling()) {
       factory_testing_display_ = UI_FACTORY_TESTING_DISPLAY_EMPTY;
       refresh_display = true;
@@ -940,6 +933,7 @@ void Ui::DoEvents() {
     } else {
       (this->*modes_[mode_].refresh_display)();
       display_.set_brightness(UINT16_MAX);
+      mode_ == UI_MODE_PARAMETER_EDIT ? SetFadeForSetting(setting()) : display_.set_fade(0);
     }
     if (scroll_display) {
       display_.Scroll();
@@ -948,24 +942,6 @@ void Ui::DoEvents() {
         mode_ == UI_MODE_CALIBRATION_ADJUST_LEVEL ||
         mode_ == UI_MODE_LEARNING
     );
-    if (multi.recording()) {
-      display_.set_fade(0);
-    // } else if (
-    //   mode_ == UI_MODE_MAIN_MENU || (
-    //     mode_ == UI_MODE_PARAMETER_SELECT && (
-    //       &setting() == &setting_defs.get(SETTING_MENU_SETUP) ||
-    //       &setting() == &setting_defs.get(SETTING_MENU_OSCILLATOR) ||
-    //       &setting() == &setting_defs.get(SETTING_MENU_ENVELOPE) ||
-    //       current_menu_ != &live_menu_
-    //     )
-    //   )
-    // ) {
-    //   display_.set_fade(kDefaultFade);
-    } else if (mode_ == UI_MODE_PARAMETER_EDIT) {
-      SetFadeForSetting(setting());
-    } else {
-      display_.set_fade(0);
-    }
     return;
   }
   if (display_.scrolling()) { return; }
@@ -975,7 +951,7 @@ void Ui::DoEvents() {
     active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
     ActivePartHeldKeys().stack.most_recent_note_index();
   bool print_part = mode_ == UI_MODE_PARAMETER_SELECT;
-  if (queue_.idle_time() > kRefreshTwoThirds) {
+  if (queue_.idle_time() > (kRefreshMsec * 2 / 3)) { // Last third
     if (print_part) {
       display_.set_fade(0);
       PrintPartAndPlayMode(active_part_);
@@ -987,7 +963,7 @@ void Ui::DoEvents() {
     } else if (print_latch) {
       PrintLatch();
     }
-  } else if (queue_.idle_time() > kRefreshOneThird) {
+  } else if (queue_.idle_time() > (kRefreshMsec / 3)) { // Middle third
     if (print_latch && print_part) {
       PrintLatch();
     }
