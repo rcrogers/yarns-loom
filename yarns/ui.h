@@ -141,9 +141,9 @@ class Ui {
   void Print(const char* text) {
     display_.Print(text, text);
   }
-  void PrintInteger(uint8_t number) {
+  void PrintInteger(uint8_t number, uint16_t brightness = UINT16_MAX, uint16_t fade_increment = 0) {
     Settings::PrintInteger(buffer_, number);
-    display_.Print(buffer_);
+    display_.Print(buffer_, buffer_, brightness, fade_increment);
   }
 
   void PrintDebugByte(uint8_t byte) {
@@ -221,18 +221,18 @@ class Ui {
   void PrintCalibrationVoiceNumber();
   void PrintCalibrationNote();
   void PrintRecordingPart();
-  void SetBrightnessFromSequencerPhase(const Part& part);
+  uint16_t GetBrightnessFromSequencerPhase(const Part& part);
   void PrintLoopSequencerStatus();
   void PrintStepSequencerStatus();
-  void PrintNote(int16_t note);
+  void PrintNote(int16_t note, uint16_t brightness = UINT16_MAX, uint16_t fade = 0);
   void PrintPushItNote();
   void PrintLearning();
   void PrintFactoryTesting();
   void PrintRecordingStep();
   void PrintArpeggiatorMovementStep(SequencerStep step);
-  void PrintPartAndPlayMode(uint8_t part);
+  void PrintPartAndPlayMode(uint8_t part, uint16_t brightness = UINT16_MAX, uint16_t fade = 0);
   void PrintLatch();
-  void SetFadeForSetting(const Setting& setting);
+  uint16_t GetFadeForSetting(const Setting& setting);
 
   HeldKeys& ActivePartHeldKeys();
   
