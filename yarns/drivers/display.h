@@ -49,22 +49,20 @@ class Display {
   inline void Print(const char* string) {
     Print(string, string);
   }
-  void Print(const char* short_string, const char* long_string);
+  void Print(const char* short_string, const char* long_string, uint16_t brightness = UINT16_MAX, uint16_t fade = 0);
 
   inline void PrintMasks(const uint16_t* masks) {
     std::copy(&masks[0], &masks[kDisplayWidth], &mask_[0]);
+    set_brightness(UINT16_MAX, 0);
     use_mask_ = true;
   }
   
   char* mutable_buffer() { return short_buffer_; }
-  void set_brightness(uint16_t fraction);
+  void set_brightness(uint16_t brightness, uint16_t fade);
   void Scroll();
   
   inline bool scrolling() const { return scrolling_; }
   inline void set_blink(bool blinking) { blinking_ = blinking; }
-  inline void set_fade(uint16_t increment) { // Applied at 1kHz
-    fading_increment_ = increment;
-  }
  
  private:
   void Shift14SegmentsWord(uint16_t data);
@@ -82,8 +80,10 @@ class Display {
   
   uint16_t scrolling_pre_delay_timer_;
   uint16_t scrolling_timer_;
-  uint16_t fading_counter_;
-  uint16_t fading_increment_;
+
+  // Applied at 1kHz
+  uint16_t fading_counter_, fading_increment_;
+
   uint8_t scrolling_step_;
   
   uint16_t active_position_;
