@@ -619,6 +619,7 @@ void Part::RecordStep(const SequencerStep& step) {
   SequencerStep* target = &seq_.step[seq_rec_step_];
   target->data[0] = step.data[0];
   target->data[1] |= step.data[1];
+  if (!target->has_note()) target->set_slid(false);
   ++seq_rec_step_;
   uint8_t last_step = seq_overdubbing_ ? seq_.num_steps : kNumSteps;
   // Extend sequence.
