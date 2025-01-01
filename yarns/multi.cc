@@ -93,6 +93,7 @@ void Multi::Init(bool reset_calibration) {
     cv_outputs_[i].Init(reset_calibration);
   }
   running_ = false;
+  can_advance_lfos_ = true;
   recording_ = false;
   recording_part_ = 0;
   started_by_keyboard_ = true;
@@ -135,6 +136,7 @@ void Multi::Clock() {
     return;
   }
   
+  can_advance_lfos_ = true;
   // Pre-increment so that the tick count will stay valid until the next Clock()
   clock_input_ticks_++;
   // clock_offset does not impact whether there is a new tick
@@ -166,7 +168,7 @@ void Multi::Clock() {
     
     if (ticks >= 0) {
       for (uint8_t p = 0; p < num_active_parts_; ++p) {
-        bool new_step = modulo(multi.tick_counter(), part_[p].PPQN()) == 0;
+        bool new_step = ticks % part_[p].PPQN() == 0;
         if (new_step && !part_[p].apply_swing_to_current_step()) part_[p].ClockStep();
         part_[p].ClockStepGateEndings();
       }
@@ -205,6 +207,7 @@ void Multi::Start(bool started_by_keyboard) {
   midi_handler.OnStart();
 
   running_ = true;
+  can_advance_lfos_ = false; // Until the first Clock()
   stop_count_down_ = 0;
 
   // NB: we assume that set_next_clock_input_tick has already been called if
@@ -217,7 +220,10 @@ void Multi::Start(bool started_by_keyboard) {
 
   backup_clock_lfo_.SetPhase(modulo(ticks_for_lfo, 1 << kBackupClockLFOPeriodTicksBits));
 
-  // NB: looper is handled in Part::Start instead, because it has side effects
+  // NB: looper phase is handled in Part::Start, so it can generate side effects
+  //
+  // Also NB: we do not change frequency for synced LFOs, hoping that we stored
+  // a good frequency while the clock was running previously
   ClockLFOs(ticks_for_lfo, true);
 
   for (uint8_t i = 0; i < num_active_parts_; ++i) {
@@ -269,6 +275,7 @@ void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos
 }
 
 // Update LFOs that control swing and voice modulation, but not the looper
+// NB: if forcing phase, we do not update the frequency of synced LFOs
 void Multi::ClockLFOs(int32_t ticks, bool force_phase) {
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
     Part& part = part_[p];
@@ -303,17 +310,17 @@ void Multi::Refresh() {
     cv_outputs_[i].Refresh();
   }
 
-  // Advance LFOs, except during interval between Start and the first Clock
-  if (!running_ || tick_counter() >= 0) {
+  if (can_advance_lfos_) {
     backup_clock_lfo_.Refresh();
     uint32_t swing_phase = abs(settings_.clock_swing) << (32 - 6);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       Part& part = part_[p];
 
       // Check whether we've waited long enough for a swung step
-      part.swing_lfo().Refresh();
-      bool hit_swing = part.swing_lfo().GetPhase() - swing_phase < part.swing_lfo().GetPhaseIncrement();
-      if (hit_swing && part.apply_swing_to_current_step()) part.ClockStep();
+      FastSyncedLFO& swing_lfo = part.swing_lfo();
+      swing_lfo.Refresh();
+      bool hit_swing = swing_lfo.GetPhase() - swing_phase < swing_lfo.GetPhaseIncrement();
+      if (running_ && tick_counter() >= 0 && hit_swing && part.apply_swing_to_current_step()) part.ClockStep();
 
       part.mutable_looper().Refresh();
       for (uint8_t v = 0; v < part.num_voices(); ++v) {
@@ -818,6 +825,7 @@ void Multi::UpdateTempo() {
   phase_increment /= settings_.clock_input_division;
   phase_increment >>= kBackupClockLFOPeriodTicksBits;
   backup_clock_lfo_.SetPhaseIncrement(phase_increment);
+  // Other LFOs will sync to this one
 }
 
 void Multi::AfterDeserialize() {

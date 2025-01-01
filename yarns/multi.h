@@ -454,10 +454,10 @@ class Multi {
       --internal_clock_ticks_;
     }
 
-    bool started = tick_counter() >= 0;
+    bool can_play = tick_counter() >= 0;
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       if (running()) {
-        bool play = started && part_[p].looper_in_use();
+        bool play = can_play && part_[p].looper_in_use();
         part_[p].mutable_looper().ProcessNotesUntilLFOPhase(
           play ? &Part::LooperPlayNoteOn : NULL,
           play ? &Part::LooperPlayNoteOff : NULL
@@ -614,9 +614,15 @@ class Multi {
   // 24 PPQN = 96 Hz, this overflows after 259 days
   int32_t clock_input_ticks_;
 
+  bool can_advance_lfos_;
+
   // While the clock is running, the backup LFO syncs to the clock's phase/freq,
   // and while the clock is stopped, the backup LFO continues free-running based
-  // on its last sync, to provide a tick counter for looper/modulation LFOs
+  // on its last sync, generating a new tick stream.  This preserves two key LFO
+  // behaviors while the clock is stopped: 1) synced modulation LFOs stay in
+  // phase with each other for ongoing manual play, and 2) all LFOs continue to
+  // update their frequency to reflect setting changes, retaining this frequency
+  // through the next Start to minimize sync error.
   FastSyncedLFO backup_clock_lfo_;
   // 1:1 with divided ticks, but can free-run without the clock
   int32_t backup_clock_lfo_ticks_;

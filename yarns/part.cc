@@ -351,7 +351,7 @@ bool Part::apply_swing_to_current_step() const {
 
   uint32_t step_counter = ticks_to_steps(multi.tick_counter());
   bool swing_even = multi.settings().clock_swing >= 0;
-  bool step_even = step_counter % 1 == 1;
+  bool step_even = step_counter % 2 == 1;
   return swing_even == step_even;
 }
 
