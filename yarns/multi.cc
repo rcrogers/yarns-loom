@@ -93,6 +93,7 @@ void Multi::Init(bool reset_calibration) {
     cv_outputs_[i].Init(reset_calibration);
   }
   running_ = false;
+  can_advance_lfos_ = true;
   recording_ = false;
   recording_part_ = 0;
   started_by_keyboard_ = true;
@@ -135,6 +136,7 @@ void Multi::Clock() {
     return;
   }
   
+  can_advance_lfos_ = true;
   // Pre-increment so that the tick count will stay valid until the next Clock()
   clock_input_ticks_++;
   // clock_offset does not impact whether there is a new tick
@@ -205,6 +207,7 @@ void Multi::Start(bool started_by_keyboard) {
   midi_handler.OnStart();
 
   running_ = true;
+  can_advance_lfos_ = false; // Until the first Clock()
   stop_count_down_ = 0;
 
   // NB: we assume that set_next_clock_input_tick has already been called if
@@ -303,8 +306,7 @@ void Multi::Refresh() {
     cv_outputs_[i].Refresh();
   }
 
-  // Advance LFOs, except during interval between Start and the first Clock
-  if (!running_ || tick_counter() >= 0) {
+  if (can_advance_lfos_) {
     backup_clock_lfo_.Refresh();
     uint32_t swing_phase = abs(settings_.clock_swing) << (32 - 6);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
