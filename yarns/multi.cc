@@ -220,7 +220,10 @@ void Multi::Start(bool started_by_keyboard) {
 
   backup_clock_lfo_.SetPhase(modulo(ticks_for_lfo, 1 << kBackupClockLFOPeriodTicksBits));
 
-  // NB: looper is handled in Part::Start instead, because it has side effects
+  // NB: looper phase is handled in Part::Start, so it can generate side effects
+  //
+  // Also NB: we do not change frequency for synced LFOs, hoping that we stored
+  // a good frequency while the clock was running previously
   ClockLFOs(ticks_for_lfo, true);
 
   for (uint8_t i = 0; i < num_active_parts_; ++i) {
@@ -272,6 +275,7 @@ void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos
 }
 
 // Update LFOs that control swing and voice modulation, but not the looper
+// NB: if forcing phase, we do not update the frequency of synced LFOs
 void Multi::ClockLFOs(int32_t ticks, bool force_phase) {
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
     Part& part = part_[p];
@@ -821,6 +825,7 @@ void Multi::UpdateTempo() {
   phase_increment /= settings_.clock_input_division;
   phase_increment >>= kBackupClockLFOPeriodTicksBits;
   backup_clock_lfo_.SetPhaseIncrement(phase_increment);
+  // Other LFOs will sync to this one
 }
 
 void Multi::AfterDeserialize() {
