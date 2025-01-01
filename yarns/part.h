@@ -128,6 +128,8 @@ enum SustainMode {
   SUSTAIN_MODE_LAST,
 };
 
+typedef SyncedLFO<15, 9> FastSyncedLFO; // Locks on in less than a second
+
 struct SequencerArpeggiatorResult { // Supports multiple return
   Arpeggiator arpeggiator; // Resulting arp state
   SequencerStep note; // Resulting note, including possible rest/tie
@@ -640,13 +642,12 @@ class Part {
   // Pulses Per Quarter Note
   uint16_t PPQN() const { return lut_clock_ratio_ticks[seq_.clock_division]; }
   uint8_t gate_length() const { return seq_.gate_length + 1; }
-  void Clock();
+  void ClockStep();
   // Advance step sequencer and/or arpeggiator
   SequencerArpeggiatorResult BuildNextStepResult(uint32_t step_counter) const;
   void ClockStepGateEndings();
   void Start();
-  void CueSequencer();
-  inline uint32_t ticks_to_steps(int32_t ticks) {
+  inline uint32_t ticks_to_steps(int32_t ticks) const {
     return seq_.step_offset + ticks / PPQN();
   }
 
@@ -855,6 +856,9 @@ class Part {
 
   inline Voice* voice(uint8_t index) const { return voice_[index]; }
   inline uint8_t num_voices() const { return num_voices_; }
+
+  bool apply_swing_to_current_step() const;
+  inline FastSyncedLFO& swing_lfo() { return swing_lfo_; }
   
   bool Set(uint8_t address, uint8_t value);
   inline uint8_t Get(uint8_t address) const {
@@ -964,6 +968,7 @@ class Part {
   bool seq_overwrite_;
   
   looper::Deck looper_;
+  FastSyncedLFO swing_lfo_;
 
   // Tracks which looper note (if any) is currently being recorded by a given
   // held key. Used to a) find and conclude that looper note again when a

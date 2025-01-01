@@ -80,7 +80,6 @@ void Multi::Init(bool reset_calibration) {
     part_[i].Init();
     part_[i].set_custom_pitch_table(settings_.custom_pitch_table);
   }
-  fill(&swing_predelay_[0], &swing_predelay_[12], -1);
 
   fill(&remote_control_controller_value_[0], &remote_control_controller_value_[128], 0);
   for (uint8_t i = 0; i < kNumParts; ++i) {
@@ -157,7 +156,7 @@ void Multi::Clock() {
     }
 
     // Sync LFOs
-    ClockVoiceLFOs(ticks, false);
+    ClockLFOs(ticks, false);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       part_[p].mutable_looper().Clock(ticks);
     }
@@ -166,19 +165,10 @@ void Multi::Clock() {
     backup_clock_lfo_.Tap(ticks, 1 << kBackupClockLFOPeriodTicksBits);
     
     if (ticks >= 0) {
-      uint8_t swing_counter = modulo(ticks, 12);
-      if (internal_clock()) {
-        swing_predelay_[swing_counter] = 0;
-      } else {
-        // Number of ClockFast calls since the last Clock
-        uint32_t interval = midi_clock_tick_duration_;
-        midi_clock_tick_duration_ = 0;
-
-        // Rectified triangle wave
-        uint32_t modulation = swing_counter < 6
-            ? swing_counter : 12 - swing_counter;
-        swing_predelay_[swing_counter] = \
-            27 * modulation * interval * uint32_t(settings_.clock_swing) >> 13;
+      for (uint8_t p = 0; p < num_active_parts_; ++p) {
+        bool new_step = modulo(multi.tick_counter(), part_[p].PPQN()) == 0;
+        if (new_step && !part_[p].apply_swing_to_current_step()) part_[p].ClockStep();
+        part_[p].ClockStepGateEndings();
       }
 
       if (
@@ -227,17 +217,12 @@ void Multi::Start(bool started_by_keyboard) {
 
   backup_clock_lfo_.SetPhase(modulo(ticks_for_lfo, 1 << kBackupClockLFOPeriodTicksBits));
 
-  ClockVoiceLFOs(ticks_for_lfo, true);
-  for (uint8_t p = 0; p < num_active_parts_; ++p) {
-    part_[p].CueSequencer();
-  }
-  
-  fill(&swing_predelay_[0], &swing_predelay_[12], -1);
-  
+  // NB: looper is handled in Part::Start instead, because it has side effects
+  ClockLFOs(ticks_for_lfo, true);
+
   for (uint8_t i = 0; i < num_active_parts_; ++i) {
     part_[i].Start();
   }
-  midi_clock_tick_duration_ = 0;
 }
 
 void Multi::Stop() {
@@ -259,24 +244,6 @@ void Multi::Stop() {
   started_by_keyboard_ = true;
 }
 
-void Multi::ClockFast() {
-  if (reset_pulse_counter_) {
-    --reset_pulse_counter_;
-  }
-
-  ++midi_clock_tick_duration_;
-  for (int i = 0; i < 12; ++i) {
-    if (swing_predelay_[i] == 0) {
-      for (uint8_t j = 0; j < num_active_parts_; ++j) {
-        part_[j].Clock();
-      }
-    }
-    if (swing_predelay_[i] >= 0) {
-      --swing_predelay_[i];
-    }
-  }
-}
-
 void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos, bool force_phase) {
   if (spread >= 0) { // Detune
     uint8_t spread_8 = spread << 1;
@@ -296,18 +263,19 @@ void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos
     for (uint8_t i = 1; i < num_lfos; ++i) {
       phase += phase_offset;
       FastSyncedLFO* lfo = *(base_lfo + i);
-      if (force_phase) {
-        lfo->SetPhase(phase);
-      } else {
-        lfo->SetTargetPhase(phase);
-      }
+      lfo->RegisterPhase(phase, force_phase);
     }
   }
 }
 
-void Multi::ClockVoiceLFOs(int32_t ticks, bool force_phase) {
+// Update LFOs that control swing and voice modulation, but not the looper
+void Multi::ClockLFOs(int32_t ticks, bool force_phase) {
   for (uint8_t p = 0; p < num_active_parts_; ++p) {
     Part& part = part_[p];
+
+    uint32_t swing_lfo_phase = part.swing_lfo().ComputeTargetPhase(ticks, part.PPQN());
+    part.swing_lfo().RegisterPhase(swing_lfo_phase, force_phase);
+
     uint8_t lfo_rate = part.voicing_settings().lfo_rate;
     FastSyncedLFO* part_lfos[part.num_voices()];
     for (uint8_t v = 0; v < part.num_voices(); ++v) {
@@ -315,11 +283,7 @@ void Multi::ClockVoiceLFOs(int32_t ticks, bool force_phase) {
     }
     if (lfo_rate < 64) {
       uint32_t phase = part_lfos[0]->ComputeTargetPhase(ticks, lut_clock_ratio_ticks[(64 - lfo_rate - 1) >> 1]);
-      if (force_phase) {
-        part_lfos[0]->SetPhase(phase);
-      } else {
-        part_lfos[0]->SetTargetPhase(phase);
-      }
+      part_lfos[0]->RegisterPhase(phase, force_phase);
     } else {
       part_lfos[0]->SetPhaseIncrement(lut_lfo_increments[lfo_rate - 64]);
     }
@@ -342,8 +306,15 @@ void Multi::Refresh() {
   // Advance LFOs, except during interval between Start and the first Clock
   if (!running_ || tick_counter() >= 0) {
     backup_clock_lfo_.Refresh();
+    uint32_t swing_phase = abs(settings_.clock_swing) << (32 - 6);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       Part& part = part_[p];
+
+      // Check whether we've waited long enough for a swung step
+      part.swing_lfo().Refresh();
+      bool hit_swing = part.swing_lfo().GetPhase() - swing_phase < part.swing_lfo().GetPhaseIncrement();
+      if (hit_swing && part.apply_swing_to_current_step()) part.ClockStep();
+
       part.mutable_looper().Refresh();
       for (uint8_t v = 0; v < part.num_voices(); ++v) {
         part.voice(v)->Refresh();
@@ -359,9 +330,9 @@ void Multi::Refresh() {
     (backup_clock_lfo_.GetPhase() << kBackupClockLFOPeriodTicksBits) <
     (backup_clock_lfo_.GetPhaseIncrement() << kBackupClockLFOPeriodTicksBits)
   ) {
-    // Backup clock emits a tick
+    // Backup clock emits a tick, updating all LFOs
     backup_clock_lfo_ticks_++;
-    ClockVoiceLFOs(backup_clock_lfo_ticks_, false);
+    ClockLFOs(backup_clock_lfo_ticks_, false);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       part_[p].mutable_looper().Clock(backup_clock_lfo_ticks_);
     }
@@ -842,7 +813,7 @@ void Multi::UpdateTempo() {
   if (running_) return; // If running, backup LFO will get Tap
   if (!multi.internal_clock()) return; // We don't know the new tempo
 
-  // If not running, there's no Tap to update the increment, so do that here
+  // If we're on a stopped internal clock, calculate an updated clock speed
   uint32_t phase_increment = settings_.clock_tempo * kTempoToTickPhaseIncrement;
   phase_increment /= settings_.clock_input_division;
   phase_increment >>= kBackupClockLFOPeriodTicksBits;

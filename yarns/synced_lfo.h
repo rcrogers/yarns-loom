@@ -51,6 +51,13 @@ class SyncedLFO {
   SyncedLFO() { }
   ~SyncedLFO() { }
   void SetPhase(uint32_t phase) { phase_ = phase; }
+  void RegisterPhase(uint32_t phase, bool force) {
+    if (force) {
+      phase_ = phase;
+    } else {
+      SetTargetPhase(phase);
+    }
+  }
   uint32_t GetPhase() const { return phase_; }
   uint32_t GetTargetPhase() const { return previous_target_phase_; }
   uint32_t GetPhaseIncrement() const { return phase_increment_; }

@@ -346,36 +346,38 @@ void Part::Reset() {
   ResetAllControllers();
 }
 
-void Part::Clock() { // From Multi::ClockFast
-  bool new_step = modulo(multi.tick_counter(), PPQN()) == 0;
-  if (new_step) {
-    step_counter_ = ticks_to_steps(multi.tick_counter());
+bool Part::apply_swing_to_current_step() const {
+  if (multi.internal_clock() || !multi.settings().clock_swing) return false;
 
-    // Reset sequencer-driven arpeggiator (step or loop), if needed
-    //
-    // NB: when using looper, this produces predictable changes in the arp
-    // output (i.e., resets the arp at a predictable point in the loop) IFF the
-    // looper's LFO is locked onto the clock's phase and frequency. Clocking
-    // changes may break the lock, and briefly cause mistimed arp resets
-    if (arp_should_reset_on_step(step_counter_)) arpeggiator_.Reset();
-  }
+  uint32_t step_counter = ticks_to_steps(multi.tick_counter());
+  bool swing_even = multi.settings().clock_swing >= 0;
+  bool step_even = step_counter % 1 == 1;
+  return swing_even == step_even;
+}
+
+void Part::ClockStep() {
+  step_counter_ = ticks_to_steps(multi.tick_counter());
+  // Reset sequencer-driven arpeggiator (step or loop), if needed
+  //
+  // NB: when using looper, this produces predictable changes in the arp
+  // output (i.e., resets the arp at a predictable point in the loop) IFF the
+  // looper's LFO is locked onto the clock's phase and frequency. Clocking
+  // changes may break the lock, and briefly cause mistimed arp resets
+  if (arp_should_reset_on_step(step_counter_)) arpeggiator_.Reset();
 
   // The rest of the method is only for the step sequencer and/or arpeggiator
   if (!doing_stepped_stuff()) return;
 
-  if (new_step) {
-    SequencerArpeggiatorResult result = BuildNextStepResult(step_counter_);
-    arpeggiator_ = result.arpeggiator;
-    if (result.note.has_note()) {
-      uint8_t pitch = result.note.note();
-      uint8_t velocity = result.note.velocity();
-      GeneratedNoteOff(pitch); // Simulate a human retriggering a key
-      if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
-        InternalNoteOn(pitch, velocity, result.note.is_slid());
-      }
+  SequencerArpeggiatorResult result = BuildNextStepResult(step_counter_);
+  arpeggiator_ = result.arpeggiator;
+  if (result.note.has_note()) {
+    uint8_t pitch = result.note.note();
+    uint8_t velocity = result.note.velocity();
+    GeneratedNoteOff(pitch); // Simulate a human retriggering a key
+    if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
+      InternalNoteOn(pitch, velocity, result.note.is_slid());
     }
   }
-  ClockStepGateEndings();
 }
 
 SequencerArpeggiatorResult Part::BuildNextStepResult(uint32_t step_counter) const {
@@ -425,11 +427,12 @@ void Part::ClockStepGateEndings() {
   }
 }
 
-// Fast-forward the sequencer/arpeggiator state to the current song position. If
-// using the sequencer-driven arpeggiator, produces the cumulative arp state
-// based on any held keys
-void Part::CueSequencer() {
+void Part::Start() {
   arpeggiator_.Reset();
+
+  // Fast-forward the sequencer/arpeggiator state to the current song position.
+  // If using the sequencer-driven arpeggiator, produces the cumulative arp
+  // state based on any held keys
   if (looper_in_use()) {
     // First, move to the looper's start position, without side effects
     looper_.JumpToTick(0, NULL, NULL);
@@ -447,10 +450,8 @@ void Part::CueSequencer() {
 
       looper_.JumpToTick(cycle_ticks, on_fn, NULL);
     }
-  } else {
+  } else if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
     // The only state produced by the step sequencer is the arp
-    if (midi_.play_mode != PLAY_MODE_ARPEGGIATOR) return;
-
     int16_t last_step_triggered = seq_.step_offset + DIV_FLOOR(multi.tick_counter(), PPQN());
     uint16_t arp_reset_steps = steps_per_arp_reset();
     // NOOP if the last step triggered is less than 0 -- can't predict arp states before 0
@@ -460,10 +461,8 @@ void Part::CueSequencer() {
       arpeggiator_ = result.arpeggiator;
     }
   }
-}
 
-// Reset state for notes being actively output or recorded
-void Part::Start() {
+  // Reset state for notes being actively output or recorded
   std::fill(
     &looper_note_recording_pressed_key_[0],
     &looper_note_recording_pressed_key_[kNoteStackMapping],
@@ -479,7 +478,6 @@ void Part::Start() {
     &output_pitch_for_looper_note_[kNoteStackMapping],
     looper::kNullIndex
   );
-
   generated_notes_.Clear();
 }
 
