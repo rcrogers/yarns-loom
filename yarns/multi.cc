@@ -168,7 +168,7 @@ void Multi::Clock() {
     
     if (ticks >= 0) {
       for (uint8_t p = 0; p < num_active_parts_; ++p) {
-        bool new_step = modulo(multi.tick_counter(), part_[p].PPQN()) == 0;
+        bool new_step = ticks % part_[p].PPQN() == 0;
         if (new_step && !part_[p].apply_swing_to_current_step()) part_[p].ClockStep();
         part_[p].ClockStepGateEndings();
       }
@@ -313,9 +313,10 @@ void Multi::Refresh() {
       Part& part = part_[p];
 
       // Check whether we've waited long enough for a swung step
-      part.swing_lfo().Refresh();
-      bool hit_swing = part.swing_lfo().GetPhase() - swing_phase < part.swing_lfo().GetPhaseIncrement();
-      if (hit_swing && part.apply_swing_to_current_step()) part.ClockStep();
+      FastSyncedLFO& swing_lfo = part.swing_lfo();
+      swing_lfo.Refresh();
+      bool hit_swing = swing_lfo.GetPhase() - swing_phase < swing_lfo.GetPhaseIncrement();
+      if (running_ && tick_counter() >= 0 && hit_swing && part.apply_swing_to_current_step()) part.ClockStep();
 
       part.mutable_looper().Refresh();
       for (uint8_t v = 0; v < part.num_voices(); ++v) {
