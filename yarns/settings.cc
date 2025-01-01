@@ -280,7 +280,7 @@ const Setting Settings::settings_[] = {
   {
     "SW", "SWING",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_SWING, 0 },
-    SETTING_UNIT_UINT8, 0, 99, NULL,
+    SETTING_UNIT_INT8, -63, 63, NULL,
     0xff, 3,
   },
   {

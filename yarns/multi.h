@@ -111,7 +111,7 @@ struct PackedMulti {
 struct MultiSettings {
   uint8_t layout;
   uint8_t clock_tempo;
-  uint8_t clock_swing;
+  int8_t clock_swing;
   uint8_t clock_input_division;
   uint8_t clock_output_division;
   uint8_t clock_bar_duration;
@@ -439,9 +439,9 @@ class Multi {
   }
   
   void AfterDeserialize();
-  void ClockFast();
+  inline void UpdateResetPulse() { if (reset_pulse_counter_) --reset_pulse_counter_; }
   void Refresh();
-  void ClockVoiceLFOs(int32_t, bool);
+  void ClockLFOs(int32_t, bool);
   void RefreshInternalClock() {
     if (running() && internal_clock() && internal_clock_.Process()) {
       ++internal_clock_ticks_;
@@ -608,11 +608,6 @@ class Multi {
   
   InternalClock internal_clock_;
   uint8_t internal_clock_ticks_;
-  uint16_t midi_clock_tick_duration_;
-
-  // For each of the last 12 ticks, tracks the remaining number of ClockFast
-  // cycles until that tick should occur
-  int16_t swing_predelay_[12];
   
   // The 0-based index of the last received Clock event, ignoring
   // division/offset. Negative if we have not yet received a Clock. At 240 BPM *
