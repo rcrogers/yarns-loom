@@ -609,9 +609,8 @@ class Multi {
   InternalClock internal_clock_;
   uint8_t internal_clock_ticks_;
   
-  // The 0-based index of the last received Clock event, ignoring
-  // division/offset. Negative if we have not yet received a Clock. At 240 BPM *
-  // 24 PPQN = 96 Hz, this overflows after 259 days
+  // The 0-based index of the last received Clock event, ignoring division and
+  // offset.  At 240 BPM * 24 PPQN = 96 Hz, this overflows after 259 days
   int32_t clock_input_ticks_;
 
   bool can_advance_lfos_;
