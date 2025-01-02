@@ -370,9 +370,6 @@ bool Multi::Set(uint8_t address, uint8_t value) {
   } else if (address == MULTI_CLOCK_TEMPO) {
     UpdateTempo();
   }
-  // else if (address == MULTI_CLOCK_SWING) {
-  //   internal_clock_.set_swing(settings_.clock_swing);
-  // }
   return true;
 }
 
