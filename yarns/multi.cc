@@ -1155,10 +1155,7 @@ int16_t Multi::GetSettingValue(const Setting& setting, uint8_t part) const {
       value = multi.part(part).Get(setting.address[0]);
       break;
   }
-  if (
-    setting.unit == SETTING_UNIT_INT8 ||
-    setting.unit == SETTING_UNIT_LFO_SPREAD
-  ) value = static_cast<int8_t>(value);
+  if (setting.min_value < 0) value = static_cast<int8_t>(value);
   return value;
 }
 
