@@ -754,7 +754,15 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       break;
       
     case SETTING_UNIT_INT8:
-      PrintSignedInteger(buffer, value);
+      if (&setting == &setting_defs.get(SETTING_CLOCK_SWING)) {
+        int8_t swing = static_cast<int8_t>(value);
+        PrintInteger(buffer, abs(swing));
+        if (swing && buffer[0] == ' ') {
+          buffer[0] = swing < 0 ? 'o' : 'e';
+        }
+      } else {
+        PrintSignedInteger(buffer, value);
+      }
       break;
     
     case SETTING_UNIT_INDEX:
