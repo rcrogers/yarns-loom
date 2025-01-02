@@ -169,7 +169,7 @@ void Multi::Clock() {
     if (ticks >= 0) {
       for (uint8_t p = 0; p < num_active_parts_; ++p) {
         bool new_step = ticks % part_[p].PPQN() == 0;
-        if (new_step && !part_[p].apply_swing_to_current_step()) part_[p].ClockStep();
+        if (new_step && !part_[p].current_step_has_swing()) part_[p].ClockStep();
         part_[p].ClockStepGateEndings();
       }
 
@@ -320,7 +320,7 @@ void Multi::Refresh() {
       FastSyncedLFO& swing_lfo = part.swing_lfo();
       swing_lfo.Refresh();
       bool hit_swing = swing_lfo.GetPhase() - swing_phase < swing_lfo.GetPhaseIncrement();
-      if (running_ && tick_counter() >= 0 && hit_swing && part.apply_swing_to_current_step()) part.ClockStep();
+      if (running_ && tick_counter() >= 0 && hit_swing && part.current_step_has_swing()) part.ClockStep();
 
       part.mutable_looper().Refresh();
       for (uint8_t v = 0; v < part.num_voices(); ++v) {
@@ -369,9 +369,10 @@ bool Multi::Set(uint8_t address, uint8_t value) {
         static_cast<Layout>(value));
   } else if (address == MULTI_CLOCK_TEMPO) {
     UpdateTempo();
-  } else if (address == MULTI_CLOCK_SWING) {
-    internal_clock_.set_swing(settings_.clock_swing);
   }
+  // else if (address == MULTI_CLOCK_SWING) {
+  //   internal_clock_.set_swing(settings_.clock_swing);
+  // }
   return true;
 }
 

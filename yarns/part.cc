@@ -346,8 +346,8 @@ void Part::Reset() {
   ResetAllControllers();
 }
 
-bool Part::apply_swing_to_current_step() const {
-  if (multi.internal_clock() || !multi.settings().clock_swing) return false;
+bool Part::current_step_has_swing() const {
+  if (!multi.settings().clock_swing) return false;
 
   uint32_t step_counter = ticks_to_steps(multi.tick_counter());
   bool swing_even = multi.settings().clock_swing >= 0;
