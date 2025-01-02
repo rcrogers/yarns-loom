@@ -857,7 +857,7 @@ class Part {
   inline Voice* voice(uint8_t index) const { return voice_[index]; }
   inline uint8_t num_voices() const { return num_voices_; }
 
-  bool apply_swing_to_current_step() const;
+  bool current_step_has_swing() const;
   inline FastSyncedLFO& swing_lfo() { return swing_lfo_; }
   
   bool Set(uint8_t address, uint8_t value);
