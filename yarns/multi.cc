@@ -449,8 +449,8 @@ void Multi::AssignVoicesToCVOutputs() {
     case LAYOUT_PARAPHONIC_PLUS_ONE:
       AssignOutputVoice(0, 0, DC_PITCH, kNumParaphonicVoices);
       AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 0);
-      AssignOutputVoice(2, kNumParaphonicVoices, DC_AUX_1, 0);
-      AssignOutputVoice(3, kNumParaphonicVoices, DC_AUX_2, 1);
+      AssignOutputVoice(2, 0, DC_AUX_1, 0);
+      AssignOutputVoice(3, kNumParaphonicVoices, DC_AUX_1, 1);
       break;
   }
 }
@@ -637,8 +637,8 @@ void Multi::GetLedsBrightness(uint8_t* brightness) {
     case LAYOUT_PARAPHONIC_PLUS_ONE:
       brightness[0] = cv_outputs_[0].gate() ? 255 : 0;
       brightness[1] = cv_outputs_[1].gate() ? 255 : 0;
-      brightness[2] = voice_[1].aux_cv();
-      brightness[3] = voice_[1].aux_cv_2();
+      brightness[2] = voice_[0].aux_cv();
+      brightness[3] = voice_[kNumParaphonicVoices].aux_cv();
       break;
 
     case LAYOUT_QUAD_VOLTAGES:
