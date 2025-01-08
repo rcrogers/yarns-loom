@@ -198,7 +198,30 @@ void Ui::Poll() {
   
   // Read LED brightness from multi and copy to LEDs driver.
   uint8_t leds_brightness[kNumCVOutputs];
-  multi.GetLedsBrightness(leds_brightness);
+  if (multi.recording() && recording_part().looped()) {
+    // light up LED #1 for the first 1/4 of the loop, LED #2 for the second 1/4, and so on
+    uint16_t phase = recording_part().looper().phase();
+    div_t div_result = div(phase, UINT16_MAX / kNumCVOutputs);
+    for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
+      const uint8_t sub_phase = (div_result.rem * kNumCVOutputs) >> 8;
+      if (div_result.quot == i) {
+        leds_brightness[i] = UINT8_MAX - sub_phase;
+      // Fade in -- disabled
+      // } else if (div_result.quot == modulo(i - 1, kNumCVOutputs)) {
+      //   leds_brightness[i] = sub_phase > (UINT8_MAX >> 1) ? (sub_phase - (UINT8_MAX >> 1)) << 1 : 0;
+      } else {
+        leds_brightness[i] = 0;
+      }
+    }
+  } else {
+    multi.GetLedsBrightness(leds_brightness);
+  }
+  // Linearize brightness
+  for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
+    uint8_t expo_brightness = (UINT16_MAX - lut_env_expo[UINT8_MAX - leds_brightness[i]]) >> 8;
+    leds_brightness[i] = (leds_brightness[i] >> 1) + (expo_brightness >> 1);
+  }
+
   if (mode_ == UI_MODE_FACTORY_TESTING) {
     ++factory_testing_leds_counter_;
     uint16_t x = factory_testing_leds_counter_;
