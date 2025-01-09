@@ -3,7 +3,7 @@
 This manual explains how Loom differs from a stock Yarns.  For documentation about Yarns' native capabilities (which Loom largely retains), [check the manufacturer's manual!](https://mutable-instruments.net/modules/yarns/manual/)
 
 #### Table of contents
-- [Interface](#interface)
+- [Panel controls and display](#panel-controls-and-display)
     - [Global control and display of the active part and its play mode](#global-control-and-display-of-the-active-part-and-its-play-mode)
     - [Tap tempo changes](#tap-tempo-changes)
     - [Other changes](#other-changes)
@@ -12,8 +12,12 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - [Oscillator synthesis models](#oscillator-synthesis-models)
     - [Amplitude dynamics: envelope and tremolo](#amplitude-dynamics-envelope-and-tremolo)
 - [Sequencer](#sequencer)
-    - [Recording interface](#recording-interface)
-    - [Step sequencer changes](#step-sequencer-changes)
+    - [General recording controls](#general-recording-controls)
+    - [Step sequencer](#step-sequencer)
+      - [Swing](#swing)
+      - [Slide](#slide)
+      - [Improved step selection](#improved-step-selection)
+      - [Other changes](#other-changes-1)
     - [Loop sequencer mode with real-time recording](#loop-sequencer-mode-with-real-time-recording)
     - [Arpeggiator](#arpeggiator)
       - [Interaction between `ARP DIRECTION` and `NOTE PRIORITY`](#interaction-between-arp-direction-and-note-priority)
@@ -30,12 +34,12 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - [Event routing, filtering, and transformation](#event-routing-filtering-and-transformation)
     - [Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)](#polyphonic-voice-allocation-note-priority-and-voicing)
     - [Legato and portamento](#legato-and-portamento)
-    - [Expanded support for Control Change events](#expanded-support-for-control-change-events)
+    - [MIDI Control Change messages](#midi-control-change-messages)
     - [Clocking](#clocking)
+    - [Song position](#song-position)
     - [LFOs](#lfos)
-    - [Portamento](#portamento)
 
-# Interface
+# Panel controls and display
 
 ### Global control and display of the active part and its play mode
 - Display periodically flashes the active part and its play mode
@@ -115,15 +119,30 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   
 # Sequencer
 
-### Recording interface
+### General recording controls
 - Hold `REC` to clear sequence
 - Hold `TAP` to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
 - First `REC` press switches the display to show the pitch (or `RS`/`TI`) instead of the step number (press again to exit recording)
 
-### Step sequencer changes
-- Replaced the `EUCLIDEAN ROTATE` setting with a more general `STEP OFFSET` -- allows starting the step sequencer on any step
+### Step sequencer
+
+#### Swing
+- `SWING` works with all clock ratios, not just ratio 4:1 (f.k.a. sixteenth notes in stock firmware)
+- Swing can be applied to either even or odd steps
+  - When `SWING` is counter-clockwise, odd steps (1, 3, 5...) are swung by the selected amount
+  - When `SWING` is clockwise, even steps (2, 4, 6...) are swung (stock Yarns behavior)
+
+#### Slide
+- While in recording mode, hold `START` to toggle slide on the selected step
+- If the selected step has slide, the display will show a fade effect
+- When a `REST` or `TIE` is recorded, slide is removed from that step. If a real note is later overdubbed into this step, slide must be re-added manually
+
+#### Improved step selection
 - Display brightens while the selected step is being played
-- Wraps around when using encoder to scroll through steps
+- When using encoder to scroll through steps, wraps around if the end is reached
+
+#### Other changes
+- Replaced the `EUCLIDEAN ROTATE` setting with a more general `STEP OFFSET` -- allows starting the step sequencer on any step
 - Capacity reduced from 64 to 30 notes, to free up space in the preset storage
 
 ### Loop sequencer mode with real-time recording
@@ -131,6 +150,8 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - To use, press `REC` to enter real-time recording mode
   - Play notes to record them into the loop
   - Press `START` to delete the oldest note, or `TAP` for the newest
+  - Display brightness shows the progression of the loop, or the note being played
+  - Channel LEDs show the quarter-phase of the loop
   - Scroll the encoder to shift the loop phase by 1/128: clockwise shifts notes earlier, counter-clockwise shifts notes later
 - Loop length is set by the `L- (LOOP LENGTH)` in quarter notes, combined with the part's clock settings
 - Note start/end times are recorded at 13-bit resolution (1/8192 of the loop length)
@@ -205,11 +226,17 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Paraphonic part can use the new [envelopes](#amplitude-dynamics-envelope-and-tremolo)
   - Audio mode is always on for the paraphonic part
   - Output channels:
-    1. CV: Part 1's 3 voices mixed to 1 audio output, Gate: Part 5's gate
+    1. CV: Part 1's 3 voices mixed to 1 audio output, Gate: Part 4's gate
     2. Part 2, monophonic CV/gate
     3. Part 2, modulation configurable via `3>`
     4. Part 3, monophonic CV/gate
 - `3M` 3-part layout: 3 monophonic parts, plus clock on gate 4 and bar/reset on CV 4
+- `*1` 2-part layout: 3-voice paraphonic part + monophonic part with aux CV
+  - Output channels:
+    1. CV: Part 1's 3 voices mixed to 1 audio output, Gate: Part 1's gate
+    2. Part 2, monophonic CV/gate
+    3. Part 1's aux CV, configurable via `CV`
+    4. Part 2's aux CV, configurable via `CV`
     
 ### Hold pedal
 - Instead of a global latch state, each part can respond to the hold pedal in its own way
@@ -277,7 +304,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
 - Broadened setting range from 51 to 64 values per curve shape
   
-### Expanded support for Control Change events
+### MIDI Control Change messages
 - New global setting for `CC (CONTROL CHANGE MODE)`
   - `OFF` (CCs are ignored)
   - `ABSOLUTE` (as before)
@@ -300,12 +327,33 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - [Implementation Chart](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 
 ### Clocking
-- Added a variety of integer ratios for `O/` and `C/`, as well as for `LFO RATE` when clock-synced
-  - Includes 1/8, 3/7, 2/3, 6/5, 4/3, and more
+- Clock divisions/multiplications are expressed as a ratio of the master clock
+  - `CLOCK RATIO` sets the frequency of the part's clock relative to the master clock
+  - `OUTPUT CLOCK RATIO` sets the frequency of the clock output gate relative to the master clock
+  - Available ratios: 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9, 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
+  - These ratios are also used for `LFO RATE` when the LFO is clock-synced
+- Setting `C+ CLOCK OFFSET` allows fine-tuning the master clock by ±63 ticks
+  - Offset is applied **after** `INPUT CLK DIV`
+  - If offset is negative, the sequencer will not play any notes until tick 0 is reached
 - Sequencers' phases are based on a master clock, to allow returning to predictable phase relationships between sequences even after a stint in disparate time signatures
 - An explicit clock start (from panel switch or MIDI) can supersede an implicit clock start (from keyboard)
 - Stopping the clock no longer stops manually held keys, though it still stops notes generated by the sequencer/arpeggiator
 - Euclidean rhythms can be applied to the step sequencer as well as the arpeggiator
+
+### Song position
+- Play can resume from an arbitrary song position when externally clocked
+- All clock-based events respect the song position
+  - Step sequencer will begin on the target step
+  - The loop sequencer and synced LFOs will advance to the correct phase of their loops
+  - Arpeggiator state is updated (based on any currently held arp chord) to the same state as if the song had played from the beginning
+- External control of song position
+  - The song position is saved when the clock stops
+  - Cueing: while stopped, the song position can be updated by a MIDI Song Position Pointer message
+  - On MIDI Continue, play resumes at the song position
+  - On MIDI Start, play starts at the beginning, ignoring any MIDI Song Position Pointer
+- Notes
+  - This was tested with a Tascam Model 12 as a MIDI source, which implements cueing by sending MIDI Song Position Pointer before a MIDI Continue.  If this doesn't work with your MIDI source, let me know!
+  - When internally clocked, the Start button still resets song position to the beginning, as in stock Yarns -- there isn't yet a way to Continue without external control
 
 ### LFOs
 - `LFO RATE` (formerly `VIBRATO SPEED`) has a shared zero at center
