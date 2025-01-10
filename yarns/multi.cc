@@ -712,7 +712,9 @@ void Multi::AllocateParts() {
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
       {
-        CONSTRAIN(part_[0].mutable_voicing_settings()->oscillator_mode, OSCILLATOR_MODE_OFF + 1, OSCILLATOR_MODE_LAST - 1);
+        // if (part_[0].mutable_voicing_settings()->oscillator_mode == OSCILLATOR_MODE_OFF) {
+          part_[0].mutable_voicing_settings()->oscillator_mode = OSCILLATOR_MODE_ENVELOPED;
+        // }
         part_[0].AllocateVoices(&voice_[0], kNumParaphonicVoices, false);
         part_[1].AllocateVoices(&voice_[kNumParaphonicVoices], 1, false);
         part_[2].AllocateVoices(&voice_[kNumParaphonicVoices + 1], 1, false);
@@ -730,7 +732,9 @@ void Multi::AllocateParts() {
 
     case LAYOUT_PARAPHONIC_PLUS_ONE:
       {
-        CONSTRAIN(part_[0].mutable_voicing_settings()->oscillator_mode, OSCILLATOR_MODE_OFF + 1, OSCILLATOR_MODE_LAST - 1);
+        // if (part_[0].mutable_voicing_settings()->oscillator_mode == OSCILLATOR_MODE_OFF) {
+          part_[0].mutable_voicing_settings()->oscillator_mode = OSCILLATOR_MODE_ENVELOPED;
+        // }
         part_[0].AllocateVoices(&voice_[0], kNumParaphonicVoices, false);
         part_[1].AllocateVoices(&voice_[kNumParaphonicVoices], 1, false);
         num_active_parts_ = 2;
@@ -1090,7 +1094,7 @@ SettingRange Multi::GetSettingRange(const Setting& setting, uint8_t part) const 
       part == 0 &&
       &setting == &setting_defs.get(SETTING_VOICING_OSCILLATOR_MODE)
     ) {
-      min_value = OSCILLATOR_MODE_DRONE;
+      min_value = OSCILLATOR_MODE_OFF + 1;
     }
     if (
       part_[part].midi_settings().play_mode == PLAY_MODE_ARPEGGIATOR &&
