@@ -44,7 +44,7 @@ const uint16_t kRefreshMsec = 900;
 const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
 const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
 
-const char* const kVersion = "Loom 2_7_1";
+const char* const kVersion = "Loom 2_8_0";
 
 /* static */
 const Ui::Command Ui::commands_[] = {
