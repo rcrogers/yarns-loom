@@ -277,20 +277,23 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 ### Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)
 - Added new `FIRST` (oldest) setting to `NOTE PRIORITY`
-- Many polyphonic modes now respect `NOTE PRIORITY` and have been accordingly renamed
-  - `POLY` -> `STEAL RELEASE MUTE`
+- Polyphonic `VOICING` setting has new options that respect `NOTE PRIORITY` where applicable:
+  - `sM STEAL LOWEST PRIORITY RELEASE MUTE` (previously `POLY`)
     - Steal from the lowest-priority existing note IFF the incoming note has higher priority
-    - Don't reassign on release
-  - `SORTED` -> `PRIORITY ORDER`
+    - Does not reassign voices to unvoiced notes on release
+  - `PRIORITY ORDER` (previously `SORTED`)
     - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
-  - `U1` -> `UNISON RELEASE REASSIGN`
-  - `U2` -> `UNISON RELEASE MUTE`
-  - `STEAL MOST RECENT` -> `STEAL HIGHEST PRIORITY`
+  - `UNISON RELEASE REASSIGN` (previously `U1`)
+  - `UNISON RELEASE MUTE` (previously `U2`)
+  - `SM STEAL HIGHEST PRIORITY RELEASE MUTE` (previously `STEAL MOST RECENT`)
     - Steal from the highest-priority existing note IFF the incoming note has higher priority
-    - Don't reassign on release
-  - `NICE` -> `STEAL RELEASE REASSIGN`
+    - Does not reassign on release
+  - `sR STEAL LOWEST PRIORITY RELEASE REASSIGN`
     - Steal from the lowest-priority existing note IFF the incoming note has higher priority
-    - Reassign on release
+    - Reassigns voices to unvoiced notes on release
+  - `SR STEAL HIGHEST PRIORITY RELEASE REASSIGN`
+    - Steal from the highest-priority existing note IFF the incoming note has higher priority
+    - Reassigns on release
 - Notes that steal a voice are considered legato
 - Fixed unison to allocate notes without gaps
 - Improve unison etc. to avoid unnecessary reassignment/retrigger of voices during a partial chord change

@@ -76,6 +76,7 @@ enum PolyMode {
   POLY_MODE_UNISON_RELEASE_SILENT,
   POLY_MODE_STEAL_HIGHEST_PRIORITY,
   POLY_MODE_STEAL_RELEASE_REASSIGN,
+  POLY_MODE_STEAL_HIGHEST_PRIORITY_RELEASE_REASSIGN,
   POLY_MODE_LAST
 };
 
@@ -184,7 +185,7 @@ struct PackedPart {
 
   // VoicingSettings
   unsigned int
-    allocation_mode : 4, // values free: 6
+    allocation_mode : 4, // values free: 5
     allocation_priority : 2, // values free: 0
     portamento : 7,
     legato_retrigger : 1,
@@ -735,7 +736,8 @@ class Part {
     return
       voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_SILENT ||
       voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN ||
-      voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY;
+      voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY ||
+      voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY_RELEASE_REASSIGN;
   }
 
   inline bool uses_sorted_dispatch() const {

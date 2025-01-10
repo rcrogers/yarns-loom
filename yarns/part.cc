@@ -859,13 +859,15 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
     switch (voicing_.allocation_mode) {
       case POLY_MODE_STEAL_RELEASE_SILENT:
       case POLY_MODE_STEAL_RELEASE_REASSIGN:
+      case POLY_MODE_STEAL_HIGHEST_PRIORITY_RELEASE_REASSIGN:
       case POLY_MODE_STEAL_HIGHEST_PRIORITY: {
         bool note_justifies_steal = mono_allocator_.priority_for_note(
           static_cast<stmlib::NoteStackFlags>(voicing_.allocation_priority),
           note
         ) < num_voices_;
-        uint8_t note_to_steal_voice_from =
-          voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY
+        bool steal_highest = voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY ||
+          voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY_RELEASE_REASSIGN;
+        uint8_t note_to_steal_voice_from = steal_highest
           ? before.note // Highest priority before this note
           : priority_note(num_voices_).note; // Note that just got deprioritized
         uint8_t stealable_voice_index = note_justifies_steal
@@ -958,11 +960,10 @@ void Part::InternalNoteOff(uint8_t note) {
         FindVoiceForNote(note);
     if (voice_index < num_voices_) {
       VoiceNoteOff(voice_index);
-      if (
-        had_unvoiced_notes &&
-        (voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN ||
-          voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY)
-      ) { // Reassign freed voice to the highest-priority note that is not voiced
+      bool reassign = voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN ||
+        voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY_RELEASE_REASSIGN;
+      if (had_unvoiced_notes && reassign) {
+        // Reassign freed voice to the highest-priority note that is not voiced
         const NoteEntry* priority_unvoiced_note = &after; // Just for initialization
         for (uint8_t i = 0; i < mono_allocator_.size(); ++i) {
           priority_unvoiced_note = &priority_note(i);
