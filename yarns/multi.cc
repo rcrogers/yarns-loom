@@ -533,6 +533,12 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_ONE:
+      // const NoteEntry& last_note = part_[0].priority_note(NOTE_STACK_PRIORITY_LAST);
+      // const uint8_t last_voice = part_[0].FindVoiceForNote(last_note.note);
+      // brightness[0] = (
+      //   last_note.note == NOTE_STACK_FREE_SLOT ||
+      //   last_voice == VOICE_ALLOCATION_NOT_FOUND
+      // ) ? 0 : part_[0].voice(last_voice)->velocity() << 1;
       gate[0] = cv_outputs_[0].gate();
       gate[1] = cv_outputs_[1].gate();
       gate[2] = clock();
