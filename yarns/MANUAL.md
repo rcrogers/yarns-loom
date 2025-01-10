@@ -335,8 +335,10 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - `OUTPUT CLOCK RATIO` sets the frequency of the clock output gate relative to the master clock
   - Available ratios: 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9, 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
   - These ratios are also used for `LFO RATE` when the LFO is clock-synced
-- Setting `C+ CLOCK OFFSET` allows fine-tuning the master clock by ±63 ticks
-  - Offset is applied **after** `INPUT CLK DIV`
+- Setting `C+ CLOCK OFFSET` allows fine-tuning the master clock phase by ±63 ticks
+  - Applied in real time if the clock is running
+  - Designed to aid in multitrack recording
+  - Arithmetically, offset is applied **after** `INPUT CLK DIV`
   - If offset is negative, the sequencer will not play any notes until tick 0 is reached
 - Sequencers' phases are based on a master clock, to allow returning to predictable phase relationships between sequences even after a stint in disparate time signatures
 - An explicit clock start (from panel switch or MIDI) can supersede an implicit clock start (from keyboard)
