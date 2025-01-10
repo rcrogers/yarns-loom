@@ -143,6 +143,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 #### Other changes
 - Replaced the `EUCLIDEAN ROTATE` setting with a more general `STEP OFFSET` -- allows starting the step sequencer on any step
+- Euclidean rhythms can be applied to the step sequencer as well as the arpeggiator
 - Capacity reduced from 64 to 30 notes, to free up space in the preset storage
 
 ### Loop sequencer mode with real-time recording
@@ -239,14 +240,16 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     4. Part 2's aux CV, configurable via `CV`
     
 ### Hold pedal
-- Instead of a global latch state, each part can respond to the hold pedal in its own way
-- Screen periodically shows tick marks to show the state of the part's 6 most recently pressed keys, and how the hold pedal is affecting them
-  - Bottom-half tick: key is manually held, and will stop when released
-  - Full-height tick: key is manually held, and will be sustained when released
-  - Steady top-half tick: key is sustained, and will continue after the next key-press
-  - Blinking top-half tick: key is sustained, and will be stopped by the next key-press
-- New `HP (HOLD PEDAL POLARITY)` setting to switch between [negative (default) and positive pedal polarity](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html), or otherwise reverse the pedal's up/down behavior
-- New `HM (HOLD PEDAL MODE)` setting to change the part's response to the hold pedal
+
+#### Display of pressed/sustained keys
+- Screen periodically shows tick marks to show the state of the active part's 6 most recently pressed keys, and how the hold pedal is affecting them
+- Bottom-half tick: key is manually held, and will stop when released
+- Full-height tick: key is manually held, and will be sustained when released
+- Steady top-half tick: key is sustained, and will continue after the next key-press
+- Blinking top-half tick: key is sustained, and will be stopped by the next key-press
+
+#### Hold pedal mode per part
+  - New part setting `HM (HOLD PEDAL MODE` sets each part's response to the hold pedal
   - `OFF`: pedal has no effect
   - `SUSTAIN`: sustains key-releases while pedal is down, and stops sustained notes on pedal-up
     - Matches the behavior of the pedal in the stock firmware
@@ -258,6 +261,13 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - Notes triggered while the pedal is down are not sustained and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
   - `FILTER`: while pedal is down, ignores key-presses and sustains key-releases; while pedal is up, stops sustained notes on key-press
     - In combination with setting an opposite `HOLD PEDAL POLARITY` on two different parts, this allows the use of the pedal to select which part is controlled by the keyboard, while also supporting latching
+
+#### Pedal polarity
+- New part setting `HP (HOLD PEDAL POLARITY)` inverts a part's up/down pedal behavior
+- Allows compatibility with any manufacturer's hold pedals
+- Allows reversing up/down semantics for the selected `HOLD PEDAL MODE`
+- [More information on negative (default) and positive pedal polarity](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html)
+
 
 ### Event routing, filtering, and transformation
 - New `SI (SEQ INPUT RESPONSE)` setting changes how a playing sequence responds to manual input
@@ -276,21 +286,30 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Recording part now responds to MIDI start
 
 ### Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)
+
+#### Note priority
 - Added new `FIRST` (oldest) setting to `NOTE PRIORITY`
-- Many polyphonic modes now respect `NOTE PRIORITY` and have been accordingly renamed
-  - `POLY` -> `STEAL RELEASE MUTE`
+- Voicing respects note priority wherever applicable
+
+#### Polyphonic `VOICING` options
+- `sM STEAL LOWEST PRIORITY RELEASE MUTE` (previously `POLY`)
     - Steal from the lowest-priority existing note IFF the incoming note has higher priority
-    - Don't reassign on release
-  - `SORTED` -> `PRIORITY ORDER`
+    - Does not reassign voices to unvoiced notes on release
+- `PRIORITY ORDER` (previously `SORTED`)
     - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
-  - `U1` -> `UNISON RELEASE REASSIGN`
-  - `U2` -> `UNISON RELEASE MUTE`
-  - `STEAL MOST RECENT` -> `STEAL HIGHEST PRIORITY`
+- `UNISON RELEASE REASSIGN` (previously `U1`)
+- `UNISON RELEASE MUTE` (previously `U2`)
+- `SM STEAL HIGHEST PRIORITY RELEASE MUTE` (previously `STEAL MOST RECENT`)
     - Steal from the highest-priority existing note IFF the incoming note has higher priority
-    - Don't reassign on release
-  - `NICE` -> `STEAL RELEASE REASSIGN`
+    - Does not reassign on release
+- `sR STEAL LOWEST PRIORITY RELEASE REASSIGN`
     - Steal from the lowest-priority existing note IFF the incoming note has higher priority
-    - Reassign on release
+    - Reassigns voices to unvoiced notes on release
+- `SR STEAL HIGHEST PRIORITY RELEASE REASSIGN`
+    - Steal from the highest-priority existing note IFF the incoming note has higher priority
+    - Reassigns on release
+
+#### Other changes
 - Notes that steal a voice are considered legato
 - Fixed unison to allocate notes without gaps
 - Improve unison etc. to avoid unnecessary reassignment/retrigger of voices during a partial chord change
@@ -305,68 +324,96 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Broadened setting range from 51 to 64 values per curve shape
   
 ### MIDI Control Change messages
+
+#### Control change mode
 - New global setting for `CC (CONTROL CHANGE MODE)`
-  - `OFF` (CCs are ignored)
-  - `ABSOLUTE` (as before)
-  - `RELATIVE DIRECT`
+- `OFF`: CCs are ignored
+- `ABSOLUTE`: the setting is updated to the CC value (for use with traditional potentiometers)
+- `RELATIVE DIRECT`: the setting is directly incremented by the CC value
     - For use with endless encoders
     - Uses the "twos complement" standard for translating MIDI values into a relative change
       - MIDI value 1 => setting + 1 (increment)
       - MIDI value 127 => setting - 1 (decrement)
     - Settings will increase or decrease by one value for each click of the encoder
     - Depending on how many values the setting has, the encoder may take anywhere from 1 to 127 clicks to scan the range of setting values
-  - `RELATIVE SCALED`
+- `RELATIVE SCALED`: the setting is incremented by 0-100% of the CC value
     - Similar to `RELATIVE DIRECT`, but always takes 127 encoder clicks to scan the range of setting values, no matter how many setting values there are
     - Effectively gives all controllers the same travel distance from minimum to maximum
-- The result of a received CC is briefly displayed (value, setting abbreviation, and receiving part)
+
+#### Added CCs
 - Recording control: start/stop recording mode, delete a recording
 - CC support for all new settings
-- Macro CC for controlling recording state: off, on, triggered erase, immediate erase
-- Macro CC for controlling sequencer mode: step sequencer, step arpeggiator, manual, loop arpeggiator, loop sequencer
+
+#### Macro CCs that control combinations of settings
+- Recording state and erase: off, on, triggered erase, immediate erase
+- Sequencer mode and play mode: step sequencer, step arpeggiator, manual, loop arpeggiator, loop sequencer
+
+#### Other CC improvements
+- The result of a received CC is briefly displayed (value, setting abbreviation, and receiving part)
 - Fixed settings to accept a negative value via CC
 - [Implementation Chart](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 
 ### Clocking
+
+#### Clock ratios
 - Clock divisions/multiplications are expressed as a ratio of the master clock
-  - `CLOCK RATIO` sets the frequency of the part's clock relative to the master clock
-  - `OUTPUT CLOCK RATIO` sets the frequency of the clock output gate relative to the master clock
-  - Available ratios: 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9, 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
-  - These ratios are also used for `LFO RATE` when the LFO is clock-synced
-- Setting `C+ CLOCK OFFSET` allows fine-tuning the master clock by ±63 ticks
-  - Offset is applied **after** `INPUT CLK DIV`
-  - If offset is negative, the sequencer will not play any notes until tick 0 is reached
-- Sequencers' phases are based on a master clock, to allow returning to predictable phase relationships between sequences even after a stint in disparate time signatures
+- `CLOCK RATIO` sets the frequency of the part's clock relative to the master clock
+- `OUTPUT CLOCK RATIO` sets the frequency of the clock output gate relative to the master clock
+- Available ratios: 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9, 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
+- These ratios are also used for `LFO RATE` when the LFO is clock-synced
+
+#### Clock offset
+- Setting `C+ CLOCK OFFSET` allows fine-tuning the master clock phase by ±63 ticks
+- Applied in real time if the clock is running
+- Designed to aid in multitrack recording
+- Arithmetically, offset is applied **after** `INPUT CLK DIV`
+- If offset is negative, the sequencer will not play any notes until tick 0 is reached
+
+#### Predictable phase relationships between clocked events
+- Sequencers' phases are always calculated from the master clock state
+  - Allows sequencers to return to predictable phase relationships even after a stint in disparate time signatures
+
+#### Improved interaction between keyboard and clock start/stop
 - An explicit clock start (from panel switch or MIDI) can supersede an implicit clock start (from keyboard)
 - Stopping the clock no longer stops manually held keys, though it still stops notes generated by the sequencer/arpeggiator
-- Euclidean rhythms can be applied to the step sequencer as well as the arpeggiator
 
-### Song position
-- Play can resume from an arbitrary song position when externally clocked
+### Play from a song position
+
+#### What the song position controls
 - All clock-based events respect the song position
-  - Step sequencer will begin on the target step
-  - The loop sequencer and synced LFOs will advance to the correct phase of their loops
-  - Arpeggiator state is updated (based on any currently held arp chord) to the same state as if the song had played from the beginning
-- External control of song position
-  - The song position is saved when the clock stops
-  - Cueing: while stopped, the song position can be updated by a MIDI Song Position Pointer message
-  - On MIDI Continue, play resumes at the song position
-  - On MIDI Start, play starts at the beginning, ignoring any MIDI Song Position Pointer
-- Notes
-  - This was tested with a Tascam Model 12 as a MIDI source, which implements cueing by sending MIDI Song Position Pointer before a MIDI Continue.  If this doesn't work with your MIDI source, let me know!
-  - When internally clocked, the Start button still resets song position to the beginning, as in stock Yarns -- there isn't yet a way to Continue without external control
+- Step sequencer will begin on the target step
+- The loop sequencer and synced LFOs will advance to the correct phase of their loops
+- Arpeggiator state is updated (based on any currently held arp chord) to the same state as if the song had played from the beginning
+
+#### How to set song position with external MIDI
+- The song position is saved when the clock stops
+- Cueing: while stopped, the song position can be updated by a MIDI Song Position Pointer message
+- On MIDI Continue, play resumes at the song position
+- On MIDI Start, play starts at the beginning, ignoring any MIDI Song Position Pointer
+
+#### Notes
+- This was tested with a Tascam Model 12 as a MIDI source, which implements cueing by sending MIDI Song Position Pointer before a MIDI Continue.  If this doesn't work with your MIDI source, let me know!
+- When internally clocked, the Start button still resets song position to the beginning, as in stock Yarns
+- There isn't yet a way to Continue without external control
 
 ### LFOs
-- `LFO RATE` (formerly `VIBRATO SPEED`) has a shared zero at center
-  - Increases clock sync ratio when turning counter-clockwise of center, and increases frequency when turning clockwise
+
+#### Frequency
+  - `LFO RATE` (formerly `VIBRATO SPEED`) has a shared zero at center
+  - Increases clock sync ratio when turning counter-clockwise of center
+  - Increases frequency when turning clockwise
+
+#### Vibrato shape
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
-- LFO "spreading": dephase or detune a part's LFOs 
-  - `LV (LFO SPREAD VOICES)`: dephase or detune LFOs between the part's voices
+
+#### Spread: detune or dephase a part's LFOs
+- `LV (LFO SPREAD VOICES)`: dephase or detune LFOs between the part's voices
     - Only available in polyphonic/paraphonic layouts
-  - `LT (LFO SPREAD TYPES)`: for each voice in the part, dephase or detune between the vibrato, timbre, and tremolo LFOs
-  - Turning these settings counter-clockwise from center dephases the LFOs
+- `LT (LFO SPREAD TYPES)`: for each voice in the part, dephase or detune between the vibrato, timbre, and tremolo LFOs
+- Turning these settings counter-clockwise from center dephases the LFOs
     - Each LFO's phase is progressively more offset, by an amount ranging from 0° to 360° depending on the setting
     - Ideal for quadrature and three-phase modulation
     - When dephasing, the LFOs always share a common frequency
-  - Turning clockwise from center detunes the LFOs
+- Turning clockwise from center detunes the LFOs
     - Each LFO's frequency is a multiple of the last, with that multiple being between 1x and 2x depending on the setting
     - Facilitates unstable, meandering modulation
