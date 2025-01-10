@@ -284,13 +284,13 @@ const Setting Settings::settings_[] = {
     0xff, 3,
   },
   {
-    "I/", "INPUT CLK DIV",
+    "I/", "INPUT CLOCK DIV",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_INPUT_DIVISION, 0 },
     SETTING_UNIT_UINT8, 1, 4, NULL,
     0xff, 0xff,
   },
   {
-    "O/", "OUTPUT CLK RATIO",
+    "O/", "OUTPUT CLOCK RATIO OUT/IN",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OUTPUT_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     0xff, 0,
@@ -622,7 +622,7 @@ const Setting Settings::settings_[] = {
     89, 0xff,
   },
   {
-    "C/", "CLK RATIO OUT-IN",
+    "C/", "CLOCK RATIO OUT/IN",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_CLOCK_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     102, 24,
