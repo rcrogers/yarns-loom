@@ -284,13 +284,13 @@ const Setting Settings::settings_[] = {
     0xff, 3,
   },
   {
-    "I/", "INPUT CLK DIV",
+    "I/", "INPUT CLOCK DIV",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_INPUT_DIVISION, 0 },
     SETTING_UNIT_UINT8, 1, 4, NULL,
     0xff, 0xff,
   },
   {
-    "O/", "OUTPUT CLK RATIO",
+    "O/", "OUTPUT CLOCK RATIO OUT/IN",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OUTPUT_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     0xff, 0,
@@ -622,7 +622,7 @@ const Setting Settings::settings_[] = {
     89, 0xff,
   },
   {
-    "C/", "CLK RATIO OUT-IN",
+    "C/", "CLOCK RATIO OUT/IN",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_CLOCK_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     102, 24,
@@ -754,7 +754,15 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       break;
       
     case SETTING_UNIT_INT8:
-      PrintSignedInteger(buffer, value);
+      if (&setting == &setting_defs.get(SETTING_CLOCK_SWING)) {
+        int8_t swing = static_cast<int8_t>(value);
+        PrintInteger(buffer, abs(swing));
+        if (swing && buffer[0] == ' ') {
+          buffer[0] = swing < 0 ? 'o' : 'e';
+        }
+      } else {
+        PrintSignedInteger(buffer, value);
+      }
       break;
     
     case SETTING_UNIT_INDEX:

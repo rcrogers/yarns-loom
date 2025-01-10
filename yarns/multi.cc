@@ -449,8 +449,8 @@ void Multi::AssignVoicesToCVOutputs() {
     case LAYOUT_PARAPHONIC_PLUS_ONE:
       AssignOutputVoice(0, 0, DC_PITCH, kNumParaphonicVoices);
       AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 0);
-      AssignOutputVoice(2, kNumParaphonicVoices, DC_AUX_1, 0);
-      AssignOutputVoice(3, kNumParaphonicVoices, DC_AUX_2, 1);
+      AssignOutputVoice(2, 0, DC_AUX_1, 0);
+      AssignOutputVoice(3, kNumParaphonicVoices, DC_AUX_1, 1);
       break;
   }
 }
@@ -533,6 +533,12 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_ONE:
+      // const NoteEntry& last_note = part_[0].priority_note(NOTE_STACK_PRIORITY_LAST);
+      // const uint8_t last_voice = part_[0].FindVoiceForNote(last_note.note);
+      // brightness[0] = (
+      //   last_note.note == NOTE_STACK_FREE_SLOT ||
+      //   last_voice == VOICE_ALLOCATION_NOT_FOUND
+      // ) ? 0 : part_[0].voice(last_voice)->velocity() << 1;
       gate[0] = cv_outputs_[0].gate();
       gate[1] = cv_outputs_[1].gate();
       gate[2] = clock();
@@ -637,8 +643,8 @@ void Multi::GetLedsBrightness(uint8_t* brightness) {
     case LAYOUT_PARAPHONIC_PLUS_ONE:
       brightness[0] = cv_outputs_[0].gate() ? 255 : 0;
       brightness[1] = cv_outputs_[1].gate() ? 255 : 0;
-      brightness[2] = voice_[1].aux_cv();
-      brightness[3] = voice_[1].aux_cv_2();
+      brightness[2] = voice_[0].aux_cv();
+      brightness[3] = voice_[kNumParaphonicVoices].aux_cv();
       break;
 
     case LAYOUT_QUAD_VOLTAGES:
@@ -712,7 +718,9 @@ void Multi::AllocateParts() {
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
       {
-        CONSTRAIN(part_[0].mutable_voicing_settings()->oscillator_mode, OSCILLATOR_MODE_OFF + 1, OSCILLATOR_MODE_LAST - 1);
+        // if (part_[0].mutable_voicing_settings()->oscillator_mode == OSCILLATOR_MODE_OFF) {
+          part_[0].mutable_voicing_settings()->oscillator_mode = OSCILLATOR_MODE_ENVELOPED;
+        // }
         part_[0].AllocateVoices(&voice_[0], kNumParaphonicVoices, false);
         part_[1].AllocateVoices(&voice_[kNumParaphonicVoices], 1, false);
         part_[2].AllocateVoices(&voice_[kNumParaphonicVoices + 1], 1, false);
@@ -730,7 +738,9 @@ void Multi::AllocateParts() {
 
     case LAYOUT_PARAPHONIC_PLUS_ONE:
       {
-        CONSTRAIN(part_[0].mutable_voicing_settings()->oscillator_mode, OSCILLATOR_MODE_OFF + 1, OSCILLATOR_MODE_LAST - 1);
+        // if (part_[0].mutable_voicing_settings()->oscillator_mode == OSCILLATOR_MODE_OFF) {
+          part_[0].mutable_voicing_settings()->oscillator_mode = OSCILLATOR_MODE_ENVELOPED;
+        // }
         part_[0].AllocateVoices(&voice_[0], kNumParaphonicVoices, false);
         part_[1].AllocateVoices(&voice_[kNumParaphonicVoices], 1, false);
         num_active_parts_ = 2;
@@ -1090,7 +1100,7 @@ SettingRange Multi::GetSettingRange(const Setting& setting, uint8_t part) const 
       part == 0 &&
       &setting == &setting_defs.get(SETTING_VOICING_OSCILLATOR_MODE)
     ) {
-      min_value = OSCILLATOR_MODE_DRONE;
+      min_value = OSCILLATOR_MODE_OFF + 1;
     }
     if (
       part_[part].midi_settings().play_mode == PLAY_MODE_ARPEGGIATOR &&
@@ -1155,10 +1165,7 @@ int16_t Multi::GetSettingValue(const Setting& setting, uint8_t part) const {
       value = multi.part(part).Get(setting.address[0]);
       break;
   }
-  if (
-    setting.unit == SETTING_UNIT_INT8 ||
-    setting.unit == SETTING_UNIT_LFO_SPREAD
-  ) value = static_cast<int8_t>(value);
+  if (setting.min_value < 0) value = static_cast<int8_t>(value);
   return value;
 }
 
