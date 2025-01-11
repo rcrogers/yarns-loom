@@ -194,6 +194,23 @@ void Multi::Clock() {
   }
 }
 
+void Multi::set_next_clock_input_tick(uint16_t n) {
+  int32_t prev = clock_input_ticks_;
+  // We haven't actually received the target tick yet -- Clock() will
+  // pre-increment -- so the last Clock we received is one prior
+  clock_input_ticks_ = n - 1;
+
+  if (clock_input_ticks_ == -1) {
+    ui.SplashString("[]");
+  } else if (prev == clock_input_ticks_) {
+    ui.SplashString("==");
+  } else if (clock_input_ticks_ < prev) {
+    ui.SplashString("<<");
+  } else if (clock_input_ticks_ > prev) {
+    ui.SplashString(">>");
+  }
+}
+
 void Multi::Start(bool started_by_keyboard) {
   // Non-keyboard start can override a keyboard start
   started_by_keyboard_ = started_by_keyboard_ && started_by_keyboard;
@@ -229,6 +246,8 @@ void Multi::Start(bool started_by_keyboard) {
   for (uint8_t i = 0; i < num_active_parts_; ++i) {
     part_[i].Start();
   }
+
+  ui.SplashString("|>");
 }
 
 void Multi::Stop() {
@@ -248,6 +267,8 @@ void Multi::Stop() {
   stop_count_down_ = 0;
   running_ = false;
   started_by_keyboard_ = true;
+
+  ui.SplashString("||");
 }
 
 void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos, bool force_phase) {
@@ -896,6 +917,9 @@ int16_t Multi::GetControllableValue(CCRouting cc) const {
   uint8_t part_index = cc.part();
   if (setting) return GetSettingValue(*setting, part_index);
 
+  // Avoid accessing part_ if we're not actually controlling a part.  We could
+  // instead recurse into GetControllableValue with a remote routing, but there
+  // is currently no remote control for non-setting controllers, so we NOOP.
   if (cc.is_remote()) return 0;
 
   const Part& part = part_[part_index];

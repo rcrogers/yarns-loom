@@ -307,6 +307,7 @@ void Ui::PrintCalibrationNote() {
       calibration_strings[calibration_note_]);
 }
 
+// NB: just writes buffer, doesn't display it
 void Ui::PrintPartAndPlayMode(uint8_t part) {
   uint8_t play_mode = multi.part(part).midi_settings().play_mode;
   strcpy(buffer_, "1x");

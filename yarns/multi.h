@@ -381,11 +381,7 @@ class Multi {
   }
   
   void Clock();
-  inline void set_next_clock_input_tick(uint16_t n) {
-    // We haven't actually received the target tick yet -- Clock() will
-    // pre-increment -- so the last Clock we received is one prior
-    clock_input_ticks_ = n - 1;
-  }
+  void set_next_clock_input_tick(uint16_t n);
   
   // A start initiated by a MIDI 0xfa event or the front panel start button will
   // start the sequencers. A start initiated by the keyboard will not start
