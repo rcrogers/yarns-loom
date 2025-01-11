@@ -159,7 +159,7 @@ void Ui::Init() {
   modes_[UI_MODE_FACTORY_TESTING].incremented_variable = \
       &factory_testing_number_;
 
-  SplashOn(SPLASH_VERSION);
+  SplashString(kVersion, true);
 }
 
 void Ui::Poll() {
@@ -229,11 +229,6 @@ void Ui::Poll() {
     leds_brightness[1] = (((x + 256) & 511) < 128) ? 255 : 0;
     leds_brightness[2] = (((x + 128) & 511) < 128) ? 255 : 0;
     leds_brightness[3] = (((x + 000) & 511) < 128) ? 255 : 0;
-  } else if (splash_ == SPLASH_VERSION) {
-    leds_brightness[0] = 255;
-    leds_brightness[1] = 0;
-    leds_brightness[2] = 0;
-    leds_brightness[3] = 0;
   }
   
   leds_.Write(leds_brightness);
@@ -312,13 +307,12 @@ void Ui::PrintCalibrationNote() {
       calibration_strings[calibration_note_]);
 }
 
-void Ui::PrintPartAndPlayMode(uint8_t part, uint16_t brightness, uint16_t fade) {
+void Ui::PrintPartAndPlayMode(uint8_t part) {
   uint8_t play_mode = multi.part(part).midi_settings().play_mode;
   strcpy(buffer_, "1x");
   buffer_[0] += part;
   buffer_[1] = setting_defs.get(SETTING_SEQUENCER_PLAY_MODE).values[play_mode][0];
   buffer_[2] = '\0';
-  display_.Print(buffer_, buffer_, brightness, fade);
 }
 
 void Ui::PrintArpeggiatorMovementStep(SequencerStep step) {
@@ -367,7 +361,8 @@ void Ui::PrintLoopSequencerStatus() {
   if (recording_mode_is_displaying_pitch_) {
     PrintNote(looper.NotePitch(note_index), brightness);
   } else {
-    PrintInteger(looper.NoteAgeOrdinal(note_index) + 1, brightness);
+    Settings::PrintInteger(buffer_, looper.NoteAgeOrdinal(note_index) + 1);
+    display_.Print(buffer_, buffer_, brightness);
   }
 }
 
@@ -391,7 +386,8 @@ void Ui::PrintStepSequencerStatus() {
     else if (step.is_tie()) display_.Print("TI", "TI", brightness, fade);
     else PrintNote(step.note(), brightness, fade);
   } else {
-    PrintInteger(rec_step + 1, brightness, fade);
+    Settings::PrintInteger(buffer_, rec_step + 1);
+    display_.Print(buffer_, buffer_, brightness, fade);
   }
 }
 
@@ -446,60 +442,28 @@ void Ui::SplashOn(Splash splash) {
   splash_ = splash;
   queue_.Touch(); // Reset idle timer
   display_.set_blink(false);
-  switch (splash_) {
-    case SPLASH_NONE:
-    case SPLASH_PART_STRING:
-      break;
+}
 
-    case SPLASH_ACTIVE_PART:
-      if (multi.recording()) {
-        strcpy(buffer_, "1R");
-        buffer_[0] += splash_part_;
-        buffer_[2] = '\0';
-        display_.Print(buffer_);
-      } else {
-        PrintPartAndPlayMode(splash_part_);
-      }
-      break;
+void Ui::SplashString(const char* text, bool scroll) {
+  display_.Print(text);
+  if (scroll) display_.Scroll();
+  SplashOn(SPLASH_STRING);
+}
 
-    case SPLASH_VERSION:
-      display_.Print(kVersion);
-      display_.Scroll();
-      break;
+void Ui::SplashPartString(const char* label, uint8_t part) {
+  strcpy(buffer_, label);
+  buffer_[2] = '\0';
+  display_.Print(buffer_);
+  SplashOn(SPLASH_PART_STRING, part);
+}
 
-    case SPLASH_SETTING_VALUE:
-      setting_defs.Print(*splash_setting_def_, multi.GetSettingValue(*splash_setting_def_, splash_part_), buffer_);
-      display_.Print(buffer_, buffer_, UINT16_MAX, GetFadeForSetting(*splash_setting_def_));
-      display_.Scroll();
-      break;
+void Ui::SplashSetting(const Setting& s, uint8_t part) {
+  splash_setting_def_ = &s;
 
-    case SPLASH_SETTING_NAME:
-      display_.Print(splash_setting_def_->short_name);
-      break;
-
-    case SPLASH_SETTING_PART:
-      strcpy(buffer_, "1C");
-      buffer_[0] += splash_part_;
-      buffer_[2] = '\0';
-      display_.Print(buffer_);
-      break;
-
-    case SPLASH_LOOPER_PHASE_OFFSET:
-      PrintInteger(recording_part().looper().pos_offset >> 9);
-      break;
-
-    case SPLASH_PROGRAM_LOAD:
-      strcpy(buffer_, "L1");
-      buffer_[1] += program_index_;
-      display_.Print(buffer_);
-      break;
-
-    case SPLASH_PROGRAM_SAVE:
-      strcpy(buffer_, "S1");
-      buffer_[1] += program_index_;
-      display_.Print(buffer_);
-      break;
-  }
+  setting_defs.Print(s, multi.GetSettingValue(s, splash_part_), buffer_);
+  display_.Print(buffer_, buffer_, UINT16_MAX, GetFadeForSetting(s));
+  display_.Scroll();
+  SplashOn(SPLASH_SETTING_VALUE, part);
 }
 
 // Generic Handlers
@@ -559,11 +523,13 @@ void Ui::OnClickLoadSave(const Event& e) {
     active_program_ = program_index_;
     if (mode_ == UI_MODE_SAVE_SELECT_PROGRAM) {
       storage_manager.SaveMulti(program_index_);
-      SplashOn(SPLASH_PROGRAM_SAVE);
+      strcpy(buffer_, "S1");
     } else {
       storage_manager.LoadMulti(program_index_);
-      SplashOn(SPLASH_PROGRAM_LOAD);
+      strcpy(buffer_, "L1");
     }
+    buffer_[1] += program_index_;
+    SplashString(buffer_);
   }
   mode_ = UI_MODE_PARAMETER_SELECT;
 }
@@ -639,7 +605,8 @@ void Ui::OnIncrementCalibrationAdjustment(const stmlib::Event& e) {
 void Ui::OnIncrementRecording(const stmlib::Event& e) {
   if (recording_part().looped()) {
     mutable_recording_part()->mutable_looper().pos_offset += e.data << 9;
-    SplashOn(SPLASH_LOOPER_PHASE_OFFSET);
+    Settings::PrintInteger(buffer_, recording_part().looper().pos_offset >> 9);
+    SplashString(buffer_);
     return;
   }
 
@@ -786,7 +753,15 @@ void Ui::OnSwitchHeld(const Event& e) {
       } else {
         // Increment active part
         active_part_ = (1 + active_part_) % multi.num_active_parts();
-        SplashOn(SPLASH_ACTIVE_PART, active_part_);
+        if (multi.recording()) {
+          strcpy(buffer_, "1R");
+          buffer_[0] += active_part_;
+          buffer_[2] = '\0';
+          display_.Print(buffer_);
+        } else {
+          PrintPartAndPlayMode(active_part_);
+        }
+        SplashString(buffer_);
       }
       break;
 
@@ -912,10 +887,14 @@ void Ui::DoEvents() {
     }
     // Chaining
     if (splash_ == SPLASH_SETTING_VALUE) {
+      display_.Print(splash_setting_def_->short_name);
       SplashOn(SPLASH_SETTING_NAME);
       return;
     } else if (splash_ == SPLASH_SETTING_NAME || splash_ == SPLASH_PART_STRING) {
-      SplashOn(SPLASH_SETTING_PART);
+      strcpy(buffer_, "1C");
+      buffer_[0] += splash_part_;
+      buffer_[2] = '\0';
+      SplashString(buffer_);
       return;
     }
     // Exit splash
@@ -965,7 +944,8 @@ void Ui::DoEvents() {
       uint16_t brightness = multi.running() && active_part().sequencer_in_use()
         ? GetBrightnessFromSequencerPhase(active_part())
         : UINT16_MAX;
-      PrintPartAndPlayMode(active_part_, brightness);
+      PrintPartAndPlayMode(active_part_);
+      display_.Print(buffer_, buffer_, brightness);
     } else if (print_latch) {
       PrintLatch();
     }

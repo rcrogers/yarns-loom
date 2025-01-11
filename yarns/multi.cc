@@ -1013,7 +1013,9 @@ bool Multi::ControlChange(uint8_t channel, uint8_t controller, uint8_t value_7bi
       case kCCLooperPhaseOffset:
         if (part_[part_index].looped()) {
           part_->mutable_looper().pos_offset = scaled_value << 9;
-          ui.SplashOn(SPLASH_LOOPER_PHASE_OFFSET);
+          char buffer[2];
+          Settings::PrintInteger(buffer, scaled_value);
+          ui.SplashString(buffer);
         }
         break;
 
