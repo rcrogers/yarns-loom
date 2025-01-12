@@ -65,15 +65,11 @@ enum UiMode {
 
 enum Splash {
   SPLASH_NONE = 0,
-  SPLASH_VERSION,
-  SPLASH_PART_STRING,   // Print an arbitrary string, then SPLASH_SETTING_PART
-  SPLASH_SETTING_VALUE, // Print a setting value, then SPLASH_SETTING_NAME
-  SPLASH_SETTING_NAME,  // Print a setting name, then SPLASH_SETTING_PART
-  SPLASH_SETTING_PART,
-  SPLASH_ACTIVE_PART,
-  SPLASH_LOOPER_PHASE_OFFSET,
-  SPLASH_PROGRAM_LOAD,
-  SPLASH_PROGRAM_SAVE,
+  SPLASH_STRING,        // Print an arbitrary string
+  // Chained splashes
+  SPLASH_PART_STRING,   // Print an arbitrary string, then part
+  SPLASH_SETTING_NAME,  // Print a setting name, then part
+  SPLASH_SETTING_VALUE, // Print a setting value, then ^
 };
 
 enum MainMenuEntry {
@@ -119,31 +115,18 @@ class Ui {
   }
   void DoEvents();
   void FlushEvents();
+
   void SplashOn(Splash splash);
-  void SplashPartString(const char* label, uint8_t part) {
-    strcpy(buffer_, label);
-    buffer_[2] = '\0';
-    display_.Print(buffer_);
-    SplashOn(SPLASH_PART_STRING, part);
-  }
-  void SplashOn(Splash s, uint8_t part) { splash_part_ = part; SplashOn(s); }
-  inline void SplashSetting(const Setting& s, uint8_t part) {
-    splash_setting_def_ = &s;
-    SplashOn(SPLASH_SETTING_VALUE, part);
-  }
+  inline void SplashOn(Splash s, uint8_t part) { splash_part_ = part; SplashOn(s); }
+  void SplashString(const char* text, bool scroll);
+  inline void SplashString(const char* text) { SplashString(text, false); }
+  void SplashPartString(const char* label, uint8_t part);
+  void SplashSetting(const Setting& s, uint8_t part);
 
   inline bool in_recording_mode() const {
     return multi.recording() && (
       mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT
     );
-  }
-
-  void Print(const char* text) {
-    display_.Print(text, text);
-  }
-  void PrintInteger(uint8_t number, uint16_t brightness = UINT16_MAX, uint16_t fade_increment = 0) {
-    Settings::PrintInteger(buffer_, number);
-    display_.Print(buffer_, buffer_, brightness, fade_increment);
   }
 
   void PrintDebugByte(uint8_t byte) {
@@ -152,7 +135,7 @@ class Ui {
     buffer[2] = '\0';
     buffer[0] = hexadecimal[byte >> 4];
     buffer[1] = hexadecimal[byte & 0xf];
-    Print(buffer);
+    display_.Print(buffer);
     queue_.Touch();
   }
   
@@ -220,8 +203,6 @@ class Ui {
   void PrintProgramNumber();
   void PrintCalibrationVoiceNumber();
   void PrintCalibrationNote();
-  void PrintRecordingPart();
-  uint16_t GetBrightnessFromSequencerPhase(const Part& part);
   void PrintLoopSequencerStatus();
   void PrintStepSequencerStatus();
   void PrintNote(int16_t note, uint16_t brightness = UINT16_MAX, uint16_t fade = 0);
@@ -230,8 +211,10 @@ class Ui {
   void PrintFactoryTesting();
   void PrintRecordingStep();
   void PrintArpeggiatorMovementStep(SequencerStep step);
-  void PrintPartAndPlayMode(uint8_t part, uint16_t brightness = UINT16_MAX, uint16_t fade = 0);
+  void PrintPartAndPlayMode(uint8_t part);
   void PrintLatch();
+
+  uint16_t GetBrightnessFromSequencerPhase(const Part& part);
   uint16_t GetFadeForSetting(const Setting& setting);
 
   HeldKeys& ActivePartHeldKeys();
@@ -280,6 +263,7 @@ class Ui {
   
   UiMode mode_;
   UiMode previous_mode_;
+
   Splash splash_;
   Setting const* splash_setting_def_;
   uint8_t splash_part_;

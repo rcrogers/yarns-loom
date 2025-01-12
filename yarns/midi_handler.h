@@ -124,7 +124,7 @@ class MidiHandler {
   
   static void Start() {
     if (!multi.internal_clock()) {
-      multi.set_next_clock_input_tick(0);
+      multi.set_next_clock_input_tick(0); // Reset song position
       multi.Start(false);
     }
   }

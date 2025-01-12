@@ -2,7 +2,7 @@
 An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), with an emphasis on dynamic voicing, flexible composition, and expressive control.
 
 ### Features
-- [Cue playback with MIDI Song Position](yarns/MANUAL.md#song-position)
+- [Cue playback with MIDI Song Position](yarns/MANUAL.md#play-from-a-song-position)
 - [Looper-style sequencer](yarns/MANUAL.md#loop-sequencer-mode-with-real-time-recording)
 - [Arpeggiator movement can be programmed via sequencer](yarns/MANUAL.md#sequencer-driven-arpeggiator)
 - [Braids-inspired oscillator waveforms with timbre shaping](yarns/MANUAL.md#oscillator-controls)
