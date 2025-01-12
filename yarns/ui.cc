@@ -752,6 +752,14 @@ void Ui::OnSwitchHeld(const Event& e) {
           step->set_slid(!step->is_slid());
         }
       } else {
+        // TODO reset song pos
+      }
+      break;
+
+    case UI_SWITCH_TAP_TEMPO_REST:
+      if (recording_any) {
+        mutable_recording_part()->toggle_seq_overwrite();
+      } else {
         // Increment active part
         active_part_ = (1 + active_part_) % multi.num_active_parts();
         if (multi.recording()) {
@@ -763,18 +771,6 @@ void Ui::OnSwitchHeld(const Event& e) {
           PrintPartAndPlayMode(active_part_);
         }
         SplashString(buffer_);
-      }
-      break;
-
-    case UI_SWITCH_TAP_TEMPO_REST:
-      if (recording_any) {
-        mutable_recording_part()->toggle_seq_overwrite();
-      } else {
-        multi.ApplySettingAndSplash(
-          setting_defs.get(SETTING_SEQUENCER_PLAY_MODE),
-          active_part_,
-          (1 + active_part().midi_settings().play_mode) % PLAY_MODE_LAST
-        );
       }
       break;
 
