@@ -294,7 +294,6 @@ class Multi {
         !running() &&
         internal_clock() &&
         !settings_.clock_manual_start) {
-      set_next_clock_input_tick(0);
       // Start the arpeggiators.
       Start(true);
     }
@@ -412,7 +411,6 @@ class Multi {
     }
     if (!running() && internal_clock()) {
       // Start the arpeggiators.
-      set_next_clock_input_tick(0);
       Start(true);
     }
   }

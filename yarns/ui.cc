@@ -681,7 +681,6 @@ void Ui::OnSwitchPress(const Event& e) {
         }
       } else {
         if (!multi.running()) {
-          multi.set_next_clock_input_tick(0);
           multi.Start(false);
         } else {
           multi.Stop();
@@ -752,7 +751,7 @@ void Ui::OnSwitchHeld(const Event& e) {
           step->set_slid(!step->is_slid());
         }
       } else {
-        // TODO reset song pos
+        multi.set_next_clock_input_tick(0); // Reset song position
       }
       break;
 
