@@ -122,6 +122,7 @@ class Ui {
   inline void SplashString(const char* text) { SplashString(text, false); }
   void SplashPartString(const char* label, uint8_t part);
   void SplashSetting(const Setting& s, uint8_t part);
+  void SetSplashBrightness();
 
   inline bool in_recording_mode() const {
     return multi.recording() && (
@@ -267,6 +268,7 @@ class Ui {
   Splash splash_;
   Setting const* splash_setting_def_;
   uint8_t splash_part_;
+  bool splash_fade_in_;
   
   Menu setup_menu_;
   Menu oscillator_menu_;

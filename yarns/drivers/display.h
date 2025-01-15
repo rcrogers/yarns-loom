@@ -58,7 +58,10 @@ class Display {
   }
   
   char* mutable_buffer() { return short_buffer_; }
-  void set_brightness(uint16_t brightness, uint16_t fade);
+  void set_brightness(uint16_t brightness, uint16_t fade, bool linearize = true);
+  inline uint16_t get_fade() const {
+    return fading_increment_;
+  }
   void Scroll();
   
   inline bool scrolling() const { return scrolling_; }
