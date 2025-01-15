@@ -41,6 +41,7 @@ using namespace std;
 using namespace stmlib;
 
 const uint16_t kRefreshMsec = 900;
+const uint16_t kCrossfadeMsec = kRefreshMsec >> 3;
 const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
 const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
 
@@ -441,6 +442,7 @@ void Ui::PrintFactoryTesting() {
 
 void Ui::SplashOn(Splash splash) {
   splash_ = splash;
+  splash_fade_in_ = false;
   queue_.Touch(); // Reset idle timer
   display_.set_blink(false);
 }
@@ -465,6 +467,19 @@ void Ui::SplashSetting(const Setting& s, uint8_t part) {
   display_.Print(buffer_, buffer_, UINT16_MAX, GetFadeForSetting(s));
   display_.Scroll();
   SplashOn(SPLASH_SETTING_VALUE, part);
+}
+
+void Ui::SetSplashBrightness() {
+  int16_t remaining_splash_time = kRefreshMsec - queue_.idle_time();
+  uint16_t splash_brightness = UINT16_MAX;
+  if (queue_.idle_time() < kCrossfadeMsec && splash_fade_in_) {
+    // If less than 1/4 through the splash time, fade in
+    splash_brightness = UINT16_MAX * queue_.idle_time() / kCrossfadeMsec;
+  } else if (remaining_splash_time < kCrossfadeMsec) {
+    // If more than 3/4 through the splash time, fade out
+    splash_brightness = UINT16_MAX * remaining_splash_time / kCrossfadeMsec;
+  }
+  display_.set_brightness(splash_brightness, display_.get_fade(), false);
 }
 
 // Generic Handlers
@@ -877,20 +892,28 @@ void Ui::DoEvents() {
     OnClickLearning(Event());
   }
 
+  if (display_.scrolling()) queue_.Touch(); // Scrolling counts as activity
+
   if (splash_) { // Check whether to end this splash (and maybe chain another)
-    if (queue_.idle_time() < kRefreshMsec || display_.scrolling()) {
+    if (queue_.idle_time() < kRefreshMsec) {
+      SetSplashBrightness();
       return; // Splash isn't over yet
     }
+
     // Chaining
     if (splash_ == SPLASH_SETTING_VALUE) {
       display_.Print(splash_setting_def_->short_name);
       SplashOn(SPLASH_SETTING_NAME);
+      splash_fade_in_ = true;
+      SetSplashBrightness();
       return;
     } else if (splash_ == SPLASH_SETTING_NAME || splash_ == SPLASH_PART_STRING) {
       strcpy(buffer_, "1C");
       buffer_[0] += splash_part_;
       buffer_[2] = '\0';
       SplashString(buffer_);
+      splash_fade_in_ = true;
+      SetSplashBrightness();
       return;
     }
     // Exit splash
@@ -902,10 +925,8 @@ void Ui::DoEvents() {
   }
 
   if (queue_.idle_time() > kRefreshMsec) {
-    if (!display_.scrolling()) {
-      factory_testing_display_ = UI_FACTORY_TESTING_DISPLAY_EMPTY;
-      refresh_display = true;
-    }
+    factory_testing_display_ = UI_FACTORY_TESTING_DISPLAY_EMPTY;
+    refresh_display = true;
   }
 
   if (refresh_display) {
