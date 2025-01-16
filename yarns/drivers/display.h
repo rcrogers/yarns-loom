@@ -36,7 +36,7 @@
 namespace yarns {
 
 const uint8_t kDisplayWidth = 2;
-const uint8_t kScrollBufferSize = 32;
+const uint8_t kScrollBufferSize = 64;
 class Display {
  public:
   Display() { }
@@ -53,7 +53,6 @@ class Display {
 
   inline void PrintMasks(const uint16_t* masks) {
     std::copy(&masks[0], &masks[kDisplayWidth], &mask_[0]);
-    set_brightness(UINT16_MAX, 0);
     use_mask_ = true;
   }
   
