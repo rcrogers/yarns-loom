@@ -36,7 +36,7 @@
 namespace yarns {
 
 const uint8_t kDisplayWidth = 2;
-const uint8_t kScrollBufferSize = 32;
+const uint8_t kScrollBufferSize = 64;
 class Display {
  public:
   Display() { }
