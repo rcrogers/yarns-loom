@@ -479,7 +479,7 @@ void Ui::CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_
   } else if (fade_out_remaining < kCrossfadeMsec) {
     brightness = UINT16_MAX * fade_out_remaining / kCrossfadeMsec;
   }
-  display_.set_brightness(brightness, display_.get_fade(), false);
+  display_.set_brightness(brightness, false);
 }
 
 // Generic Handlers

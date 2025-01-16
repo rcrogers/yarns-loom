@@ -57,7 +57,11 @@ class Display {
   }
   
   char* mutable_buffer() { return short_buffer_; }
-  void set_brightness(uint16_t brightness, uint16_t fade, bool linearize = true);
+  inline void set_brightness_and_fade(uint16_t brightness, uint16_t fade, bool linearize = true) {
+    set_brightness(brightness, linearize);
+    set_fade(fade);
+  }
+  void set_brightness(uint16_t brightness, bool linearize = true);
   inline uint16_t get_fade() const {
     return fading_increment_;
   }
@@ -65,6 +69,9 @@ class Display {
   
   inline bool scrolling() const { return scrolling_; }
   inline void set_blink(bool blinking) { blinking_ = blinking; }
+  inline void set_fade(uint16_t increment) { // Applied at 1kHz
+    fading_increment_ = increment * brightness_ >> 16;
+  }
  
  private:
   void Shift14SegmentsWord(uint16_t data);
