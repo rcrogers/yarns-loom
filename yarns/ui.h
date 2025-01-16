@@ -118,11 +118,10 @@ class Ui {
 
   void SplashOn(Splash splash);
   inline void SplashOn(Splash s, uint8_t part) { splash_part_ = part; SplashOn(s); }
-  void SplashString(const char* text, bool scroll);
-  inline void SplashString(const char* text) { SplashString(text, false); }
+  void SplashString(const char* text);
   void SplashPartString(const char* label, uint8_t part);
   void SplashSetting(const Setting& s, uint8_t part);
-  void SetSplashBrightness();
+  void CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time, bool fade_in);
 
   inline bool in_recording_mode() const {
     return multi.recording() && (

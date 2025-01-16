@@ -53,7 +53,6 @@ class Display {
 
   inline void PrintMasks(const uint16_t* masks) {
     std::copy(&masks[0], &masks[kDisplayWidth], &mask_[0]);
-    set_brightness(UINT16_MAX, 0);
     use_mask_ = true;
   }
   

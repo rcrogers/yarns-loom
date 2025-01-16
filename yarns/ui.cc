@@ -160,7 +160,9 @@ void Ui::Init() {
   modes_[UI_MODE_FACTORY_TESTING].incremented_variable = \
       &factory_testing_number_;
 
-  SplashString(kVersion, true);
+  SplashString(kVersion);
+  splash_fade_in_ = true;
+  display_.Scroll();
 }
 
 void Ui::Poll() {
@@ -447,9 +449,8 @@ void Ui::SplashOn(Splash splash) {
   display_.set_blink(false);
 }
 
-void Ui::SplashString(const char* text, bool scroll) {
+void Ui::SplashString(const char* text) {
   display_.Print(text);
-  if (scroll) display_.Scroll();
   SplashOn(SPLASH_STRING);
 }
 
@@ -469,17 +470,16 @@ void Ui::SplashSetting(const Setting& s, uint8_t part) {
   SplashOn(SPLASH_SETTING_VALUE, part);
 }
 
-void Ui::SetSplashBrightness() {
-  int16_t remaining_splash_time = kRefreshMsec - queue_.idle_time();
-  uint16_t splash_brightness = UINT16_MAX;
-  if (queue_.idle_time() < kCrossfadeMsec && splash_fade_in_) {
-    // If less than 1/4 through the splash time, fade in
-    splash_brightness = UINT16_MAX * queue_.idle_time() / kCrossfadeMsec;
-  } else if (remaining_splash_time < kCrossfadeMsec) {
-    // If more than 3/4 through the splash time, fade out
-    splash_brightness = UINT16_MAX * remaining_splash_time / kCrossfadeMsec;
+void Ui::CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time, bool fade_in) {
+  uint16_t brightness = UINT16_MAX;
+  uint32_t fade_in_elapsed = queue_.idle_time() - fade_in_start_time;
+  uint32_t fade_out_remaining = fade_out_end_time - queue_.idle_time();
+  if (fade_in_elapsed < kCrossfadeMsec && fade_in) {
+    brightness = UINT16_MAX * fade_in_elapsed / kCrossfadeMsec;
+  } else if (fade_out_remaining < kCrossfadeMsec) {
+    brightness = UINT16_MAX * fade_out_remaining / kCrossfadeMsec;
   }
-  display_.set_brightness(splash_brightness, display_.get_fade(), false);
+  display_.set_brightness(brightness, display_.get_fade(), false);
 }
 
 // Generic Handlers
@@ -855,16 +855,12 @@ void Ui::DoEvents() {
         OnClickRecording(e);
       } else {
         (this->*mode.on_click)(e);
-        if (mode_ == UI_MODE_PARAMETER_EDIT) {
-          scroll_display = true;
-        }
       }
     } else if (e.control_type == CONTROL_ENCODER) {
       if (in_recording_mode()) {
         OnIncrementRecording(e);
       } else {
         (this->*mode.on_increment)(e);
-        scroll_display = true;
       }
     } else if (e.control_type == CONTROL_ENCODER_LONG_CLICK) {
       OnLongClick(e);
@@ -874,6 +870,7 @@ void Ui::DoEvents() {
       OnSwitchHeld(e);
     }
     refresh_display = true;
+    scroll_display = true;
   }
 
   if (!tap_tempo_resolved_) {
@@ -892,11 +889,10 @@ void Ui::DoEvents() {
     OnClickLearning(Event());
   }
 
-  if (display_.scrolling()) queue_.Touch(); // Scrolling counts as activity
-
   if (splash_) { // Check whether to end this splash (and maybe chain another)
-    if (queue_.idle_time() < kRefreshMsec) {
-      SetSplashBrightness();
+    if (display_.scrolling() || queue_.idle_time() < kRefreshMsec) {
+      // If scrolling, fade-out never begins, we will just exit splash after scrolling
+      CrossfadeBrightness(0, display_.scrolling() ? -1 : kRefreshMsec, splash_fade_in_);
       return; // Splash isn't over yet
     }
 
@@ -904,8 +900,8 @@ void Ui::DoEvents() {
     if (splash_ == SPLASH_SETTING_VALUE) {
       display_.Print(splash_setting_def_->short_name);
       SplashOn(SPLASH_SETTING_NAME);
+      // NB: we don't scroll the setting name
       splash_fade_in_ = true;
-      SetSplashBrightness();
       return;
     } else if (splash_ == SPLASH_SETTING_NAME || splash_ == SPLASH_PART_STRING) {
       strcpy(buffer_, "1C");
@@ -913,18 +909,23 @@ void Ui::DoEvents() {
       buffer_[2] = '\0';
       SplashString(buffer_);
       splash_fade_in_ = true;
-      SetSplashBrightness();
       return;
     }
     // Exit splash
     splash_ = SPLASH_NONE;
     refresh_display = true;
-    if (mode_ == UI_MODE_PARAMETER_EDIT) {
-      scroll_display = true;
-    }
   }
 
-  if (queue_.idle_time() > kRefreshMsec) {
+  bool print_latch =
+    active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
+    ActivePartHeldKeys().stack.most_recent_note_index();
+  bool print_part = mode_ == UI_MODE_PARAMETER_SELECT && multi.num_active_parts() > 1;
+
+  if (
+    !display_.scrolling() &&
+    (print_latch || print_part) &&
+    queue_.idle_time() > kRefreshMsec
+  ) {
     factory_testing_display_ = UI_FACTORY_TESTING_DISPLAY_EMPTY;
     refresh_display = true;
   }
@@ -951,25 +952,28 @@ void Ui::DoEvents() {
   }
   if (display_.scrolling()) { return; }
 
-  // If display is idle, flash various statuses
-  bool print_latch =
-    active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
-    ActivePartHeldKeys().stack.most_recent_note_index();
-  bool print_part = mode_ == UI_MODE_PARAMETER_SELECT;
-  if (queue_.idle_time() > (kRefreshMsec * 2 / 3)) { // Last third
+  // If we're not scrolling and it's not yet time to refresh, print latch or part
+  bool print_last_third = print_latch || print_part;
+  bool print_middle_third = print_latch && print_part;
+  uint16_t begin_middle_third = kRefreshMsec / 3;
+  uint16_t begin_last_third = kRefreshMsec * 2 / 3;
+  if (print_last_third && queue_.idle_time() >= begin_last_third) {
     if (print_part) {
-      uint16_t brightness = multi.running() && active_part().sequencer_in_use()
-        ? GetBrightnessFromSequencerPhase(active_part())
-        : UINT16_MAX;
       PrintPartAndPlayMode(active_part_);
-      display_.Print(buffer_, buffer_, brightness);
+      display_.Print(buffer_, buffer_);
     } else if (print_latch) {
       PrintLatch();
     }
-  } else if (queue_.idle_time() > (kRefreshMsec / 3)) { // Middle third
-    if (print_latch && print_part) {
-      PrintLatch();
-    }
+    CrossfadeBrightness(begin_last_third, kRefreshMsec, true);
+  } else if (print_middle_third && queue_.idle_time() >= begin_middle_third) {
+    PrintLatch();
+    CrossfadeBrightness(begin_middle_third, begin_last_third, false);
+  } else {
+    if (print_middle_third) CrossfadeBrightness(0, begin_middle_third, true);
+    else if (print_last_third) CrossfadeBrightness(0, begin_last_third, true);
+    // TODO if we just finished scrolling, ideally we would fade-in here, but
+    // finishing scroll doesn't reset the idle time
+    else CrossfadeBrightness(0, -1, true);
   }
 }
 
