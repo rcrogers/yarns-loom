@@ -168,9 +168,10 @@ void Multi::Clock() {
     
     if (ticks >= 0) {
       for (uint8_t p = 0; p < num_active_parts_; ++p) {
-        bool new_step = ticks % part_[p].PPQN() == 0;
-        if (new_step && !part_[p].current_step_has_swing()) part_[p].ClockStep();
-        part_[p].ClockStepGateEndings();
+        Part& part = part_[p];
+        bool new_step = ticks % part.PPQN() == 0;
+        if (new_step && !part.current_step_has_swing()) part.ClockStep();
+        if (part.doing_stepped_stuff()) part.ClockStepGateEndings();
       }
 
       if (
