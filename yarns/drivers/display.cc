@@ -87,7 +87,7 @@ void Display::Scroll() {
   }
 }
 
-void Display::set_brightness(uint16_t brightness, uint16_t fade, bool linearize) {
+void Display::set_brightness(uint16_t brightness, bool linearize) {
   if (linearize) {
     // Applying a brightness fraction naively to PWM results in a visual bias
     // toward over-brightness -- expo conversion biases it back toward darkness
@@ -96,8 +96,6 @@ void Display::set_brightness(uint16_t brightness, uint16_t fade, bool linearize)
   } else {
     brightness_ = brightness;
   }
-
-  fading_increment_ = fade * brightness_ >> 16;
 }
 
 void Display::RefreshSlow() {
@@ -180,7 +178,8 @@ void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t 
   scrolling_ = false;
   use_mask_ = false;
 
-  set_brightness(brightness, fade);
+  set_brightness(brightness, true);
+  fading_increment_ = fade * brightness_ >> 16;
 }
 
 # define SHIFT_BIT \
