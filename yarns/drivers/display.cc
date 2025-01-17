@@ -178,7 +178,8 @@ void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t 
   scrolling_ = false;
   use_mask_ = false;
 
-  set_brightness_and_fade(brightness, fade);
+  set_brightness(brightness, true);
+  fading_increment_ = fade * brightness_ >> 16;
 }
 
 # define SHIFT_BIT \
