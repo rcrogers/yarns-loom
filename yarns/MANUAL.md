@@ -391,7 +391,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 #### Predictable phase relationships between clocked events
 - Sequencers' phases are always calculated from the master clock state
-  - Allows sequencers to return to predictable phase relationships even after a stint in disparate time signatures
+- Allows sequencers to return to predictable phase relationships even after a stint in disparate time signatures
 
 #### Improved interaction between keyboard and clock start/stop
 - An explicit clock start (from panel switch or MIDI) can supersede an implicit clock start (from keyboard)
