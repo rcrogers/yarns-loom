@@ -267,7 +267,7 @@ class Ui {
   Splash splash_;
   Setting const* splash_setting_def_;
   uint8_t splash_part_;
-  bool splash_fade_in_;
+  bool refresh_was_automatic_;
   
   Menu setup_menu_;
   Menu oscillator_menu_;

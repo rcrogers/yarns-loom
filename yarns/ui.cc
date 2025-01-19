@@ -161,7 +161,7 @@ void Ui::Init() {
       &factory_testing_number_;
 
   SplashString(kVersion);
-  splash_fade_in_ = true;
+  refresh_was_automatic_ = true;
   display_.Scroll();
 }
 
@@ -444,7 +444,7 @@ void Ui::PrintFactoryTesting() {
 
 void Ui::SplashOn(Splash splash) {
   splash_ = splash;
-  splash_fade_in_ = false;
+  refresh_was_automatic_ = false;
   queue_.Touch(); // Reset idle timer
   display_.set_blink(false);
 }
@@ -870,6 +870,7 @@ void Ui::DoEvents() {
       OnSwitchHeld(e);
     }
     refresh_display = true;
+    refresh_was_automatic_ = false;
     scroll_display = true;
   }
 
@@ -892,7 +893,7 @@ void Ui::DoEvents() {
   if (splash_) { // Check whether to end this splash (and maybe chain another)
     if (display_.scrolling() || queue_.idle_time() < kRefreshMsec) {
       // If scrolling, fade-out never begins, we will just exit splash after scrolling
-      CrossfadeBrightness(0, display_.scrolling() ? -1 : kRefreshMsec, splash_fade_in_);
+      CrossfadeBrightness(0, display_.scrolling() ? -1 : kRefreshMsec, refresh_was_automatic_);
       return; // Splash isn't over yet
     }
 
@@ -901,19 +902,20 @@ void Ui::DoEvents() {
       display_.Print(splash_setting_def_->short_name);
       SplashOn(SPLASH_SETTING_NAME);
       // NB: we don't scroll the setting name
-      splash_fade_in_ = true;
+      refresh_was_automatic_ = true;
       return;
     } else if (splash_ == SPLASH_SETTING_NAME || splash_ == SPLASH_PART_STRING) {
       strcpy(buffer_, "1C");
       buffer_[0] += splash_part_;
       buffer_[2] = '\0';
       SplashString(buffer_);
-      splash_fade_in_ = true;
+      refresh_was_automatic_ = true;
       return;
     }
     // Exit splash
     splash_ = SPLASH_NONE;
     refresh_display = true;
+    refresh_was_automatic_ = true;
   }
 
   bool print_latch =
@@ -973,7 +975,7 @@ void Ui::DoEvents() {
     else if (print_last_third) CrossfadeBrightness(0, begin_last_third, true);
     // TODO if we just finished scrolling, ideally we would fade-in here, but
     // finishing scroll doesn't reset the idle time
-    else CrossfadeBrightness(0, -1, true);
+    else CrossfadeBrightness(0, -1, refresh_was_automatic_);
   }
 }
 
