@@ -31,16 +31,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
         - [`GRID` direction](#grid-direction)
 - [MIDI](#midi)
     - [Layouts](#layouts)
-    - [Hold pedal](#hold-pedal)
-      - [Display of pressed/sustained keys](#display-of-pressedsustained-keys)
-      - [Hold pedal mode per part](#hold-pedal-mode-per-part)
-      - [Pedal polarity](#pedal-polarity)
     - [Event routing, filtering, and transformation](#event-routing-filtering-and-transformation)
-    - [Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)](#polyphonic-voice-allocation-note-priority-and-voicing)
-      - [Note priority](#note-priority)
-      - [Polyphonic `VOICING` options](#polyphonic-voicing-options)
-      - [Other changes](#other-changes-2)
-    - [Legato and portamento](#legato-and-portamento)
     - [MIDI Control Change messages](#midi-control-change-messages)
       - [Control change mode](#control-change-mode)
       - [Added CCs](#added-ccs)
@@ -51,10 +42,18 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
       - [Clock offset](#clock-offset)
       - [Predictable phase relationships between clocked events](#predictable-phase-relationships-between-clocked-events)
       - [Improved interaction between keyboard and clock start/stop](#improved-interaction-between-keyboard-and-clock-startstop)
-    - [Play from a song position](#play-from-a-song-position)
+    - [Song position](#song-position)
       - [What the song position controls](#what-the-song-position-controls)
-      - [How to set song position with external MIDI](#how-to-set-song-position-with-external-midi)
-      - [Notes](#notes)
+      - [Using the song position](#using-the-song-position)
+    - [Hold pedal](#hold-pedal)
+      - [Display of pressed/sustained keys](#display-of-pressedsustained-keys)
+      - [Hold pedal mode per part](#hold-pedal-mode-per-part)
+      - [Pedal polarity](#pedal-polarity)
+    - [Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)](#polyphonic-voice-allocation-note-priority-and-voicing)
+      - [Note priority](#note-priority)
+      - [Polyphonic `VOICING` options](#polyphonic-voicing-options)
+      - [Other changes](#other-changes-2)
+    - [Legato and portamento](#legato-and-portamento)
     - [LFOs](#lfos)
       - [Frequency](#frequency)
       - [Vibrato shape](#vibrato-shape)
@@ -265,34 +264,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     3. Part 1's aux CV, configurable via `CV`
     4. Part 2's aux CV, configurable via `CV`
     
-### Hold pedal
 
-#### Display of pressed/sustained keys
-- Screen periodically shows tick marks to show the state of the active part's 6 most recently pressed keys, and how the hold pedal is affecting them
-- Bottom-half tick: key is manually held, and will stop when released
-- Full-height tick: key is manually held, and will be sustained when released
-- Steady top-half tick: key is sustained, and will continue after the next key-press
-- Blinking top-half tick: key is sustained, and will be stopped by the next key-press
-
-#### Hold pedal mode per part
-  - New part setting `HM (HOLD PEDAL MODE` sets each part's response to the hold pedal
-  - `OFF`: pedal has no effect
-  - `SUSTAIN`: sustains key-releases while pedal is down, and stops sustained notes on pedal-up
-    - Matches the behavior of the pedal in the stock firmware
-  - `SOSTENUTO`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down; stops sustained notes on pedal-up
-  - `LATCH`: uses the semantics of the button-controlled latching in stock Yarns -- sustains key-releases while pedal is down; stops sustained notes on key-press regardless of pedal state
-    - Matches the behavior of the front-panel latching (triggered by holding `REC`)
-  - `MOMENTARY LATCH`: like `LATCH`, but stop sustained notes on pedal-up, instead of on key-press
-  - `CLUTCH`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down (like `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (like `LATCH`)
-    - Notes triggered while the pedal is down are not sustained and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
-  - `FILTER`: while pedal is down, ignores key-presses and sustains key-releases; while pedal is up, stops sustained notes on key-press
-    - In combination with setting an opposite `HOLD PEDAL POLARITY` on two different parts, this allows the use of the pedal to select which part is controlled by the keyboard, while also supporting latching
-
-#### Pedal polarity
-- New part setting `HP (HOLD PEDAL POLARITY)` inverts a part's up/down pedal behavior
-- Allows compatibility with any manufacturer's hold pedals
-- Allows reversing up/down semantics for the selected `HOLD PEDAL MODE`
-- [More information on negative (default) and positive pedal polarity](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html)
 
 
 ### Event routing, filtering, and transformation
@@ -311,44 +283,6 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Any MIDI events ignored by the recording part can be received by other parts
   - Recording part now responds to MIDI start
 
-### Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)
-
-#### Note priority
-- Added new `FIRST` (oldest) setting to `NOTE PRIORITY`
-- Voicing respects note priority wherever applicable
-
-#### Polyphonic `VOICING` options
-- `sM STEAL LOWEST PRIORITY RELEASE MUTE` (previously `POLY`)
-    - Steal from the lowest-priority existing note IFF the incoming note has higher priority
-    - Does not reassign voices to unvoiced notes on release
-- `PRIORITY ORDER` (previously `SORTED`)
-    - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
-- `UNISON RELEASE REASSIGN` (previously `U1`)
-- `UNISON RELEASE MUTE` (previously `U2`)
-- `SM STEAL HIGHEST PRIORITY RELEASE MUTE` (previously `STEAL MOST RECENT`)
-    - Steal from the highest-priority existing note IFF the incoming note has higher priority
-    - Does not reassign on release
-- `sR STEAL LOWEST PRIORITY RELEASE REASSIGN`
-    - Steal from the lowest-priority existing note IFF the incoming note has higher priority
-    - Reassigns voices to unvoiced notes on release
-- `SR STEAL HIGHEST PRIORITY RELEASE REASSIGN`
-    - Steal from the highest-priority existing note IFF the incoming note has higher priority
-    - Reassigns on release
-
-#### Other changes
-- Notes that steal a voice are considered legato
-- Fixed unison to allocate notes without gaps
-- Improve unison etc. to avoid unnecessary reassignment/retrigger of voices during a partial chord change
-- Unison etc. reassign voices on `NoteOff` if there are held notes that don't yet have a voice
-- Allow monophonic parts to use all voicing modes
-
-### Legato and portamento
-- Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` (are notes retriggered when played legato?) and `PORTAMENTO LEGATO ONLY` (is portamento applied on all notes, or only on notes played legato?)
-  - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
-- `PORTAMENTO` setting has a shared zero at center
-  - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
-- Broadened setting range from 51 to 64 values per curve shape
-  
 ### MIDI Control Change messages
 
 #### Control change mode
@@ -403,24 +337,89 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - An explicit clock start (from panel switch or MIDI) can supersede an implicit clock start (from keyboard)
 - Stopping the clock no longer stops manually held keys, though it still stops notes generated by the sequencer/arpeggiator
 
-### Play from a song position
+### Song position
 
 #### What the song position controls
-- All clock-based events respect the song position
+- All clock-based events are synchronized to the song position
 - Step sequencer will begin on the target step
 - The loop sequencer and synced LFOs will advance to the correct phase of their loops
 - Arpeggiator state is updated (based on any currently held arp chord) to the same state as if the song had played from the beginning
 
-#### How to set song position with external MIDI
+#### Using the song position
 - The song position is saved when the clock stops
-- Cueing: while stopped, the song position can be updated by a MIDI Song Position Pointer message
-- On MIDI Continue, play resumes at the song position
-- On MIDI Start, play starts at the beginning, ignoring any MIDI Song Position Pointer
+  - Display flashes `||` (pause)
+- Cueing: the song position can be updated by a MIDI Song Position Pointer message
+  - Display flashes `<<` (rewind), `>>` (fast-forward), or `[]` (reset/stop) depending on the new song position
+  - Note: this was tested with a Tascam Model 12 as a MIDI source, which implements cueing by sending MIDI Song Position Pointer followed by a MIDI Continue.  If this doesn't work with your MIDI source, let me know!
+- Reset song position: long press Start/Stop button, or start via MIDI Start
+- Play from song position: short press Start/Stop button, or MIDI Continue
 
-#### Notes
-- This was tested with a Tascam Model 12 as a MIDI source, which implements cueing by sending MIDI Song Position Pointer before a MIDI Continue.  If this doesn't work with your MIDI source, let me know!
-- When internally clocked, the Start button still resets song position to the beginning, as in stock Yarns
-- There isn't yet a way to Continue without external control
+### Hold pedal
+
+#### Display of pressed/sustained keys
+- Screen periodically shows tick marks to show the state of the active part's 6 most recently pressed keys, and how the hold pedal is affecting them
+- Bottom-half tick: key is manually held, and will stop when released
+- Full-height tick: key is manually held, and will be sustained when released
+- Steady top-half tick: key is sustained, and will continue after the next key-press
+- Blinking top-half tick: key is sustained, and will be stopped by the next key-press
+
+#### Hold pedal mode per part
+  - New part setting `HM (HOLD PEDAL MODE` sets each part's response to the hold pedal
+  - `OFF`: pedal has no effect
+  - `SUSTAIN`: sustains key-releases while pedal is down, and stops sustained notes on pedal-up
+    - Matches the behavior of the pedal in the stock firmware
+  - `SOSTENUTO`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down; stops sustained notes on pedal-up
+  - `LATCH`: uses the semantics of the button-controlled latching in stock Yarns -- sustains key-releases while pedal is down; stops sustained notes on key-press regardless of pedal state
+    - Matches the behavior of the front-panel latching (triggered by holding `REC`)
+  - `MOMENTARY LATCH`: like `LATCH`, but stop sustained notes on pedal-up, instead of on key-press
+  - `CLUTCH`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down (like `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (like `LATCH`)
+    - Notes triggered while the pedal is down are not sustained and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
+  - `FILTER`: while pedal is down, ignores key-presses and sustains key-releases; while pedal is up, stops sustained notes on key-press
+    - In combination with setting an opposite `HOLD PEDAL POLARITY` on two different parts, this allows the use of the pedal to select which part is controlled by the keyboard, while also supporting latching
+
+#### Pedal polarity
+- New part setting `HP (HOLD PEDAL POLARITY)` inverts a part's up/down pedal behavior
+- Allows compatibility with any manufacturer's hold pedals
+- Allows reversing up/down semantics for the selected `HOLD PEDAL MODE`
+- [More information on negative (default) and positive pedal polarity](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html)
+
+### Polyphonic voice allocation (`NOTE PRIORITY` and `VOICING`)
+
+#### Note priority
+- Added new `FIRST` (oldest) setting to `NOTE PRIORITY`
+- Voicing respects note priority wherever applicable
+
+#### Polyphonic `VOICING` options
+- `sM STEAL LOWEST PRIORITY RELEASE MUTE` (previously `POLY`)
+    - Steal from the lowest-priority existing note IFF the incoming note has higher priority
+    - Does not reassign voices to unvoiced notes on release
+- `PRIORITY ORDER` (previously `SORTED`)
+    - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
+- `UNISON RELEASE REASSIGN` (previously `U1`)
+- `UNISON RELEASE MUTE` (previously `U2`)
+- `SM STEAL HIGHEST PRIORITY RELEASE MUTE` (previously `STEAL MOST RECENT`)
+    - Steal from the highest-priority existing note IFF the incoming note has higher priority
+    - Does not reassign on release
+- `sR STEAL LOWEST PRIORITY RELEASE REASSIGN`
+    - Steal from the lowest-priority existing note IFF the incoming note has higher priority
+    - Reassigns voices to unvoiced notes on release
+- `SR STEAL HIGHEST PRIORITY RELEASE REASSIGN`
+    - Steal from the highest-priority existing note IFF the incoming note has higher priority
+    - Reassigns on release
+
+#### Other changes
+- Notes that steal a voice are considered legato
+- Fixed unison to allocate notes without gaps
+- Improve unison etc. to avoid unnecessary reassignment/retrigger of voices during a partial chord change
+- Unison etc. reassign voices on `NoteOff` if there are held notes that don't yet have a voice
+- Allow monophonic parts to use all voicing modes
+
+### Legato and portamento
+- Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` (are notes retriggered when played legato?) and `PORTAMENTO LEGATO ONLY` (is portamento applied on all notes, or only on notes played legato?)
+  - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
+- `PORTAMENTO` setting has a shared zero at center
+  - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
+- Broadened setting range from 51 to 64 values per curve shape
 
 ### LFOs
 
