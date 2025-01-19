@@ -263,9 +263,6 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     2. Part 2, monophonic CV/gate
     3. Part 1's aux CV, configurable via `CV`
     4. Part 2's aux CV, configurable via `CV`
-    
-
-
 
 ### Event routing, filtering, and transformation
 - New `SI (SEQ INPUT RESPONSE)` setting changes how a playing sequence responds to manual input
@@ -353,6 +350,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Note: this was tested with a Tascam Model 12 as a MIDI source, which implements cueing by sending MIDI Song Position Pointer followed by a MIDI Continue.  If this doesn't work with your MIDI source, let me know!
 - Reset song position: long press Start/Stop button, or start via MIDI Start
 - Play from song position: short press Start/Stop button, or MIDI Continue
+  - Display flashes `|>` (play)
 
 ### Hold pedal
 
