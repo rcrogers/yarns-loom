@@ -87,11 +87,15 @@ void Display::Scroll() {
   }
 }
 
-void Display::set_brightness(uint16_t fraction) {
-  // Applying a brightness fraction naively to PWM results in a visual bias
-  // toward over-brightness -- expo conversion biases it back toward darkness
-  uint8_t phase = UINT8_MAX - (fraction >> 8);
-  brightness_ = UINT16_MAX - lut_env_expo[(phase >> 1) + (phase >> 2)];
+void Display::set_brightness(uint16_t brightness, bool linearize) {
+  if (linearize) {
+    // Applying a brightness fraction naively to PWM results in a visual bias
+    // toward over-brightness -- expo conversion biases it back toward darkness
+    uint8_t darkness = UINT8_MAX - (brightness >> 8);
+    brightness_ = UINT16_MAX - lut_env_expo[(darkness >> 1) + (darkness >> 2)];
+  } else {
+    brightness_ = brightness;
+  }
 }
 
 void Display::RefreshSlow() {
@@ -117,10 +121,8 @@ void Display::RefreshSlow() {
 
   if (fading_increment_) {
     fading_counter_ += fading_increment_;
-  }
-  
-  if (fading_increment_) {
-    actual_brightness_ = (fading_counter_ >> 1) + (fading_counter_ >> 2) + (1 << 14);
+    fading_counter_ %= brightness_;
+    actual_brightness_ = (fading_counter_ >> 1) + (fading_counter_ >> 2) + (brightness_ >> 2);
   } else {
     actual_brightness_ = brightness_;
   }
@@ -165,7 +167,7 @@ void Display::RefreshFast() {
   brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
 }
 
-void Display::Print(const char* short_buffer, const char* long_buffer) {
+void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t brightness, uint16_t fade) {
   strncpy(short_buffer_, short_buffer, kDisplayWidth);
 
 #ifdef APPLICATION
@@ -175,6 +177,9 @@ void Display::Print(const char* short_buffer, const char* long_buffer) {
 
   scrolling_ = false;
   use_mask_ = false;
+
+  set_brightness(brightness, true);
+  fading_increment_ = fade * brightness_ >> 16;
 }
 
 # define SHIFT_BIT \

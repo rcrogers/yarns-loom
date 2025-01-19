@@ -42,6 +42,7 @@ namespace yarns {
   SETTING_CLOCK_TEMPO, \
   SETTING_CLOCK_SWING, \
   SETTING_CLOCK_INPUT_DIVISION, \
+  SETTING_CLOCK_OFFSET, \
   SETTING_CLOCK_OUTPUT_DIVISION, \
   SETTING_CLOCK_BAR_DURATION, \
   SETTING_CLOCK_NUDGE_FIRST_TICK, \
@@ -101,6 +102,7 @@ namespace yarns {
   SETTING_MIDI_TRANSPOSE_OCTAVES, \
   SETTING_VOICING_PORTAMENTO, \
   SETTING_VOICING_LFO_RATE, \
+  SETTING_SEQUENCER_PLAY_MODE, \
   SETTING_SEQUENCER_CLOCK_QUANTIZATION, \
   SETTING_SEQUENCER_LOOP_LENGTH, \
   MENU_PART_CLOCKING, \
@@ -280,6 +282,17 @@ static const SettingIndex paraphonic_plus_two[] = {
   MENU_END
 };
 
+static const SettingIndex paraphonic_plus_one[] = {
+  MENU_LAYOUT_CLOCK,
+  SETTING_CLOCK_OVERRIDE,
+  MENU_MIDI,
+  MENU_VOICING_ALLOCATION_MIXED,
+  MENU_MODULATION,
+  SETTING_VOICING_CV_OUT,
+  MENU_TUNING,
+  MENU_END
+};
+
 static const SettingIndex two_one[] = {
   MENU_LAYOUT_CLOCK,
   MENU_MIDI,
@@ -323,6 +336,7 @@ static const SettingIndex* setup_setting_list_for_layout[LAYOUT_LAST] = {
   two_one,
   paraphonic_plus_two,
   tri_mono,
+  paraphonic_plus_one,
 };
 
 class Menu {

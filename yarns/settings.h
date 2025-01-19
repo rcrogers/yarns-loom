@@ -68,6 +68,7 @@ enum SettingIndex {
   SETTING_CLOCK_SWING,
   SETTING_CLOCK_INPUT_DIVISION,
   SETTING_CLOCK_OUTPUT_DIVISION,
+  SETTING_CLOCK_OFFSET,
   SETTING_CLOCK_BAR_DURATION,
   SETTING_CLOCK_NUDGE_FIRST_TICK,
   SETTING_CLOCK_MANUAL_START,
@@ -160,6 +161,7 @@ class Settings {
   Settings() { }
   ~Settings() { }
 
+  // Maps a controller number to a setting index.
   uint8_t part_cc_map[128];
   uint8_t remote_control_cc_map[128];
   

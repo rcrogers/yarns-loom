@@ -105,7 +105,7 @@ void SysTick_Handler() {
     // refreshed to the right value when the trigger/gate is sent.
     gate_output.Write(gate);
   }
-  multi.ClockFast();
+  multi.UpdateResetPulse();
   if (refresh) {
     multi.Refresh();
     multi.GetCvGate(cv, gate);

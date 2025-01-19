@@ -39,13 +39,29 @@
 namespace yarns {
 
 const char* const layout_values[LAYOUT_LAST] = {
-  "1M", "2M", "4M", "2P", "4P", "2>", "4>", "8>", "4T", "4V", "31", "22", "21", "*2", "3M"
+  "1M 1 MONO PART",
+  "2M 2 MONO PARTS",
+  "4M 4 MONO PARTS",
+  "2P 2-VOICE POLY",
+  "4P 4-VOICE POLY",
+  "2> 2-VOICE POLYCHAINED",
+  "4> 4-VOICE POLYCHAINED",
+  "8> 8-VOICE POLYCHAINED",
+  "4T 4 TRIGGERS",
+  "4V 4 CONTROL VOLTAGES",
+  "31 3-VOICE POLY + 1 MONO PART",
+  "22 2-VOICE POLY + 2 MONO PARTS",
+  "21 2-VOICE POLY + 1 MONO PART",
+  "*2 PARAPHONIC + 2 MONO PARTS + 1 GATE",
+  "3M 3 MONO PARTS",
+  "*1 PARAPHONIC + 1 MONO PART",
 };
 
 const char* const control_change_mode_values[CONTROL_CHANGE_MODE_LAST] = {
   "OFF",
   "ABSOLUTE 0-127",
-  "RELATIVE TWOS COMP INC=1 DEC=127",
+  "RD RELATIVE DIRECT",
+  "RS RELATIVE SCALED",
 };
 
 const char* const midi_out_mode_values[] = {
@@ -58,15 +74,16 @@ const char* const boolean_values[] = {
 
 const char* const voicing_allocation_mode_values[POLY_MODE_LAST] = {
   "MONOPHONIC",
-  "SM STEAL RELEASE MUTE",
+  "sM STEAL LOWEST PRIORITY RELEASE MUTE",
   "CYCLIC",
   "RANDOM",
   "VELOCITY",
   "PRIORITY ORDER",
   "UR UNISON RELEASE REASSIGN",
   "UM UNISON RELEASE MUTE",
-  "SP STEAL HIGHEST PRIORITY",
-  "SR STEAL RELEASE REASSIGN",
+  "SM STEAL HIGHEST PRIORITY RELEASE MUTE",
+  "sR STEAL LOWEST PRIORITY RELEASE REASSIGN",
+  "SR STEAL HIGHEST PRIORITY RELEASE REASSIGN",
 };
 
 const char* const sequencer_arp_direction_values[ARPEGGIATOR_DIRECTION_LAST] = {
@@ -264,20 +281,26 @@ const Setting Settings::settings_[] = {
   {
     "SW", "SWING",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_SWING, 0 },
-    SETTING_UNIT_UINT8, 0, 99, NULL,
+    SETTING_UNIT_INT8, -63, 63, NULL,
     0xff, 3,
   },
   {
-    "I/", "INPUT CLK DIV",
+    "I/", "INPUT CLOCK DIV",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_INPUT_DIVISION, 0 },
     SETTING_UNIT_UINT8, 1, 4, NULL,
     0xff, 0xff,
   },
   {
-    "O/", "OUTPUT CLK RATIO",
+    "O/", "OUTPUT CLOCK RATIO OUT/IN",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OUTPUT_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     0xff, 0,
+  },
+  {
+    "C+", "CLOCK OFFSET",
+    SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OFFSET, 0 },
+    SETTING_UNIT_INT8, -64, 63, NULL,
+    0xff, 0xff,
   },
   {
     "B-", "BAR DURATION",
@@ -600,7 +623,7 @@ const Setting Settings::settings_[] = {
     89, 0xff,
   },
   {
-    "C/", "CLK RATIO OUT-IN",
+    "C/", "CLOCK RATIO OUT/IN",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_CLOCK_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     102, 24,
@@ -732,7 +755,15 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       break;
       
     case SETTING_UNIT_INT8:
-      PrintSignedInteger(buffer, value);
+      if (&setting == &setting_defs.get(SETTING_CLOCK_SWING)) {
+        int8_t swing = static_cast<int8_t>(value);
+        PrintInteger(buffer, abs(swing));
+        if (swing && buffer[0] == ' ') {
+          buffer[0] = swing < 0 ? 'o' : 'e';
+        }
+      } else {
+        PrintSignedInteger(buffer, value);
+      }
       break;
     
     case SETTING_UNIT_INDEX:

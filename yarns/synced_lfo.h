@@ -30,6 +30,9 @@
 #ifndef YARNS_SYNCED_LFO_H_
 #define YARNS_SYNCED_LFO_H_
 
+#include "stmlib/stmlib.h"
+using namespace stmlib;
+
 namespace yarns {
 
 enum LFOShape {
@@ -41,19 +44,22 @@ enum LFOShape {
   LFO_SHAPE_LAST
 };
 
-template<uint8_t PHASE_ERR_SHIFT, uint8_t FREQ_ERR_SHIFT>
+template<uint8_t PHASE_ERR_DOWNSHIFT, uint8_t FREQ_ERR_DOWNSHIFT>
 class SyncedLFO {
  public:
 
-  uint8_t clock_division_;
-
   SyncedLFO() { }
   ~SyncedLFO() { }
-  void Init(uint32_t phase = 0) {
-    phase_ = phase;
+  void SetPhase(uint32_t phase) { phase_ = phase; }
+  void RegisterPhase(uint32_t phase, bool force) {
+    if (force) {
+      phase_ = phase;
+    } else {
+      SetTargetPhase(phase);
+    }
   }
-
   uint32_t GetPhase() const { return phase_; }
+  uint32_t GetTargetPhase() const { return previous_target_phase_; }
   uint32_t GetPhaseIncrement() const { return phase_increment_; }
   void SetPhaseIncrement(uint32_t i) { phase_increment_ = i; }
   void Refresh() { phase_ += phase_increment_; }
@@ -76,10 +82,14 @@ class SyncedLFO {
     } 
   }
 
-  void Tap(uint32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) {
-    uint16_t tick_phase = tick_counter % period_ticks;
+  uint32_t ComputeTargetPhase(int32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) const {
+    uint16_t tick_phase = modulo(tick_counter, period_ticks);
     uint32_t target_phase = ((tick_phase << 16) / period_ticks) << 16;
-    SetTargetPhase(target_phase + phase_offset);
+    return target_phase + phase_offset;
+  }
+
+  void Tap(int32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) {
+    SetTargetPhase(ComputeTargetPhase(tick_counter, period_ticks, phase_offset));
   }
 
   void SetTargetPhase(uint32_t target_phase) {
@@ -87,17 +97,9 @@ class SyncedLFO {
     uint32_t target_increment = target_phase - previous_target_phase_;
     int32_t d_error = target_increment - (phase_ - previous_phase_);
     int32_t p_error = target_phase - phase_;
-    int32_t error = (p_error >> PHASE_ERR_SHIFT) + (d_error >> FREQ_ERR_SHIFT);
+    int32_t error = (p_error >> PHASE_ERR_DOWNSHIFT) + (d_error >> FREQ_ERR_DOWNSHIFT);
 
-    if (error < 0 && abs(error) > phase_increment_) {
-      // underflow
-      phase_increment_ = 0;
-    } else if (error > 0 && (UINT32_MAX - error) < phase_increment_) {
-      // overflow
-      phase_increment_ = UINT32_MAX;
-    } else {
-      phase_increment_ += error;
-    }
+    phase_increment_ = SaturatingIncrement(phase_increment_, error);
 
     previous_phase_ = phase_;
     previous_target_phase_ = target_phase;
