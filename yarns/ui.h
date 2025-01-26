@@ -199,7 +199,7 @@ class Ui {
   // Print functions.
   void PrintParameterName();
   void PrintParameterValue();
-  void PrintMenuName();
+  void PrintCommandName();
   void PrintProgramNumber();
   void PrintCalibrationVoiceNumber();
   void PrintCalibrationNote();
