@@ -819,6 +819,18 @@ void Multi::UpdateTempo() {
   // Other LFOs will sync to this one
 }
 
+void Multi::SwapParts(uint8_t x, uint8_t y) {
+  if (x == y) return;
+
+  PackedPart x_packed, y_packed;
+  part_[x].Pack(x_packed);
+  part_[y].Pack(y_packed);
+  part_[x].Unpack(y_packed);
+  part_[y].Unpack(x_packed);
+
+  AfterDeserialize();
+}
+
 void Multi::AfterDeserialize() {
   CONSTRAIN(settings_.control_change_mode, 0, CONTROL_CHANGE_MODE_LAST - 1);
 
