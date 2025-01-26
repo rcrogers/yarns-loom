@@ -969,7 +969,7 @@ void Ui::DoEvents() {
     CrossfadeBrightness(begin_last_third, kRefreshMsec, true);
   } else if (print_middle_third && queue_.idle_time() >= begin_middle_third) {
     PrintLatch();
-    CrossfadeBrightness(begin_middle_third, begin_last_third, false);
+    CrossfadeBrightness(begin_middle_third, begin_last_third, true);
   } else {
     if (print_middle_third) CrossfadeBrightness(0, begin_middle_third, true);
     else if (print_last_third) CrossfadeBrightness(0, begin_last_third, true);
