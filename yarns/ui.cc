@@ -486,7 +486,9 @@ void Ui::CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_
 void Ui::OnLongClick(const Event& e) {
   switch (mode_) {
     case UI_MODE_MAIN_MENU:
-      mode_ = previous_mode_;
+    case UI_MODE_LOAD_SELECT_PROGRAM:
+    case UI_MODE_SAVE_SELECT_PROGRAM:
+      mode_ = UI_MODE_PARAMETER_SELECT;
       break;
       
     default:
