@@ -427,6 +427,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Increases frequency when turning clockwise
 
 #### Vibrato shape
+- `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`) manually sets vibrato, for keyboards that don't have a modulation wheel
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
 
 #### Spread: detune or dephase a part's LFOs
