@@ -56,7 +56,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - [Legato and portamento](#legato-and-portamento)
     - [LFOs](#lfos)
       - [Frequency](#frequency)
-      - [Vibrato shape](#vibrato-shape)
+      - [Vibrato shape](#vibrato-lfo)
       - [Spread: detune or dephase a part's LFOs](#spread-detune-or-dephase-a-parts-lfos)
 
 # Panel controls and display
@@ -426,7 +426,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Increases clock sync ratio when turning counter-clockwise of center
   - Increases frequency when turning clockwise
 
-#### Vibrato shape
+#### Vibrato LFO
 - `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`) manually sets vibrato, for keyboards that don't have a modulation wheel
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
 
