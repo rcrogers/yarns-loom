@@ -891,31 +891,9 @@ class Part {
     seq_rec_step_ = stmlib::modulo(seq_rec_step_, overdubbing() ? seq_.num_steps : kNumSteps);
   }
 
-  void Pack(PackedPart& packed) const {
-    looper_.Pack(packed);
-    midi_.Pack(packed);
-    voicing_.Pack(packed);
-    seq_.Pack(packed);
-  }
-
-  void Unpack(PackedPart& packed) {
-    looper_.Unpack(packed);
-    midi_.Unpack(packed);
-    voicing_.Unpack(packed);
-    seq_.Unpack(packed);
-  }
-  
-  void AfterDeserialize() {
-    CONSTRAIN(midi_.play_mode, 0, PLAY_MODE_LAST - 1);
-    CONSTRAIN(seq_.clock_quantization, 0, 1);
-    CONSTRAIN(seq_.loop_length, 0, 7);
-    CONSTRAIN(seq_.arp_range, 0, 3);
-    CONSTRAIN(seq_.arp_direction, 0, ARPEGGIATOR_DIRECTION_LAST - 1);
-    AllNotesOff();
-    TouchVoices();
-    TouchVoiceAllocation();
-    ResetAllKeys();
-  }
+  void Pack(PackedPart& packed) const;
+  void Unpack(PackedPart& packed);
+  void AfterDeserialize();
 
   void set_siblings(bool has_siblings) {
     has_siblings_ = has_siblings;

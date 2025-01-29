@@ -51,6 +51,7 @@ const char* const kVersion = "Loom 2_8_0";
 const Ui::Command Ui::commands_[] = {
   { "*LOAD*", UI_MODE_LOAD_SELECT_PROGRAM, NULL },
   { "*SAVE*", UI_MODE_SAVE_SELECT_PROGRAM, NULL },
+  { "*PART SWAP SETTINGS*", UI_MODE_SWAP_SELECT_PART, NULL },
   { "*INIT*", UI_MODE_PARAMETER_SELECT, &Ui::DoInitCommand },
   { "*QUICK CONFIG*", UI_MODE_LEARNING, &Ui::DoLearnCommand },
   { "*>SYSEX DUMP*", UI_MODE_PARAMETER_SELECT, &Ui::DoDumpCommand },
@@ -74,7 +75,7 @@ Ui::Mode Ui::modes_[] = {
   
   // UI_MODE_MAIN_MENU
   { &Ui::OnIncrement, &Ui::OnClickMainMenu,
-    &Ui::PrintMenuName,
+    &Ui::PrintCommandName,
     UI_MODE_MAIN_MENU,
     NULL, 0, MAIN_MENU_LAST - 1 },
   
@@ -90,6 +91,12 @@ Ui::Mode Ui::modes_[] = {
     UI_MODE_MAIN_MENU,
     NULL, 0, kNumPrograms },
   
+  // UI_MODE_SWAP_SELECT_PART
+  { &Ui::OnIncrement, &Ui::OnClickSwapPart,
+    &Ui::PrintSwapPart,
+    UI_MODE_PARAMETER_SELECT,
+    NULL, 0, kNumParts - 1 },
+
   // UI_MODE_CALIBRATION_SELECT_VOICE
   { &Ui::OnIncrement, &Ui::OnClickCalibrationSelectVoice,
     &Ui::PrintCalibrationVoiceNumber,
@@ -153,6 +160,7 @@ void Ui::Init() {
   modes_[UI_MODE_MAIN_MENU].incremented_variable = &command_index_;
   modes_[UI_MODE_LOAD_SELECT_PROGRAM].incremented_variable = &program_index_;
   modes_[UI_MODE_SAVE_SELECT_PROGRAM].incremented_variable = &program_index_;
+  modes_[UI_MODE_SWAP_SELECT_PART].incremented_variable = &swap_part_index_;
   modes_[UI_MODE_CALIBRATION_SELECT_VOICE].incremented_variable = \
       &calibration_voice_;
   modes_[UI_MODE_CALIBRATION_SELECT_NOTE].incremented_variable = \
@@ -161,7 +169,7 @@ void Ui::Init() {
       &factory_testing_number_;
 
   SplashString(kVersion);
-  splash_fade_in_ = true;
+  refresh_was_automatic_ = true;
   display_.Scroll();
 }
 
@@ -280,7 +288,7 @@ void Ui::PrintParameterValue() {
   display_.Print(buffer_, buffer_, UINT16_MAX, GetFadeForSetting(setting()));
 }
 
-void Ui::PrintMenuName() {
+void Ui::PrintCommandName() {
   display_.Print(commands_[command_index_].name);
 }
 
@@ -444,7 +452,7 @@ void Ui::PrintFactoryTesting() {
 
 void Ui::SplashOn(Splash splash) {
   splash_ = splash;
-  splash_fade_in_ = false;
+  refresh_was_automatic_ = false;
   queue_.Touch(); // Reset idle timer
   display_.set_blink(false);
 }
@@ -486,7 +494,10 @@ void Ui::CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_
 void Ui::OnLongClick(const Event& e) {
   switch (mode_) {
     case UI_MODE_MAIN_MENU:
-      mode_ = previous_mode_;
+    case UI_MODE_LOAD_SELECT_PROGRAM:
+    case UI_MODE_SAVE_SELECT_PROGRAM:
+    case UI_MODE_SWAP_SELECT_PART:
+      mode_ = UI_MODE_PARAMETER_SELECT;
       break;
       
     default:
@@ -547,6 +558,14 @@ void Ui::OnClickLoadSave(const Event& e) {
     buffer_[1] += program_index_;
     SplashString(buffer_);
   }
+  mode_ = UI_MODE_PARAMETER_SELECT;
+}
+
+void Ui::OnClickSwapPart(const Event& e) {
+  multi.SwapParts(active_part_, swap_part_index_);
+  buffer_[0] = active_part_ + '1';
+  buffer_[1] = swap_part_index_ + '1';
+  SplashString(buffer_);
   mode_ = UI_MODE_PARAMETER_SELECT;
 }
 
@@ -870,6 +889,7 @@ void Ui::DoEvents() {
       OnSwitchHeld(e);
     }
     refresh_display = true;
+    refresh_was_automatic_ = false;
     scroll_display = true;
   }
 
@@ -892,7 +912,7 @@ void Ui::DoEvents() {
   if (splash_) { // Check whether to end this splash (and maybe chain another)
     if (display_.scrolling() || queue_.idle_time() < kRefreshMsec) {
       // If scrolling, fade-out never begins, we will just exit splash after scrolling
-      CrossfadeBrightness(0, display_.scrolling() ? -1 : kRefreshMsec, splash_fade_in_);
+      CrossfadeBrightness(0, display_.scrolling() ? -1 : kRefreshMsec, refresh_was_automatic_);
       return; // Splash isn't over yet
     }
 
@@ -901,31 +921,31 @@ void Ui::DoEvents() {
       display_.Print(splash_setting_def_->short_name);
       SplashOn(SPLASH_SETTING_NAME);
       // NB: we don't scroll the setting name
-      splash_fade_in_ = true;
+      refresh_was_automatic_ = true;
       return;
     } else if (splash_ == SPLASH_SETTING_NAME || splash_ == SPLASH_PART_STRING) {
       strcpy(buffer_, "1C");
       buffer_[0] += splash_part_;
       buffer_[2] = '\0';
       SplashString(buffer_);
-      splash_fade_in_ = true;
+      refresh_was_automatic_ = true;
       return;
     }
     // Exit splash
     splash_ = SPLASH_NONE;
     refresh_display = true;
+    refresh_was_automatic_ = true;
   }
 
+  bool print_command = mode_ == UI_MODE_LOAD_SELECT_PROGRAM || mode_ == UI_MODE_SAVE_SELECT_PROGRAM;
   bool print_latch =
+    (mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT) &&
     active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
     ActivePartHeldKeys().stack.most_recent_note_index();
-  bool print_part = mode_ == UI_MODE_PARAMETER_SELECT && multi.num_active_parts() > 1;
+  bool print_active_part = (mode_ == UI_MODE_PARAMETER_SELECT && multi.num_active_parts() > 1) || mode_ == UI_MODE_SWAP_SELECT_PART;
+  bool print_any = print_command || print_latch || print_active_part;
 
-  if (
-    !display_.scrolling() &&
-    (print_latch || print_part) &&
-    queue_.idle_time() > kRefreshMsec
-  ) {
+  if (print_any && !display_.scrolling() && queue_.idle_time() > kRefreshMsec) {
     factory_testing_display_ = UI_FACTORY_TESTING_DISPLAY_EMPTY;
     refresh_display = true;
   }
@@ -953,27 +973,29 @@ void Ui::DoEvents() {
   if (display_.scrolling()) { return; }
 
   // If we're not scrolling and it's not yet time to refresh, print latch or part
-  bool print_last_third = print_latch || print_part;
-  bool print_middle_third = print_latch && print_part;
+  bool print_last_third = print_any;
+  bool print_middle_third = print_latch && print_active_part;
   uint16_t begin_middle_third = kRefreshMsec / 3;
   uint16_t begin_last_third = kRefreshMsec * 2 / 3;
   if (print_last_third && queue_.idle_time() >= begin_last_third) {
-    if (print_part) {
+    if (print_active_part) {
       PrintPartAndPlayMode(active_part_);
       display_.Print(buffer_, buffer_);
     } else if (print_latch) {
       PrintLatch();
+    } else if (print_command) {
+      PrintCommandName();
     }
     CrossfadeBrightness(begin_last_third, kRefreshMsec, true);
   } else if (print_middle_third && queue_.idle_time() >= begin_middle_third) {
     PrintLatch();
-    CrossfadeBrightness(begin_middle_third, begin_last_third, false);
+    CrossfadeBrightness(begin_middle_third, begin_last_third, true);
   } else {
     if (print_middle_third) CrossfadeBrightness(0, begin_middle_third, true);
     else if (print_last_third) CrossfadeBrightness(0, begin_last_third, true);
     // TODO if we just finished scrolling, ideally we would fade-in here, but
     // finishing scroll doesn't reset the idle time
-    else CrossfadeBrightness(0, -1, true);
+    else CrossfadeBrightness(0, -1, refresh_was_automatic_);
   }
 }
 

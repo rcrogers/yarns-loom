@@ -553,6 +553,8 @@ class Multi {
     settings_.Unpack(packed);
     AfterDeserialize();
   };
+
+  void SwapParts(uint8_t x, uint8_t y);
   
   template<typename T>
   void SerializeCalibration(T* stream_buffer) {
