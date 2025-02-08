@@ -480,28 +480,20 @@ void Multi::AssignVoicesToCVOutputs() {
 void Multi::GetCvGate(uint16_t* cv, bool* gate) {
   for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
     cv[i] = cv_outputs_[i].dc_dac_code();
+    gate[i] = cv_outputs_[i].gate();
   }
 
   switch (settings_.layout) {
     case LAYOUT_MONO:
     case LAYOUT_DUAL_POLYCHAINED:
-      gate[0] = voice_[0].gate();
       gate[1] = voice_[0].trigger();
       gate[2] = clock();
       gate[3] = reset_or_playing_flag();
       break;
       
     case LAYOUT_DUAL_MONO:
-      gate[0] = voice_[0].gate();
-      gate[1] = voice_[1].gate();
-      gate[2] = clock();
-      gate[3] = reset_or_playing_flag();
-      break;
-    
     case LAYOUT_DUAL_POLY:
     case LAYOUT_QUAD_POLYCHAINED:
-      gate[0] = voice_[0].gate();
-      gate[1] = voice_[1].gate();
       gate[2] = clock();
       gate[3] = reset_or_playing_flag();
       break;
@@ -509,47 +501,30 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
     case LAYOUT_QUAD_MONO:
     case LAYOUT_QUAD_POLY:
     case LAYOUT_OCTAL_POLYCHAINED:
-      gate[0] = voice_[0].gate();
-      gate[1] = voice_[1].gate();
+    case LAYOUT_QUAD_VOLTAGES:
       if (settings_.clock_override) {
         gate[2] = clock();
         gate[3] = reset_or_playing_flag();
-      } else {
-        gate[2] = voice_[2].gate();
-        gate[3] = voice_[3].gate();
       }
       break;
 
     case LAYOUT_THREE_ONE:
     case LAYOUT_TWO_TWO:
-      gate[0] = voice_[0].gate();
-      gate[1] = voice_[1].gate();
-      gate[2] = voice_[2].gate();
       if (settings_.clock_override) {
         gate[3] = clock();
-      } else {
-        gate[3] = voice_[3].gate();
       }
       break;
     
     case LAYOUT_TWO_ONE:
-      gate[0] = voice_[0].gate();
-      gate[1] = voice_[1].gate();
-      gate[2] = voice_[2].gate();
       gate[3] = clock();
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
       gate[0] = voice_[kNumSystemVoices - 1].gate();
-      gate[1] = cv_outputs_[1].gate();
       gate[2] = settings_.clock_override ? clock() : cv_outputs_[2].trigger();
-      gate[3] = cv_outputs_[3].gate();
       break;
 
     case LAYOUT_TRI_MONO:
-      for (uint8_t i = 0; i < 3; ++i) {
-        gate[i] = voice_[i].gate();
-      }
       gate[3] = clock();
       cv[3] = cv_outputs_[3].volts_dac_code(reset_or_playing_flag() ? 5 : 0);
       break;
@@ -561,8 +536,6 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       //   last_note.note == NOTE_STACK_FREE_SLOT ||
       //   last_voice == VOICE_ALLOCATION_NOT_FOUND
       // ) ? 0 : part_[0].voice(last_voice)->velocity() << 1;
-      gate[0] = cv_outputs_[0].gate();
-      gate[1] = cv_outputs_[1].gate();
       gate[2] = clock();
       gate[3] = reset_or_playing_flag();
       break;
@@ -572,18 +545,6 @@ void Multi::GetCvGate(uint16_t* cv, bool* gate) {
       gate[1] = voice_[0].trigger() && voice_[1].gate();
       gate[2] = clock();
       gate[3] = reset_or_playing_flag();
-      break;
-
-    case LAYOUT_QUAD_VOLTAGES:
-      gate[0] = voice_[0].gate();
-      gate[1] = voice_[1].gate();
-      if (settings_.clock_override) {
-        gate[2] = clock();
-        gate[3] = reset_or_playing_flag();
-      } else {
-        gate[2] = voice_[2].gate();
-        gate[3] = voice_[3].gate();
-      }
       break;
   }
 }
@@ -856,6 +817,18 @@ void Multi::UpdateTempo() {
   phase_increment >>= kBackupClockLFOPeriodTicksBits;
   backup_clock_lfo_.SetPhaseIncrement(phase_increment);
   // Other LFOs will sync to this one
+}
+
+void Multi::SwapParts(uint8_t x, uint8_t y) {
+  if (x == y) return;
+
+  PackedPart x_packed, y_packed;
+  part_[x].Pack(x_packed);
+  part_[y].Pack(y_packed);
+  part_[x].Unpack(y_packed);
+  part_[y].Unpack(x_packed);
+
+  AfterDeserialize();
 }
 
 void Multi::AfterDeserialize() {

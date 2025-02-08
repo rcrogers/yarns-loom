@@ -53,6 +53,7 @@ enum UiMode {
   UI_MODE_MAIN_MENU,
   UI_MODE_LOAD_SELECT_PROGRAM,
   UI_MODE_SAVE_SELECT_PROGRAM,
+  UI_MODE_SWAP_SELECT_PART,
   UI_MODE_CALIBRATION_SELECT_VOICE,
   UI_MODE_CALIBRATION_SELECT_NOTE,
   UI_MODE_CALIBRATION_ADJUST_LEVEL,
@@ -75,6 +76,7 @@ enum Splash {
 enum MainMenuEntry {
   MAIN_MENU_LOAD,
   MAIN_MENU_SAVE,
+  MAIN_MENU_SWAP_PART,
   MAIN_MENU_INIT,
   MAIN_MENU_LEARN,
   MAIN_MENU_DUMP,
@@ -183,6 +185,7 @@ class Ui {
   // Specialized Handler.
   void OnClickMainMenu(const stmlib::Event& e);
   void OnClickLoadSave(const stmlib::Event& e);
+  void OnClickSwapPart(const stmlib::Event& e);
   void OnClickCalibrationSelectVoice(const stmlib::Event& e);
   void OnClickCalibrationSelectNote(const stmlib::Event& e);
   void OnClickRecording(const stmlib::Event& e);
@@ -199,7 +202,7 @@ class Ui {
   // Print functions.
   void PrintParameterName();
   void PrintParameterValue();
-  void PrintMenuName();
+  void PrintCommandName();
   void PrintProgramNumber();
   void PrintCalibrationVoiceNumber();
   void PrintCalibrationNote();
@@ -212,6 +215,7 @@ class Ui {
   void PrintRecordingStep();
   void PrintArpeggiatorMovementStep(SequencerStep step);
   void PrintPartAndPlayMode(uint8_t part);
+  void PrintSwapPart() { PrintPartAndPlayMode(swap_part_index_); display_.Print(buffer_); }
   void PrintLatch();
 
   uint16_t GetBrightnessFromSequencerPhase(const Part& part);
@@ -280,6 +284,7 @@ class Ui {
   int8_t calibration_voice_;
   int8_t calibration_note_;
   int8_t program_index_;
+  int8_t swap_part_index_;
   int8_t active_program_;
   bool push_it_;
   int16_t push_it_note_;
