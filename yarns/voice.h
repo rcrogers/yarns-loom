@@ -100,10 +100,6 @@ enum LFORole {
   LFO_ROLE_LAST
 };
 
-typedef SyncedLFO<17, 9> FastSyncedLFO; // Locks on in less than a second
-
-const uint8_t kLowFreqRefresh = 32; // 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
-
 class CVOutput;
 
 class Voice {

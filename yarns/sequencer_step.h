@@ -48,6 +48,13 @@ struct SequencerStep {
   inline uint8_t note() const { return data[0] & 0x7f; }
 
   inline bool is_slid() const { return data[1] & 0x80; }
+  inline void set_slid(bool slid) {
+    if (slid) {
+      data[1] |= 0x80;
+    } else {
+      data[1] &= 0x7f;
+    }
+  }
   inline uint8_t velocity() const { return data[1] & 0x7f; }
 
   inline bool is_white() const { return whiteKeyValues[note() % 12] != 0xff; }

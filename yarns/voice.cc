@@ -44,7 +44,8 @@ using namespace stmlib_midi;
 
 const int32_t kOctave = 12 << 7;
 const int32_t kMaxNote = 120 << 7;
-const int32_t kQuadrature = 0x40000000;
+
+const uint8_t kLowFreqRefresh = 32; // 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
 
 void Voice::Init() {
   audio_output_ = NULL;
@@ -56,7 +57,7 @@ void Voice::Init() {
   ResetAllControllers();
   
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
-    lfos_[i].Init();
+    lfos_[i].SetPhase(0);
     lfos_[i].SetPhaseIncrement(lut_lfo_increments[50]);
   }
   pitch_bend_range_ = 2;

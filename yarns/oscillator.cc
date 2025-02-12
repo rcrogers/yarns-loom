@@ -427,15 +427,16 @@ void Oscillator::RenderExponentialSine() {
 }
 
 void Oscillator::RenderFM() {
-  int16_t interval = lut_fm_modulator_intervals[shape_ - OSC_SHAPE_FM];
+  uint8_t fm_shape = shape_ - OSC_SHAPE_FM;
+  int16_t interval = lut_fm_modulator_intervals[fm_shape];
+  int8_t index_shift = lut_fm_index_shifts[fm_shape];
+  bool index_shift_halfbit = lut_fm_index_shift_halfbits[fm_shape];
   modulator_phase_increment_ = ComputePhaseIncrement(pitch_ + interval);
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     modulator_phase += modulator_phase_increment;
     int16_t modulator = Interpolate824(wav_sine, modulator_phase);
     uint32_t phase_mod = modulator * timbre;
-    // phase_mod = (phase_mod << 3) + (phase_mod << 2); // FM index 0-3
-    phase_mod <<= 3; // FM index 0-2
-    if (interval == 0) phase_mod <<= 1; // Double index range for 1:1 FM ratio
+    phase_mod = (phase_mod << index_shift) + (index_shift_halfbit ? (phase_mod << (index_shift - 1)) : 0);
     this_sample = Interpolate824(wav_sine, phase + phase_mod);
   )
 }

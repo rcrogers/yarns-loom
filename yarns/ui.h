@@ -53,6 +53,7 @@ enum UiMode {
   UI_MODE_MAIN_MENU,
   UI_MODE_LOAD_SELECT_PROGRAM,
   UI_MODE_SAVE_SELECT_PROGRAM,
+  UI_MODE_SWAP_SELECT_PART,
   UI_MODE_CALIBRATION_SELECT_VOICE,
   UI_MODE_CALIBRATION_SELECT_NOTE,
   UI_MODE_CALIBRATION_ADJUST_LEVEL,
@@ -65,20 +66,17 @@ enum UiMode {
 
 enum Splash {
   SPLASH_NONE = 0,
-  SPLASH_VERSION,
-  SPLASH_PART_STRING,   // Print an arbitrary string, then SPLASH_SETTING_PART
-  SPLASH_SETTING_VALUE, // Print a setting value, then SPLASH_SETTING_NAME
-  SPLASH_SETTING_NAME,  // Print a setting name, then SPLASH_SETTING_PART
-  SPLASH_SETTING_PART,
-  SPLASH_ACTIVE_PART,
-  SPLASH_LOOPER_PHASE_OFFSET,
-  SPLASH_PROGRAM_LOAD,
-  SPLASH_PROGRAM_SAVE,
+  SPLASH_STRING,        // Print an arbitrary string
+  // Chained splashes
+  SPLASH_PART_STRING,   // Print an arbitrary string, then part
+  SPLASH_SETTING_NAME,  // Print a setting name, then part
+  SPLASH_SETTING_VALUE, // Print a setting value, then ^
 };
 
 enum MainMenuEntry {
   MAIN_MENU_LOAD,
   MAIN_MENU_SAVE,
+  MAIN_MENU_SWAP_PART,
   MAIN_MENU_INIT,
   MAIN_MENU_LEARN,
   MAIN_MENU_DUMP,
@@ -89,10 +87,8 @@ enum MainMenuEntry {
 
 enum UiSwitch {
   UI_SWITCH_REC,
-  UI_SWITCH_START_STOP,
-  UI_SWITCH_TIE = UI_SWITCH_START_STOP,
-  UI_SWITCH_TAP_TEMPO,
-  UI_SWITCH_REST = UI_SWITCH_TAP_TEMPO,
+  UI_SWITCH_START_STOP_TIE,
+  UI_SWITCH_TAP_TEMPO_REST,
 };
 
 enum UiFactoryTestingDisplay {
@@ -121,31 +117,18 @@ class Ui {
   }
   void DoEvents();
   void FlushEvents();
+
   void SplashOn(Splash splash);
-  void SplashPartString(const char* label, uint8_t part) {
-    strcpy(buffer_, label);
-    buffer_[2] = '\0';
-    display_.Print(buffer_);
-    SplashOn(SPLASH_PART_STRING, part);
-  }
-  void SplashOn(Splash s, uint8_t part) { splash_part_ = part; SplashOn(s); }
-  inline void SplashSetting(const Setting& s, uint8_t part) {
-    splash_setting_def_ = &s;
-    SplashOn(SPLASH_SETTING_VALUE, part);
-  }
+  inline void SplashOn(Splash s, uint8_t part) { splash_part_ = part; SplashOn(s); }
+  void SplashString(const char* text);
+  void SplashPartString(const char* label, uint8_t part);
+  void SplashSetting(const Setting& s, uint8_t part);
+  void CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time, bool fade_in);
 
   inline bool in_recording_mode() const {
     return multi.recording() && (
       mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT
     );
-  }
-
-  void Print(const char* text) {
-    display_.Print(text, text);
-  }
-  void PrintInteger(uint8_t number) {
-    Settings::PrintInteger(buffer_, number);
-    display_.Print(buffer_);
   }
 
   void PrintDebugByte(uint8_t byte) {
@@ -154,7 +137,7 @@ class Ui {
     buffer[2] = '\0';
     buffer[0] = hexadecimal[byte >> 4];
     buffer[1] = hexadecimal[byte & 0xf];
-    Print(buffer);
+    display_.Print(buffer);
     queue_.Touch();
   }
   
@@ -202,6 +185,7 @@ class Ui {
   // Specialized Handler.
   void OnClickMainMenu(const stmlib::Event& e);
   void OnClickLoadSave(const stmlib::Event& e);
+  void OnClickSwapPart(const stmlib::Event& e);
   void OnClickCalibrationSelectVoice(const stmlib::Event& e);
   void OnClickCalibrationSelectNote(const stmlib::Event& e);
   void OnClickRecording(const stmlib::Event& e);
@@ -218,23 +202,24 @@ class Ui {
   // Print functions.
   void PrintParameterName();
   void PrintParameterValue();
-  void PrintMenuName();
+  void PrintCommandName();
   void PrintProgramNumber();
   void PrintCalibrationVoiceNumber();
   void PrintCalibrationNote();
-  void PrintRecordingPart();
-  void SetBrightnessFromSequencerPhase(const Part& part);
   void PrintLoopSequencerStatus();
   void PrintStepSequencerStatus();
-  void PrintNote(int16_t note);
+  void PrintNote(int16_t note, uint16_t brightness = UINT16_MAX, uint16_t fade = 0);
   void PrintPushItNote();
   void PrintLearning();
   void PrintFactoryTesting();
   void PrintRecordingStep();
   void PrintArpeggiatorMovementStep(SequencerStep step);
   void PrintPartAndPlayMode(uint8_t part);
+  void PrintSwapPart() { PrintPartAndPlayMode(swap_part_index_); display_.Print(buffer_); }
   void PrintLatch();
-  void SetFadeForSetting(const Setting& setting);
+
+  uint16_t GetBrightnessFromSequencerPhase(const Part& part);
+  uint16_t GetFadeForSetting(const Setting& setting);
 
   HeldKeys& ActivePartHeldKeys();
   
@@ -282,9 +267,11 @@ class Ui {
   
   UiMode mode_;
   UiMode previous_mode_;
+
   Splash splash_;
   Setting const* splash_setting_def_;
   uint8_t splash_part_;
+  bool refresh_was_automatic_;
   
   Menu setup_menu_;
   Menu oscillator_menu_;
@@ -297,6 +284,7 @@ class Ui {
   int8_t calibration_voice_;
   int8_t calibration_note_;
   int8_t program_index_;
+  int8_t swap_part_index_;
   int8_t active_program_;
   bool push_it_;
   int16_t push_it_note_;

@@ -49,6 +49,9 @@ void ChannelLeds::Init() {
 }
 
 void ChannelLeds::Write() {
+  // Because we increment by 16, there are only 256/16 = 16 levels of
+  // brightness, but the PWM cycle is fast enough to achieve 1000/16 = 62.5 Hz
+  // refresh rate.
   pwm_counter_ += 16;
   
   GPIO_WriteBit(GPIOA, GPIO_Pin_12,
