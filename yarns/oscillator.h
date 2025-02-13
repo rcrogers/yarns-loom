@@ -41,7 +41,8 @@
 
 namespace yarns {
 
-const size_t kAudioBlockSize = 64;
+const uint8_t kAudioBlockBits = 6;
+const size_t kAudioBlockSize = 1 << kAudioBlockBits;
 
 class StateVariableFilter {
  public:
@@ -50,7 +51,7 @@ class StateVariableFilter {
   void RenderSample(int16_t in);
   int32_t bp, lp, notch, hp;
  private:
-  Interpolator<int32_t, int16_t, kAudioBlockSize> cutoff, damp;
+  Interpolator<int32_t, int16_t, kAudioBlockBits> cutoff, damp;
 };
 
 struct PhaseDistortionSquareModulator {
@@ -170,7 +171,7 @@ class Oscillator {
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;
-  Interpolator<int32_t, int16_t, kAudioBlockSize> timbre_, gain_;
+  Interpolator<int32_t, int16_t, kAudioBlockBits> timbre_, gain_;
   int16_t pitch_;
 
   uint32_t phase_;

@@ -45,8 +45,6 @@ using namespace stmlib_midi;
 const int32_t kOctave = 12 << 7;
 const int32_t kMaxNote = 120 << 7;
 
-const uint8_t kLowFreqRefresh = 32; // 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
-
 void Voice::Init() {
   audio_output_ = NULL;
   note_ = -1;
@@ -207,7 +205,7 @@ void Voice::Refresh() {
     pitch_lfo_interpolator_.SetTarget(pitch_lfo_15);
     pitch_lfo_interpolator_.ComputeSlope();
   }
-  refresh_counter_ = (refresh_counter_ + 1) % kLowFreqRefresh;
+  refresh_counter_ = (refresh_counter_ + 1) % (1 << kLFOInterpolatorBits);
 
   pitch_lfo_interpolator_.Tick();
   timbre_lfo_interpolator_.Tick();
