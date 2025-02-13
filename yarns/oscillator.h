@@ -33,6 +33,7 @@
 #include "stmlib/stmlib.h"
 #include "stmlib/utils/ring_buffer.h"
 
+#include "yarns/envelope.h"
 #include "yarns/interpolator.h"
 
 #include <cstring>
@@ -96,9 +97,13 @@ class Oscillator {
   inline void Init(uint16_t scale) {
     audio_buffer_.Init();
     scale_ = scale;
-    timbre_.Init(64);
-    gain_.Init(64);
-    svf_.Init(64);
+    gain_.Init(kAudioBlockSize);
+    timbre_.Init(kAudioBlockSize);
+    gain_envelope_.Init();
+    timbre_envelope_.Init();
+    timbre_buffer_.Init();
+    gain_buffer_.Init();
+    svf_.Init(kAudioBlockSize);
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
@@ -110,10 +115,19 @@ class Oscillator {
     return audio_buffer_.ImmediateRead();
   }
 
-  void Refresh(int16_t pitch, int16_t timbre, uint16_t gain);
+  void Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo);
   
   inline void set_shape(OscillatorShape shape) {
     shape_ = shape;
+  }
+
+  inline void NoteOn(ADSR& adsr, bool drone, int16_t timbre_envelope_target) {
+    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
+    timbre_envelope_.NoteOn(adsr, 0, timbre_envelope_target);
+  }
+  inline void NoteOff() {
+    gain_envelope_.NoteOff();
+    timbre_envelope_.NoteOff();
   }
   
   void Render();
@@ -155,6 +169,7 @@ class Oscillator {
   }
 
   OscillatorShape shape_;
+  Envelope gain_envelope_, timbre_envelope_;
   Interpolator timbre_, gain_;
   int16_t pitch_;
 
@@ -169,7 +184,7 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
-  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_;
+  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_, gain_buffer_, timbre_buffer_;
   
   static RenderFn fn_table_[];
   
