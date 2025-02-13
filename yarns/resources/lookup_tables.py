@@ -118,41 +118,47 @@ env_linear[-1] = env_linear[-2]
 env_expo = 1.0 - numpy.exp(-4 * env_linear)
 lookup_tables.append(('env_expo', env_expo / env_expo.max() * 65535.0))
 
+env_samples = 16.0
 env_linear = numpy.arange(1, env_samples + 1) / env_samples
 env_expo = 1.0 - numpy.exp(-4 * env_linear)
 env_expo /= env_expo.max()
 dx = 1 / env_samples
-y_approx = 0
-slope_power = None
+y_actual = 0
+shift = None
 errors = []
 expo_slope_shift = []
 assert(len(env_expo) == env_samples)
-for idx, y in enumerate(env_expo):
-  dy = y - (0 if idx == 0 else env_expo[idx - 1])
-  slope = dy / dx
+for idx, y_ideal in enumerate(env_expo):
+  dy_ideal = y_ideal - (0 if idx == 0 else env_expo[idx - 1])
+  dy_actual = y_ideal - y_actual
+  dy_weighted = (dy_ideal + dy_actual) / 2
+  slope = dy_weighted / dx
   # slope **= 0.915 # avg -1.22%, final 0.05%
-  slope = (slope ** 0.98) * 0.97 # avg 0.66%, final 0.000%
+  # slope = (slope ** 0.98) * 0.97 # avg 0.66%, final 0.000%
   ideal_slope_power = math.log(slope, 2)
   # ideal_slope_power -= 0.05 # avg 1.38%, final 0.17%
   # ideal_slope_power *= 0.91 # avg -1.21%, final 0.1%
-  slope_power = round(ideal_slope_power)
-  expo_slope_shift.append(slope_power)
-  y_approx += 2 ** slope_power * dx
+  shift = round(ideal_slope_power)
+  # Slope shift should be monotonically decreasing
+  if len(expo_slope_shift) > 0:
+    assert(shift <= expo_slope_shift[-1])
+  expo_slope_shift.append(shift)
+  y_actual += 2 ** shift * dx
   # print(y_approx, y)
-  error = 100 * (y_approx - y) / y
+  error = 100 * (y_actual - y_ideal) / y_ideal
   errors.append(error)
   # print(
   #   'idx',
   #   str.rjust(str(idx), 4),
   #   'slope power',
-  #   str.rjust(str(slope_power), 3),
+  #   str.rjust(str(shift), 3),
   #   'error %',
   #   str.rjust(format(
   #     round(error, 3)
   #   , '.3f'), 6)
   # )
 
-print('\navg error', sum(errors) / len(errors))
+print('\navg abs error pct', sum(abs(e) for e in errors) / len(errors))
 
 lookup_tables_8.append(
     ('expo_slope_shift', expo_slope_shift)
