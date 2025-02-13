@@ -97,13 +97,13 @@ class Oscillator {
   inline void Init(uint16_t scale) {
     audio_buffer_.Init();
     scale_ = scale;
-    gain_.Init(64);
-    timbre_.Init(64);
+    gain_.Init(kAudioBlockSize);
+    timbre_.Init(kAudioBlockSize);
     gain_envelope_.Init();
     timbre_envelope_.Init();
     timbre_buffer_.Init();
     gain_buffer_.Init();
-    svf_.Init(64);
+    svf_.Init(kAudioBlockSize);
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
