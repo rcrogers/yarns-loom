@@ -34,39 +34,44 @@
 namespace yarns {
 
 // https://hbfs.wordpress.com/2009/07/28/faster-than-bresenhams-algorithm/
-template<typename HighRes, typename LowRes, uint8_t DX>
 class Interpolator {
- STATIC_ASSERT(sizeof(HighRes) == 2 * sizeof(LowRes), sizes);
  public:
   typedef union {
-    HighRes high_res;
+    int32_t i;
     struct { // endian-specific!
-      LowRes subsampling;
-      LowRes low_res;
+      int16_t lo;
+      int16_t hi;
     };
   } fixed_point;
 
-  void Init() {
-    value_.high_res = 0;
-    slope_ = 0;
+  void Init(uint8_t dx) {
+    x_delta_ = dx;
+    y_.i = 0;
+    m_ = 0;
   }
-  void SetTarget(LowRes t) { target_ = t; } // 15-bit
+  void SetTarget(int16_t y) { y_target_ = y; } // 15-bit
   void ComputeSlope() {
-    slope_ = ((static_cast<HighRes>(target_ ) << sizeof(LowRes)) - value_.high_res) / DX;
+    m_ = static_cast<int32_t>((y_target_ - y_.hi) << 16) / x_delta_;
+    tick_counter_ = 0;
   }
-  void SetSlope(HighRes slope) { slope_ = slope; }
   void Tick() {
-    SaturatingIncrement(value_.high_res, slope_);
+    // Stop if ComputeSlope is late, to avoid overshoot
+    if (tick_counter_ >= x_delta_) return;
+    tick_counter_++;
+
+    y_.i += m_;
   }
-  LowRes value() const { return value_.low_res; }
-  LowRes target() const { return target_; }
+  int16_t value() const { return y_.hi; }
+  int16_t target() const { return y_target_; }
 
 private:
-  fixed_point value_;
-  LowRes target_;
+  uint8_t x_delta_;
+  fixed_point y_;
+  int16_t y_target_;
 
   // Updated by ComputeSlope
-  HighRes slope_;
+  int32_t m_;
+  uint8_t tick_counter_;
 };
 
 }  // namespace yarns

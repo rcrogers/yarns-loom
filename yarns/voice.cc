@@ -44,6 +44,7 @@ using namespace stmlib_midi;
 
 const int32_t kOctave = 12 << 7;
 const int32_t kMaxNote = 120 << 7;
+const int32_t kQuadrature = 0x40000000;
 
 const uint8_t kLowFreqRefresh = 32; // 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
 
@@ -68,10 +69,10 @@ void Voice::Init() {
   timbre_init_current_ = 0;
 
   refresh_counter_ = 0;
-  pitch_lfo_interpolator_.Init();
-  timbre_lfo_interpolator_.Init();
-  amplitude_lfo_interpolator_.Init();
-  scaled_vibrato_lfo_interpolator_.Init();
+  pitch_lfo_interpolator_.Init(kLowFreqRefresh);
+  timbre_lfo_interpolator_.Init(kLowFreqRefresh);
+  amplitude_lfo_interpolator_.Init(kLowFreqRefresh);
+  scaled_vibrato_lfo_interpolator_.Init(kLowFreqRefresh);
   
   portamento_phase_ = 0;
   portamento_phase_increment_ = 1U << 31;
@@ -98,7 +99,7 @@ void CVOutput::Init(bool reset_calibration) {
   dirty_ = false;
   dc_role_ = DC_PITCH;
   envelope_.Init();
-  tremolo_.Init();
+  tremolo_.Init(64);
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
@@ -194,7 +195,7 @@ void Voice::Refresh() {
   if (refresh_counter_ == 0) {
     uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
-    amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo);
+    amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
 
     int32_t timbre_lfo_15 = lfo_value(LFO_ROLE_TIMBRE) * timbre_mod_lfo_current_ >> (31 - 15);
@@ -221,7 +222,7 @@ void Voice::Refresh() {
     timbre_lfo_interpolator_.value();
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
-  uint16_t tremolo = amplitude_lfo_interpolator_.value();
+  uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
   if (aux_1_envelope()) {
     mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
   }

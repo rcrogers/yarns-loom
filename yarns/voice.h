@@ -270,8 +270,7 @@ class Voice {
   uint32_t trigger_phase_;
 
   uint8_t refresh_counter_;
-  Interpolator<int32_t, int16_t, 0> timbre_lfo_interpolator_, pitch_lfo_interpolator_, vibrato_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
-  Interpolator<uint32_t, uint16_t, 0> amplitude_lfo_interpolator_;
+  Interpolator pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
 
   uint16_t tremolo_mod_target_;
   uint16_t tremolo_mod_current_;
@@ -433,7 +432,7 @@ class CVOutput {
   uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
-  Interpolator<int32_t, int16_t, 64> tremolo_; // TODO why 64?
+  Interpolator tremolo_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };
