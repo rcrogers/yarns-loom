@@ -626,11 +626,8 @@ fm_modulator_intervals = [128 * 12 * numpy.log2(r) for r in fm_ratios]
 lookup_tables_signed.append(('fm_modulator_intervals', fm_modulator_intervals))
 
 FM_INDEX_SCALING_BASE = 40
-fm_index_shifts_f = numpy.log2(FM_INDEX_SCALING_BASE / numpy.array(fm_ratios))
-fm_index_shifts = numpy.floor(fm_index_shifts_f)
-fm_index_shift_halfbits = (fm_index_shifts_f - fm_index_shifts) > math.log(1.5, 2)
-lookup_tables_8.append(('fm_index_shifts', fm_index_shifts_f))
-lookup_tables_8.append(('fm_index_shift_halfbits', fm_index_shift_halfbits))
+fm_index_upshifts_f = numpy.log2(FM_INDEX_SCALING_BASE / numpy.array(fm_ratios))
+lookup_tables_8.append(('fm_index_2x_upshifts', numpy.round(fm_index_upshifts_f * 2)))
 
 
 clock_ratio_ticks = []
