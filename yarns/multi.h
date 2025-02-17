@@ -460,6 +460,9 @@ class Multi {
       for (uint8_t v = 0; v < part_[p].num_voices(); ++v) {
         part_[p].voice(v)->RenderSamples();
       }
+      for (uint8_t c = 0; c < kNumCVOutputs; ++c) {
+        cv_outputs_[c].RenderEnvelopeSamples();
+      }
     }
   }
   

@@ -41,7 +41,7 @@
 
 namespace yarns {
 
-const size_t kAudioBlockSize = 64;
+const size_t kAudioBlockSize = 32;
 
 class StateVariableFilter {
  public:

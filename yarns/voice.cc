@@ -99,6 +99,7 @@ void CVOutput::Init(bool reset_calibration) {
   dirty_ = false;
   dc_role_ = DC_PITCH;
   envelope_.Init();
+  envelope_buffer_.Init();
   tremolo_.Init(16); // Approximates the ratio between 4 kHz Refresh and 40 kHz GetEnvelopeSample
 }
 
@@ -223,12 +224,8 @@ void Voice::Refresh() {
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
   uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
-  if (aux_1_envelope()) {
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
-  }
-  if (aux_2_envelope()) {
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
-  }
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->RefreshTremolo(tremolo);
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->RefreshTremolo(tremolo);
   oscillator_.Refresh(note, timbre_15, tremolo);
   // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
 
@@ -237,6 +234,7 @@ void Voice::Refresh() {
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
+  mod_aux_[MOD_AUX_ENVELOPE] = 0;
   
   if (trigger_phase_increment_) {
     trigger_phase_ += trigger_phase_increment_;
@@ -252,6 +250,19 @@ void Voice::Refresh() {
 void CVOutput::Refresh() {
   if (is_audio() || is_envelope()) return;
   dac_code_ = (this->*dc_fn_table_[dc_role_])();
+}
+
+void CVOutput::RenderEnvelopeSamples() {
+  if (!is_envelope()) return;
+  if (envelope_buffer_.writable() < kAudioBlockSize) return;
+  size_t size = kAudioBlockSize;
+  while (size--) {
+    tremolo_.Tick();
+    envelope_.Tick();
+    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+    CONSTRAIN(value, 0, UINT16_MAX);
+    envelope_buffer_.Overwrite(value);
+  }
 }
 
 void Voice::NoteOn(

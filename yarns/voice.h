@@ -342,15 +342,10 @@ class CVOutput {
     envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
   }
   inline void NoteOff() { envelope_.NoteOff(); }
-  uint16_t RefreshEnvelope(uint16_t tremolo) {
+
+  void RefreshTremolo(uint16_t tremolo) {
     tremolo_.SetTarget(envelope_.tremolo(tremolo));
     tremolo_.ComputeSlope();
-    return volts_dac_code(0) - envelope_value();
-  }
-  inline uint16_t envelope_value() {
-    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-    CONSTRAIN(value, 0, UINT16_MAX);
-    return value;
   }
 
   inline uint16_t GetAudioSample() {
@@ -361,10 +356,10 @@ class CVOutput {
     return mix;
   }
 
+  void RenderEnvelopeSamples();
+
   inline uint16_t GetEnvelopeSample() {
-    tremolo_.Tick();
-    envelope_.Tick();
-    return envelope_value();
+    return envelope_buffer_.ImmediateRead();
   }
 
   void Refresh();
@@ -432,6 +427,7 @@ class CVOutput {
   uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
+  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> envelope_buffer_;
   Interpolator tremolo_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
