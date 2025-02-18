@@ -1143,12 +1143,13 @@ int16_t Part::Tune(int16_t midi_note) {
     pitch = just_intonation_processor.NoteOn(note);
   } else if (voicing_.tuning_system == TUNING_SYSTEM_CUSTOM) {
     pitch += custom_pitch_table_[pitch_class];
-  } else if (voicing_.tuning_system > TUNING_SYSTEM_JUST_INTONATION) {
-    note -= voicing_.tuning_root;
-    pitch_class = (note + 240) % 12;
-    pitch += lookup_table_signed_table[LUT_SCALE_PYTHAGOREAN + \
-        voicing_.tuning_system - TUNING_SYSTEM_PYTHAGOREAN][pitch_class];
   }
+  // else if (voicing_.tuning_system > TUNING_SYSTEM_JUST_INTONATION) {
+  //   note -= voicing_.tuning_root;
+  //   pitch_class = (note + 240) % 12;
+  //   pitch += lookup_table_signed_table[LUT_SCALE_PYTHAGOREAN +
+  //       voicing_.tuning_system - TUNING_SYSTEM_PYTHAGOREAN][pitch_class];
+  // }
   
   int32_t root = (static_cast<int32_t>(voicing_.tuning_root) + 60) << 7;
   int32_t scaled_pitch = static_cast<int32_t>(pitch);
