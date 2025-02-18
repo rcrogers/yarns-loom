@@ -47,7 +47,7 @@ class Voice;
 
 const uint8_t kNumSteps = 30;
 const uint8_t kNumMaxVoicesPerPart = 4;
-const uint8_t kNumParaphonicVoices = 3;
+const uint8_t kNumParaphonicVoices = 4;
 const uint8_t kNoteStackSize = 12;
 const uint8_t kNoteStackMapping = kNoteStackSize + 1; // 1-based
 
