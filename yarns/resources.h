@@ -68,6 +68,35 @@ extern const uint16_t lut_clock_ratio_ticks[];
 extern const uint16_t lut_svf_cutoff[];
 extern const uint16_t lut_svf_damp[];
 extern const uint16_t lut_svf_scale[];
+extern const int16_t lut_scale_pythagorean[];
+extern const int16_t lut_scale_1_4_eb[];
+extern const int16_t lut_scale_1_4_e[];
+extern const int16_t lut_scale_1_4_ea[];
+extern const int16_t lut_scale_bhairav[];
+extern const int16_t lut_scale_gunakri[];
+extern const int16_t lut_scale_marwa[];
+extern const int16_t lut_scale_shree[];
+extern const int16_t lut_scale_purvi[];
+extern const int16_t lut_scale_bilawal[];
+extern const int16_t lut_scale_yaman[];
+extern const int16_t lut_scale_kafi[];
+extern const int16_t lut_scale_bhimpalasree[];
+extern const int16_t lut_scale_darbari[];
+extern const int16_t lut_scale_rageshree[];
+extern const int16_t lut_scale_khamaj[];
+extern const int16_t lut_scale_mimal[];
+extern const int16_t lut_scale_parameshwari[];
+extern const int16_t lut_scale_rangeshwari[];
+extern const int16_t lut_scale_gangeshwari[];
+extern const int16_t lut_scale_kameshwari[];
+extern const int16_t lut_scale_pa__kafi[];
+extern const int16_t lut_scale_natbhairav[];
+extern const int16_t lut_scale_m_kauns[];
+extern const int16_t lut_scale_bairagi[];
+extern const int16_t lut_scale_b_todi[];
+extern const int16_t lut_scale_chandradeep[];
+extern const int16_t lut_scale_kaushik_todi[];
+extern const int16_t lut_scale_jogeshwari[];
 extern const int16_t lut_fm_modulator_intervals[];
 extern const char* const lut_fm_ratio_names[];
 extern const char* const lut_clock_ratio_names[];
@@ -118,7 +147,69 @@ extern const uint16_t chr_characters[];
 #define LUT_SVF_DAMP_SIZE 257
 #define LUT_SVF_SCALE 6
 #define LUT_SVF_SCALE_SIZE 257
-#define LUT_FM_MODULATOR_INTERVALS 0
+#define LUT_SCALE_PYTHAGOREAN 0
+#define LUT_SCALE_PYTHAGOREAN_SIZE 12
+#define LUT_SCALE_1_4_EB 1
+#define LUT_SCALE_1_4_EB_SIZE 12
+#define LUT_SCALE_1_4_E 2
+#define LUT_SCALE_1_4_E_SIZE 12
+#define LUT_SCALE_1_4_EA 3
+#define LUT_SCALE_1_4_EA_SIZE 12
+#define LUT_SCALE_BHAIRAV 4
+#define LUT_SCALE_BHAIRAV_SIZE 12
+#define LUT_SCALE_GUNAKRI 5
+#define LUT_SCALE_GUNAKRI_SIZE 12
+#define LUT_SCALE_MARWA 6
+#define LUT_SCALE_MARWA_SIZE 12
+#define LUT_SCALE_SHREE 7
+#define LUT_SCALE_SHREE_SIZE 12
+#define LUT_SCALE_PURVI 8
+#define LUT_SCALE_PURVI_SIZE 12
+#define LUT_SCALE_BILAWAL 9
+#define LUT_SCALE_BILAWAL_SIZE 12
+#define LUT_SCALE_YAMAN 10
+#define LUT_SCALE_YAMAN_SIZE 12
+#define LUT_SCALE_KAFI 11
+#define LUT_SCALE_KAFI_SIZE 12
+#define LUT_SCALE_BHIMPALASREE 12
+#define LUT_SCALE_BHIMPALASREE_SIZE 12
+#define LUT_SCALE_DARBARI 13
+#define LUT_SCALE_DARBARI_SIZE 12
+#define LUT_SCALE_BAGESHREE 14
+#define LUT_SCALE_BAGESHREE_SIZE 12
+#define LUT_SCALE_RAGESHREE 15
+#define LUT_SCALE_RAGESHREE_SIZE 12
+#define LUT_SCALE_KHAMAJ 16
+#define LUT_SCALE_KHAMAJ_SIZE 12
+#define LUT_SCALE_MIMAL 17
+#define LUT_SCALE_MIMAL_SIZE 12
+#define LUT_SCALE_PARAMESHWARI 18
+#define LUT_SCALE_PARAMESHWARI_SIZE 12
+#define LUT_SCALE_RANGESHWARI 19
+#define LUT_SCALE_RANGESHWARI_SIZE 12
+#define LUT_SCALE_GANGESHWARI 20
+#define LUT_SCALE_GANGESHWARI_SIZE 12
+#define LUT_SCALE_KAMESHWARI 21
+#define LUT_SCALE_KAMESHWARI_SIZE 12
+#define LUT_SCALE_PA__KAFI 22
+#define LUT_SCALE_PA__KAFI_SIZE 12
+#define LUT_SCALE_NATBHAIRAV 23
+#define LUT_SCALE_NATBHAIRAV_SIZE 12
+#define LUT_SCALE_M_KAUNS 24
+#define LUT_SCALE_M_KAUNS_SIZE 12
+#define LUT_SCALE_BAIRAGI 25
+#define LUT_SCALE_BAIRAGI_SIZE 12
+#define LUT_SCALE_B_TODI 26
+#define LUT_SCALE_B_TODI_SIZE 12
+#define LUT_SCALE_CHANDRADEEP 27
+#define LUT_SCALE_CHANDRADEEP_SIZE 12
+#define LUT_SCALE_KAUSHIK_TODI 28
+#define LUT_SCALE_KAUSHIK_TODI_SIZE 12
+#define LUT_SCALE_JOGESHWARI 29
+#define LUT_SCALE_JOGESHWARI_SIZE 12
+#define LUT_SCALE_RASIA 30
+#define LUT_SCALE_RASIA_SIZE 12
+#define LUT_FM_MODULATOR_INTERVALS 31
 #define LUT_FM_MODULATOR_INTERVALS_SIZE 26
 #define LUT_FM_RATIO_NAMES 0
 #define LUT_FM_RATIO_NAMES_SIZE 26

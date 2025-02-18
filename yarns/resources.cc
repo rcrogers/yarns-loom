@@ -725,6 +725,151 @@ const uint16_t* const lookup_table_table[] = {
   lut_svf_scale,
 };
 
+const int16_t lut_scale_pythagorean[] = {
+       0,    -13,      5,     -8,
+      10,     -3,     15,      3,
+     -10,      8,     -5,     13,
+};
+const int16_t lut_scale_1_4_eb[] = {
+       0,      0,      0,      0,
+     -64,      0,      0,      0,
+       0,      0,      0,    -64,
+};
+const int16_t lut_scale_1_4_e[] = {
+       0,      0,      0,      0,
+     -64,      0,      0,      0,
+       0,      0,      0,      0,
+};
+const int16_t lut_scale_1_4_ea[] = {
+       0,      0,      0,      0,
+     -64,      0,      0,      0,
+       0,    -64,      0,      0,
+};
+const int16_t lut_scale_bhairav[] = {
+       0,    -13,   -141,   -269,
+     -18,     -3,   -131,      3,
+     -10,   -138,   -266,    -15,
+};
+const int16_t lut_scale_gunakri[] = {
+       0,     15,   -113,   -241,
+    -369,     -3,   -131,      3,
+      18,   -110,   -238,   -366,
+};
+const int16_t lut_scale_marwa[] = {
+       0,     15,   -113,   -241,
+     -18,   -146,    -13,   -141,
+    -269,    -20,   -148,    -15,
+};
+const int16_t lut_scale_shree[] = {
+       0,    -13,   -141,   -269,
+     -18,   -146,    -13,      3,
+     -10,   -138,   -266,    -15,
+};
+const int16_t lut_scale_purvi[] = {
+       0,     15,   -113,   -241,
+     -18,   -146,    -13,      3,
+      18,   -110,   -238,    -15,
+};
+const int16_t lut_scale_bilawal[] = {
+       0,   -128,      5,   -123,
+     -18,     -3,   -131,      3,
+    -125,      8,   -120,    -15,
+};
+const int16_t lut_scale_yaman[] = {
+       0,   -128,      5,   -123,
+      10,   -118,     15,      3,
+    -125,      8,   -120,     13,
+};
+const int16_t lut_scale_kafi[] = {
+       0,   -128,    -23,     -8,
+    -136,     -3,   -131,      3,
+    -125,    -20,     -5,   -133,
+};
+const int16_t lut_scale_bhimpalasree[] = {
+       0,   -128,      5,     20,
+    -108,     -3,   -131,      3,
+    -125,      8,     23,   -105,
+};
+const int16_t lut_scale_darbari[] = {
+       0,   -128,      5,     -8,
+    -136,     -3,   -131,      3,
+     -10,   -138,     -5,   -133,
+};
+const int16_t lut_scale_rageshree[] = {
+       0,   -128,      5,   -123,
+     -18,     -3,   -131,      3,
+    -125,    -20,     -5,   -133,
+};
+const int16_t lut_scale_khamaj[] = {
+       0,   -128,      5,   -123,
+     -18,     -3,   -131,      3,
+    -125,      8,     -5,     13,
+};
+const int16_t lut_scale_mimal[] = {
+       0,   -128,      5,     -8,
+    -136,     -3,   -131,      3,
+    -125,    -20,     -5,    -15,
+};
+const int16_t lut_scale_parameshwari[] = {
+       0,    -13,   -141,     -8,
+    -136,     -3,   -131,   -259,
+    -387,    -20,     -5,   -133,
+};
+const int16_t lut_scale_rangeshwari[] = {
+       0,   -128,      5,     -8,
+    -136,     -3,   -131,      3,
+    -125,   -253,   -381,    -15,
+};
+const int16_t lut_scale_gangeshwari[] = {
+       0,   -128,   -256,   -384,
+     -18,     -3,   -131,      3,
+     -10,   -138,     -5,   -133,
+};
+const int16_t lut_scale_kameshwari[] = {
+       0,   -128,      5,   -123,
+    -251,   -379,    -13,      3,
+    -125,    -20,     -5,   -133,
+};
+const int16_t lut_scale_pa__kafi[] = {
+       0,   -128,      5,     -8,
+    -136,     -3,   -131,      3,
+    -125,      8,     -5,   -133,
+};
+const int16_t lut_scale_natbhairav[] = {
+       0,   -128,      5,   -123,
+     -18,     -3,   -131,      3,
+     -10,   -138,   -266,    -15,
+};
+const int16_t lut_scale_m_kauns[] = {
+       0,   -128,      5,   -123,
+      10,     -3,   -131,   -259,
+     -10,   -138,     -5,   -133,
+};
+const int16_t lut_scale_bairagi[] = {
+       0,    -13,   -141,   -269,
+    -397,     -3,   -131,      3,
+    -125,   -253,     -5,   -133,
+};
+const int16_t lut_scale_b_todi[] = {
+       0,    -13,   -141,     -8,
+    -136,   -264,   -392,      3,
+    -125,   -253,     -5,   -133,
+};
+const int16_t lut_scale_chandradeep[] = {
+       0,   -128,   -256,     -8,
+    -136,     -3,   -131,      3,
+    -125,   -253,     -5,   -133,
+};
+const int16_t lut_scale_kaushik_todi[] = {
+       0,   -128,   -256,     -8,
+    -136,     -3,    -13,   -141,
+     -10,   -138,   -266,   -394,
+};
+const int16_t lut_scale_jogeshwari[] = {
+       0,   -128,   -256,     -8,
+     -18,     -3,   -131,   -259,
+    -387,    -20,     -5,   -133,
+};
 const int16_t lut_fm_modulator_intervals[] = {
        0,   1536,   2434,   3566,
     4312,   2030,   2776,   3333,
@@ -737,6 +882,37 @@ const int16_t lut_fm_modulator_intervals[] = {
 
 
 const int16_t* const lookup_table_signed_table[] = {
+  lut_scale_pythagorean,
+  lut_scale_1_4_eb,
+  lut_scale_1_4_e,
+  lut_scale_1_4_ea,
+  lut_scale_bhairav,
+  lut_scale_gunakri,
+  lut_scale_marwa,
+  lut_scale_shree,
+  lut_scale_purvi,
+  lut_scale_bilawal,
+  lut_scale_yaman,
+  lut_scale_kafi,
+  lut_scale_bhimpalasree,
+  lut_scale_darbari,
+  lut_scale_kafi,
+  lut_scale_rageshree,
+  lut_scale_khamaj,
+  lut_scale_mimal,
+  lut_scale_parameshwari,
+  lut_scale_rangeshwari,
+  lut_scale_gangeshwari,
+  lut_scale_kameshwari,
+  lut_scale_pa__kafi,
+  lut_scale_natbhairav,
+  lut_scale_m_kauns,
+  lut_scale_bairagi,
+  lut_scale_b_todi,
+  lut_scale_chandradeep,
+  lut_scale_kaushik_todi,
+  lut_scale_jogeshwari,
+  lut_scale_yaman,
   lut_fm_modulator_intervals,
 };
 

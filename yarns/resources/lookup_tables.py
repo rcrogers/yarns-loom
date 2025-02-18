@@ -527,8 +527,8 @@ scales = [
      LayoutRaga(DecodeShrutiChart('s---r---g---mp---d---n'), True)),
 ]
 
-# for scale, values in scales:
-#   lookup_tables_signed.append(('scale_%s' % scale, values))
+for scale, values in scales:
+  lookup_tables_signed.append(('scale_%s' % scale, values))
 
 
 """----------------------------------------------------------------------------
