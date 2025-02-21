@@ -42,6 +42,9 @@ sys.path.append('.')
 from tools.midi import midifile
 from tools.hexfile import hexfile
 
+STORAGE_START_ADDRESS = 0x8020000 - 9 * 1024 # FLASH_STORAGE_BASE
+PROGRAM_START_ADDRESS = 0x08001000 # kStartAddress
+MAX_PROGRAM_SIZE = STORAGE_START_ADDRESS - PROGRAM_START_ADDRESS
 
 def CreateMidifile(
     input_file_name,
@@ -51,6 +54,12 @@ def CreateMidifile(
   size = len(data)
   print('size', size)
   page_size = options.page_size
+
+  overflow = size - MAX_PROGRAM_SIZE
+  if overflow > 0:
+    print('Overflowed max program size', MAX_PROGRAM_SIZE, 'by', overflow)
+    sys.exit(1)
+
   delay = options.delay
   _, input_file_name = os.path.split(input_file_name)
   comments = [
