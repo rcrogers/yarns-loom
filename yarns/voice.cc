@@ -34,6 +34,7 @@
 #include "stmlib/midi/midi.h"
 #include "stmlib/utils/dsp.h"
 #include "stmlib/utils/random.h"
+#include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
 
@@ -264,7 +265,7 @@ void CVOutput::RenderEnvelopeSamples() {
     tremolo_.Tick();
     envelope_.Tick();
     int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-    CONSTRAIN(value, 0, UINT16_MAX);
+    value = stmlib::ClipU16(value);
     envelope_buffer_.Overwrite(value);
   }
 }

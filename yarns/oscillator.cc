@@ -31,6 +31,7 @@
 
 #include "stmlib/utils/dsp.h"
 #include "stmlib/utils/random.h"
+#include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
 
@@ -158,7 +159,7 @@ void Oscillator::Render() {
     gain_envelope_.Tick();
     gain_.Tick();
     int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
-    CONSTRAIN(gain, 0, UINT16_MAX);
+    gain = stmlib::ClipU16(gain);
     gain_buffer_.Overwrite(gain);
   }
   timbre_.ComputeSlope();
@@ -166,9 +167,9 @@ void Oscillator::Render() {
   while (size--) {
     timbre_envelope_.Tick();
     timbre_.Tick();
-    int32_t timbre = timbre_.value() + timbre_envelope_.value();
-    CONSTRAIN(timbre, 0, 32767);
-    timbre_buffer_.Overwrite(timbre);
+    int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
+    timbre = stmlib::ClipU16(timbre);
+    timbre_buffer_.Overwrite(timbre >> 1);
   }
 
   uint8_t fn_index = shape_;
