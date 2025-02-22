@@ -224,8 +224,15 @@ void Voice::Refresh() {
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
   uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->RefreshTremolo(tremolo);
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->RefreshTremolo(tremolo);
+
+  // Needed for LED display of envelope CV
+  if (aux_1_envelope()) {
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
+  }
+  if (aux_2_envelope()) {
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
+  }
+
   oscillator_.Refresh(note, timbre_15, tremolo);
   // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
 
@@ -234,7 +241,6 @@ void Voice::Refresh() {
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
-  mod_aux_[MOD_AUX_ENVELOPE] = 0;
   
   if (trigger_phase_increment_) {
     trigger_phase_ += trigger_phase_increment_;

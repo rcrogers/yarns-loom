@@ -343,10 +343,16 @@ class CVOutput {
   }
   inline void NoteOff() { envelope_.NoteOff(); }
 
-  void RefreshTremolo(uint16_t tremolo) {
+  uint16_t RefreshEnvelope(uint16_t tremolo) {
     tremolo_.SetTarget(envelope_.tremolo(tremolo));
     tremolo_.ComputeSlope();
+    return volts_dac_code(0) - envelope_value();
   }
+  inline uint16_t envelope_value() {
+    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+    CONSTRAIN(value, 0, UINT16_MAX);
+    return value;
+   }
 
   inline uint16_t GetAudioSample() {
     uint16_t mix = zero_dac_code_;
