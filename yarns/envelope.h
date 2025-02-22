@@ -39,7 +39,7 @@ using namespace stmlib;
 enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,
   ENV_SEGMENT_DECAY,
-  ENV_SEGMENT_EARLY_RELEASE,
+  ENV_SEGMENT_EARLY_RELEASE, // Gate ended before sustain, so skip sustain
   ENV_SEGMENT_SUSTAIN,
   ENV_SEGMENT_RELEASE,
   ENV_SEGMENT_DEAD,
@@ -133,9 +133,10 @@ class Envelope {
     // attack that interrupts a still-high release), adjust its timing and slope
     // to try to match the nominal sound and feel
     int32_t actual_delta = target_ - value_;
-    int32_t nominal_delta = target_ - segment_target_[
+    int32_t nominal_start_value = segment_target_[
       stmlib::modulo(static_cast<int8_t>(segment) - 1, static_cast<int8_t>(ENV_SEGMENT_DEAD))
     ];
+    int32_t nominal_delta = target_ - nominal_start_value;
     positive_segment_slope_ = nominal_delta >= 0;
     if (positive_segment_slope_ != (actual_delta >= 0)) {
       // If deltas differ in sign, the direction is wrong -- skip segment
