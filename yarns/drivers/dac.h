@@ -44,25 +44,25 @@ class Dac {
   
   void Init();
   
-  inline void set_channel(uint8_t channel, uint16_t value) {
+  inline void PrepareWrite(uint8_t channel, uint16_t value) {
     if (value_[channel] != value) {
       value_[channel] = value;
       update_[channel] = true;
     }
   }
   
-  inline void Write(const uint16_t* values) {
-    set_channel(0, values[0]);
-    set_channel(1, values[1]);
-    set_channel(2, values[2]);
-    set_channel(3, values[3]);
+  inline void PrepareWrites(const uint16_t* values) {
+    PrepareWrite(0, values[0]);
+    PrepareWrite(1, values[1]);
+    PrepareWrite(2, values[2]);
+    PrepareWrite(3, values[3]);
   }
   
   inline void Cycle() {
     active_channel_ = (active_channel_ + 1) % kNumChannels;
   }
   
-  inline void Write() {
+  inline void WriteIfDirty() {
     if (update_[active_channel_]) {
       Write(value_[active_channel_]);
       update_[active_channel_] = false;

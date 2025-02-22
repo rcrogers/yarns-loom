@@ -140,7 +140,7 @@ void SysTick_Handler() {
       ++factory_testing_counter;
     }
     
-    dac.Write(cv);
+    dac.PrepareWrites(cv);
   }
 }
 
@@ -158,7 +158,7 @@ void TIM1_UP_IRQHandler(void) {
     dac.Write(multi.mutable_cv_output(dac.channel())->GetEnvelopeSample());
   } else {
     // Use value written there during previous CV refresh.
-    dac.Write();
+    dac.WriteIfDirty();
   }
   
   if (dac.channel() == 0) {
