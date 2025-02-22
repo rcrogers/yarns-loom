@@ -46,8 +46,6 @@ const int32_t kOctave = 12 << 7;
 const int32_t kMaxNote = 120 << 7;
 const int32_t kQuadrature = 0x40000000;
 
-const uint8_t kLowFreqRefresh = 32; // 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
-
 void Voice::Init() {
   audio_output_ = NULL;
   note_ = -1;
@@ -69,10 +67,10 @@ void Voice::Init() {
   timbre_init_current_ = 0;
 
   refresh_counter_ = 0;
-  pitch_lfo_interpolator_.Init(kLowFreqRefresh);
-  timbre_lfo_interpolator_.Init(kLowFreqRefresh);
-  amplitude_lfo_interpolator_.Init(kLowFreqRefresh);
-  scaled_vibrato_lfo_interpolator_.Init(kLowFreqRefresh);
+  pitch_lfo_interpolator_.Init();
+  timbre_lfo_interpolator_.Init();
+  amplitude_lfo_interpolator_.Init();
+  scaled_vibrato_lfo_interpolator_.Init();
   
   portamento_phase_ = 0;
   portamento_phase_increment_ = 1U << 31;
@@ -100,7 +98,7 @@ void CVOutput::Init(bool reset_calibration) {
   dc_role_ = DC_PITCH;
   envelope_.Init();
   envelope_buffer_.Init();
-  tremolo_.Init(16); // Approximates the ratio between 4 kHz Refresh and 40 kHz GetEnvelopeSample
+  tremolo_.Init();
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
@@ -209,7 +207,7 @@ void Voice::Refresh() {
     pitch_lfo_interpolator_.SetTarget(pitch_lfo_15);
     pitch_lfo_interpolator_.ComputeSlope();
   }
-  refresh_counter_ = (refresh_counter_ + 1) % kLowFreqRefresh;
+  refresh_counter_ = (refresh_counter_ + 1) % (1 << kLowFreqRefreshBits);
 
   pitch_lfo_interpolator_.Tick();
   timbre_lfo_interpolator_.Tick();

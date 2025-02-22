@@ -43,6 +43,9 @@ namespace yarns {
 
 const uint16_t kNumOctaves = 11;
 
+// 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
+const uint8_t kLowFreqRefreshBits = 5;
+
 enum TriggerShape {
   TRIGGER_SHAPE_SQUARE,
   TRIGGER_SHAPE_LINEAR,
@@ -270,7 +273,7 @@ class Voice {
   uint32_t trigger_phase_;
 
   uint8_t refresh_counter_;
-  Interpolator pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
+  Interpolator<kLowFreqRefreshBits> pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
 
   uint16_t tremolo_mod_target_;
   uint16_t tremolo_mod_current_;
@@ -434,7 +437,7 @@ class CVOutput {
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
   stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> envelope_buffer_;
-  Interpolator tremolo_;
+  Interpolator<6> tremolo_; // 2^4 = 16 approximates the ratio between 4 kHz Refresh and 40 kHz GetEnvelopeSample
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };

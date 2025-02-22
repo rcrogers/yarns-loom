@@ -34,6 +34,7 @@
 namespace yarns {
 
 // https://hbfs.wordpress.com/2009/07/28/faster-than-bresenhams-algorithm/
+template<uint8_t SLOPE_DOWNSHIFT>
 class Interpolator {
  public:
   typedef union {
@@ -44,34 +45,26 @@ class Interpolator {
     };
   } fixed_point;
 
-  void Init(uint8_t dx) {
-    x_delta_ = dx;
+  void Init() {
     y_.i = 0;
     m_ = 0;
   }
   void SetTarget(int16_t y) { y_target_ = y; } // 15-bit
   void ComputeSlope() {
-    m_ = static_cast<int32_t>((y_target_ - y_.hi) << 16) / x_delta_;
-    tick_counter_ = 0;
+    m_ = static_cast<int32_t>((y_target_ - y_.hi) << 16) >> SLOPE_DOWNSHIFT;
   }
   void Tick() {
-    // Stop if ComputeSlope is late, to avoid overshoot
-    if (tick_counter_ >= x_delta_) return;
-    tick_counter_++;
-
     y_.i += m_;
   }
   int16_t value() const { return y_.hi; }
   int16_t target() const { return y_target_; }
 
 private:
-  uint8_t x_delta_;
   fixed_point y_;
   int16_t y_target_;
 
   // Updated by ComputeSlope
   int32_t m_;
-  uint8_t tick_counter_;
 };
 
 }  // namespace yarns
