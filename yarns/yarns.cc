@@ -144,27 +144,45 @@ void SysTick_Handler() {
   }
 }
 
+// Modified DMA IRQ handler
+extern "C" {
+void DMA1_Channel5_IRQHandler(void) {
+  if (DMA_GetITStatus(DMA1_IT_TC5)) {
+    DMA_ClearITPendingBit(DMA1_IT_TC5);
+    
+    extern yarns::Dac dac;
+    dac.HandleDMAComplete();
+  }
+}
+}
+
+extern "C" {
 void TIM1_UP_IRQHandler(void) {
-  // DAC refresh at 4x 40kHz.
   if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
     return;
   }
   TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
   dac.Cycle();
+  
+  // Prepare and start new transfer based on source type
   if (has_audio_source[dac.channel()]) {
-    dac.Write(multi.mutable_cv_output(dac.channel())->GetAudioSample());
+    uint16_t sample = multi.mutable_cv_output(dac.channel())->GetAudioSample();
+    dac.PrepareWrite(dac.channel(), sample);
+    dac.WriteIfDirty();  // This will use double buffering internally
   } else if (has_envelope[dac.channel()]) {
-    dac.Write(multi.mutable_cv_output(dac.channel())->GetEnvelopeSample());
+    uint16_t sample = multi.mutable_cv_output(dac.channel())->GetEnvelopeSample();
+    dac.PrepareWrite(dac.channel(), sample);
+    dac.WriteIfDirty();
   } else {
-    // Use value written there during previous CV refresh.
+    // Regular CV output - will use double buffering if value has changed
     dac.WriteIfDirty();
   }
   
   if (dac.channel() == 0) {
-    // Internal clock refresh at 40kHz
     multi.RefreshInternalClock();
   }
+}
 }
 
 }
