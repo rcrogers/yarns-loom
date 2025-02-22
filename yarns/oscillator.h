@@ -41,8 +41,6 @@
 
 namespace yarns {
 
-const size_t kAudioBlockSize = 32;
-
 class StateVariableFilter {
  public:
   void Init(uint8_t interpolation_slope);
@@ -101,8 +99,6 @@ class Oscillator {
     timbre_.Init(kAudioBlockSize);
     gain_envelope_.Init();
     timbre_envelope_.Init();
-    timbre_buffer_.Init();
-    gain_buffer_.Init();
     svf_.Init(kAudioBlockSize);
     pitch_ = 60 << 7;
     phase_ = 0;
@@ -184,7 +180,8 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
-  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_, gain_buffer_, timbre_buffer_;
+  // TODO double buffering not actually needed for gain/timbre?
+  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_;
   
   static RenderFn fn_table_[];
   

@@ -254,15 +254,7 @@ void CVOutput::Refresh() {
 
 void CVOutput::RenderEnvelopeSamples() {
   if (!is_envelope()) return;
-  if (envelope_buffer_.writable() < kAudioBlockSize) return;
-  size_t size = kAudioBlockSize;
-  while (size--) {
-    tremolo_.Tick();
-    envelope_.Tick();
-    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-    CONSTRAIN(value, 0, UINT16_MAX);
-    envelope_buffer_.Overwrite(value);
-  }
+  envelope_.RenderSamples(tremolo_.value(), tremolo_.slope());
 }
 
 void Voice::NoteOn(

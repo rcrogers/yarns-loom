@@ -63,6 +63,7 @@ class Interpolator {
   }
   int16_t value() const { return y_.hi; }
   int16_t target() const { return y_target_; }
+  int16_t slope() const { return m_ >> 16; }
 
 private:
   uint8_t x_delta_;

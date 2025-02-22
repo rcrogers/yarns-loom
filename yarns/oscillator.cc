@@ -152,24 +152,9 @@ void Oscillator::Render() {
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
   gain_.ComputeSlope();
-  size_t size;
-  size = kAudioBlockSize;
-  while (size--) {
-    gain_envelope_.Tick();
-    gain_.Tick();
-    int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
-    CONSTRAIN(gain, 0, UINT16_MAX);
-    gain_buffer_.Overwrite(gain);
-  }
+  gain_envelope_.RenderSamples(gain_.value(), gain_.slope());
   timbre_.ComputeSlope();
-  size = kAudioBlockSize;
-  while (size--) {
-    timbre_envelope_.Tick();
-    timbre_.Tick();
-    int32_t timbre = timbre_.value() + timbre_envelope_.value();
-    CONSTRAIN(timbre, 0, 32767);
-    timbre_buffer_.Overwrite(timbre);
-  }
+  timbre_envelope_.RenderSamples(timbre_.value(), timbre_.slope());
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
@@ -178,7 +163,7 @@ void Oscillator::Render() {
 }
 
 #define SET_TIMBRE \
-  int16_t timbre = timbre_buffer_.ImmediatePeek();
+  int16_t timbre = timbre_envelope_.sample_buffer.ImmediatePeek();
 
 #define RENDER_CORE(body) \
   int32_t next_sample = next_sample_; \
@@ -200,7 +185,7 @@ void Oscillator::Render() {
   uint32_t modulator_phase_increment = modulator_phase_increment_; \
   RENDER_CORE( \
     phase += phase_increment; \
-    uint16_t gain = gain_buffer_.ImmediateRead(); \
+    uint16_t gain = gain_envelope_.sample_buffer.ImmediateRead(); \
     body \
   ) \
   phase_ = phase; \
@@ -210,7 +195,7 @@ void Oscillator::Render() {
 
 #define RENDER_WITH_PHASE_GAIN_TIMBRE(body) \
   RENDER_WITH_PHASE_GAIN( \
-    int16_t timbre = timbre_buffer_.ImmediateRead(); \
+    int16_t timbre = timbre_envelope_.sample_buffer.ImmediateRead(); \
     body \
   )
 
@@ -542,7 +527,7 @@ void Oscillator::RenderFilteredNoise() {
   // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
   // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;
   RENDER_CORE(
-    uint16_t gain = gain_buffer_.ImmediateRead();
+    uint16_t gain = gain_envelope_.sample_buffer.ImmediateRead();
     svf.RenderSample(Random::GetSample());
     switch (shape_) {
       case OSC_SHAPE_NOISE_LP: this_sample = svf.lp; break;

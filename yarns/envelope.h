@@ -34,7 +34,7 @@
 
 namespace yarns {
 
-using namespace stmlib;
+const size_t kAudioBlockSize = 32;
 
 enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,
@@ -62,6 +62,8 @@ class Envelope {
   Envelope() { }
   ~Envelope() { }
 
+  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2> sample_buffer;
+
   void Init() {
     gate_ = false;
     value_ = segment_target_[ENV_SEGMENT_RELEASE] = 0;
@@ -71,6 +73,7 @@ class Envelope {
       &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
       0
     );
+    sample_buffer.Init();
   }
 
   inline void NoteOff() {
@@ -165,32 +168,55 @@ class Envelope {
     phase_ = 0;
   }
 
-  inline void Tick() {
-    while (segment_ != next_tick_segment_) { // Event loop
-      Trigger(next_tick_segment_);
-    }
+  inline void RenderSamples(int16_t linear_bias_initial, int16_t linear_bias_slope) {
+    if (sample_buffer.writable() < kAudioBlockSize) return;
 
-    // Early-release segment stays at max slope until it reaches target
-    if (segment_ != ENV_SEGMENT_EARLY_RELEASE) {
-      if (!phase_increment_) return;
-      phase_ += phase_increment_;
-      if (phase_ < phase_increment_) phase_ = UINT32_MAX;
-    }
+    int32_t env_value = value_;
+    uint32_t phase = phase_;
+    uint32_t phase_increment = phase_increment_;
+    int32_t linear_bias = linear_bias_initial;
+    size_t size = kAudioBlockSize;
+    while (size--) {
+      linear_bias += linear_bias_slope;
 
-    if (positive_segment_slope_ // The slope is about to overshoot the target
-      ? value_ > target_overshoot_threshold_
-      : value_ < target_overshoot_threshold_
-    ) {
-      // Because the target is closer than the expo slope would have taken us,
-      // this tick, which we spend on jumping to the target, is flatter than
-      // nominal.  The alternative would be to, instead of jumping, immediately
-      // Tick() again
-      value_ = target_;
-      next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
-      return;
-    }
+      while (segment_ != next_tick_segment_) { // Event loop
+        // TODO push local env_value to member value_
+        value_ = env_value;
+        // TODO it's kind of bad that Trigger is called inside the render loop, is there a way to do this more cleanly?
+        Trigger(next_tick_segment_);
+        // TODO pull local phase and phase_increment from member phase_ and phase_increment_
+        phase = 0;
+        phase_increment = phase_increment_;
+      }
 
-    value_ += expo_slope_[phase_ >> (32 - kLutExpoSlopeShiftSizeBits)];
+      if (phase_increment) { // Segment has slope
+        // Early-release segment stays at max slope until it reaches target
+        if (segment_ != ENV_SEGMENT_EARLY_RELEASE) {
+          phase += phase_increment;
+          if (phase < phase_increment) phase = UINT32_MAX;
+        }
+
+        if (positive_segment_slope_ // The slope is about to overshoot the target
+          ? env_value > target_overshoot_threshold_
+          : env_value < target_overshoot_threshold_
+        ) {
+          // Because the target is closer than the expo slope would have taken us,
+          // this tick, which we spend on jumping to the target, is flatter than
+          // nominal.  The alternative would be to, instead of jumping, immediately
+          // Tick() again
+          env_value = target_;
+          next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
+        } else {
+          env_value += expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
+        }
+      }
+      
+      int32_t biased_value = (env_value >> 16) + linear_bias;
+      CONSTRAIN(biased_value, INT16_MIN, INT16_MAX);
+      sample_buffer.Overwrite(biased_value);
+    }
+    value_ = env_value;
+    phase_ = phase;
   }
 
   inline int16_t value() const { return value_ >> 16; }
