@@ -85,20 +85,23 @@ class Envelope {
     }
   }
 
+  inline int32_t target(EnvelopeSegment segment) const {
+    return segment_target_[segment] << 16;
+  }
+
   inline void NoteOn(
     ADSR& adsr,
-    int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
+    int16_t min_target, int16_t max_target // Actual bounds, 16-bit signed
   ) {
     adsr_ = &adsr;
     int16_t scale = max_target - min_target;
     positive_scale_ = scale >= 0;
-    min_target <<= 16;
     // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
-    segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
+    segment_target_[ENV_SEGMENT_ATTACK] = min_target + (scale * adsr.peak >> 16);
     segment_target_[ENV_SEGMENT_DECAY] =
       segment_target_[ENV_SEGMENT_EARLY_RELEASE] =
       segment_target_[ENV_SEGMENT_SUSTAIN] =
-      min_target + scale * adsr.sustain;
+      min_target + (scale * adsr.sustain >> 16);
     segment_target_[ENV_SEGMENT_RELEASE] = min_target;
 
     if (!gate_) {
@@ -108,7 +111,7 @@ class Envelope {
   }
 
   inline int16_t tremolo(uint16_t strength) const {
-    int32_t relative_value = (value_ - segment_target_[ENV_SEGMENT_RELEASE]) >> 16;
+    int32_t relative_value = (value_ - target(ENV_SEGMENT_RELEASE));
     return relative_value * -strength >> 16;
   }
   
@@ -127,15 +130,14 @@ class Envelope {
       case ENV_SEGMENT_RELEASE: phase_increment_ = adsr_->release ; break;
       default: phase_increment_ = 0; return;
     }
-    target_ = segment_target_[segment];
+    int32_t target_ = target(segment);
 
     // In case the segment is not starting from its nominal value (e.g. an
     // attack that interrupts a still-high release), adjust its timing and slope
     // to try to match the nominal sound and feel
+    EnvelopeSegment prev_segment = static_cast<EnvelopeSegment>(stmlib::modulo(static_cast<int8_t>(segment) - 1, static_cast<int8_t>(ENV_SEGMENT_DEAD)));
+    int32_t nominal_delta = target_ - target(prev_segment);
     int32_t actual_delta = target_ - value_;
-    int32_t nominal_delta = target_ - segment_target_[
-      stmlib::modulo(static_cast<int8_t>(segment) - 1, static_cast<int8_t>(ENV_SEGMENT_DEAD))
-    ];
     positive_segment_slope_ = nominal_delta >= 0;
     if (positive_segment_slope_ != (actual_delta >= 0)) {
       // If deltas differ in sign, the direction is wrong -- skip segment
@@ -185,7 +187,7 @@ class Envelope {
       // this tick, which we spend on jumping to the target, is flatter than
       // nominal.  The alternative would be to, instead of jumping, immediately
       // Tick() again
-      value_ = target_;
+      value_ = target(segment_);
       next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
       return;
     }
@@ -201,14 +203,13 @@ class Envelope {
   EnvelopeSegment next_tick_segment_;
   
   // Value that needs to be reached at the end of each segment.
-  int32_t segment_target_[ENV_SEGMENT_DEAD];
+  int16_t segment_target_[ENV_SEGMENT_DEAD];
   bool positive_scale_, positive_segment_slope_;
   
   // Current segment.
   EnvelopeSegment segment_;
   
   // Target and current value of the current segment.
-  int32_t target_;
   int32_t value_;
 
   int32_t target_overshoot_threshold_;
