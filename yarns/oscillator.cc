@@ -197,16 +197,13 @@ void Oscillator::Render() {
   uint32_t phase = phase_; \
   uint32_t phase_increment = phase_increment_; \
   uint32_t modulator_phase = modulator_phase_; \
-  uint32_t modulator_phase_increment = modulator_phase_increment_; \
   RENDER_CORE( \
     phase += phase_increment; \
     uint16_t gain = gain_buffer_.ImmediateRead(); \
     body \
   ) \
   phase_ = phase; \
-  phase_increment_ = phase_increment; \
   modulator_phase_ = modulator_phase; \
-  modulator_phase_increment_ = modulator_phase_increment;
 
 #define RENDER_WITH_PHASE_GAIN_TIMBRE(body) \
   RENDER_WITH_PHASE_GAIN( \
@@ -351,7 +348,7 @@ void Oscillator::RenderSawPulseMorph() {
   SET_TIMBRE; \
   int32_t modulator_pitch = pitch_ + (timbre >> 3); \
   CONSTRAIN(modulator_pitch, 0, kHighestNote - 1); \
-  modulator_phase_increment_ = ComputePhaseIncrement(modulator_pitch);
+  uint32_t modulator_phase_increment = ComputePhaseIncrement(modulator_pitch);
 
 void Oscillator::RenderSyncSine() {
   SET_SYNC_INCREMENT;
@@ -429,7 +426,7 @@ void Oscillator::RenderExponentialSine() {
 void Oscillator::RenderFM() {
   uint8_t fm_shape = shape_ - OSC_SHAPE_FM;
   int16_t interval = lut_fm_modulator_intervals[fm_shape];
-  modulator_phase_increment_ = ComputePhaseIncrement(pitch_ + interval);
+  uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
 
   // Compensate for higher FM ratios having sweet spot at lower index
   uint8_t index_2x_upshift = lut_fm_index_2x_upshifts[fm_shape];
@@ -452,7 +449,7 @@ void Oscillator::RenderFM() {
   int16_t timbre_offset = timbre - 2048; \
   int32_t shifted_pitch = pitch_ + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8); \
   if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1; \
-  modulator_phase_increment_ = ComputePhaseIncrement(shifted_pitch);
+  uint32_t modulator_phase_increment = ComputePhaseIncrement(shifted_pitch);
 
 const uint32_t kPhaseResetSaw[] = {
   0, // Low-pass: -cos
