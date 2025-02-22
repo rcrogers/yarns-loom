@@ -183,7 +183,9 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
-  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_, gain_buffer_, timbre_buffer_;
+  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_;
+  // Double buffering not needed for gain/timbre because they're synchronous from the standpoint of audio rendering
+  stmlib::RingBuffer<uint16_t, kAudioBlockSize> gain_buffer_, timbre_buffer_;
   
   static RenderFn fn_table_[];
   
