@@ -13,3 +13,9 @@
 [submodule "avr_audio_bootloader"]
 	path = avr_audio_bootloader
 	url = https://github.com/pichenettes/avr-audio-bootloader.git
+[submodule "CMSIS-DSP"]
+	path = CMSIS-DSP
+	url = git@github.com:ARM-software/CMSIS-DSP.git
+[submodule "CMSIS_5"]
+	path = CMSIS_5
+	url = git@github.com:ARM-software/CMSIS_5.git
