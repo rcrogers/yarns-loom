@@ -222,9 +222,6 @@ class Voice {
   }
   inline FastSyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
 
-  inline void RenderSamples() {
-    if (uses_audio()) oscillator_.Render();
-  }
   inline uint16_t ReadSample() {
     return oscillator_.ReadSample();
   }
@@ -333,6 +330,7 @@ class CVOutput {
     return false;
   }
 
+  inline bool is_high_freq() const { return is_audio() || is_envelope(); }
   inline bool is_audio() const {
     return num_audio_voices_ > 0 && audio_voices_[0]->uses_audio();
   }
@@ -357,18 +355,10 @@ class CVOutput {
     return value;
    }
 
-  inline uint16_t GetAudioSample() {
-    uint16_t mix = zero_dac_code_;
-    for (uint8_t i = 0; i < num_audio_voices_; ++i) {
-      mix -= audio_voices_[i]->ReadSample();
-    }
-    return mix;
-  }
+  void RenderSamples();
 
-  void RenderEnvelopeSamples();
-
-  inline uint16_t GetEnvelopeSample() {
-    return envelope_buffer_.ImmediateRead();
+  inline uint16_t GetDACSample() {
+    return dac_buffer_.ImmediateRead();
   }
 
   void Refresh();
@@ -436,8 +426,8 @@ class CVOutput {
   uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
-  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> envelope_buffer_;
-  Interpolator<6> tremolo_; // 2^4 = 16 approximates the ratio between 4 kHz Refresh and 40 kHz GetEnvelopeSample
+  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2> dac_buffer_;
+  Interpolator<kAudioBlockSizeBits> tremolo_; // 2^4 = 16 approximates the ratio between 4 kHz Refresh and 40 kHz GetEnvelopeSample
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };

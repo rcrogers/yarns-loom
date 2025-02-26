@@ -98,7 +98,7 @@ void CVOutput::Init(bool reset_calibration) {
   dirty_ = false;
   dc_role_ = DC_PITCH;
   envelope_.Init();
-  envelope_buffer_.Init();
+  dac_buffer_.Init();
   tremolo_.Init();
 }
 
@@ -257,16 +257,34 @@ void CVOutput::Refresh() {
   dac_code_ = (this->*dc_fn_table_[dc_role_])();
 }
 
-void CVOutput::RenderEnvelopeSamples() {
-  if (!is_envelope()) return;
-  if (envelope_buffer_.writable() < kAudioBlockSize) return;
-  size_t size = kAudioBlockSize;
-  while (size--) {
-    tremolo_.Tick();
-    envelope_.Tick();
-    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-    value = stmlib::ClipU16(value);
-    envelope_buffer_.Overwrite(value);
+void CVOutput::RenderSamples() {
+  // if (uses_audio()) oscillator_.Render();
+  if (dac_buffer_.writable() < kAudioBlockSize) return;
+
+  if (is_envelope()) {
+    size_t size = kAudioBlockSize;
+    while (size--) {
+      tremolo_.Tick();
+      envelope_.Tick();
+      int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+      value = stmlib::ClipU16(value);
+      dac_buffer_.Overwrite(value);
+    }
+  } else if (is_audio()) {
+    std::fill(
+        dac_buffer_.write_ptr(),
+        dac_buffer_.write_ptr() + kAudioBlockSize,
+        zero_dac_code_
+    );
+    for (uint8_t v = 0; v < num_audio_voices_; ++v) {
+      audio_voices_[v]->oscillator()->Render();
+      q15_add<kAudioBlockSize, false>(
+          audio_voices_[v]->oscillator()->audio_buffer.read_ptr(),
+          dac_buffer_.write_ptr(),
+          dac_buffer_.write_ptr()
+      );
+    }
+    dac_buffer_.advance_write_ptr(kAudioBlockSize);
   }
 }
 

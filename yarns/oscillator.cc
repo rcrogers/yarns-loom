@@ -143,8 +143,6 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
 }
 
 void Oscillator::Render() {
-  if (audio_buffer_.writable() < kAudioBlockSize) return;
-  
   if (pitch_ >= kHighestNote) {
     pitch_ = kHighestNote - 1;
   } else if (pitch_ < 0) {
@@ -184,13 +182,13 @@ void Oscillator::Render() {
 #define RENDER_CORE(body) \
   int32_t next_sample = next_sample_; \
   size_t size = kAudioBlockSize; \
-  int16_t* audio_start = audio_buffer_.write_ptr(); \
+  int16_t* audio_start = audio_buffer.write_ptr(); \
   int16_t* gain_start = gain_buffer_.write_ptr(); \
   while (size--) { \
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     body \
-    audio_buffer_.Overwrite(this_sample); \
+    audio_buffer.Overwrite(this_sample); \
   } \
   next_sample_ = next_sample; \
   q15_mult<kAudioBlockSize>(gain_start, audio_start, audio_start); \

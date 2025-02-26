@@ -95,8 +95,10 @@ class Oscillator {
   Oscillator() { }
   ~Oscillator() { }
 
+  stmlib::RingBuffer<int16_t, kAudioBlockSize> audio_buffer;
+
   inline void Init(uint16_t scale) {
-    audio_buffer_.Init();
+    audio_buffer.Init();
     scale_ = scale;
     gain_.Init();
     timbre_.Init();
@@ -112,8 +114,8 @@ class Oscillator {
     next_sample_ = 0;
   }
 
-  inline uint16_t ReadSample() {
-    return audio_buffer_.ImmediateRead();
+  inline int16_t ReadSample() {
+    return audio_buffer.ImmediateRead();
   }
 
   void Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo);
@@ -184,7 +186,6 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
-  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2> audio_buffer_;
   // Double buffering not needed for gain/timbre because they're synchronous from the standpoint of audio rendering
   stmlib::RingBuffer<int16_t, kAudioBlockSize> gain_buffer_, timbre_buffer_;
   

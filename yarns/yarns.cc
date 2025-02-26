@@ -65,8 +65,7 @@ extern "C" {
 
 uint16_t cv[4];
 bool gate[4];
-bool has_audio_source[4];
-bool has_envelope[4];
+bool is_high_freq[4];
 uint16_t factory_testing_counter;
 
 void SysTick_Handler() {
@@ -110,14 +109,10 @@ void SysTick_Handler() {
     multi.Refresh();
     multi.GetCvGate(cv, gate);
 
-    has_audio_source[0] = multi.cv_output(0).is_audio();
-    has_audio_source[1] = multi.cv_output(1).is_audio();
-    has_audio_source[2] = multi.cv_output(2).is_audio();
-    has_audio_source[3] = multi.cv_output(3).is_audio();
-    has_envelope[0] = multi.cv_output(0).is_envelope();
-    has_envelope[1] = multi.cv_output(1).is_envelope();
-    has_envelope[2] = multi.cv_output(2).is_envelope();
-    has_envelope[3] = multi.cv_output(3).is_envelope();
+    is_high_freq[0] = multi.cv_output(0).is_high_freq();
+    is_high_freq[1] = multi.cv_output(1).is_high_freq();
+    is_high_freq[2] = multi.cv_output(2).is_high_freq();
+    is_high_freq[3] = multi.cv_output(3).is_high_freq();
     
     // In calibration mode, overrides the DAC outputs with the raw calibration
     // table values.
@@ -166,14 +161,10 @@ void TIM1_UP_IRQHandler(void) {
   dac.Cycle();
   
   // Prepare and start new transfer based on source type
-  if (has_audio_source[dac.channel()]) {
-    uint16_t sample = multi.mutable_cv_output(dac.channel())->GetAudioSample();
+  if (is_high_freq[dac.channel()]) {
+    uint16_t sample = multi.mutable_cv_output(dac.channel())->GetDACSample();
     dac.PrepareWrite(dac.channel(), sample);
     dac.WriteIfDirty();  // This will use double buffering internally
-  } else if (has_envelope[dac.channel()]) {
-    uint16_t sample = multi.mutable_cv_output(dac.channel())->GetEnvelopeSample();
-    dac.PrepareWrite(dac.channel(), sample);
-    dac.WriteIfDirty();
   } else {
     // Regular CV output - will use double buffering if value has changed
     dac.WriteIfDirty();
