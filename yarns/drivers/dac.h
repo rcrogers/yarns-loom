@@ -38,6 +38,11 @@ namespace yarns {
 const uint8_t kNumChannels = 4;
 const uint16_t kPinSS = GPIO_Pin_12;
 
+// New constants for circular DMA
+const uint16_t kAudioBufferSize = 64;  // Size per channel, must be power of 2
+const uint8_t kDmaHalfCompleteFlag = 0x01;
+const uint8_t kDmaCompleteFlag = 0x02;
+
 class Dac {
  public:
   Dac() { }
@@ -66,19 +71,30 @@ class Dac {
   
   inline void WriteIfDirty() {
     if (update_[active_channel_]) {
-      PrepareNextBuffer();
-      StartTransferIfNeeded();
+      // For non-high-frequency channels, we still use the direct write
+      if (!is_high_freq_[active_channel_]) {
+        SendSingleValue(active_channel_, value_[active_channel_]);
+      }
       update_[active_channel_] = false;
     }
   }
   
+  // New methods for circular DMA
+  void FillBuffer(uint8_t channel);
+  void StartCircularDMA(uint8_t channel);
+  void StopCircularDMA(uint8_t channel);
+  
   inline uint8_t channel() { return active_channel_; }
   
-  // Called from ISR to handle buffer switching
+  // Called from ISR to handle buffer states
   void HandleDMAComplete();
- 
+  void HandleDMAHalfComplete();
+  
+  // Set channel to high frequency mode (uses circular DMA)
+  void SetHighFrequencyMode(uint8_t channel, bool high_freq);
+  
  private:
-  // Double buffer configuration
+  // For non-circular direct writes
   static const uint16_t kDMABufferSize = 2;  // Two 16-bit words per transfer
   static const uint8_t kNumBuffers = 2;
   
@@ -91,10 +107,24 @@ class Dac {
   volatile uint8_t active_buffer_;  // Currently transmitting buffer
   volatile uint8_t next_buffer_;    // Buffer being prepared
   
+  // For circular DMA
+  struct CircularDMABuffer {
+    // Each entry contains formatted data for DAC: command word and data word
+    uint16_t data[kAudioBufferSize * 2]; 
+    volatile uint8_t state;  // Flags to indicate buffer state
+  };
+  
+  CircularDMABuffer audio_buffer_[kNumChannels];
+  volatile bool circular_dma_active_[kNumChannels];
+  
   bool update_[kNumChannels];
   uint16_t value_[kNumChannels];
+  bool is_high_freq_[kNumChannels];
   uint8_t active_channel_;
   volatile bool transfer_in_progress_;
+  
+  // Helper to send a single value to the DAC
+  void SendSingleValue(uint8_t channel, uint16_t value);
   
   inline void PrepareNextBuffer() {
     // Format data for DAC in the next buffer

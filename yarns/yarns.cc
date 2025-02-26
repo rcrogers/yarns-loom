@@ -65,7 +65,6 @@ extern "C" {
 
 uint16_t cv[4];
 bool gate[4];
-bool is_high_freq[4];
 uint16_t factory_testing_counter;
 
 void SysTick_Handler() {
@@ -109,10 +108,9 @@ void SysTick_Handler() {
     multi.Refresh();
     multi.GetCvGate(cv, gate);
 
-    is_high_freq[0] = multi.cv_output(0).is_high_freq();
-    is_high_freq[1] = multi.cv_output(1).is_high_freq();
-    is_high_freq[2] = multi.cv_output(2).is_high_freq();
-    is_high_freq[3] = multi.cv_output(3).is_high_freq();
+    for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
+      dac.SetHighFrequencyMode(i, multi.cv_output(i).is_high_freq());
+    }
     
     // In calibration mode, overrides the DAC outputs with the raw calibration
     // table values.
@@ -142,11 +140,16 @@ void SysTick_Handler() {
 // Modified DMA IRQ handler
 extern "C" {
 void DMA1_Channel5_IRQHandler(void) {
+  extern yarns::Dac dac;
+  
   if (DMA_GetITStatus(DMA1_IT_TC5)) {
     DMA_ClearITPendingBit(DMA1_IT_TC5);
-    
-    extern yarns::Dac dac;
     dac.HandleDMAComplete();
+  }
+  
+  if (DMA_GetITStatus(DMA1_IT_HT5)) {
+    DMA_ClearITPendingBit(DMA1_IT_HT5);
+    dac.HandleDMAHalfComplete();
   }
 }
 }
@@ -160,15 +163,9 @@ void TIM1_UP_IRQHandler(void) {
 
   dac.Cycle();
   
-  // Prepare and start new transfer based on source type
-  if (is_high_freq[dac.channel()]) {
-    uint16_t sample = multi.mutable_cv_output(dac.channel())->GetDACSample();
-    dac.PrepareWrite(dac.channel(), sample);
-    dac.WriteIfDirty();  // This will use double buffering internally
-  } else {
-    // Regular CV output - will use double buffering if value has changed
-    dac.WriteIfDirty();
-  }
+  // We no longer need the sample fetching here since it's handled
+  // by the circular DMA system for high-freq channels
+  dac.WriteIfDirty();
   
   if (dac.channel() == 0) {
     multi.RefreshInternalClock();
