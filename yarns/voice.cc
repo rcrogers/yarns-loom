@@ -258,7 +258,6 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples() {
-  // if (uses_audio()) oscillator_.Render();
   if (dac_buffer_.writable() < kAudioBlockSize) return;
 
   if (is_envelope()) {
