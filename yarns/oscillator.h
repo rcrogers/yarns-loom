@@ -41,7 +41,8 @@
 
 namespace yarns {
 
-const size_t kAudioBlockSize = 32;
+const size_t kAudioBlockSizeBits = 6;
+const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
 class StateVariableFilter {
  public:
@@ -50,7 +51,7 @@ class StateVariableFilter {
   void RenderSample(int16_t in);
   int32_t bp, lp, notch, hp;
  private:
-  Interpolator<6> cutoff, damp;
+  Interpolator<kAudioBlockSizeBits> cutoff, damp;
 };
 
 struct PhaseDistortionSquareModulator {
@@ -170,7 +171,7 @@ class Oscillator {
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;
-  Interpolator<6> timbre_, gain_;
+  Interpolator<kAudioBlockSizeBits> timbre_, gain_;
   int16_t pitch_;
 
   uint32_t phase_;
@@ -183,9 +184,9 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
-  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_;
+  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2> audio_buffer_;
   // Double buffering not needed for gain/timbre because they're synchronous from the standpoint of audio rendering
-  stmlib::RingBuffer<uint16_t, kAudioBlockSize> gain_buffer_, timbre_buffer_;
+  stmlib::RingBuffer<int16_t, kAudioBlockSize> gain_buffer_, timbre_buffer_;
   
   static RenderFn fn_table_[];
   

@@ -184,15 +184,16 @@ void Oscillator::Render() {
 #define RENDER_CORE(body) \
   int32_t next_sample = next_sample_; \
   size_t size = kAudioBlockSize; \
+  int16_t* audio_start = audio_buffer_.write_ptr(); \
+  int16_t* gain_start = gain_buffer_.write_ptr(); \
   while (size--) { \
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     body \
-    audio_buffer_.Overwrite( \
-      (static_cast<int32_t>(gain) * this_sample) >> 16 \
-    ); \
+    audio_buffer_.Overwrite(this_sample); \
   } \
   next_sample_ = next_sample; \
+  q15_mult<kAudioBlockSize>(gain_start, audio_start, audio_start); \
 
 #define RENDER_WITH_PHASE_GAIN(body) \
   uint32_t phase = phase_; \
@@ -200,7 +201,6 @@ void Oscillator::Render() {
   uint32_t modulator_phase = modulator_phase_; \
   RENDER_CORE( \
     phase += phase_increment; \
-    uint16_t gain = gain_buffer_.ImmediateRead(); \
     body \
   ) \
   phase_ = phase; \
@@ -540,7 +540,6 @@ void Oscillator::RenderFilteredNoise() {
   // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
   // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;
   RENDER_CORE(
-    uint16_t gain = gain_buffer_.ImmediateRead();
     svf.RenderSample(Random::GetSample());
     switch (shape_) {
       case OSC_SHAPE_NOISE_LP: this_sample = svf.lp; break;
