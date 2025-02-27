@@ -306,6 +306,7 @@ class CVOutput {
 
     num_audio_voices_ = num_audio;
     zero_dac_code_ = volts_dac_code(0);
+    envelope_.Init(zero_dac_code_ >> 1);
     uint16_t scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
     scale /= num_audio_voices_;
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {

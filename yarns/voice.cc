@@ -97,7 +97,7 @@ void CVOutput::Init(bool reset_calibration) {
   }
   dirty_ = false;
   dc_role_ = DC_PITCH;
-  envelope_.Init();
+  envelope_.Init(0);
   dac_buffer_.Init();
   tremolo_.Init();
 }

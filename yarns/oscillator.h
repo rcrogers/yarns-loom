@@ -102,8 +102,8 @@ class Oscillator {
     scale_ = scale;
     gain_.Init();
     timbre_.Init();
-    gain_envelope_.Init();
-    timbre_envelope_.Init();
+    gain_envelope_.Init(0);
+    timbre_envelope_.Init(0);
     timbre_buffer_.Init();
     gain_buffer_.Init();
     svf_.Init();
