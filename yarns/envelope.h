@@ -97,7 +97,6 @@ class Envelope {
   ~Envelope() { }
 
   void Init(int32_t value) {
-    gate_ = false;
     value_ = value;
     Trigger(ENV_SEGMENT_DEAD);
     std::fill(
@@ -207,8 +206,7 @@ class Envelope {
         bool positive_segment_slope = nominal_delta >= 0;
         if (positive_segment_slope != (attack_.delta >= 0)) {
           // If deltas differ in sign, the direction is wrong -- skip segment
-          next_tick_segment_ = static_cast<EnvelopeSegment>(segment + 1);
-          return;
+          return Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
         }
         // Pick the larger delta, and thus the steeper slope that reaches the
         // target more quickly.  If actual delta is smaller than nominal (e.g.
@@ -265,9 +263,6 @@ class Envelope {
   int16_t value() const { return value_ >> 16; }
 
  private:
-  bool gate_;
-  EnvelopeSegment next_tick_segment_;
-  
   Motion attack_, decay_, release_, release_prelude_;
   Motion* motion_;
   
