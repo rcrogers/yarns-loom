@@ -56,8 +56,9 @@ class Interpolator {
   void Tick() {
     y_.i += m_;
   }
-  int16_t value() const { return y_.hi; }
-  int16_t target() const { return y_target_; }
+  inline int16_t value() const { return y_.hi; }
+  inline int16_t target() const { return y_target_; }
+  inline int32_t slope() const { return m_; }
 
 private:
   fixed_point y_;

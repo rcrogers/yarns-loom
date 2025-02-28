@@ -150,7 +150,7 @@ void Oscillator::Render() {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
-  // // gain_.ComputeSlope();
+  gain_.ComputeSlope();
   // size_t size;
   // size = kAudioBlockSize;
   // while (size--) {
@@ -161,8 +161,8 @@ void Oscillator::Render() {
   //   // gain_buffer_.Overwrite(gain >> 1);
   //   gain_buffer_.Overwrite(gain_envelope_.value());
   // }
-  gain_envelope_.RenderSamples(&gain_buffer_);
-  // timbre_.ComputeSlope();
+  gain_envelope_.RenderSamples(&gain_buffer_, gain_.value() << 16, gain_.slope());
+  timbre_.ComputeSlope();
   // size = kAudioBlockSize;
   // while (size--) {
   //   timbre_envelope_.Tick();
@@ -172,7 +172,7 @@ void Oscillator::Render() {
   //   // timbre_buffer_.Overwrite(timbre >> 1);
   //   timbre_buffer_.Overwrite(timbre_envelope_.value());
   // }
-  timbre_envelope_.RenderSamples(&timbre_buffer_);
+  timbre_envelope_.RenderSamples(&timbre_buffer_, timbre_.value() << 16, timbre_.slope());
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);

@@ -269,7 +269,7 @@ void CVOutput::RenderSamples() {
     //   value = stmlib::ClipU16(value);
     //   dac_buffer_.Overwrite(value);
     // }
-    envelope_.RenderSamples(&dac_buffer_);
+    envelope_.RenderSamples(&dac_buffer_, tremolo_.value() << 16, tremolo_.slope());
   } else if (is_audio()) {
     std::fill(
         dac_buffer_.write_ptr(),

@@ -216,7 +216,9 @@ class Envelope {
         // from re-attacks that begin high), use nominal's steeper slope (e.g.
         // so the attack sounds like a quick catch-up vs a flat, blaring hold
         // stage). If actual is greater (rare in practice), use that
+
         // TODO "reaching the target" doesn't work now, need to truncate the segment
+        // TODO truncating phase based on delta-of-deltas is hard due to exp!
         attack_.delta = positive_segment_slope
           ? std::max(nominal_delta, attack_.delta)
           : std::min(nominal_delta, attack_.delta);
@@ -234,19 +236,18 @@ class Envelope {
   }
 
   template<size_t BUFFER_SIZE> // To allow both double and single buffering
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer) {
+  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias) {
     // NB: theoretically it would be nice if we could pick up on a NoteOn/NoteOff in the render loop and immediately change direction.  However, MIDI input processing is synchronous with regard to rendering, so this scenario does not arise and there's no point supporting it.
 
     // TODO try copying slope table into locals
-    // Also: "running total" vector fn?
-    // https://en.wikipedia.org/wiki/Prefix_sum
-    // Decrement int32 phase and check greater than 0? Maybe try for osc too
 
-    int32_t value = value_;
+    int32_t value = value_ + value_bias;
     uint32_t phase = phase_;
     uint32_t phase_increment = motion_ ? motion_->phase_increment : 0;
+    // int16_t* buffer_start = buffer->write_ptr();
     size_t size = kAudioBlockSize;
     while (size--) {
+      // TODO Decrement int32 phase and check greater than 0? Maybe try for osc too
       phase += phase_increment;
       if (phase < phase_increment) {
         value = motion_->target;
@@ -254,12 +255,18 @@ class Envelope {
         phase = 0;
         phase_increment = motion_ ? motion_->phase_increment : 0;
       }
+      // TODO try outputting slopes instead, then computing a running total
+      // https://claude.ai/chat/127cae75-04b9-4d95-87ac-d01114bd7cf3
+      // Complication: shifting slopes before summing will cause error
+      // Running total must be 32-bit, slope vector must be 32-bit, output buffer can be 16-bit
+      // Separate inline buffer of length 4-8?
+      // Also need to calculate a delta on segment change
       int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
-      value += slope;
+      value += slope + slope_bias;
       buffer->Overwrite(value >> 16);
     }
+    value_ = value - value_bias;
     phase_ = phase;
-    value_ = value;
   }
 
   int16_t value() const { return value_ >> 16; }
