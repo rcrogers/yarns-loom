@@ -39,6 +39,12 @@ using namespace stmlib;
 const size_t kAudioBlockSizeBits = 6;
 const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
+const uint8_t kLutExpoSlopeShiftSizeBits = 4;
+STATIC_ASSERT(
+  1 << kLutExpoSlopeShiftSizeBits == LUT_EXPO_SLOPE_SHIFT_SIZE,
+  expo_slope_shift_size
+);
+
 enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,           // manual start, auto/manual end
   ENV_SEGMENT_DECAY,            // auto start, auto/manual end
@@ -48,6 +54,9 @@ enum EnvelopeSegment {
   ENV_SEGMENT_DEAD,             // no motion
   ENV_NUM_SEGMENTS,
 };
+
+// Manual start edge cases: too far from target (prelude), too close to target (truncate beginning), wrong direction (skip?)
+// Can also apply to decay start if attack was skipped due to wrong direction
 
 struct ADSR {
   uint16_t peak, sustain; // Platonic, unscaled targets
@@ -84,12 +93,6 @@ struct Motion {
   }
 
 };
-
-const uint8_t kLutExpoSlopeShiftSizeBits = 4;
-STATIC_ASSERT(
-  1 << kLutExpoSlopeShiftSizeBits == LUT_EXPO_SLOPE_SHIFT_SIZE,
-  expo_slope_shift_size
-);
 
 class Envelope {
  public:
@@ -129,6 +132,8 @@ class Envelope {
     attack_.Set(value_, peak, adsr.attack);
     decay_.Set(peak, sustain, adsr.decay);
     release_.Set(sustain, min_target, adsr.release);
+
+    // TODO could precompute decay/release slopes here, don't have to wait for them to arrive.  downside is that decay can be skipped (release cannot).  Trigger would need to know whether to use the precomputed slope or compute a new one.
 
     if (segment_ > ENV_SEGMENT_SUSTAIN) {
       // TODO skip to decay if we are already above peak? is a decay prelude needed?
@@ -176,8 +181,6 @@ class Envelope {
         return;
     }
 
-    // TODO strictly speaking, decay/release slopes can always be precomputed at NoteOn, don't have to wait until the segment arrives
-    
     if (segment == ENV_SEGMENT_RELEASE_PRELUDE) {
       // RELEASE_PRELUDE heads for the sustain level at RELEASE's steepest
       // slope, then RELEASE begins.
@@ -206,7 +209,7 @@ class Envelope {
         bool positive_segment_slope = nominal_delta >= 0;
         if (positive_segment_slope != (attack_.delta >= 0)) {
           // If deltas differ in sign, the direction is wrong -- skip segment
-          return Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
+          return Trigger(static_cast<EnvelopeSegment>(segment + 1));
         }
         // Pick the larger delta, and thus the steeper slope that reaches the
         // target more quickly.  If actual delta is smaller than nominal (e.g.
@@ -232,18 +235,17 @@ class Envelope {
 
   template<size_t BUFFER_SIZE> // To allow both double and single buffering
   void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer) {
-    // TODO simplify to a single render_new_segment_ dirty check?  also can NoteOn/Noteoff handle their triggers externally and just set the dirty bit here?  compute expo slopes for attack/decay on NoteOn, release/release_prelude on NoteOff.  when decay starts (the only auto transition that really matters), just switch to its slope table
-    // ALSO: this "note arrives during render" scenario is fantasy, it's all synchronous.  The inside of the render loop doesn't need memory reads, EXCEPT when it itself completes segments
-    // Also try copying slope table into locals
+    // NB: theoretically it would be nice if we could pick up on a NoteOn/NoteOff in the render loop and immediately change direction.  However, MIDI input processing is synchronous with regard to rendering, so this scenario does not arise and there's no point supporting it.
+
+    // TODO try copying slope table into locals
     // Also: "running total" vector fn?
     // https://en.wikipedia.org/wiki/Prefix_sum
     // Decrement int32 phase and check greater than 0? Maybe try for osc too
 
-    size_t size = kAudioBlockSize;
-    // bool dirty = true;
     int32_t value = value_;
     uint32_t phase = phase_;
     uint32_t phase_increment = motion_ ? motion_->phase_increment : 0;
+    size_t size = kAudioBlockSize;
     while (size--) {
       phase += phase_increment;
       if (phase < phase_increment) {
