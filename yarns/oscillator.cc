@@ -103,7 +103,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
     // if (shape_ >= OSC_SHAPE_FM) {
     //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
     // }
-    gain_.SetTarget(gain_envelope_.tremolo(tremolo));
+    // gain_.SetTarget(gain_envelope_.tremolo(tremolo));
 
     int32_t strength = 0x7fff - (pitch << 1);
     CONSTRAIN(strength, 0, 0x7fff);
@@ -114,7 +114,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
     ) {
       timbre = timbre * strength >> 15;
     }
-    timbre_.SetTarget(timbre);
+    // timbre_.SetTarget(timbre);
   }
 
 uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
@@ -150,25 +150,29 @@ void Oscillator::Render() {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
-  gain_.ComputeSlope();
-  size_t size;
-  size = kAudioBlockSize;
-  while (size--) {
-    gain_envelope_.Tick();
-    gain_.Tick();
-    int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
-    gain = stmlib::ClipU16(gain);
-    gain_buffer_.Overwrite(gain);
-  }
-  timbre_.ComputeSlope();
-  size = kAudioBlockSize;
-  while (size--) {
-    timbre_envelope_.Tick();
-    timbre_.Tick();
-    int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
-    timbre = stmlib::ClipU16(timbre);
-    timbre_buffer_.Overwrite(timbre >> 1);
-  }
+  // // gain_.ComputeSlope();
+  // size_t size;
+  // size = kAudioBlockSize;
+  // while (size--) {
+  //   gain_envelope_.Tick();
+  //   // gain_.Tick();
+  //   // int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
+  //   // gain = stmlib::ClipU16(gain);
+  //   // gain_buffer_.Overwrite(gain >> 1);
+  //   gain_buffer_.Overwrite(gain_envelope_.value());
+  // }
+  gain_envelope_.RenderSamples(&gain_buffer_);
+  // timbre_.ComputeSlope();
+  // size = kAudioBlockSize;
+  // while (size--) {
+  //   timbre_envelope_.Tick();
+  //   // timbre_.Tick();
+  //   // int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
+  //   // timbre = stmlib::ClipU16(timbre);
+  //   // timbre_buffer_.Overwrite(timbre >> 1);
+  //   timbre_buffer_.Overwrite(timbre_envelope_.value());
+  // }
+  timbre_envelope_.RenderSamples(&timbre_buffer_);
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);

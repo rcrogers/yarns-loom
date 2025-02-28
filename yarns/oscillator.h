@@ -41,9 +41,6 @@
 
 namespace yarns {
 
-const size_t kAudioBlockSizeBits = 6;
-const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
-
 class StateVariableFilter {
  public:
   void Init();

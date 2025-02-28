@@ -36,13 +36,16 @@ namespace yarns {
 
 using namespace stmlib;
 
+const size_t kAudioBlockSizeBits = 6;
+const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
+
 enum EnvelopeSegment {
-  ENV_SEGMENT_ATTACK,
-  ENV_SEGMENT_DECAY,
-  ENV_SEGMENT_EARLY_RELEASE, // Gate ended before sustain, so skip sustain
-  ENV_SEGMENT_SUSTAIN,
-  ENV_SEGMENT_RELEASE,
-  ENV_SEGMENT_DEAD,
+  ENV_SEGMENT_ATTACK,           // manual start, auto/manual end
+  ENV_SEGMENT_DECAY,            // auto start, auto/manual end
+  ENV_SEGMENT_SUSTAIN,          // no motion
+  ENV_SEGMENT_RELEASE_PRELUDE,  // manual start, auto end
+  ENV_SEGMENT_RELEASE,          // manual start, auto end
+  ENV_SEGMENT_DEAD,             // no motion
   ENV_NUM_SEGMENTS,
 };
 
@@ -55,24 +58,24 @@ struct Motion {
   int32_t target, delta;
   uint32_t phase_increment;
 
-  inline void Set(int32_t _start, int32_t _target, uint32_t _phase_increment) {
+  void Set(int32_t _start, int32_t _target, uint32_t _phase_increment) {
     target = _target;
     delta = _target - _start;
     phase_increment = _phase_increment;
   }
 
-  inline int32_t compute_linear_slope() const { // Divide delta by duration
+  int32_t compute_linear_slope() const { // Divide delta by duration
     int32_t s = (static_cast<int64_t>(delta) * phase_increment) >> 32;
     if (!s) s = delta >= 0 ? 1 : -1;
     return s;
   }
 
-  static inline uint8_t max_shift(int32_t n) {
+  static uint8_t max_shift(int32_t n) {
     uint32_t n_unsigned = abs(n >= 0 ? n : n + 1);
     return __builtin_clzl(n_unsigned) - 1; // 0..31
   }
 
-  static inline int32_t compute_expo_slope(
+  static int32_t compute_expo_slope(
     int32_t linear_slope, int8_t shift, uint8_t max_shift
   ) {
     return shift >= 0
@@ -104,19 +107,17 @@ class Envelope {
     );
   }
 
-  inline void NoteOff() {
-    gate_ = false;
-    switch (segment_) {
-      case ENV_SEGMENT_ATTACK:
-      case ENV_SEGMENT_DECAY:
-        next_tick_segment_ = ENV_SEGMENT_EARLY_RELEASE; break;
-      case ENV_SEGMENT_SUSTAIN:
-        next_tick_segment_ = ENV_SEGMENT_RELEASE; break;
-      default: break;
+  void NoteOff() {
+    if (segment_ == ENV_SEGMENT_SUSTAIN) {
+      // Normal release
+      Trigger(ENV_SEGMENT_RELEASE);
+    } else {
+      // TODO If we are "above" sustain level, do a release prelude.  If we are "below" sustain level, skip some portion of the beginning of the release.
+      Trigger(ENV_SEGMENT_RELEASE_PRELUDE);
     }
   }
 
-  inline void NoteOn(
+  void NoteOn(
     ADSR& adsr,
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   ) {
@@ -130,42 +131,57 @@ class Envelope {
     decay_.Set(peak, sustain, adsr.decay);
     release_.Set(sustain, min_target, adsr.release);
 
-    if (!gate_) {
-      gate_ = true;
-      next_tick_segment_ = ENV_SEGMENT_ATTACK;
+    if (segment_ > ENV_SEGMENT_SUSTAIN) {
+      // TODO skip to decay if we are already above peak? is a decay prelude needed?
+      Trigger(ENV_SEGMENT_ATTACK);
     }
   }
 
-  inline int16_t tremolo(uint16_t strength) const {
+  int16_t tremolo(uint16_t strength) const {
     int32_t relative_value = (value_ - release_.target) >> 16;
     return relative_value * -strength >> 16;
   }
   
-  inline void Trigger(EnvelopeSegment segment) {
-    if (gate_ && segment == ENV_SEGMENT_EARLY_RELEASE) {
-      segment = ENV_SEGMENT_SUSTAIN; // Skip early-release when gate is high
-    }
-    if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
-      segment = ENV_SEGMENT_RELEASE; // Skip sustain when gate is low
-    }
-    segment_ = next_tick_segment_ = segment;
+  // Populates expo slope table for the new segment
+  void Trigger(EnvelopeSegment segment) {
+    // Irrelevant now bc RELEASE_PRELUDE comes after sustain
+    // if (gate_ && segment == ENV_SEGMENT_RELEASE_PRELUDE) {
+    //   segment = ENV_SEGMENT_SUSTAIN; // Skip early-release when gate is high
+    // }
+    // // Irrelevant now because RELEASE_PRELUDE should transition directly into RELEASE
+    // if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
+    //   segment = ENV_SEGMENT_RELEASE; // Skip sustain when gate is low
+    // }
+    // autonomous transitions that rely on incrementing segment:
+    // attack -> decay: increment is fine
+    // decay -> sustain: increment is fine
+    // release_prelude -> release: increment is fine
+    // release -> dead: increment is fine
+    // TODO what about skips below?
+
+    segment_ = segment;
     switch (segment) {
       case ENV_SEGMENT_ATTACK : motion_ = &attack_  ; break;
       case ENV_SEGMENT_DECAY  : motion_ = &decay_   ; break;
       case ENV_SEGMENT_RELEASE: motion_ = &release_ ; break;
-      case ENV_SEGMENT_EARLY_RELEASE: motion_ = &early_release_; break;
+      case ENV_SEGMENT_RELEASE_PRELUDE: motion_ = &release_prelude_; break;
       case ENV_SEGMENT_SUSTAIN:
       case ENV_SEGMENT_DEAD:
       case ENV_NUM_SEGMENTS: // Should never happen
         motion_ = NULL;
+        std::fill(
+          &expo_slope_[0],
+          &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+          0
+        );
         return;
     }
 
-    // TODO value_ = target_;
+    // TODO strictly speaking, decay/release slopes can always be precomputed at NoteOn, don't have to wait until the segment arrives
     
-    if (segment == ENV_SEGMENT_EARLY_RELEASE) {
-      // If gate ends before reaching sustain, EARLY_RELEASE heads for the
-      // sustain level at RELEASE's steepest slope, then RELEASE begins.
+    if (segment == ENV_SEGMENT_RELEASE_PRELUDE) {
+      // RELEASE_PRELUDE heads for the sustain level at RELEASE's steepest
+      // slope, then RELEASE begins.
       int32_t linear_slope = release_.compute_linear_slope();
       int8_t steepest_shift = lut_expo_slope_shift[0];
       int32_t steepest_expo_slope = Motion::compute_expo_slope(
@@ -178,8 +194,10 @@ class Envelope {
         steepest_expo_slope
       );
       int32_t delta_to_sustain = decay_.target - value_;
-      early_release_.phase_increment = (steepest_expo_slope / (delta_to_sustain >> 16)) << 16;
+      release_prelude_.phase_increment = (steepest_expo_slope / (delta_to_sustain >> 16)) << 16;
     } else { // Build normal expo slopes
+
+      // TODO handle upward decay?? no longer covered by wrong-direction logic
 
       if (segment == ENV_SEGMENT_ATTACK) {
         // In case the attack is not starting from 0 (e.g. it interrupts a
@@ -197,9 +215,12 @@ class Envelope {
         // from re-attacks that begin high), use nominal's steeper slope (e.g.
         // so the attack sounds like a quick catch-up vs a flat, blaring hold
         // stage). If actual is greater (rare in practice), use that
+        // TODO "reaching the target" doesn't work now, need to truncate the segment
         attack_.delta = positive_segment_slope
           ? std::max(nominal_delta, attack_.delta)
           : std::min(nominal_delta, attack_.delta);
+      } else if (segment == ENV_SEGMENT_RELEASE) {
+        // If we are below sustain level due to an aborted attack
       }
 
       int32_t linear_slope = motion_->compute_linear_slope();
@@ -211,35 +232,43 @@ class Envelope {
     }
   }
 
-  inline void Tick() {
-    // TODO simplify to a single render_new_segment_ dirty check?  also can NoteOn/Noteoff handle their triggers externally and just set the dirty bit here?  compute expo slopes for attack/decay on NoteOn, release/early_release on NoteOff.  when decay starts (the only auto transition that really matters), just switch to its slope table
+  template<size_t BUFFER_SIZE> // To allow both double and single buffering
+  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer) {
+    // TODO simplify to a single render_new_segment_ dirty check?  also can NoteOn/Noteoff handle their triggers externally and just set the dirty bit here?  compute expo slopes for attack/decay on NoteOn, release/release_prelude on NoteOff.  when decay starts (the only auto transition that really matters), just switch to its slope table
     // ALSO: this "note arrives during render" scenario is fantasy, it's all synchronous.  The inside of the render loop doesn't need memory reads, EXCEPT when it itself completes segments
-    // Can even have a "zero slope table" so value increment isn't conditional
     // Also try copying slope table into locals
     // Also: "running total" vector fn?
-    while (segment_ != next_tick_segment_) { // Event loop
-      Trigger(next_tick_segment_);
-      phase_ = 0;
-    }
+    // https://en.wikipedia.org/wiki/Prefix_sum
+    // Decrement int32 phase and check greater than 0? Maybe try for osc too
 
-    if (!motion_) return;
-    phase_ += motion_->phase_increment;
-    if (phase_ < motion_->phase_increment) {
-      next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
-      // TODO jump to target, or do an immediate Tick to trigger next?
-      return Tick();
+    size_t size = kAudioBlockSize;
+    // bool dirty = true;
+    int32_t value = value_;
+    uint32_t phase = phase_;
+    uint32_t phase_increment = motion_ ? motion_->phase_increment : 0;
+    while (size--) {
+      phase += phase_increment;
+      if (phase < phase_increment) {
+        value = motion_->target;
+        Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
+        phase = 0;
+        phase_increment = motion_ ? motion_->phase_increment : 0;
+      }
+      int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
+      value += slope;
+      buffer->Overwrite(value >> 16);
     }
-
-    value_ += expo_slope_[phase_ >> (32 - kLutExpoSlopeShiftSizeBits)];
+    phase_ = phase;
+    value_ = value;
   }
 
-  inline int16_t value() const { return value_ >> 16; }
+  int16_t value() const { return value_ >> 16; }
 
  private:
   bool gate_;
   EnvelopeSegment next_tick_segment_;
   
-  Motion attack_, decay_, release_, early_release_;
+  Motion attack_, decay_, release_, release_prelude_;
   Motion* motion_;
   
   // Current segment.

@@ -261,14 +261,15 @@ void CVOutput::RenderSamples() {
   if (dac_buffer_.writable() < kAudioBlockSize) return;
 
   if (is_envelope()) {
-    size_t size = kAudioBlockSize;
-    while (size--) {
-      tremolo_.Tick();
-      envelope_.Tick();
-      int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-      value = stmlib::ClipU16(value);
-      dac_buffer_.Overwrite(value);
-    }
+    // size_t size = kAudioBlockSize;
+    // while (size--) {
+    //   tremolo_.Tick();
+    //   envelope_.Tick();
+    //   int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+    //   value = stmlib::ClipU16(value);
+    //   dac_buffer_.Overwrite(value);
+    // }
+    envelope_.RenderSamples(&dac_buffer_);
   } else if (is_audio()) {
     std::fill(
         dac_buffer_.write_ptr(),
