@@ -159,6 +159,7 @@ for idx, y_ideal in enumerate(env_expo):
   # )
 
 print('\navg abs error pct', sum(abs(e) for e in errors) / len(errors))
+expo_slope_shift.reverse()
 
 lookup_tables_8.append(
     ('expo_slope_shift', expo_slope_shift)

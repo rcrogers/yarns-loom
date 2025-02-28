@@ -33,6 +33,7 @@
 #include <algorithm>
 
 #include "stmlib/stmlib.h"
+#include "stmlib/utils/dsp.h"
 #include "stmlib/algorithms/voice_allocator.h"
 #include "stmlib/algorithms/note_stack.h"
 
