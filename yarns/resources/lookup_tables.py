@@ -118,18 +118,18 @@ env_linear[-1] = env_linear[-2]
 env_expo = 1.0 - numpy.exp(-4 * env_linear)
 lookup_tables.append(('env_expo', env_expo / env_expo.max() * 65535.0))
 
-env_samples = 16.0
-env_linear = numpy.arange(1, env_samples + 1) / env_samples
-env_expo = 1.0 - numpy.exp(-4 * env_linear)
-env_expo /= env_expo.max()
-dx = 1 / env_samples
+env_shift_samples = 8.0
+env_shift_linear = numpy.arange(1, env_shift_samples + 1) / env_shift_samples
+env_shift_expo = 1.0 - numpy.exp(-4 * env_shift_linear)
+env_shift_expo /= env_shift_expo.max()
+dx = 1 / env_shift_samples
 y_actual = 0
 shift = None
 errors = []
 expo_slope_shift = []
-assert(len(env_expo) == env_samples)
-for idx, y_ideal in enumerate(env_expo):
-  dy_ideal = y_ideal - (0 if idx == 0 else env_expo[idx - 1])
+assert(len(env_shift_expo) == env_shift_samples)
+for idx, y_ideal in enumerate(env_shift_expo):
+  dy_ideal = y_ideal - (0 if idx == 0 else env_shift_expo[idx - 1])
   dy_actual = y_ideal - y_actual
   dy_weighted = (dy_ideal + dy_actual) / 2
   slope = dy_weighted / dx

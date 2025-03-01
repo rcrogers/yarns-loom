@@ -83,6 +83,7 @@ void Envelope::NoteOn(
   ADSR& adsr,
   int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
 ) {
+  // NB: min_target changes between notes IFF calibration/settings change
   int16_t scale = max_target - min_target;
   min_target <<= 16;
   int32_t peak = min_target + scale * adsr.peak;
@@ -108,21 +109,6 @@ int16_t Envelope::tremolo(uint16_t strength) const {
 
 // Populates expo slope table for the new segment
 void Envelope::Trigger(EnvelopeSegment segment) {
-  // Irrelevant now bc RELEASE_PRELUDE comes after sustain
-  // if (gate_ && segment == ENV_SEGMENT_RELEASE_PRELUDE) {
-  //   segment = ENV_SEGMENT_SUSTAIN; // Skip early-release when gate is high
-  // }
-  // // Irrelevant now because RELEASE_PRELUDE should transition directly into RELEASE
-  // if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
-  //   segment = ENV_SEGMENT_RELEASE; // Skip sustain when gate is low
-  // }
-  // autonomous transitions that rely on incrementing segment:
-  // attack -> decay: increment is fine
-  // decay -> sustain: increment is fine
-  // release_prelude -> release: increment is fine
-  // release -> dead: increment is fine
-  // TODO what about skips below?
-
   segment_ = segment;
   switch (segment) {
     case ENV_SEGMENT_ATTACK : motion_ = &attack_  ; break;
@@ -161,7 +147,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
       &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
       steepest_expo_slope
     );
-    int32_t delta_to_sustain = decay_.target - value_;
+    int32_t delta_to_sustain = decay_.target - value_; // TODO Set this in NoteOff
     release_prelude_.set_phase_decrement((steepest_expo_slope / (delta_to_sustain >> 16)) << 16);
   } else { // Build normal expo slopes
 
@@ -201,17 +187,20 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   }
 }
 
+#define MAKE_BIASED_EXPO_SLOPES() \
+  int32_t biased_expo_slopes[LUT_EXPO_SLOPE_SHIFT_SIZE]; \
+  for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) { \
+    biased_expo_slopes[i] = expo_slope_[i] + slope_bias; \
+  }
+
 template<size_t BUFFER_SIZE> // To allow both double and single buffering
 void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias) {
   // NB: theoretically it would be nice if we could pick up on a NoteOn/NoteOff in the render loop and immediately change direction.  However, MIDI input processing is synchronous with regard to rendering, so this scenario does not arise and there's no point supporting it.
 
-  // TODO need to redo this after Trigger!
-  // int32_t biased_expo_slopes[LUT_EXPO_SLOPE_SHIFT_SIZE];
-  // for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-  //   biased_expo_slopes[i] = expo_slope_[i]; // + slope_bias;
-  // }
+  // MAKE_BIASED_EXPO_SLOPES();
 
-  int32_t value = value_;// + value_bias;
+  // int32_t biased_value = value_ + value_bias;
+  int32_t value = value_;
   int32_t phase = phase_;
   int32_t phase_decrement = phase_decrement_;
   // int16_t* buffer_start = buffer->write_ptr();
@@ -219,7 +208,9 @@ void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, i
   while (size--) {
     phase -= phase_decrement;
     if (phase < 0) {
-      value = motion_->target; // TODO need to write to memory!  prob unbias first
+      // biased_value = motion_->target + value_bias;
+      value = motion_->target;
+      // The current value is not available to Trigger, but currently the only segment that needs a current value is RELEASE_PRELUDE, which is a manual start segment
       Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
       phase = phase_;
       phase_decrement = phase_decrement_;
@@ -230,14 +221,28 @@ void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, i
     // Running total must be 32-bit, slope vector must be 32-bit, output buffer can be 16-bit
     // Separate inline buffer of length 4-8?
     // Also need to calculate a delta on segment change
+    // Alternately, feasible for interpolator to compute prefix sum buffer?
+    // Options for prefix sum:
+    // 1. Offset slope vector
+    //  - Render buffer of envelope slopes
+    //    - Have to handle corners
+    //  - Offset envelope slope buffer by interpolator slope
+    //  - Compute prefix sum of slope buffer
+    // 2. Apply slope/value bias inline
+    // 3. Sum value vectors
+    //   - Render buffer of interpolator values
 
     int32_t slope = expo_slope_[phase >> (31 - kLutExpoSlopeShiftSizeBits)];
     // slope += slope_bias;
     // int32_t slope = biased_expo_slopes[phase >> (31 - kLutExpoSlopeShiftSizeBits)];
+    // biased_value += slope;
     value += slope;
+    // TODO may need to clip slope and/or value after addition
+    // buffer->Overwrite(biased_value >> 16);
     buffer->Overwrite(value >> 16);
   }
-  value_ = value;// - value_bias;
+  // value_ = biased_value - value_bias;
+  value_ = value;
   phase_ = phase;
 }
 

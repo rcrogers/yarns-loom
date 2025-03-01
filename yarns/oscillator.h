@@ -170,7 +170,8 @@ class Oscillator {
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;
-  Interpolator<kAudioBlockSizeBits> timbre_, gain_;
+  Interpolator<kAudioBlockSizeBits> timbre_;
+  Interpolator<kAudioBlockSizeBits> gain_; // Damping amount
   int16_t pitch_;
 
   uint32_t phase_;

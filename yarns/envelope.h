@@ -26,6 +26,8 @@
 #ifndef YARNS_ENVELOPE_H_
 #define YARNS_ENVELOPE_H_
 
+#include <math.h>
+
 #include "stmlib/utils/ring_buffer.h"
 
 #include "yarns/resources.h"
@@ -37,7 +39,7 @@ using namespace stmlib;
 const size_t kAudioBlockSizeBits = 6;
 const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
-const uint8_t kLutExpoSlopeShiftSizeBits = 4;
+const uint8_t kLutExpoSlopeShiftSizeBits = 32 - __builtin_clz(LUT_EXPO_SLOPE_SHIFT_SIZE - 1);
 STATIC_ASSERT(
   1 << kLutExpoSlopeShiftSizeBits == LUT_EXPO_SLOPE_SHIFT_SIZE,
   expo_slope_shift_size
@@ -77,6 +79,7 @@ class Envelope {
   ~Envelope() { }
 
   void Init(int32_t value);
+  // Compute the max damp-ability of the envelope for a given tremolo strength
   int16_t tremolo(uint16_t strength) const;
   int16_t value() const;
   void NoteOff();
