@@ -333,6 +333,7 @@ void Voice::NoteOn(
 }
 
 void Voice::NoteOff() {
+  if (!gate_) return;
   gate_ = false;
   oscillator_.NoteOff();
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
