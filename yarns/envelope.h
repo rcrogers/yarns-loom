@@ -26,8 +26,6 @@
 #ifndef YARNS_ENVELOPE_H_
 #define YARNS_ENVELOPE_H_
 
-#include <math.h>
-
 #include "stmlib/utils/ring_buffer.h"
 
 #include "yarns/resources.h"
