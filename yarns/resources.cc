@@ -2967,8 +2967,8 @@ const uint32_t* const lookup_table_32_table[] = {
 };
 
 const int8_t lut_expo_slope_shift[] = {
-      -4,     -3,     -3,     -2,
-      -1,      0,      1,      2,
+       2,      1,      0,     -1,
+      -2,     -3,     -3,     -4,
 };
 const int8_t lut_fm_index_2x_upshifts[] = {
       11,      9,      7,      6,

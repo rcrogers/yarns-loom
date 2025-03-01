@@ -37,16 +37,11 @@ using namespace stmlib;
 void Motion::Set(int32_t _start, int32_t _target, uint32_t _phase_increment) {
   target = _target;
   delta = _target - _start;
-  set_phase_decrement(_phase_increment);
-}
-
-void Motion::set_phase_decrement(uint32_t n) {
-  n >>= 1;
-  phase_decrement = n; // -n;
+  phase_increment = _phase_increment;
 }
 
 int32_t Motion::compute_linear_slope() const {
-  int32_t s = (static_cast<int64_t>(delta) * phase_decrement) >> 31;
+  int32_t s = (static_cast<int64_t>(delta) * phase_increment) >> 32;
   if (!s) s = delta >= 0 ? 1 : -1;
   return s;
 }
@@ -121,8 +116,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
       motion_ = NULL;
   }
 
-  phase_ = INT32_MAX;
-  phase_decrement_ = motion_ ? motion_->phase_decrement : 0;
+  phase_ = 0;
   if (!motion_) {
     // No motion => no expo slopes
     std::fill(
@@ -137,7 +131,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
     // RELEASE_PRELUDE heads for the sustain level at RELEASE's steepest
     // slope, then RELEASE begins.
     int32_t linear_slope = release_.compute_linear_slope();
-    int8_t steepest_shift = lut_expo_slope_shift[LUT_EXPO_SLOPE_SHIFT_SIZE - 1];
+    int8_t steepest_shift = lut_expo_slope_shift[0];
     int32_t steepest_expo_slope = Motion::compute_expo_slope(
       linear_slope, steepest_shift, Motion::max_shift(linear_slope)
     );
@@ -148,7 +142,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
       steepest_expo_slope
     );
     int32_t delta_to_sustain = decay_.target - value_; // TODO Set this in NoteOff
-    release_prelude_.set_phase_decrement((steepest_expo_slope / (delta_to_sustain >> 16)) << 16);
+    release_prelude_.phase_increment = (steepest_expo_slope / (delta_to_sustain >> 16)) << 16;
   } else { // Build normal expo slopes
 
     // TODO handle upward decay?? no longer covered by wrong-direction logic
@@ -193,62 +187,77 @@ void Envelope::Trigger(EnvelopeSegment segment) {
     biased_expo_slopes[i] = expo_slope_[i] + slope_bias; \
   }
 
+/*
+TODO try copying expo slope to local
+TODO try outputting slopes instead, then computing a running total
+https://claude.ai/chat/127cae75-04b9-4d95-87ac-d01114bd7cf3
+Complication: shifting slopes before summing will cause error
+Running total must be 32-bit, slope vector must be 32-bit, output buffer can be 16-bit
+Separate inline buffer of length 4-8?
+Also need to calculate a delta on segment change
+Alternately, feasible for interpolator to compute prefix sum buffer?
+Options for vector accumulator:
+1. Offset slope vector
+  - Render buffer of envelope slopes
+    - Have to handle corners
+  - Offset envelope slope buffer by interpolator slope
+  - Compute prefix sum of slope buffer
+2. Apply slope/value bias inline, like an idiot
+  - Optionally MAKE_BIASED_EXPO_SLOPES
+3. Sum q15 value vectors (no prefix sum)
+  - Render buffer of interpolator values
+  - Sum interpolator value buffer with envelope buffer
+4. 
+*/
+
 template<size_t BUFFER_SIZE> // To allow both double and single buffering
-void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias) {
+// void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias) {
+void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias, size_t samples_to_render) {
   // NB: theoretically it would be nice if we could pick up on a NoteOn/NoteOff in the render loop and immediately change direction.  However, MIDI input processing is synchronous with regard to rendering, so this scenario does not arise and there's no point supporting it.
 
-  // MAKE_BIASED_EXPO_SLOPES();
+  // TODO could template this
+  if (!motion_) {
+    while (samples_to_render--) {
+      buffer->Overwrite(value_ >> 16);
+    }
+    return;
+  }
+
+  uint32_t phase = phase_;
+  uint32_t phase_increment = motion_->phase_increment;
+
+  // TODO precompute with same lifecycle as phase_ ?
+  uint32_t samples_until_trigger = (UINT32_MAX - phase) / phase_increment;
+
+  bool will_trigger = samples_to_render >= samples_until_trigger;
+  size_t samples_pre_trigger = will_trigger ? samples_until_trigger : samples_to_render;
+  size_t samples_post_trigger = samples_to_render - samples_until_trigger;
 
   // int32_t biased_value = value_ + value_bias;
   int32_t value = value_;
-  int32_t phase = phase_;
-  int32_t phase_decrement = phase_decrement_;
   // int16_t* buffer_start = buffer->write_ptr();
-  size_t size = kAudioBlockSize;
-  while (size--) {
-    phase -= phase_decrement;
-    if (phase < 0) {
-      // biased_value = motion_->target + value_bias;
-      value = motion_->target;
-      // The current value is not available to Trigger, but currently the only segment that needs a current value is RELEASE_PRELUDE, which is a manual start segment
-      Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-      phase = phase_;
-      phase_decrement = phase_decrement_;
-    }
-    // TODO try outputting slopes instead, then computing a running total
-    // https://claude.ai/chat/127cae75-04b9-4d95-87ac-d01114bd7cf3
-    // Complication: shifting slopes before summing will cause error
-    // Running total must be 32-bit, slope vector must be 32-bit, output buffer can be 16-bit
-    // Separate inline buffer of length 4-8?
-    // Also need to calculate a delta on segment change
-    // Alternately, feasible for interpolator to compute prefix sum buffer?
-    // Options for prefix sum:
-    // 1. Offset slope vector
-    //  - Render buffer of envelope slopes
-    //    - Have to handle corners
-    //  - Offset envelope slope buffer by interpolator slope
-    //  - Compute prefix sum of slope buffer
-    // 2. Apply slope/value bias inline
-    // 3. Sum value vectors
-    //   - Render buffer of interpolator values
-
-    int32_t slope = expo_slope_[phase >> (31 - kLutExpoSlopeShiftSizeBits)];
-    // slope += slope_bias;
-    // int32_t slope = biased_expo_slopes[phase >> (31 - kLutExpoSlopeShiftSizeBits)];
-    // biased_value += slope;
+  while (samples_pre_trigger--) {
+    phase += phase_increment;
+    int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
+    /* slope += slope_bias; */
     value += slope;
-    // TODO may need to clip slope and/or value after addition
-    // buffer->Overwrite(biased_value >> 16);
     buffer->Overwrite(value >> 16);
   }
-  // value_ = biased_value - value_bias;
-  value_ = value;
-  phase_ = phase;
+
+  if (will_trigger) { // Mid-segment state is irrelevant
+    value_ = motion_->target;
+    Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
+    if (samples_post_trigger) {
+      // NB: this may cause another Trigger if next segment is short
+      return RenderSamples(buffer, value_bias, slope_bias, samples_post_trigger);
+    }
+  } else { // Preserve mid-segment state
+    value_ = value;
+    phase_ = phase;
+  }
 }
 
-template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t value_bias, int32_t slope_bias);
-template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias);
-
-int16_t Envelope::value() const { return value_ >> 16; }
+template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t value_bias, int32_t slope_bias, size_t samples_to_render);
+template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias, size_t samples_to_render);
 
 }  // namespace yarns

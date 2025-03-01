@@ -34,7 +34,7 @@ namespace yarns {
 
 using namespace stmlib;
 
-const size_t kAudioBlockSizeBits = 6;
+const uint8_t kAudioBlockSizeBits = 6;
 const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
 const uint8_t kLutExpoSlopeShiftSizeBits = 32 - __builtin_clz(LUT_EXPO_SLOPE_SHIFT_SIZE - 1);
@@ -60,10 +60,9 @@ struct ADSR {
 
 struct Motion {
   int32_t target, delta;
-  int32_t phase_decrement;
+  uint32_t phase_increment;
 
   void Set(int32_t _start, int32_t _target, uint32_t _phase_increment);
-  void set_phase_decrement(uint32_t _phase_increment);
   int32_t compute_linear_slope() const; // Divide delta by duration
   static uint8_t max_shift(int32_t n);
   static int32_t compute_expo_slope(
@@ -79,7 +78,6 @@ class Envelope {
   void Init(int32_t value);
   // Compute the max damp-ability of the envelope for a given tremolo strength
   int16_t tremolo(uint16_t strength) const;
-  int16_t value() const;
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
@@ -87,10 +85,12 @@ class Envelope {
   );
   void Trigger(EnvelopeSegment segment); // Populates expo slope table for the new segment
   template<size_t BUFFER_SIZE>
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias);
+  // void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias);
+  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias, size_t samples_to_render = kAudioBlockSize);
 
  private:
-  int32_t value_, phase_, phase_decrement_;
+  int32_t value_;
+  uint32_t phase_;
   Motion attack_, decay_, release_, release_prelude_;
 
   // Current segment.
