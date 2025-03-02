@@ -60,7 +60,7 @@ struct ADSR {
 
 struct Motion {
   int32_t target, delta;
-  uint32_t phase_increment;
+  uint32_t phase_increment, samples_left;
 
   void Set(int32_t _start, int32_t _target, uint32_t _phase_increment);
   int32_t compute_linear_slope() const; // Divide delta by duration

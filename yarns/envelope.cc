@@ -143,6 +143,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
     );
     int32_t delta_to_sustain = decay_.target - value_; // TODO Set this in NoteOff
     release_prelude_.phase_increment = (steepest_expo_slope / (delta_to_sustain >> 16)) << 16;
+    release_prelude_.samples_left = UINT32_MAX / release_prelude_.phase_increment;
   } else { // Build normal expo slopes
 
     // TODO handle upward decay?? no longer covered by wrong-direction logic
@@ -173,6 +174,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
     }
 
     int32_t linear_slope = motion_->compute_linear_slope();
+    motion_->samples_left = UINT32_MAX / motion_->phase_increment;
     uint8_t max_shift = Motion::max_shift(linear_slope);
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
       int8_t shift = lut_expo_slope_shift[i];
@@ -226,9 +228,7 @@ void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, i
   uint32_t phase = phase_;
   uint32_t phase_increment = motion_->phase_increment;
 
-  // TODO precompute with same lifecycle as phase_ ?
-  uint32_t samples_until_trigger = (UINT32_MAX - phase) / phase_increment;
-
+  uint32_t samples_until_trigger = motion_->samples_left;
   bool will_trigger = samples_to_render >= samples_until_trigger;
   size_t samples_pre_trigger = will_trigger ? samples_until_trigger : samples_to_render;
   size_t samples_post_trigger = samples_to_render - samples_until_trigger;
@@ -251,9 +251,10 @@ void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, i
       // NB: this may cause another Trigger if next segment is short
       return RenderSamples(buffer, value_bias, slope_bias, samples_post_trigger);
     }
-  } else { // Preserve mid-segment state
+  } else { // We're still mid-segment, so save its state
     value_ = value;
     phase_ = phase;
+    motion_->samples_left -= samples_to_render;
   }
 }
 
