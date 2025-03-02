@@ -31,8 +31,43 @@ namespace yarns {
 
 using namespace stmlib;
 
-// Manual start edge cases: too far from target (prelude), too close to target (truncate beginning), wrong direction (skip?)
-// Can also apply to decay start if attack was skipped due to wrong direction
+/*
+Edge cases when a manually started segment has an off-nominal delta to target:
+1. Wrong direction (skip)
+  - Affects: ATTACK, DECAY
+    - "High attack interrupted by low attack"
+      - NoteOn with high peak
+      - ATTACK interrupted by early NoteOff
+      - EARLY_RELEASE interrupted by NoteOn with a peak level below current value
+    - Inverted decay, if peak level is below sustain level
+    - In general, delta from actual value to target has different sign than delta from nominal start value to target
+      - I.e., we seem to have already passed the target
+  - Solution
+    - ATTACK has wrong direction: skip to DECAY
+    - DECAY has wrong direction: this is more ambiguous
+      - Should we just disallow peak < sustain?
+2. Value too far from target (prelude)
+  - Affects: DECAY, RELEASE
+    - Primary case: NoteOff before SUSTAIN segment has started
+    - Can also apply to decay start, e.g.:
+      - "High attack interrupted by low attack" causes ATTACK to skip to DECAY
+      - ATTACK skips to decay
+      - DECAY is now further from sustain level than expected
+  - Solution: prelude
+    - Populate the segment's expo slopes
+    - Extend the segment's initial/steepest slope backward in time
+    - Give each Motion a new counter of prelude samples remaining
+      - While these count down, use the first expo slope value only
+      - See calculation for release_prelude_.samples_left
+3. Value too close to target
+  - Affects: ATTACK, RELEASE
+    - NoteOff from below sustain level
+    - NoteOn when above minimum level
+  - Solution: truncate beginning of phase
+    - Want to skip forward in phase
+    - Translating "value too close" to a phase is nonlinear due to expo slope
+      - Use LUT that translates an expo value to a phase?
+*/
 
 void Motion::Set(int32_t _start, int32_t _target, uint32_t _phase_increment) {
   target = _target;
@@ -69,7 +104,6 @@ void Envelope::NoteOff() {
     // Normal release
     Trigger(ENV_SEGMENT_RELEASE);
   } else {
-    // TODO If we are "above" sustain level, do a release prelude.  If we are "below" sustain level, skip some portion of the beginning of the release.
     Trigger(ENV_SEGMENT_RELEASE_PRELUDE);
   }
 }
@@ -117,8 +151,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   }
 
   phase_ = 0;
-  if (!motion_) {
-    // No motion => no expo slopes
+  if (!motion_) { // No motion => no expo slopes
     std::fill(
       &expo_slope_[0],
       &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
@@ -131,18 +164,17 @@ void Envelope::Trigger(EnvelopeSegment segment) {
     // RELEASE_PRELUDE heads for the sustain level at RELEASE's steepest
     // slope, then RELEASE begins.
     int32_t linear_slope = release_.compute_linear_slope();
-    int8_t steepest_shift = lut_expo_slope_shift[0];
-    int32_t steepest_expo_slope = Motion::compute_expo_slope(
-      linear_slope, steepest_shift, Motion::max_shift(linear_slope)
+    int32_t prelude_slope = Motion::compute_expo_slope(
+      linear_slope, lut_expo_slope_shift[0], Motion::max_shift(linear_slope)
     );
     // Use the steepest release slope for this entire segment
     std::fill(
       &expo_slope_[0],
       &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-      steepest_expo_slope
+      prelude_slope
     );
-    int32_t delta_to_sustain = decay_.target - value_; // TODO Set this in NoteOff
-    release_prelude_.phase_increment = (steepest_expo_slope / (delta_to_sustain >> 16)) << 16;
+    int32_t delta_to_nominal_start = decay_.target - value_;
+    release_prelude_.phase_increment = (prelude_slope / (delta_to_nominal_start >> 16)) << 16;
     release_prelude_.samples_left = UINT32_MAX / release_prelude_.phase_increment;
   } else { // Build normal expo slopes
 
@@ -165,17 +197,17 @@ void Envelope::Trigger(EnvelopeSegment segment) {
       // stage). If actual is greater (rare in practice), use that
 
       // TODO "reaching the target" doesn't work now, need to truncate the segment
-      // TODO truncating phase based on delta-of-deltas is hard due to exp!
       attack_.delta = positive_segment_slope
         ? std::max(nominal_delta, attack_.delta)
         : std::min(nominal_delta, attack_.delta);
     } else if (segment == ENV_SEGMENT_RELEASE) {
-      // If we are below sustain level due to an aborted attack
+      // TODO If we are below sustain level due to an aborted attack
     }
 
     int32_t linear_slope = motion_->compute_linear_slope();
     motion_->samples_left = UINT32_MAX / motion_->phase_increment;
     uint8_t max_shift = Motion::max_shift(linear_slope);
+    // TODO fast segments (0.1ms) can span multiple slices in a single sample, which means the steep initial expo slope will be in effect for more of the phase than intended, potentially causing significant error.  fall back on linear slope if samples_left does not exceed LUT_EXPO_SLOPE_SHIFT_SIZE by 1x (0.2ms segment) or 2x (0.4ms segment)?
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
       int8_t shift = lut_expo_slope_shift[i];
       expo_slope_[i] = Motion::compute_expo_slope(linear_slope, shift, max_shift);
