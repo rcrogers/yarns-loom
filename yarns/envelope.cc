@@ -244,60 +244,54 @@ template<size_t BUFFER_SIZE>
 void Envelope::RenderSamples(
   stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, 
   int32_t value_bias,
-  int32_t slope_bias
+  int32_t slope_bias, 
+  size_t render_samples_needed
 ) {
   int32_t value = value_;
   // int32_t biased_value = value_ + value_bias;
+
+  // TODO could template this
+  if (!motion_) {
+    while (render_samples_needed--) { buffer->Overwrite(value >> 16); }
+    return;
+  }
+
+  size_t catchup_samples_rendered = std::min(catchup_samples_, render_samples_needed);
+  for (size_t i = catchup_samples_rendered; i--; ) {
+    value += expo_slope_[0]; // Use the first (steepest) slope directly
+    buffer->Overwrite(value >> 16);
+  }
+  render_samples_needed -= catchup_samples_rendered;
+
+  size_t expo_samples_rendered = std::min(expo_samples_, render_samples_needed);
   uint32_t phase = phase_;
+  uint32_t phase_increment = motion_->phase_increment;
+  for (size_t i = expo_samples_rendered; i--; ) {
+    phase += phase_increment;
+    int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
+    /* slope += slope_bias; */
+    value += slope;
+    buffer->Overwrite(value >> 16);
+  }
+  render_samples_needed -= expo_samples_rendered;
 
-  size_t render_samples_needed = kAudioBlockSize;
-  while (render_samples_needed) {
-    multi.PrintDebugByte(0xA0 + segment_);
-    // Each iteration, generate samples from max one segment
-    if (motion_) {
-      multi.PrintDebugByte(0xB0 + segment_);
-      // Linear catchup
-      size_t catchup_samples_rendered = std::min(catchup_samples_, render_samples_needed);
-      for (size_t i = catchup_samples_rendered; i--; ) {
-        value += expo_slope_[0]; // Use the first (steepest) slope directly
-        buffer->Overwrite(value >> 16);
-      }
-      render_samples_needed -= catchup_samples_rendered;
-      catchup_samples_ -= catchup_samples_rendered;
-
-      // Expo curve
-      size_t expo_samples_rendered = std::min(expo_samples_, render_samples_needed);
-      uint32_t phase_increment = motion_->phase_increment;
-      for (size_t i = expo_samples_rendered; i--; ) {
-        phase += phase_increment;
-        int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
-        /* slope += slope_bias; */
-        value += slope;
-        buffer->Overwrite(value >> 16);
-      }
-      render_samples_needed -= expo_samples_rendered;
-      expo_samples_ -= expo_samples_rendered;
-
-      if (!expo_samples_) {
-        // Done rendering all samples for this segment
-        value = motion_->target;
-        phase = 0;
-        // Since we pass manual=false, we assume Trigger does not need value_ set, and that phase_ will start at 0
-        Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
-      }
-    } else if (render_samples_needed) {
-      multi.PrintDebugByte(0xC0 + segment_);
-      while (render_samples_needed--) {
-        buffer->Overwrite(value >> 16);
-      }
+  if (expo_samples_rendered == expo_samples_) { // Done rendering all samples for this segment
+    // TODO needed to avoid wrong direction check? we probably don't want wrong direction for auto triggered segments, so this is good I think
+    value_ = motion_->target;
+    Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
+    if (render_samples_needed) {
+      // NB: may cause yet another Trigger if next segment is short
+      return RenderSamples(buffer, value_bias, slope_bias, render_samples_needed);
     }
-  };
-  
-  value_ = value;
-  phase_ = phase;
+  } else { // We'll continue rendering this segment next time
+    value_ = value;
+    phase_ = phase;
+    catchup_samples_ -= catchup_samples_rendered;
+    expo_samples_ -= expo_samples_rendered;
+  }
 }
 
-template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t value_bias, int32_t slope_bias);
-template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias);
+template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed);
+template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed);
 
 }  // namespace yarns

@@ -80,7 +80,7 @@ class Envelope {
   void Trigger(EnvelopeSegment segment, bool manual); // Populates expo slope table for the new segment
 
   template<size_t BUFFER_SIZE>
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias);
+  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed = kAudioBlockSize);
 
  private:
   Motion attack_, decay_, release_;
