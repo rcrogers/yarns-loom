@@ -88,6 +88,8 @@ resources = [
    'waveshaper', 'WS', 'int16_t', int, True),
   (lookup_tables.lookup_tables_32,
    'lookup_table_32', 'LUT', 'uint32_t', int, False),
+  # (lookup_tables.lookup_tables_16,
+  #   'lookup_table_16', 'LUT', 'uint16_t', int, False),
   (lookup_tables.lookup_tables_8,
    'lookup_table_8', 'LUT', 'int8_t', int, False),
   (characters.characters,

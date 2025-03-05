@@ -30,6 +30,8 @@
 
 #include "yarns/resources.h"
 
+// #include "yarns/multi.h" // TODO
+
 namespace yarns {
 
 using namespace stmlib;
@@ -47,7 +49,6 @@ enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,           // manual start, auto/manual end
   ENV_SEGMENT_DECAY,            // auto start, auto/manual end
   ENV_SEGMENT_SUSTAIN,          // no motion
-  ENV_SEGMENT_RELEASE_PRELUDE,  // manual start, auto end
   ENV_SEGMENT_RELEASE,          // manual start, auto end
   ENV_SEGMENT_DEAD,             // no motion
   ENV_NUM_SEGMENTS,
@@ -59,15 +60,8 @@ struct ADSR {
 };
 
 struct Motion {
-  int32_t target, delta;
-  uint32_t phase_increment, samples_left;
-
-  void Set(int32_t _start, int32_t _target, uint32_t _phase_increment);
-  int32_t compute_linear_slope() const; // Divide delta by duration
-  static uint8_t max_shift(int32_t n);
-  static int32_t compute_expo_slope(
-    int32_t linear_slope, int8_t shift, uint8_t max_shift
-  );
+  int32_t target, expected_start;
+  uint32_t phase_increment;
 };
 
 class Envelope {
@@ -84,19 +78,23 @@ class Envelope {
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   );
   void Trigger(EnvelopeSegment segment); // Populates expo slope table for the new segment
-  template<size_t BUFFER_SIZE>
-  // void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias);
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias, size_t samples_to_render = kAudioBlockSize);
+
+  // template<size_t BUFFER_SIZE>
+  // void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed = kAudioBlockSize);
+  void RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias, Motion* force_motion,  size_t render_samples_needed = kAudioBlockSize);
+  void RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed = kAudioBlockSize);
 
  private:
-  int32_t value_;
-  uint32_t phase_;
-  Motion attack_, decay_, release_, release_prelude_;
-
+  Motion attack_, decay_, release_;
+  
   // Current segment.
   EnvelopeSegment segment_;
   Motion* motion_;
 
+  // State of the current motion segment
+  size_t catchup_samples_, expo_samples_; // Remaining sample counts
+  int32_t value_;
+  uint32_t phase_;
   // Maps slices of the phase to slopes, approximating an exponential curve
   int32_t expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
