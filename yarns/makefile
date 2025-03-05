@@ -24,8 +24,8 @@
 
 # System specifications
 F_CRYSTAL      = 8000000L
-F_CPU          = 128000000L
-SYSCLOCK       = SYSCLK_FREQ_HSE
+F_CPU          = 72000000L
+SYSCLOCK       = SYSCLK_FREQ_72MHz
 FAMILY         = f10x
 DENSITY        = md
 MEMORY_MODE    = flash
