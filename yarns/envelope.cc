@@ -152,10 +152,7 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   
   // TODO is there any advantage to deriving expo_samples_ count first, and basing slope on that?
 
-  // int32_t linear_slope = (static_cast<int64_t>(expected_distance_to_target) * motion_->phase_increment) >> 32;
-  int32_t linear_slope = static_cast<int32_t>(
-    multiply_64(expected_distance_to_target, motion_->phase_increment)
-  );
+  int32_t linear_slope = (static_cast<int64_t>(expected_distance_to_target) * motion_->phase_increment) >> 32;
   if (!linear_slope) linear_slope = positive_slope_expected ? 1 : -1;
   if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
     // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
@@ -276,8 +273,7 @@ void Envelope::RenderSamples(
   render_samples_needed -= expo_samples_rendered;
 
   if (expo_samples_rendered == expo_samples_) { // Done rendering all samples for this segment
-    // TODO needed to avoid wrong direction check? we probably don't want wrong direction for auto triggered segments, so this is good I think
-    value_ = motion_->target;
+    value_ = motion_->target; // manual Trigger doesn't need this, but the next RenderSamples does
     Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
     if (render_samples_needed) {
       // NB: may cause yet another Trigger if next segment is short
