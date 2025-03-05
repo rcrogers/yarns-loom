@@ -88,7 +88,7 @@ void Envelope::Init(int32_t value) {
 
 void Envelope::NoteOff() {
   if (segment_ < ENV_SEGMENT_RELEASE) {
-    Trigger(ENV_SEGMENT_RELEASE);
+    Trigger(ENV_SEGMENT_RELEASE, true);
   }
 }
 
@@ -118,7 +118,7 @@ void Envelope::NoteOn(
 
   if (segment_ > ENV_SEGMENT_SUSTAIN) {
     // TODO skip to decay if we are already above peak? is a decay prelude needed?
-    Trigger(ENV_SEGMENT_ATTACK);
+    Trigger(ENV_SEGMENT_ATTACK, true);
   }
 }
 
@@ -127,7 +127,7 @@ int16_t Envelope::tremolo(uint16_t strength) const {
   return relative_value * -strength >> 16;
 }
 
-void Envelope::Trigger(EnvelopeSegment segment) {
+void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   segment_ = segment;
   switch (segment) {
     case ENV_SEGMENT_ATTACK : motion_ = &attack_  ; break;
@@ -141,22 +141,18 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   int32_t expected_distance_to_target = motion_->target - motion_->expected_start;
   bool positive_slope_expected = expected_distance_to_target >= 0;
   
-  if ((motion_->target - value_ >= 0) != positive_slope_expected) {
+  if (manual && (motion_->target - value_ >= 0) != positive_slope_expected) {
     // We're going in the wrong direction
     if (segment == ENV_SEGMENT_ATTACK) {
       // Skip to next segment for attack
-      return Trigger(ENV_SEGMENT_DECAY);
+      return Trigger(ENV_SEGMENT_DECAY, manual);
     }
     // TODO skip decay?
   }
   
   // TODO is there any advantage to deriving expo_samples_ count first, and basing slope on that?
 
-  // Set linear and expo slopes
-
   // int32_t linear_slope = (static_cast<int64_t>(expected_distance_to_target) * motion_->phase_increment) >> 32;
-  // Cross multiply instead of using int64_t
-
   int32_t linear_slope = static_cast<int32_t>(
     multiply_64(expected_distance_to_target, motion_->phase_increment)
   );
@@ -180,22 +176,25 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   }
   
   // If Trigger was automatic, or non-interrupting manual, this should be 0
-  int32_t catchup_distance = motion_->expected_start - value_;
-  if ((catchup_distance >= 0) == positive_slope_expected) {
-    // Expo phase will start from the beginning
-    phase_ = 0;
-    // May need some linear catchup before the expo phase begins
-    catchup_samples_ = expo_slope_[0] ? catchup_distance / expo_slope_[0] : 0;
+  if (manual) {
+    int32_t catchup_distance = motion_->expected_start - value_;
+    if ((catchup_distance >= 0) == positive_slope_expected) {
+      phase_ = 0; // Expo phase will start from the beginning
+      // May need some linear catchup before the expo phase begins
+      catchup_samples_ = expo_slope_[0] ? catchup_distance / expo_slope_[0] : 0;
+    } else {
+      // We're closer to target than nominal, so fast-forward to a phase determined by the distance we've already traveled
+      uint32_t expected_distance_24 = expected_distance_to_target >> 8;
+      uint8_t value_fraction_completed_8 = expected_distance_24 ? -catchup_distance / expected_distance_24 : 0;
+      // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
+      phase_ = (UINT16_MAX - lut_env_expo[UINT8_MAX - value_fraction_completed_8]) << 16;
+      catchup_samples_ = 0;
+    }
   } else {
-    // We're closer to target than nominal, so fast-forward to a phase determined by the distance we've already traveled
-    // int64_t completed_distance_40 = -catchup_distance << 8;
-    // uint8_t value_fraction_completed = expected_distance_to_target ? completed_distance_40 / expected_distance_to_target : 0;
-    uint32_t expected_distance_24 = expected_distance_to_target >> 8;
-    uint8_t value_fraction_completed_8 = expected_distance_24 ? -catchup_distance / expected_distance_24 : 0;
-    // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
-    phase_ = (UINT16_MAX - lut_env_expo[UINT8_MAX - value_fraction_completed_8]) << 16;
     catchup_samples_ = 0;
+    phase_ = 0;
   }
+
   expo_samples_ = (UINT32_MAX - phase_) / motion_->phase_increment;
 }
 
@@ -245,54 +244,60 @@ template<size_t BUFFER_SIZE>
 void Envelope::RenderSamples(
   stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, 
   int32_t value_bias,
-  int32_t slope_bias, 
-  size_t render_samples_needed
+  int32_t slope_bias
 ) {
   int32_t value = value_;
   // int32_t biased_value = value_ + value_bias;
-
-  // TODO could template this
-  if (!motion_) {
-    while (render_samples_needed--) { buffer->Overwrite(value >> 16); }
-    return;
-  }
-
-  size_t catchup_samples_rendered = std::min(catchup_samples_, render_samples_needed);
-  for (size_t i = catchup_samples_rendered; i--; ) {
-    value += expo_slope_[0]; // Use the first (steepest) slope directly
-    buffer->Overwrite(value >> 16);
-  }
-  render_samples_needed -= catchup_samples_rendered;
-
-  size_t expo_samples_rendered = std::min(expo_samples_, render_samples_needed);
   uint32_t phase = phase_;
-  uint32_t phase_increment = motion_->phase_increment;
-  for (size_t i = expo_samples_rendered; i--; ) {
-    phase += phase_increment;
-    int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
-    /* slope += slope_bias; */
-    value += slope;
-    buffer->Overwrite(value >> 16);
-  }
-  render_samples_needed -= expo_samples_rendered;
 
-  if (expo_samples_rendered == expo_samples_) { // Done rendering all samples for this segment
-    // TODO needed to avoid wrong direction check? we probably don't want wrong direction for auto triggered segments, so this is good I think
-    value_ = motion_->target;
-    Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
-    if (render_samples_needed) {
-      // NB: may cause yet another Trigger if next segment is short
-      return RenderSamples(buffer, value_bias, slope_bias, render_samples_needed);
+  size_t render_samples_needed = kAudioBlockSize;
+  while (render_samples_needed) {
+    multi.PrintDebugByte(0xA0 + segment_);
+    // Each iteration, generate samples from max one segment
+    if (motion_) {
+      multi.PrintDebugByte(0xB0 + segment_);
+      // Linear catchup
+      size_t catchup_samples_rendered = std::min(catchup_samples_, render_samples_needed);
+      for (size_t i = catchup_samples_rendered; i--; ) {
+        value += expo_slope_[0]; // Use the first (steepest) slope directly
+        buffer->Overwrite(value >> 16);
+      }
+      render_samples_needed -= catchup_samples_rendered;
+      catchup_samples_ -= catchup_samples_rendered;
+
+      // Expo curve
+      size_t expo_samples_rendered = std::min(expo_samples_, render_samples_needed);
+      uint32_t phase_increment = motion_->phase_increment;
+      for (size_t i = expo_samples_rendered; i--; ) {
+        phase += phase_increment;
+        int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
+        /* slope += slope_bias; */
+        value += slope;
+        buffer->Overwrite(value >> 16);
+      }
+      render_samples_needed -= expo_samples_rendered;
+      expo_samples_ -= expo_samples_rendered;
+
+      if (!expo_samples_) {
+        // Done rendering all samples for this segment
+        value = motion_->target;
+        phase = 0;
+        // Since we pass manual=false, we assume Trigger does not need value_ set, and that phase_ will start at 0
+        Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
+      }
+    } else if (render_samples_needed) {
+      multi.PrintDebugByte(0xC0 + segment_);
+      while (render_samples_needed--) {
+        buffer->Overwrite(value >> 16);
+      }
     }
-  } else { // We'll continue rendering this segment next time
-    value_ = value;
-    phase_ = phase;
-    catchup_samples_ -= catchup_samples_rendered;
-    expo_samples_ -= expo_samples_rendered;
-  }
+  };
+  
+  value_ = value;
+  phase_ = phase;
 }
 
-template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed);
-template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed);
+template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t value_bias, int32_t slope_bias);
+template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias);
 
 }  // namespace yarns

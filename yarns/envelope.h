@@ -77,10 +77,10 @@ class Envelope {
     ADSR& adsr,
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   );
-  void Trigger(EnvelopeSegment segment); // Populates expo slope table for the new segment
+  void Trigger(EnvelopeSegment segment, bool manual); // Populates expo slope table for the new segment
 
   template<size_t BUFFER_SIZE>
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed = kAudioBlockSize);
+  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias);
 
  private:
   Motion attack_, decay_, release_;
