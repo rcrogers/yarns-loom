@@ -106,21 +106,6 @@ extern const int16_t wav_steps[];
 extern const int16_t wav_noise[];
 extern const int16_t wav_sine[];
 extern const int16_t wav_sizzle[];
-extern const int16_t wav_bandlimited_comb_0[];
-extern const int16_t wav_bandlimited_comb_1[];
-extern const int16_t wav_bandlimited_comb_2[];
-extern const int16_t wav_bandlimited_comb_3[];
-extern const int16_t wav_bandlimited_comb_4[];
-extern const int16_t wav_bandlimited_comb_5[];
-extern const int16_t wav_bandlimited_comb_6[];
-extern const int16_t wav_bandlimited_comb_7[];
-extern const int16_t wav_bandlimited_comb_8[];
-extern const int16_t wav_bandlimited_comb_9[];
-extern const int16_t wav_bandlimited_comb_10[];
-extern const int16_t wav_bandlimited_comb_11[];
-extern const int16_t wav_bandlimited_comb_12[];
-extern const int16_t wav_bandlimited_comb_13[];
-extern const int16_t wav_bandlimited_comb_14[];
 extern const int16_t ws_violent_overdrive[];
 extern const int16_t ws_sine_fold[];
 extern const int16_t ws_tri_fold[];
@@ -227,36 +212,6 @@ extern const uint16_t chr_characters[];
 #define WAV_SINE_SIZE 257
 #define WAV_SIZZLE 5
 #define WAV_SIZZLE_SIZE 257
-#define WAV_BANDLIMITED_COMB_0 6
-#define WAV_BANDLIMITED_COMB_0_SIZE 257
-#define WAV_BANDLIMITED_COMB_1 7
-#define WAV_BANDLIMITED_COMB_1_SIZE 257
-#define WAV_BANDLIMITED_COMB_2 8
-#define WAV_BANDLIMITED_COMB_2_SIZE 257
-#define WAV_BANDLIMITED_COMB_3 9
-#define WAV_BANDLIMITED_COMB_3_SIZE 257
-#define WAV_BANDLIMITED_COMB_4 10
-#define WAV_BANDLIMITED_COMB_4_SIZE 257
-#define WAV_BANDLIMITED_COMB_5 11
-#define WAV_BANDLIMITED_COMB_5_SIZE 257
-#define WAV_BANDLIMITED_COMB_6 12
-#define WAV_BANDLIMITED_COMB_6_SIZE 257
-#define WAV_BANDLIMITED_COMB_7 13
-#define WAV_BANDLIMITED_COMB_7_SIZE 257
-#define WAV_BANDLIMITED_COMB_8 14
-#define WAV_BANDLIMITED_COMB_8_SIZE 257
-#define WAV_BANDLIMITED_COMB_9 15
-#define WAV_BANDLIMITED_COMB_9_SIZE 257
-#define WAV_BANDLIMITED_COMB_10 16
-#define WAV_BANDLIMITED_COMB_10_SIZE 257
-#define WAV_BANDLIMITED_COMB_11 17
-#define WAV_BANDLIMITED_COMB_11_SIZE 257
-#define WAV_BANDLIMITED_COMB_12 18
-#define WAV_BANDLIMITED_COMB_12_SIZE 257
-#define WAV_BANDLIMITED_COMB_13 19
-#define WAV_BANDLIMITED_COMB_13_SIZE 257
-#define WAV_BANDLIMITED_COMB_14 20
-#define WAV_BANDLIMITED_COMB_14_SIZE 257
 #define WS_VIOLENT_OVERDRIVE 0
 #define WS_VIOLENT_OVERDRIVE_SIZE 257
 #define WS_SINE_FOLD 1
