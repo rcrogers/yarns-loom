@@ -96,11 +96,13 @@ void Envelope::NoteOn(
   ADSR& adsr,
   int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
 ) {
+  // multi.PrintInt32E(max_target);
   // NB: min_target changes between notes IFF calibration/settings change
   int16_t scale = max_target - min_target;
   min_target <<= 16;
   int32_t peak = min_target + scale * adsr.peak;
   int32_t sustain = min_target + scale * adsr.sustain;
+  // multi.PrintInt32E(scale);
 
   attack_.expected_start = min_target;
   attack_.target = peak;
@@ -127,6 +129,9 @@ int16_t Envelope::tremolo(uint16_t strength) const {
   return relative_value * -strength >> 16;
 }
 
+#define DIFF_DOWNSHIFT(a, b) \
+  ((a >> 1) - (b >> 1));
+
 void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   segment_ = segment;
   switch (segment) {
@@ -138,10 +143,15 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
       return;
   }
 
-  int32_t expected_distance_to_target = motion_->target - motion_->expected_start;
-  bool positive_slope_expected = expected_distance_to_target >= 0;
+  // multi.PrintInt32E(motion_->target);
+  int32_t expected_distance_to_target_31 = DIFF_DOWNSHIFT(motion_->target, motion_->expected_start);
+  bool positive_slope_expected = expected_distance_to_target_31 >= 0;
+
+  // Sign/magnitude looks good on timbre ADR, both polarizations
+  // For release, magnitude gets higher when sustain level rises.  This is expected
+  // multi.PrintInt32E(expected_distance_to_target_31);
   
-  if (manual && (motion_->target - value_ >= 0) != positive_slope_expected) {
+  if (manual && (motion_->target >= value_) != positive_slope_expected) {
     // We're going in the wrong direction
     if (segment == ENV_SEGMENT_ATTACK) {
       // Skip to next segment for attack
@@ -152,8 +162,15 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   
   // TODO is there any advantage to deriving expo_samples_ count first, and basing slope on that?
 
-  int32_t linear_slope = (static_cast<int64_t>(expected_distance_to_target) * motion_->phase_increment) >> 32;
-  if (!linear_slope) linear_slope = positive_slope_expected ? 1 : -1;
+  int32_t linear_slope = (static_cast<int64_t>(expected_distance_to_target_31) * motion_->phase_increment) >> 31;
+
+  // This is ZERO on release for positive envelope when sustain is zero!  When sustain is 1/128, prints -4.12E6
+  // Well yeah -- if sustain level is 0, release has nowhere to go.  We should probably just skip segments that have no discernable linear slope?
+  // *** CATCHUP STRATEGY DOES NOT WORK *** for a release whose nominal delta and slope are 0! skipping it isn't an answer either, we gotta get to 0 somehow
+  multi.PrintInt32E(linear_slope);
+
+  int32_t minimal_slope = positive_slope_expected ? 1 : -1;
+  if (!linear_slope) linear_slope = minimal_slope;
   if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
     // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
     std::fill(
@@ -166,26 +183,46 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
       int8_t shift = lut_expo_slope_shift[i];
-      expo_slope_[i] = shift >= 0
+      int32_t expo_slope = shift >= 0
         ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
         : linear_slope >> static_cast<uint8_t>(-shift);
+      if (!expo_slope) expo_slope = minimal_slope;
+      expo_slope_[i] = expo_slope;
     }
   }
   
-  // If Trigger was automatic, or non-interrupting manual, this should be 0
   if (manual) {
-    int32_t catchup_distance = motion_->expected_start - value_;
-    if ((catchup_distance >= 0) == positive_slope_expected) {
+    // Positive: expected start is above us, in absolute terms. Negative: expected start is below us.  If the Trigger didn't interrupt another moving segment, this should be 0
+    int32_t catchup_distance_31 = DIFF_DOWNSHIFT(motion_->expected_start, value_);
+    //  - With positive timbre polarization
+    //    - always outputs negative or 0 on both A+R
+    //    - Negative delta to expected start on inc attack: we're above expected start.  This is expected when attacking before release has completed
+    //    - Negative delta to expected start on dec release: we're above expected start.  This is expected when releasing before decay has completed
+    //  - With negative timbre polarization
+    //    - always positive
+    // multi.PrintInt32E(catchup_distance_31);
+    if ((catchup_distance_31 >= 0) == positive_slope_expected) {
       phase_ = 0; // Expo phase will start from the beginning
       // May need some linear catchup before the expo phase begins
-      catchup_samples_ = expo_slope_[0] ? catchup_distance / expo_slope_[0] : 0;
+      catchup_samples_ = (catchup_distance_31 / expo_slope_[0]) << 1;
+      // For early release with sustain = 1/127, this gets up to 6.07E6 = about 150 seconds -- bad!
+      // Also, with sustain at 0, *** there is no print here!!! ***
+      // multi.PrintInt32E(catchup_samples_);
+
+      // Maxes out at -4.12E6. Presumably this is linear (bc short segment)  => would imply real catchup distance ~ -16480000 ? catchup_distance_31 is more like -1.01E9, implying real distance -2E9
+      // We're off by 120x???  Are slopes just too low across the board?
+      // multi.PrintInt32E(expo_slope_[0]);
+
+      // multi.PrintDebugByte(0xA0 + segment);
     } else {
       // We're closer to target than nominal, so fast-forward to a phase determined by the distance we've already traveled
-      uint32_t expected_distance_24 = expected_distance_to_target >> 8;
-      uint8_t value_fraction_completed_8 = expected_distance_24 ? -catchup_distance / expected_distance_24 : 0;
+      uint32_t expected_distance_23 = expected_distance_to_target_31 >> 8;
+      uint8_t value_fraction_completed_8 = expected_distance_to_target_31 ? (-catchup_distance_31 / expected_distance_23) << 1 : 0;
       // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
       phase_ = (UINT16_MAX - lut_env_expo[UINT8_MAX - value_fraction_completed_8]) << 16;
       catchup_samples_ = 0;
+
+      // multi.PrintDebugByte(0xB0 + segment);
     }
   } else {
     catchup_samples_ = 0;

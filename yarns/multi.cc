@@ -68,6 +68,10 @@ void Multi::PrintDebugByte(uint8_t byte) {
   ui.PrintDebugByte(byte);
 }
 
+void Multi::PrintInt32E(int32_t value) {
+  ui.PrintInt32E(value);
+}
+
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
 
