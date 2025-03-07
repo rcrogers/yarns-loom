@@ -25,7 +25,7 @@
 
 #include "yarns/envelope.h"
 
-#include "yarns/multi.h" // TODO
+#include "yarns/multi.h"
 
 #include "stmlib/dsp/dsp.h"
 
@@ -72,7 +72,7 @@ Edge cases when a manually started segment has an off-nominal delta to target:
 */
 
 void Envelope::Init(int32_t value) {
-  value_ = value;
+  value_ = 0; // value;
   phase_ = 0;
   segment_ = ENV_SEGMENT_DEAD;
   motion_ = NULL;
@@ -116,6 +116,7 @@ void Envelope::NoteOn(
   // TODO could precompute decay/release slopes here, don't have to wait for them to arrive.  downside is that decay can be skipped (release cannot).  Trigger would need to know whether to use the precomputed slope or compute a new one.
 
   if (segment_ > ENV_SEGMENT_SUSTAIN) {
+    multi.PrintInt32E(value_);
     Trigger(ENV_SEGMENT_ATTACK, true);
   }
 }
@@ -138,76 +139,73 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
       motion_ = NULL;
       return;
   }  
-  
-  // TODO *** if sustain is 0, early release totally whiffs and envelope stays high
-  // CV envelope seemingly not affected, but osc gain/timbre both are??
-  // For osc gain/timbre, could be related to having a min target that is true 0
-  // Flat release between 0 sustain and 0 min could provoke edge cases
-  // TODO target_above_expected_start is misleading bad for flat segments! audit all three "above" checks for this
 
-  bool target_above_expected_start = motion_->target >= motion_->expected_start;
-  bool target_above_actual_start = motion_->target >= value_;
+  int32_t nominal_delta_31 = DIFF_DOWNSHIFT(motion_->target, motion_->expected_start);
+  int32_t actual_delta_31 = DIFF_DOWNSHIFT(motion_->target, value_);
+  bool movement_expected = nominal_delta_31 != 0;
 
-  if (manual && (
-    // Direction is wrong
-    target_above_expected_start != target_above_actual_start// ||
-    // // There is no direction
-    // motion_->target == value_
-  )) {
-    // Skip segment
-    multi.PrintDebugByte(0x0E + (segment << 4));
+  // Skip segment if there is a direction disagreement or nowhere to go
+  if (
+    // Already at target (important to skip because 0 disrupts direction checks)
+    !actual_delta_31 || (
+      // The segment is supposed to have a direction
+      movement_expected && (
+        // It doesn't agree with the actual direction
+        (nominal_delta_31 > 0) !=
+        (actual_delta_31 > 0)
+      )
+      // Cases: NoteOn during release from above peak level
+      // TODO are direction skips good in case of polarity reversals? only if there are non-attack cases
+    )
+  ) {
+    // Seeing some of these after a totally normal ADS to 0 sustain, probably indicating underflow.  How to avoid overshoot?
+    // multi.PrintDebugByte(0x0F + (segment << 4));
     return Trigger(static_cast<EnvelopeSegment>(segment + 1), manual);
   }
 
-  if (manual && (
-    // // Direction is wrong
-    // target_above_expected_start != target_above_actual_start ||
-    // There is no direction
-    motion_->target == value_
-  )) {
-    // Skip segment
-    multi.PrintDebugByte(0x0F + (segment << 4));
-    return Trigger(static_cast<EnvelopeSegment>(segment + 1), manual);
-  }
+  // multi.PrintDebugByte(0x09 + (segment << 4));
 
-  multi.PrintDebugByte(0x09 + (segment << 4));
-
+  // Determine X and Y distance to travel during this segment
   int32_t delta_31;
-  bool expected_start_above_actual_start = motion_->expected_start >= value_;
-  bool farther_than_expected = target_above_expected_start == expected_start_above_actual_start;
-  if (farther_than_expected) {
-    multi.PrintDebugByte(0x0A + (segment << 4));
-    // Use the steeper contour to cover distance faster
-    delta_31 = DIFF_DOWNSHIFT(motion_->target, value_);
-    phase_ = 0;
-  } else {
-    // TODO when we see 0B here (attack from nonzero), there are usually audio glitches
-    // double pop -- second is at transition to decay?
-    // exacerbated by low sustain
-    multi.PrintDebugByte(0x0B + (segment << 4));
+  if ( // Closer to target than expected
+    false && movement_expected && (
+      // NB: we already ruled out direction disagreement
+      abs(actual_delta_31) < abs(nominal_delta_31)
+    )
+  ) {
+    // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack 
+
+    // TODO this pathway is still glitchy, math wrong?
+    // multi.PrintDebugByte(0x0B + (segment << 4));
 
     // Keep the nominal segment contour
-    delta_31 = DIFF_DOWNSHIFT(motion_->target, motion_->expected_start);
+    delta_31 = nominal_delta_31;
 
-    // Fast-forward in time to reflect distance already traveled
-    int32_t delta_completed_31 = DIFF_DOWNSHIFT(value_, motion_->expected_start);
+    // Pre-advance X to reflect Y already traveled
+    int32_t delta_amount_completed_31 = DIFF_DOWNSHIFT(value_, motion_->expected_start);
     // TODO possible overflow?
     int32_t delta_total_23 = delta_31 >> 8;
-    uint8_t delta_fraction_completed_8 = delta_total_23 ? delta_completed_31 / delta_total_23 : 0;
+    uint8_t delta_fraction_completed_8 = delta_total_23 ? delta_amount_completed_31 / delta_total_23 : 0;
     // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
     STATIC_ASSERT(LUT_ENV_EXPO_SIZE == UINT8_MAX + 2, lut_env_expo_size);
     phase_ = (UINT16_MAX - lut_env_expo[UINT8_MAX - delta_fraction_completed_8]) << 16;
     // if (segment == ENV_SEGMENT_ATTACK) multi.PrintInt32E(phase_);
+  } else {
+    // We're at least as far as expected (possibly farther).  Make the curve as steep as needed to cover the Y distance in the expected time
+    // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted segments
+    // multi.PrintDebugByte(0x0A + (segment << 4));
+    delta_31 = actual_delta_31;
+    phase_ = 0;
   }
   segment_samples_ = (UINT32_MAX - phase_) / motion_->phase_increment;
 
   // TODO any advantage to calculating this from samples_left_?  maybe messed up by phase skipping
   int32_t linear_slope = (static_cast<int64_t>(delta_31) * motion_->phase_increment) >> 31;
   // multi.PrintInt32E(linear_slope);
-  int32_t minimal_slope = target_above_expected_start ? 1 : -1;
+  int32_t minimal_slope = actual_delta_31 > 0 ? 1 : -1;
   if (!linear_slope) linear_slope = minimal_slope;
 
-  // Populate expo slope table
+  // Create segment curve from linear slope
   if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
     // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
     std::fill(
@@ -298,9 +296,17 @@ void Envelope::RenderSamples(
   }
   render_samples_needed -= samples_rendered;
 
+  // If segment is complete
   if (samples_rendered == segment_samples_) {
-    // Done rendering all samples for this segment
-    value_ = motion_->target; // Trigger shouldn't need this, but the next RenderSamples needs to know where we left off
+    // int32_t error = DIFF_DOWNSHIFT(value, motion_->target);
+    // multi.PrintInt32E(error);
+    // multi.PrintInt32E(motion_->target);
+
+    // Trigger shouldn't need this, but the next RenderSamples needs to know where we left off    
+    value_ = motion_->target;
+    // multi.PrintInt32E(value_);
+    // Without jump, reliable audio glitches on 0B
+    // value_ = value;
     Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
     if (render_samples_needed) {
       // NB: may cause yet another Trigger if next segment is short
