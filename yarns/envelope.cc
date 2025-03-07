@@ -76,8 +76,7 @@ void Envelope::Init(int32_t value) {
   phase_ = 0;
   segment_ = ENV_SEGMENT_DEAD;
   motion_ = NULL;
-  catchup_samples_ = 0;
-  expo_samples_ = 0;
+  segment_samples_ = 0;
   std::fill(
     &expo_slope_[0],
     &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
@@ -96,13 +95,11 @@ void Envelope::NoteOn(
   ADSR& adsr,
   int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
 ) {
-  // multi.PrintInt32E(max_target);
   // NB: min_target changes between notes IFF calibration/settings change
-  int16_t scale = max_target - min_target;
+  int16_t scale = max_target - min_target; // TODO overflow?
   min_target <<= 16;
   int32_t peak = min_target + scale * adsr.peak;
   int32_t sustain = min_target + scale * adsr.sustain;
-  // multi.PrintInt32E(scale);
 
   attack_.expected_start = min_target;
   attack_.target = peak;
@@ -119,7 +116,6 @@ void Envelope::NoteOn(
   // TODO could precompute decay/release slopes here, don't have to wait for them to arrive.  downside is that decay can be skipped (release cannot).  Trigger would need to know whether to use the precomputed slope or compute a new one.
 
   if (segment_ > ENV_SEGMENT_SUSTAIN) {
-    // TODO skip to decay if we are already above peak? is a decay prelude needed?
     Trigger(ENV_SEGMENT_ATTACK, true);
   }
 }
@@ -141,36 +137,77 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     default:
       motion_ = NULL;
       return;
+  }  
+  
+  // TODO *** if sustain is 0, early release totally whiffs and envelope stays high
+  // CV envelope seemingly not affected, but osc gain/timbre both are??
+  // For osc gain/timbre, could be related to having a min target that is true 0
+  // Flat release between 0 sustain and 0 min could provoke edge cases
+  // TODO target_above_expected_start is misleading bad for flat segments! audit all three "above" checks for this
+
+  bool target_above_expected_start = motion_->target >= motion_->expected_start;
+  bool target_above_actual_start = motion_->target >= value_;
+
+  if (manual && (
+    // Direction is wrong
+    target_above_expected_start != target_above_actual_start// ||
+    // // There is no direction
+    // motion_->target == value_
+  )) {
+    // Skip segment
+    multi.PrintDebugByte(0x0E + (segment << 4));
+    return Trigger(static_cast<EnvelopeSegment>(segment + 1), manual);
   }
 
-  // multi.PrintInt32E(motion_->target);
-  int32_t expected_distance_to_target_31 = DIFF_DOWNSHIFT(motion_->target, motion_->expected_start);
-  bool positive_slope_expected = expected_distance_to_target_31 >= 0;
-
-  // Sign/magnitude looks good on timbre ADR, both polarizations
-  // For release, magnitude gets higher when sustain level rises.  This is expected
-  // multi.PrintInt32E(expected_distance_to_target_31);
-  
-  if (manual && (motion_->target >= value_) != positive_slope_expected) {
-    // We're going in the wrong direction
-    if (segment == ENV_SEGMENT_ATTACK) {
-      // Skip to next segment for attack
-      return Trigger(ENV_SEGMENT_DECAY, manual);
-    }
-    // TODO skip decay?
+  if (manual && (
+    // // Direction is wrong
+    // target_above_expected_start != target_above_actual_start ||
+    // There is no direction
+    motion_->target == value_
+  )) {
+    // Skip segment
+    multi.PrintDebugByte(0x0F + (segment << 4));
+    return Trigger(static_cast<EnvelopeSegment>(segment + 1), manual);
   }
-  
-  // TODO is there any advantage to deriving expo_samples_ count first, and basing slope on that?
 
-  int32_t linear_slope = (static_cast<int64_t>(expected_distance_to_target_31) * motion_->phase_increment) >> 31;
+  multi.PrintDebugByte(0x09 + (segment << 4));
 
-  // This is ZERO on release for positive envelope when sustain is zero!  When sustain is 1/128, prints -4.12E6
-  // Well yeah -- if sustain level is 0, release has nowhere to go.  We should probably just skip segments that have no discernable linear slope?
-  // *** CATCHUP STRATEGY DOES NOT WORK *** for a release whose nominal delta and slope are 0! skipping it isn't an answer either, we gotta get to 0 somehow
-  multi.PrintInt32E(linear_slope);
+  int32_t delta_31;
+  bool expected_start_above_actual_start = motion_->expected_start >= value_;
+  bool farther_than_expected = target_above_expected_start == expected_start_above_actual_start;
+  if (farther_than_expected) {
+    multi.PrintDebugByte(0x0A + (segment << 4));
+    // Use the steeper contour to cover distance faster
+    delta_31 = DIFF_DOWNSHIFT(motion_->target, value_);
+    phase_ = 0;
+  } else {
+    // TODO when we see 0B here (attack from nonzero), there are usually audio glitches
+    // double pop -- second is at transition to decay?
+    // exacerbated by low sustain
+    multi.PrintDebugByte(0x0B + (segment << 4));
 
-  int32_t minimal_slope = positive_slope_expected ? 1 : -1;
+    // Keep the nominal segment contour
+    delta_31 = DIFF_DOWNSHIFT(motion_->target, motion_->expected_start);
+
+    // Fast-forward in time to reflect distance already traveled
+    int32_t delta_completed_31 = DIFF_DOWNSHIFT(value_, motion_->expected_start);
+    // TODO possible overflow?
+    int32_t delta_total_23 = delta_31 >> 8;
+    uint8_t delta_fraction_completed_8 = delta_total_23 ? delta_completed_31 / delta_total_23 : 0;
+    // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
+    STATIC_ASSERT(LUT_ENV_EXPO_SIZE == UINT8_MAX + 2, lut_env_expo_size);
+    phase_ = (UINT16_MAX - lut_env_expo[UINT8_MAX - delta_fraction_completed_8]) << 16;
+    // if (segment == ENV_SEGMENT_ATTACK) multi.PrintInt32E(phase_);
+  }
+  segment_samples_ = (UINT32_MAX - phase_) / motion_->phase_increment;
+
+  // TODO any advantage to calculating this from samples_left_?  maybe messed up by phase skipping
+  int32_t linear_slope = (static_cast<int64_t>(delta_31) * motion_->phase_increment) >> 31;
+  // multi.PrintInt32E(linear_slope);
+  int32_t minimal_slope = target_above_expected_start ? 1 : -1;
   if (!linear_slope) linear_slope = minimal_slope;
+
+  // Populate expo slope table
   if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
     // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
     std::fill(
@@ -190,46 +227,6 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
       expo_slope_[i] = expo_slope;
     }
   }
-  
-  if (manual) {
-    // Positive: expected start is above us, in absolute terms. Negative: expected start is below us.  If the Trigger didn't interrupt another moving segment, this should be 0
-    int32_t catchup_distance_31 = DIFF_DOWNSHIFT(motion_->expected_start, value_);
-    //  - With positive timbre polarization
-    //    - always outputs negative or 0 on both A+R
-    //    - Negative delta to expected start on inc attack: we're above expected start.  This is expected when attacking before release has completed
-    //    - Negative delta to expected start on dec release: we're above expected start.  This is expected when releasing before decay has completed
-    //  - With negative timbre polarization
-    //    - always positive
-    // multi.PrintInt32E(catchup_distance_31);
-    if ((catchup_distance_31 >= 0) == positive_slope_expected) {
-      phase_ = 0; // Expo phase will start from the beginning
-      // May need some linear catchup before the expo phase begins
-      catchup_samples_ = (catchup_distance_31 / expo_slope_[0]) << 1;
-      // For early release with sustain = 1/127, this gets up to 6.07E6 = about 150 seconds -- bad!
-      // Also, with sustain at 0, *** there is no print here!!! ***
-      // multi.PrintInt32E(catchup_samples_);
-
-      // Maxes out at -4.12E6. Presumably this is linear (bc short segment)  => would imply real catchup distance ~ -16480000 ? catchup_distance_31 is more like -1.01E9, implying real distance -2E9
-      // We're off by 120x???  Are slopes just too low across the board?
-      // multi.PrintInt32E(expo_slope_[0]);
-
-      // multi.PrintDebugByte(0xA0 + segment);
-    } else {
-      // We're closer to target than nominal, so fast-forward to a phase determined by the distance we've already traveled
-      uint32_t expected_distance_23 = expected_distance_to_target_31 >> 8;
-      uint8_t value_fraction_completed_8 = expected_distance_to_target_31 ? (-catchup_distance_31 / expected_distance_23) << 1 : 0;
-      // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
-      phase_ = (UINT16_MAX - lut_env_expo[UINT8_MAX - value_fraction_completed_8]) << 16;
-      catchup_samples_ = 0;
-
-      // multi.PrintDebugByte(0xB0 + segment);
-    }
-  } else {
-    catchup_samples_ = 0;
-    phase_ = 0;
-  }
-
-  expo_samples_ = (UINT32_MAX - phase_) / motion_->phase_increment;
 }
 
 /*
@@ -284,43 +281,36 @@ void Envelope::RenderSamples(
   int32_t value = value_;
   // int32_t biased_value = value_ + value_bias;
 
-  // TODO could template this
   if (!motion_) {
     while (render_samples_needed--) { buffer->Overwrite(value >> 16); }
     return;
   }
 
-  size_t catchup_samples_rendered = std::min(catchup_samples_, render_samples_needed);
-  for (size_t i = catchup_samples_rendered; i--; ) {
-    value += expo_slope_[0]; // Use the first (steepest) slope directly
-    buffer->Overwrite(value >> 16);
-  }
-  render_samples_needed -= catchup_samples_rendered;
-
-  size_t expo_samples_rendered = std::min(expo_samples_, render_samples_needed);
+  size_t samples_rendered = std::min(segment_samples_, render_samples_needed);
   uint32_t phase = phase_;
   uint32_t phase_increment = motion_->phase_increment;
-  for (size_t i = expo_samples_rendered; i--; ) {
+  for (size_t i = samples_rendered; i--; ) {
     phase += phase_increment;
     int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
     /* slope += slope_bias; */
     value += slope;
     buffer->Overwrite(value >> 16);
   }
-  render_samples_needed -= expo_samples_rendered;
+  render_samples_needed -= samples_rendered;
 
-  if (expo_samples_rendered == expo_samples_) { // Done rendering all samples for this segment
-    value_ = motion_->target; // manual Trigger doesn't need this, but the next RenderSamples does
+  if (samples_rendered == segment_samples_) {
+    // Done rendering all samples for this segment
+    value_ = motion_->target; // Trigger shouldn't need this, but the next RenderSamples needs to know where we left off
     Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
     if (render_samples_needed) {
       // NB: may cause yet another Trigger if next segment is short
       return RenderSamples(buffer, value_bias, slope_bias, render_samples_needed);
     }
-  } else { // We'll continue rendering this segment next time
+  } else {
+    // We'll continue rendering this segment next time
     value_ = value;
     phase_ = phase;
-    catchup_samples_ -= catchup_samples_rendered;
-    expo_samples_ -= expo_samples_rendered;
+    segment_samples_ -= samples_rendered;
   }
 }
 

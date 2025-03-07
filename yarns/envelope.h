@@ -90,7 +90,7 @@ class Envelope {
   Motion* motion_;
 
   // State of the current motion segment
-  size_t catchup_samples_, expo_samples_; // Remaining sample counts
+  size_t segment_samples_;
   int32_t value_;
   uint32_t phase_;
   // Maps slices of the phase to slopes, approximating an exponential curve
