@@ -304,7 +304,8 @@ void Voice::NoteOn(
   }
   gate_ = true;
   adsr_ = adsr;
-  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
+
+  if (uses_audio()) oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 
@@ -335,7 +336,7 @@ void Voice::NoteOn(
 void Voice::NoteOff() {
   if (!gate_) return; // TODO
   gate_ = false;
-  oscillator_.NoteOff();
+  if (uses_audio()) oscillator_.NoteOff();
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
 }
