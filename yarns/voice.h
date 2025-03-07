@@ -209,6 +209,7 @@ class Voice {
   inline bool uses_audio() const {
     return audio_output_ && oscillator_mode_ != OSCILLATOR_MODE_OFF;
   }
+  // Is this a gate-only part?
   inline bool has_cv_output() const {
     if (uses_audio()) return true;
     for (uint8_t i = 0; i < DC_LAST; ++i) {
