@@ -270,7 +270,11 @@ void CVOutput::RenderSamples() {
     //   value = stmlib::ClipU16(value);
     //   dac_buffer_.Overwrite(value);
     // }
-    envelope_.RenderSamples(&dac_buffer_, tremolo_.value() << 16, tremolo_.slope());
+
+    // tremolo_.SetTarget(envelope_.tremolo(tremolo));
+    // tremolo_.ComputeSlope();
+
+    envelope_.RenderSamples(&dac_buffer_, tremolo_.target() << 16);
   } else if (is_audio()) {
     std::fill(
         dac_buffer_.write_ptr(),

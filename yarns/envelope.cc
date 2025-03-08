@@ -72,16 +72,17 @@ Edge cases when a manually started segment has an off-nominal delta to target:
 */
 
 void Envelope::Init(int32_t value) {
-  value_ = 0; // value;
+  value_ = value;
   phase_ = 0;
+  output_bias_ = 0;
   segment_ = ENV_SEGMENT_DEAD;
   motion_ = NULL;
   segment_samples_ = 0;
-  std::fill(
-    &expo_slope_[0],
-    &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-    0
-  );
+  // std::fill(
+  //   &expo_slope_[0],
+  //   &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+  //   0
+  // );
   // Trigger(ENV_SEGMENT_DEAD);
 }
 
@@ -104,14 +105,20 @@ void Envelope::NoteOn(
   attack_.expected_start = min_target;
   attack_.target = peak;
   attack_.phase_increment = adsr.attack;
+  attack_.delta_31 = 0;
+  attack_.actual_start = 0;
 
   decay_.expected_start = peak;
   decay_.target = sustain;
   decay_.phase_increment = adsr.decay;
+  decay_.delta_31 = 0;
+  decay_.actual_start = 0;
 
   release_.expected_start = sustain;
   release_.target = min_target;
   release_.phase_increment = adsr.release;
+  release_.delta_31 = 0;
+  release_.actual_start = 0;
 
   // TODO could precompute decay/release slopes here, don't have to wait for them to arrive.  downside is that decay can be skipped (release cannot).  Trigger would need to know whether to use the precomputed slope or compute a new one.
 
@@ -127,7 +134,7 @@ int16_t Envelope::tremolo(uint16_t strength) const {
 }
 
 #define DIFF_DOWNSHIFT(a, b) \
-  ((a >> 1) - (b >> 1));
+  (((a) >> 1) - ((b) >> 1));
 
 void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   segment_ = segment;
@@ -166,9 +173,9 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   // multi.PrintDebugByte(0x09 + (segment << 4));
 
   // Determine X and Y distance to travel during this segment
-  int32_t delta_31;
+  motion_->actual_start = value_;
   if ( // Closer to target than expected
-    false && movement_expected && (
+    movement_expected && (
       // NB: we already ruled out direction disagreement
       abs(actual_delta_31) < abs(nominal_delta_31)
     )
@@ -179,14 +186,15 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     // multi.PrintDebugByte(0x0B + (segment << 4));
 
     // Keep the nominal segment contour
-    delta_31 = nominal_delta_31;
+    motion_->delta_31 = nominal_delta_31;
 
     // Pre-advance X to reflect Y already traveled
     int32_t delta_amount_completed_31 = DIFF_DOWNSHIFT(value_, motion_->expected_start);
     // TODO possible overflow?
-    int32_t delta_total_23 = delta_31 >> 8;
+    int32_t delta_total_23 = motion_->delta_31 >> 8;
     uint8_t delta_fraction_completed_8 = delta_total_23 ? delta_amount_completed_31 / delta_total_23 : 0;
     // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
+    // TODO no longer true!
     STATIC_ASSERT(LUT_ENV_EXPO_SIZE == UINT8_MAX + 2, lut_env_expo_size);
     phase_ = (UINT16_MAX - lut_env_expo[UINT8_MAX - delta_fraction_completed_8]) << 16;
     // if (segment == ENV_SEGMENT_ATTACK) multi.PrintInt32E(phase_);
@@ -194,37 +202,37 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     // We're at least as far as expected (possibly farther).  Make the curve as steep as needed to cover the Y distance in the expected time
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted segments
     // multi.PrintDebugByte(0x0A + (segment << 4));
-    delta_31 = actual_delta_31;
+    motion_->delta_31 = actual_delta_31;
     phase_ = 0;
   }
   segment_samples_ = (UINT32_MAX - phase_) / motion_->phase_increment;
 
-  // TODO any advantage to calculating this from samples_left_?  maybe messed up by phase skipping
-  int32_t linear_slope = (static_cast<int64_t>(delta_31) * motion_->phase_increment) >> 31;
-  // multi.PrintInt32E(linear_slope);
-  int32_t minimal_slope = actual_delta_31 > 0 ? 1 : -1;
-  if (!linear_slope) linear_slope = minimal_slope;
+  // // TODO any advantage to calculating this from samples_left_?  maybe messed up by phase skipping
+  // int32_t linear_slope = (static_cast<int64_t>(motion_->actual_delta_31) * motion_->phase_increment) >> 31;
+  // // multi.PrintInt32E(linear_slope);
+  // int32_t minimal_slope = actual_delta_31 > 0 ? 1 : -1;
+  // if (!linear_slope) linear_slope = minimal_slope;
 
-  // Create segment curve from linear slope
-  if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
-    // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
-    std::fill(
-      &expo_slope_[0],
-      &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-      linear_slope
-    );
-  } else {
-    uint32_t slope_for_clz = abs(linear_slope >= 0 ? linear_slope : linear_slope + 1);
-    uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
-    for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-      int8_t shift = lut_expo_slope_shift[i];
-      int32_t expo_slope = shift >= 0
-        ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
-        : linear_slope >> static_cast<uint8_t>(-shift);
-      if (!expo_slope) expo_slope = minimal_slope;
-      expo_slope_[i] = expo_slope;
-    }
-  }
+  // // Create segment curve from linear slope
+  // if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
+  //   // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
+  //   std::fill(
+  //     &expo_slope_[0],
+  //     &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+  //     linear_slope
+  //   );
+  // } else {
+  //   uint32_t slope_for_clz = abs(linear_slope >= 0 ? linear_slope : linear_slope + 1);
+  //   uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
+  //   for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
+  //     int8_t shift = lut_expo_slope_shift[i];
+  //     int32_t expo_slope = shift >= 0
+  //       ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
+  //       : linear_slope >> static_cast<uint8_t>(-shift);
+  //     if (!expo_slope) expo_slope = minimal_slope;
+  //     expo_slope_[i] = expo_slope;
+  //   }
+  // }
 }
 
 /*
@@ -272,55 +280,60 @@ Options for vector accumulator:
 template<size_t BUFFER_SIZE>
 void Envelope::RenderSamples(
   stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, 
-  int32_t value_bias,
-  int32_t slope_bias, 
+  int32_t new_output_bias,
   size_t render_samples_needed
 ) {
-  int32_t value = value_;
-  // int32_t biased_value = value_ + value_bias;
+  new_output_bias = 0; // TODO
+
+  int32_t current_output_value = value_ + output_bias_;
 
   if (!motion_) {
-    while (render_samples_needed--) { buffer->Overwrite(value >> 16); }
+    int32_t slope = (new_output_bias - output_bias_) / render_samples_needed;
+    while (render_samples_needed--) {
+      current_output_value += slope;
+      buffer->Overwrite(current_output_value >> 16);
+    }
+    output_bias_ = new_output_bias;
     return;
   }
+  output_bias_ = new_output_bias;
 
+  // Linear interpolation over this render cycle
   size_t samples_rendered = std::min(segment_samples_, render_samples_needed);
-  uint32_t phase = phase_;
-  uint32_t phase_increment = motion_->phase_increment;
+  phase_ += motion_->phase_increment * samples_rendered;
+  uint16_t expo_fraction = Interpolate824(lut_env_expo, phase_);
+  int32_t motion_progress_31 = (static_cast<int64_t>(motion_->delta_31) * expo_fraction) >> 16;
+  int32_t output_target_31 = (new_output_bias >> 1) + (motion_->actual_start >> 1) + motion_progress_31;
+  CONSTRAIN(output_target_31, INT32_MIN >> 1, INT32_MAX >> 1); // TODO use min/max from noteon?
+  int32_t render_delta_31 = DIFF_DOWNSHIFT(output_target_31 << 1, current_output_value);
+  CONSTRAIN(render_delta_31, INT32_MIN >> 1, INT32_MAX >> 1);
+  multi.PrintInt32E(render_delta_31);
+
+  int32_t slope = (render_delta_31 / samples_rendered) << 1;
   for (size_t i = samples_rendered; i--; ) {
-    phase += phase_increment;
-    int32_t slope = expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
-    /* slope += slope_bias; */
-    value += slope;
-    buffer->Overwrite(value >> 16);
+    current_output_value += slope;
+    buffer->Overwrite(current_output_value >> 16);
   }
-  render_samples_needed -= samples_rendered;
 
-  // If segment is complete
   if (samples_rendered == segment_samples_) {
-    // int32_t error = DIFF_DOWNSHIFT(value, motion_->target);
-    // multi.PrintInt32E(error);
-    // multi.PrintInt32E(motion_->target);
-
-    // Trigger shouldn't need this, but the next RenderSamples needs to know where we left off    
+    // Segment is complete
     value_ = motion_->target;
-    // multi.PrintInt32E(value_);
-    // Without jump, reliable audio glitches on 0B
-    // value_ = value;
     Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
+    render_samples_needed -= samples_rendered;
     if (render_samples_needed) {
       // NB: may cause yet another Trigger if next segment is short
-      return RenderSamples(buffer, value_bias, slope_bias, render_samples_needed);
+      return RenderSamples(buffer, new_output_bias, render_samples_needed);
     }
   } else {
     // We'll continue rendering this segment next time
-    value_ = value;
-    phase_ = phase;
+    value_ = current_output_value - new_output_bias; // CONSTRAIN complicates this
     segment_samples_ -= samples_rendered;
   }
 }
 
-template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed);
-template void Envelope::RenderSamples(stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed);
+template void Envelope::RenderSamples(
+  stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t new_output_bias, size_t render_samples_needed);
+template void Envelope::RenderSamples(
+  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t new_output_bias, size_t render_samples_needed);
 
 }  // namespace yarns

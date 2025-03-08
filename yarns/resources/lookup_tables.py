@@ -115,9 +115,9 @@ env_samples = 256.0
 
 # p = 1.83 is good, 2.5 also good, 2.7 gets a uniform spread of shifts
 def make_expo(linear, p = 1.95):
-  # return 1.0 - numpy.exp(-4 * linear)
-  # Alternate curve shape: quarter circle
-  return (1 - (1 - linear) ** p) ** (1 / p)
+  return 1.0 - numpy.exp(-4 * linear)
+  # # Alternate curve shape: quarter circle
+  # return (1 - (1 - linear) ** p) ** (1 / p)
 
 # Map a phase to an exponential value
 env_linear = numpy.arange(0, env_samples + 1) / env_samples
@@ -209,9 +209,9 @@ def get_cumulative_value_from_slope_shifts(x): # x between 0 and 1
 
 print('\navg abs error pct', sum(abs(e) for e in errors) / len(errors))
 
-lookup_tables_8.append(
-    ('expo_slope_shift', expo_slope_shift)
-)
+# lookup_tables_8.append(
+#     ('expo_slope_shift', expo_slope_shift)
+# )
 
 # raise Exception('stop here')
 

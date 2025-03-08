@@ -39,11 +39,11 @@ using namespace stmlib;
 const uint8_t kAudioBlockSizeBits = 6;
 const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
-const uint8_t kLutExpoSlopeShiftSizeBits = 32 - __builtin_clz(LUT_EXPO_SLOPE_SHIFT_SIZE - 1);
-STATIC_ASSERT(
-  1 << kLutExpoSlopeShiftSizeBits == LUT_EXPO_SLOPE_SHIFT_SIZE,
-  expo_slope_shift_size
-);
+// const uint8_t kLutExpoSlopeShiftSizeBits = 32 - __builtin_clz(LUT_EXPO_SLOPE_SHIFT_SIZE - 1);
+// STATIC_ASSERT(
+//   1 << kLutExpoSlopeShiftSizeBits == LUT_EXPO_SLOPE_SHIFT_SIZE,
+//   expo_slope_shift_size
+// );
 
 enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,           // manual start, auto/manual end
@@ -60,7 +60,7 @@ struct ADSR {
 };
 
 struct Motion {
-  int32_t target, expected_start;
+  int32_t target, expected_start, delta_31, actual_start;
   uint32_t phase_increment;
 };
 
@@ -77,10 +77,10 @@ class Envelope {
     ADSR& adsr,
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   );
-  void Trigger(EnvelopeSegment segment, bool manual); // Populates expo slope table for the new segment
+  void Trigger(EnvelopeSegment segment, bool is_manual); // Populates expo slope table for the new segment
 
   template<size_t BUFFER_SIZE>
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t value_bias, int32_t slope_bias, size_t render_samples_needed = kAudioBlockSize);
+  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t new_output_bias, size_t render_samples_needed = kAudioBlockSize);
 
  private:
   Motion attack_, decay_, release_;
@@ -93,8 +93,9 @@ class Envelope {
   size_t segment_samples_;
   int32_t value_;
   uint32_t phase_;
+  int32_t output_bias_;
   // Maps slices of the phase to slopes, approximating an exponential curve
-  int32_t expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  // int32_t expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
