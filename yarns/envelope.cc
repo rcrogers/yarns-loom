@@ -29,6 +29,10 @@
 
 #include "stmlib/dsp/dsp.h"
 
+#pragma GCC diagnostic error "-Wsign-conversion"
+#pragma GCC diagnostic error "-Wsign-compare"
+// #pragma GCC diagnostic error "-Wconversion"
+
 namespace yarns {
 
 using namespace stmlib;
@@ -132,9 +136,15 @@ int16_t Envelope::tremolo(uint16_t strength) const {
   int32_t relative_value = (value_ - release_.target) >> 16;
   return relative_value * -strength >> 16;
 }
+/*
+#define DOWNSHIFT_SIGNED_1BIT(value) \
+  ((value) >= 0 ? ((value) >> 1) : ((value) + 1) >> 1)
 
 #define DIFF_DOWNSHIFT(a, b) \
-  (((a) >> 1) - ((b) >> 1));
+  (DOWNSHIFT_SIGNED_1BIT(a) - DOWNSHIFT_SIGNED_1BIT(b))
+*/
+
+#define DIFF_DOWNSHIFT(a, b) ((a / 2) - (b / 2))
 
 void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   segment_ = segment;
@@ -182,7 +192,6 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   ) {
     // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack 
 
-    // TODO this pathway is still glitchy, math wrong?
     // multi.PrintDebugByte(0x0B + (segment << 4));
 
     // Keep the nominal segment contour
@@ -190,14 +199,20 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
 
     // Pre-advance X to reflect Y already traveled
     int32_t delta_amount_completed_31 = DIFF_DOWNSHIFT(value_, motion_->expected_start);
-    // TODO possible overflow?
     int32_t delta_total_23 = motion_->delta_31 >> 8;
     uint8_t delta_fraction_completed_8 = delta_total_23 ? delta_amount_completed_31 / delta_total_23 : 0;
+
+    // uint8_t delta_fraction_remaining_8 = UINT8_MAX - delta_fraction_completed_8;
     // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
     // TODO no longer true!
-    STATIC_ASSERT(LUT_ENV_EXPO_SIZE == UINT8_MAX + 2, lut_env_expo_size);
-    phase_ = (UINT16_MAX - lut_env_expo[UINT8_MAX - delta_fraction_completed_8]) << 16;
+    // STATIC_ASSERT(LUT_ENV_EXPO_SIZE == UINT8_MAX + 2, lut_env_expo_size);
+    // uint16_t phase_remaining_16 = lut_env_expo[delta_fraction_remaining_8];
+    // phase_ = static_cast<uint16_t>(UINT16_MAX - phase_remaining_16);
+    // phase_ <<= 16;
     // if (segment == ENV_SEGMENT_ATTACK) multi.PrintInt32E(phase_);
+
+    phase_ = Interpolate88(lut_env_inverse_expo, delta_fraction_completed_8);
+    phase_ <<= 16;
   } else {
     // We're at least as far as expected (possibly farther).  Make the curve as steep as needed to cover the Y distance in the expected time
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted segments
@@ -206,42 +221,8 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     phase_ = 0;
   }
   segment_samples_ = (UINT32_MAX - phase_) / motion_->phase_increment;
-
-  // // TODO any advantage to calculating this from samples_left_?  maybe messed up by phase skipping
-  // int32_t linear_slope = (static_cast<int64_t>(motion_->actual_delta_31) * motion_->phase_increment) >> 31;
-  // // multi.PrintInt32E(linear_slope);
-  // int32_t minimal_slope = actual_delta_31 > 0 ? 1 : -1;
-  // if (!linear_slope) linear_slope = minimal_slope;
-
-  // // Create segment curve from linear slope
-  // if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
-  //   // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
-  //   std::fill(
-  //     &expo_slope_[0],
-  //     &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-  //     linear_slope
-  //   );
-  // } else {
-  //   uint32_t slope_for_clz = abs(linear_slope >= 0 ? linear_slope : linear_slope + 1);
-  //   uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
-  //   for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-  //     int8_t shift = lut_expo_slope_shift[i];
-  //     int32_t expo_slope = shift >= 0
-  //       ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
-  //       : linear_slope >> static_cast<uint8_t>(-shift);
-  //     if (!expo_slope) expo_slope = minimal_slope;
-  //     expo_slope_[i] = expo_slope;
-  //   }
-  // }
 }
 
-/*
-#define MAKE_BIASED_EXPO_SLOPES() \
-  int32_t biased_expo_slopes[LUT_EXPO_SLOPE_SHIFT_SIZE]; \
-  for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) { \
-    biased_expo_slopes[i] = expo_slope_[i] + slope_bias; \
-  }
-*/
 
 /* Render TODO
 
@@ -254,27 +235,6 @@ Try outputting slopes instead, then computing a running total
 https://claude.ai/chat/127cae75-04b9-4d95-87ac-d01114bd7cf3
 Complication: shifting slopes before summing will cause error
 Running total must be 32-bit, slope vector must be 32-bit, output buffer can be 16-bit
-
-Options for vector accumulator:
-1. Offset slope vector
-  - Render buffer of envelope slopes
-    - Have to handle corners
-  - Offset envelope slope buffer by interpolator slope
-  - Compute prefix sum of slope buffer
-2. Apply slope/value bias inline, like an idiot
-  - Optionally MAKE_BIASED_EXPO_SLOPES
-3. Sum q15 value vectors (no prefix sum)
-  - Render buffer of interpolator values
-  - Sum interpolator value buffer with envelope buffer
-4. 
-*/
-
-/*
-#define MAKE_BIASED_EXPO_SLOPES() \
-  int32_t biased_expo_slopes[LUT_EXPO_SLOPE_SHIFT_SIZE]; \
-  for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) { \
-    biased_expo_slopes[i] = expo_slope_[i] + slope_bias; \
-  }
 */
 
 template<size_t BUFFER_SIZE>
@@ -288,7 +248,7 @@ void Envelope::RenderSamples(
   int32_t current_output_value = value_ + output_bias_;
 
   if (!motion_) {
-    int32_t slope = (new_output_bias - output_bias_) / render_samples_needed;
+    int32_t slope = (DIFF_DOWNSHIFT(new_output_bias, output_bias_) / static_cast<int32_t>(render_samples_needed)) << 1;
     while (render_samples_needed--) {
       current_output_value += slope;
       buffer->Overwrite(current_output_value >> 16);
@@ -303,20 +263,25 @@ void Envelope::RenderSamples(
   phase_ += motion_->phase_increment * samples_rendered;
   uint16_t expo_fraction = Interpolate824(lut_env_expo, phase_);
   int32_t motion_progress_31 = (static_cast<int64_t>(motion_->delta_31) * expo_fraction) >> 16;
-  int32_t output_target_31 = (new_output_bias >> 1) + (motion_->actual_start >> 1) + motion_progress_31;
-  CONSTRAIN(output_target_31, INT32_MIN >> 1, INT32_MAX >> 1); // TODO use min/max from noteon?
+  // multi.PrintInt32E(motion_progress_31); // Looks good
+  int32_t output_target_31 = (new_output_bias / 2) + (motion_->actual_start / 2) + motion_progress_31;
+  CONSTRAIN(output_target_31, INT32_MIN / 2, INT32_MAX / 2); // TODO use min/max from noteon?
   int32_t render_delta_31 = DIFF_DOWNSHIFT(output_target_31 << 1, current_output_value);
-  CONSTRAIN(render_delta_31, INT32_MIN >> 1, INT32_MAX >> 1);
-  multi.PrintInt32E(render_delta_31);
+  CONSTRAIN(render_delta_31, INT32_MIN / 2, INT32_MAX / 2);
+  // multi.PrintInt32E(render_delta_31); // Looks good, decreases over time as expected for both segment signs
 
-  int32_t slope = (render_delta_31 / samples_rendered) << 1;
+  int32_t slope = (render_delta_31 / static_cast<int32_t>(samples_rendered)) << 1;
+  // multi.PrintInt32E(slope);
   for (size_t i = samples_rendered; i--; ) {
     current_output_value += slope;
     buffer->Overwrite(current_output_value >> 16);
   }
+  // Shows going past 0 on early release -- mainly for release below sustain? indicates error from phase skipping
+  // multi.PrintInt32E(current_output_value);
 
   if (samples_rendered == segment_samples_) {
     // Segment is complete
+    multi.PrintInt32E(current_output_value);
     value_ = motion_->target;
     Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
     render_samples_needed -= samples_rendered;

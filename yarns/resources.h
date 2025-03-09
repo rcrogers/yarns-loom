@@ -62,6 +62,7 @@ extern const uint16_t* const char_table[];
 
 extern const char str_dummy[];
 extern const uint16_t lut_env_expo[];
+extern const uint16_t lut_env_inverse_expo[];
 extern const uint16_t lut_arpeggiator_patterns[];
 extern const uint16_t lut_consonance[];
 extern const uint16_t lut_clock_ratio_ticks[];
@@ -119,17 +120,19 @@ extern const uint16_t chr_characters[];
 #define STR_DUMMY 0  // dummy
 #define LUT_ENV_EXPO 0
 #define LUT_ENV_EXPO_SIZE 257
-#define LUT_ARPEGGIATOR_PATTERNS 1
+#define LUT_ENV_INVERSE_EXPO 1
+#define LUT_ENV_INVERSE_EXPO_SIZE 257
+#define LUT_ARPEGGIATOR_PATTERNS 2
 #define LUT_ARPEGGIATOR_PATTERNS_SIZE 23
-#define LUT_CONSONANCE 2
+#define LUT_CONSONANCE 3
 #define LUT_CONSONANCE_SIZE 1536
-#define LUT_CLOCK_RATIO_TICKS 3
+#define LUT_CLOCK_RATIO_TICKS 4
 #define LUT_CLOCK_RATIO_TICKS_SIZE 32
-#define LUT_SVF_CUTOFF 4
+#define LUT_SVF_CUTOFF 5
 #define LUT_SVF_CUTOFF_SIZE 257
-#define LUT_SVF_DAMP 5
+#define LUT_SVF_DAMP 6
 #define LUT_SVF_DAMP_SIZE 257
-#define LUT_SVF_SCALE 6
+#define LUT_SVF_SCALE 7
 #define LUT_SVF_SCALE_SIZE 257
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12

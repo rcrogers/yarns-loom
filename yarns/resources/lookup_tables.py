@@ -125,6 +125,12 @@ env_linear[-1] = env_linear[-2]
 env_expo = make_expo(env_linear)
 lookup_tables.append(('env_expo', env_expo / env_expo.max() * 65535.0))
 
+def make_expo_inverse(expo_value):
+    return -numpy.log(1.0 - expo_value) / 4.0
+
+env_inverse_expo = make_expo_inverse(env_expo)
+lookup_tables.append(('env_inverse_expo', env_inverse_expo / env_inverse_expo.max() * 65535.0))
+
 # Like the above, but with 7-bit phase and 7-bit value instead of 8-bit phase and 16-bit value
 # env_linear = numpy.arange(0, 128.0 + 1) / 128
 # env_expo_7bit = make_expo(env_linear)
