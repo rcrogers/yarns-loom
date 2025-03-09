@@ -110,24 +110,24 @@ void Envelope::NoteOn(
   attack_.target = peak;
   attack_.phase_increment = adsr.attack;
   attack_.delta_31 = 0;
-  attack_.actual_start = 0;
+  attack_.expo_start = 0;
 
   decay_.expected_start = peak;
   decay_.target = sustain;
   decay_.phase_increment = adsr.decay;
   decay_.delta_31 = 0;
-  decay_.actual_start = 0;
+  decay_.expo_start = 0;
 
   release_.expected_start = sustain;
   release_.target = min_target;
   release_.phase_increment = adsr.release;
   release_.delta_31 = 0;
-  release_.actual_start = 0;
+  release_.expo_start = 0;
 
   // TODO could precompute decay/release slopes here, don't have to wait for them to arrive.  downside is that decay can be skipped (release cannot).  Trigger would need to know whether to use the precomputed slope or compute a new one.
 
   if (segment_ > ENV_SEGMENT_SUSTAIN) {
-    multi.PrintInt32E(value_);
+    // multi.PrintInt32E(value_);
     Trigger(ENV_SEGMENT_ATTACK, true);
   }
 }
@@ -183,7 +183,7 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   // multi.PrintDebugByte(0x09 + (segment << 4));
 
   // Determine X and Y distance to travel during this segment
-  motion_->actual_start = value_;
+  
   if ( // Closer to target than expected
     movement_expected && (
       // NB: we already ruled out direction disagreement
@@ -194,13 +194,23 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
 
     // multi.PrintDebugByte(0x0B + (segment << 4));
 
-    // Keep the nominal segment contour
+    // Keep the nominal segment steepness
     motion_->delta_31 = nominal_delta_31;
+    motion_->expo_start = motion_->expected_start;
 
     // Pre-advance X to reflect Y already traveled
-    int32_t delta_amount_completed_31 = DIFF_DOWNSHIFT(value_, motion_->expected_start);
-    int32_t delta_total_23 = motion_->delta_31 >> 8;
-    uint8_t delta_fraction_completed_8 = delta_total_23 ? delta_amount_completed_31 / delta_total_23 : 0;
+
+    int32_t progress_amount_31 = DIFF_DOWNSHIFT(value_, motion_->expected_start);
+
+    // int32_t delta_total_23 = motion_->delta_31 >> 8;
+    // uint8_t delta_fraction_completed_8 = delta_total_23 ? delta_amount_completed_31 / delta_total_23 : 0;
+    // TODO Interpolate88 needs 16-bit phase!
+    // phase_ = Interpolate88(lut_env_inverse_expo, delta_fraction_completed_8);
+    // phase_ <<= 16;
+
+    uint16_t progress_fraction = progress_amount_31 / (motion_->delta_31 >> 17);
+    phase_ = Interpolate88(lut_env_inverse_expo, progress_fraction);
+    phase_ <<= 16;
 
     // uint8_t delta_fraction_remaining_8 = UINT8_MAX - delta_fraction_completed_8;
     // This lookup assumes lut_env_expo is roughly symmetric across the line y = 1 - x, so it can serve as its own inverse function
@@ -209,15 +219,13 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     // uint16_t phase_remaining_16 = lut_env_expo[delta_fraction_remaining_8];
     // phase_ = static_cast<uint16_t>(UINT16_MAX - phase_remaining_16);
     // phase_ <<= 16;
-    // if (segment == ENV_SEGMENT_ATTACK) multi.PrintInt32E(phase_);
-
-    phase_ = Interpolate88(lut_env_inverse_expo, delta_fraction_completed_8);
-    phase_ <<= 16;
+    // if (segment == ENV_SEGMENT_ATTACK) multi.PrintInt32E(phase_);    
   } else {
     // We're at least as far as expected (possibly farther).  Make the curve as steep as needed to cover the Y distance in the expected time
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted segments
     // multi.PrintDebugByte(0x0A + (segment << 4));
     motion_->delta_31 = actual_delta_31;
+    motion_->expo_start = value_;
     phase_ = 0;
   }
   segment_samples_ = (UINT32_MAX - phase_) / motion_->phase_increment;
@@ -263,9 +271,10 @@ void Envelope::RenderSamples(
   phase_ += motion_->phase_increment * samples_rendered;
   uint16_t expo_fraction = Interpolate824(lut_env_expo, phase_);
   int32_t motion_progress_31 = (static_cast<int64_t>(motion_->delta_31) * expo_fraction) >> 16;
-  // multi.PrintInt32E(motion_progress_31); // Looks good
-  int32_t output_target_31 = (new_output_bias / 2) + (motion_->actual_start / 2) + motion_progress_31;
+  // multi.PrintInt32E(motion_progress_31); // Looks good directionally
+  int32_t output_target_31 = (new_output_bias / 2) + (motion_->expo_start / 2) + motion_progress_31;
   CONSTRAIN(output_target_31, INT32_MIN / 2, INT32_MAX / 2); // TODO use min/max from noteon?
+  // multi.PrintInt32E(output_target_31);
   int32_t render_delta_31 = DIFF_DOWNSHIFT(output_target_31 << 1, current_output_value);
   CONSTRAIN(render_delta_31, INT32_MIN / 2, INT32_MAX / 2);
   // multi.PrintInt32E(render_delta_31); // Looks good, decreases over time as expected for both segment signs
@@ -281,7 +290,7 @@ void Envelope::RenderSamples(
 
   if (samples_rendered == segment_samples_) {
     // Segment is complete
-    multi.PrintInt32E(current_output_value);
+    // multi.PrintInt32E(current_output_value);
     value_ = motion_->target;
     Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
     render_samples_needed -= samples_rendered;

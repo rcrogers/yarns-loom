@@ -356,7 +356,7 @@ class CVOutput {
   void RenderSamples();
 
   inline uint16_t GetDACSample() {
-    return dac_buffer_.ImmediateRead();
+    return dac_buffer_.ImmediateRead() << 1;
   }
 
   void Refresh();

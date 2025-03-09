@@ -60,7 +60,7 @@ struct ADSR {
 };
 
 struct Motion {
-  int32_t target, expected_start, delta_31, actual_start;
+  int32_t target, expected_start, delta_31, expo_start;
   uint32_t phase_increment;
 };
 
