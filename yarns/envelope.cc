@@ -212,8 +212,8 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     // phase_ = Interpolate88(lut_env_inverse_expo, delta_fraction_completed_8);
     // phase_ <<= 16;
 
-    uint16_t progress_fraction = progress_amount_31 / (motion_->delta_31 >> 17);
-    phase_ = Interpolate88(lut_env_inverse_expo, progress_fraction);
+    int32_t progress_fraction = progress_amount_31 / (motion_->delta_31 >> 16);
+    phase_ = Interpolate88(lut_env_inverse_expo, stmlib::ClipU16(progress_fraction));
     phase_ <<= 16;
 
     // uint8_t delta_fraction_remaining_8 = UINT8_MAX - delta_fraction_completed_8;
