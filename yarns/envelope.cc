@@ -155,7 +155,7 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     default:
       motion_ = NULL;
       return;
-  }  
+  }
 
   int32_t nominal_delta_31 = DIFF_DOWNSHIFT(motion_->target, motion_->expected_start);
   int32_t actual_delta_31 = DIFF_DOWNSHIFT(motion_->target, value_);
@@ -201,6 +201,10 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     // Pre-advance X to reflect Y already traveled
 
     int32_t progress_amount_31 = DIFF_DOWNSHIFT(value_, motion_->expected_start);
+
+    // TODO playing slow legato notes on current preset causes weird blaring!  attack from sustain level seems flat?  for sustain 64 and below?
+  // Phase at sustain = 64: 2.14E9
+  // Phase at sustain = 65: 3.32E7
 
     // int32_t delta_total_23 = motion_->delta_31 >> 8;
     // uint8_t delta_fraction_completed_8 = delta_total_23 ? delta_amount_completed_31 / delta_total_23 : 0;
