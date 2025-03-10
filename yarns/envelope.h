@@ -39,11 +39,8 @@ using namespace stmlib;
 const uint8_t kAudioBlockSizeBits = 6;
 const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
-// const uint8_t kLutExpoSlopeShiftSizeBits = 32 - __builtin_clz(LUT_EXPO_SLOPE_SHIFT_SIZE - 1);
-// STATIC_ASSERT(
-//   1 << kLutExpoSlopeShiftSizeBits == LUT_EXPO_SLOPE_SHIFT_SIZE,
-//   expo_slope_shift_size
-// );
+const uint8_t kEdgeBits = 3;
+const uint8_t kNumEdges = 1 << kEdgeBits;
 
 enum EnvelopeSegment {
   ENV_SEGMENT_ATTACK,           // manual start, auto/manual end
@@ -59,9 +56,14 @@ struct ADSR {
   uint32_t attack, decay, release; // Timing
 };
 
-struct Motion {
-  int32_t target, expected_start, delta_31, expo_start;
+struct ExpoCurve {
+  int32_t target, nominal_offset, scale, offset;
   uint32_t phase_increment;
+};
+
+struct Edge {
+  size_t samples;
+  int32_t slope;
 };
 
 class Envelope {
@@ -83,19 +85,18 @@ class Envelope {
   void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t new_output_bias, size_t render_samples_needed = kAudioBlockSize);
 
  private:
-  Motion attack_, decay_, release_;
+  ExpoCurve attack_, decay_, release_;
   
   // Current segment.
   EnvelopeSegment segment_;
-  Motion* motion_;
+  ExpoCurve* expo_;
 
   // State of the current motion segment
-  size_t segment_samples_;
+  Edge edges_[kNumEdges];
+  uint8_t current_edge_;
   int32_t value_;
   uint32_t phase_;
   int32_t output_bias_;
-  // Maps slices of the phase to slopes, approximating an exponential curve
-  // int32_t expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
