@@ -162,7 +162,7 @@ void Oscillator::Render() {
   //   // gain_buffer_.Overwrite(gain >> 1);
   //   gain_buffer_.Overwrite(gain_envelope_.value());
   // }
-  gain_envelope_.RenderSamples(&gain_buffer_, gain_.target() << 16);
+  gain_envelope_.RenderSamples(&gain_buffer, gain_.target() << 16);
   // timbre_.ComputeSlope();
   // size = kAudioBlockSize;
   // while (size--) {
@@ -187,16 +187,13 @@ void Oscillator::Render() {
 #define RENDER_CORE(body) \
   int32_t next_sample = next_sample_; \
   size_t size = kAudioBlockSize; \
-  int16_t* audio_start = audio_buffer.write_ptr(); \
-  int16_t* gain_start = gain_buffer_.write_ptr(); \
   while (size--) { \
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     body \
     audio_buffer.Overwrite(this_sample); \
   } \
-  next_sample_ = next_sample; \
-  q15_mult<kAudioBlockSize>(gain_start, audio_start, audio_start); \
+  next_sample_ = next_sample;
 
 #define RENDER_WITH_PHASE_GAIN(body) \
   uint32_t phase = phase_; \
