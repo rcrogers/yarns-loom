@@ -38,7 +38,7 @@ namespace yarns {
 using namespace stmlib;
 
 /*
-Edge cases when a manually started segment has an off-nominal delta to target:
+Edge cases when a manually started stage has an off-nominal delta to target:
 1. Wrong direction (skip)
   - Affects: ATTACK, DECAY
     - "High attack interrupted by low attack"
@@ -54,14 +54,14 @@ Edge cases when a manually started segment has an off-nominal delta to target:
       - Should we just disallow peak < sustain?
 2. Value too far from target (prelude)
   - Affects: DECAY, RELEASE
-    - Primary case: NoteOff before SUSTAIN segment has started
+    - Primary case: NoteOff before SUSTAIN stage has started
     - Can also apply to decay start, e.g.:
       - "High attack interrupted by low attack" causes ATTACK to skip to DECAY
       - ATTACK skips to decay
       - DECAY is now further from sustain level than expected
   - Solution: prelude
-    - Populate the segment's expo slopes
-    - Extend the segment's initial/steepest slope backward in time
+    - Populate the stage's expo slopes
+    - Extend the stage's initial/steepest slope backward in time
     - Give each Motion a new counter of prelude samples remaining
       - While these count down, use the first expo slope value only
       - See calculation for release_prelude_.samples_left
@@ -79,18 +79,18 @@ void Envelope::Init(int32_t value) {
   value_ = value;
   phase_ = 0;
   output_bias_ = 0;
-  segment_ = ENV_SEGMENT_DEAD;
+  stage_ = ENV_STAGE_DEAD;
   expo_ = NULL;
   for (uint8_t i = 0; i < kNumEdges; ++i) {
     edges_[i].slope = 0;
     edges_[i].samples = 0;
   }
-  // Trigger(ENV_SEGMENT_DEAD);
+  // Trigger(ENV_STAGE_DEAD);
 }
 
 void Envelope::NoteOff() {
-  if (segment_ < ENV_SEGMENT_RELEASE) {
-    Trigger(ENV_SEGMENT_RELEASE, true);
+  if (stage_ < ENV_STAGE_RELEASE) {
+    Trigger(ENV_STAGE_RELEASE, true);
   }
 }
 
@@ -124,9 +124,9 @@ void Envelope::NoteOn(
 
   // TODO could precompute decay/release slopes here, don't have to wait for them to arrive.  downside is that decay can be skipped (release cannot).  Trigger would need to know whether to use the precomputed slope or compute a new one.
 
-  if (segment_ > ENV_SEGMENT_SUSTAIN) {
+  if (stage_ > ENV_STAGE_SUSTAIN) {
     // multi.PrintInt32E(value_);
-    Trigger(ENV_SEGMENT_ATTACK, true);
+    Trigger(ENV_STAGE_ATTACK, true);
   }
 }
 
@@ -134,22 +134,13 @@ int16_t Envelope::tremolo(uint16_t strength) const {
   int32_t relative_value = (value_ - release_.target) >> 16;
   return relative_value * -strength >> 16;
 }
-/*
-#define DOWNSHIFT_SIGNED_1BIT(value) \
-  ((value) >= 0 ? ((value) >> 1) : ((value) + 1) >> 1)
 
-#define DIFF_DOWNSHIFT(a, b) \
-  (DOWNSHIFT_SIGNED_1BIT(a) - DOWNSHIFT_SIGNED_1BIT(b))
-*/
-
-// #define DIFF_DOWNSHIFT(a, b) ((a / 2) - (b / 2))
-
-void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
-  segment_ = segment;
-  switch (segment) {
-    case ENV_SEGMENT_ATTACK : expo_ = &attack_  ; break;
-    case ENV_SEGMENT_DECAY  : expo_ = &decay_   ; break;
-    case ENV_SEGMENT_RELEASE: expo_ = &release_ ; break;
+void Envelope::Trigger(EnvelopeStage stage, bool manual) {
+  stage_ = stage;
+  switch (stage) {
+    case ENV_STAGE_ATTACK : expo_ = &attack_  ; break;
+    case ENV_STAGE_DECAY  : expo_ = &decay_   ; break;
+    case ENV_STAGE_RELEASE: expo_ = &release_ ; break;
     default:
       expo_ = NULL;
       return;
@@ -159,11 +150,11 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   int32_t measured_scale = SatSub(expo_->target, value_);
   bool movement_expected = nominal_scale != 0;
 
-  // Skip segment if there is a direction disagreement or nowhere to go
+  // Skip stage if there is a direction disagreement or nowhere to go
   if (
     // Already at target (important to skip because 0 disrupts direction checks)
     !measured_scale || (
-      // The segment is supposed to have a direction
+      // The stage is supposed to have a direction
       movement_expected && (
         // It doesn't agree with the actual direction
         (nominal_scale > 0) != (measured_scale > 0)
@@ -173,13 +164,13 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     )
   ) {
     // Seeing some of these after a totally normal ADS to 0 sustain, probably indicating underflow.  How to avoid overshoot?
-    // multi.PrintDebugByte(0x0F + (segment << 4));
-    return Trigger(static_cast<EnvelopeSegment>(segment + 1), manual);
+    // multi.PrintDebugByte(0x0F + (stage << 4));
+    return Trigger(static_cast<EnvelopeStage>(stage + 1), manual);
   }
 
-  // multi.PrintDebugByte(0x09 + (segment << 4));
+  // multi.PrintDebugByte(0x09 + (stage << 4));
 
-  // Determine X and Y distance to travel during this segment
+  // Determine X and Y distance to travel during this stage
   
   if ( // Closer to target than expected
     movement_expected && (
@@ -189,9 +180,9 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
   ) {
     // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack 
 
-    // multi.PrintDebugByte(0x0B + (segment << 4));
+    // multi.PrintDebugByte(0x0B + (stage << 4));
 
-    // Keep the nominal segment steepness
+    // Keep the nominal stage steepness
     expo_->scale = nominal_scale;
     expo_->offset = expo_->nominal_offset;
 
@@ -202,26 +193,69 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     phase_ <<= 16;
   } else {
     // We're at least as far as expected (possibly farther).  Make the curve as steep as needed to cover the Y distance in the expected time
-    // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted segments
-    // multi.PrintDebugByte(0x0A + (segment << 4));
+    // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
+    // multi.PrintDebugByte(0x0A + (stage << 4));
     expo_->scale = measured_scale;
     expo_->offset = value_;
     phase_ = 0;
   }
 
-  size_t segment_samples = (UINT32_MAX - phase_) / expo_->phase_increment;
+  // int32_t linear_slope = (static_cast<int64_t>(motion_->actual_delta_31) * motion_->phase_increment) >> 31;
+  // // multi.PrintInt32E(linear_slope);
+  // int32_t minimal_slope = actual_delta_31 > 0 ? 1 : -1;
+  // if (!linear_slope) linear_slope = minimal_slope;
+
+  // // Create segment curve from linear slope
+  // if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
+  //   // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
+  //   std::fill(
+  //     &expo_slope_[0],
+  //     &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+  //     linear_slope
+  //   );
+  // } else {
+  //   uint32_t slope_for_clz = abs(linear_slope >= 0 ? linear_slope : linear_slope + 1);
+  //   uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
+  //   for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
+  //     int8_t shift = lut_expo_slope_shift[i];
+  //     int32_t expo_slope = shift >= 0
+  //       ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
+  //       : linear_slope >> static_cast<uint8_t>(-shift);
+  //     if (!expo_slope) expo_slope = minimal_slope;
+  //     expo_slope_[i] = expo_slope;
+  //   }
+  // }
+
   // uint32_t edge_phase_fraction = UINT32_MAX >> kEdgeBits;
   // int32_t simulated_value = expo_->offset;
-  int32_t last_scaled_expo = 0;
-  for (uint32_t i = 0; i < kNumEdges; ++i) {
-    edges_[i].samples = segment_samples >> kEdgeBits; // TODO
+  // int32_t last_scaled_expo = 0;
 
-    // TODO def getting overshoot
+  int32_t linear_slope = (static_cast<int64_t>(expo_->scale) * expo_->phase_increment) >> 32;
+  uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
+  uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
+
+  // Assign the number of samples to each edge.  The first edges may be partly or completely skipped if some phase has been skipped.  The last edge may have a remainder. 
+  // TODO need to apportion samples toward the end, not evenly, for phase skipping
+  size_t stage_samples = (UINT32_MAX - phase_) / expo_->phase_increment;
+  size_t max_edge_samples = (UINT32_MAX / expo_->phase_increment) >> kEdgeBits;
+
+  // Iterate backwards from last edge
+  for (int32_t i = kNumEdges - 1; i >= 0; --i) {
+    // TODO handle remainder
+    size_t edge_samples = std::min(stage_samples, max_edge_samples);
+    stage_samples -= edge_samples;
+    edges_[i].samples = edge_samples;
+
+    int8_t shift = lut_expo_slope_shift[i];
+    int32_t expo_slope = shift >= 0
+      ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
+      : linear_slope >> static_cast<uint8_t>(-shift);
+    edges_[i].slope = expo_slope;
 
     // uint32_t edge_end_phase = (UINT32_MAX >> kEdgeBits) * (i + 1);
-    uint8_t edge_end_phase = ((i + 1) << (8 - kEdgeBits)) - 1;
-    // uint16_t expo_fraction = Interpolate88(lut_env_expo, edge_end_phase);
-    uint16_t expo_fraction = lut_env_expo[edge_end_phase];  
+    // uint8_t edge_end_phase = ((i + 1) << (8 - kEdgeBits)) - 1;
+    // // uint16_t expo_fraction = Interpolate88(lut_env_expo, edge_end_phase);
+    // uint16_t expo_fraction = lut_env_expo[edge_end_phase];  
 
     // Super accurate, but 2 mults + 1 div per slice
     // int32_t scaled_expo = (expo_->scale >> 12) * (expo_fraction >> 4);
@@ -231,21 +265,21 @@ void Envelope::Trigger(EnvelopeSegment segment, bool manual) {
     // simulated_value = edge_target;
     // // simulated_value += edges_[i].slope * static_cast<int32_t>(edges_[i].samples);
     
-    // This is way more accurate than shifts, but requires 2 multiplications per slice.
-    int32_t scaled_expo = (expo_->scale >> 12) * (expo_fraction >> 4);
-    int32_t edge_delta = SatSub(scaled_expo, last_scaled_expo);
-    // TODO constrain to min/max from noteon?
-    edges_[i].slope = (edge_delta >> 16) * static_cast<int32_t>(expo_->phase_increment >> 16);
-    last_scaled_expo = scaled_expo;
+    // This is way more accurate than shifts, but requires 2 multiplications per slice
+    // int32_t scaled_expo = (expo_->scale >> 12) * (expo_fraction >> 4);
+    // int32_t edge_delta = SatSub(scaled_expo, last_scaled_expo);
+    // // TODO constrain to min/max from noteon?
+    // edges_[i].slope = (edge_delta >> 16) * static_cast<int32_t>(expo_->phase_increment >> 16);
+    // last_scaled_expo = scaled_expo;
 
     // a compromise with 1 mult per slice: LUT of "slope ratios" in 3.13 or 2.14 format
   
     // If the curve function has a constant 2nd derivative, it should be possible to generate a single scaled number that is *added* to the slope each slice, e.g. -x² + 2x
     // https://claude.ai/chat/2f2083f0-11b9-42ea-a62c-f85652cda175
   }
+
   current_edge_ = phase_ >> (32 - kEdgeBits);
 }
-
 
 /* Render TODO
 
@@ -283,7 +317,6 @@ void Envelope::RenderSamples(
   }
   output_bias_ = new_output_bias;
 
-  // Linear interpolation over this render cycle
   Edge& edge = edges_[current_edge_];
   size_t samples_rendered = std::min(edge.samples, render_samples_needed);
   int32_t slope = edge.slope;
@@ -298,20 +331,20 @@ void Envelope::RenderSamples(
   if (samples_rendered == edge.samples) {
     edge.samples = 0; // Probably unncessary
     current_edge_ = (current_edge_ + 1) % kNumEdges;
-    if (current_edge_ == 0) { // Begin next segment
+    if (current_edge_ == 0) { // Begin next stage
       value_ = expo_->target;
-      Trigger(static_cast<EnvelopeSegment>(segment_ + 1), false);
+      Trigger(static_cast<EnvelopeStage>(stage_ + 1), false);
     } else {
       // jump to edge target?
     }
 
     render_samples_needed -= samples_rendered;
     if (render_samples_needed) {
-      // NB: may cause yet another Trigger if next segment is short
+      // NB: may cause yet another Trigger if next stage is short
       return RenderSamples(buffer, new_output_bias, render_samples_needed);
     }
   } else {
-    // We'll continue rendering this segment next time
+    // We'll continue rendering this stage next time
     value_ = current_output_value - new_output_bias; // CONSTRAIN complicates this
     edge.samples -= samples_rendered;
   }

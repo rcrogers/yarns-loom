@@ -42,13 +42,13 @@ const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 const uint8_t kEdgeBits = 3;
 const uint8_t kNumEdges = 1 << kEdgeBits;
 
-enum EnvelopeSegment {
-  ENV_SEGMENT_ATTACK,           // manual start, auto/manual end
-  ENV_SEGMENT_DECAY,            // auto start, auto/manual end
-  ENV_SEGMENT_SUSTAIN,          // no motion
-  ENV_SEGMENT_RELEASE,          // manual start, auto end
-  ENV_SEGMENT_DEAD,             // no motion
-  ENV_NUM_SEGMENTS,
+enum EnvelopeStage {
+  ENV_STAGE_ATTACK,   // manual start, auto/manual end
+  ENV_STAGE_DECAY,    // auto start, auto/manual end
+  ENV_STAGE_SUSTAIN,  // no motion
+  ENV_STAGE_RELEASE,  // manual start, auto end
+  ENV_STAGE_DEAD,     // no motion
+  ENV_NUM_STAGES,
 };
 
 struct ADSR {
@@ -79,7 +79,7 @@ class Envelope {
     ADSR& adsr,
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   );
-  void Trigger(EnvelopeSegment segment, bool is_manual); // Populates expo slope table for the new segment
+  void Trigger(EnvelopeStage stage, bool is_manual); // Populates expo slope table for the new stage
 
   template<size_t BUFFER_SIZE>
   void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t new_output_bias, size_t render_samples_needed = kAudioBlockSize);
@@ -87,11 +87,11 @@ class Envelope {
  private:
   ExpoCurve attack_, decay_, release_;
   
-  // Current segment.
-  EnvelopeSegment segment_;
+  // Current stage.
+  EnvelopeStage stage_;
   ExpoCurve* expo_;
 
-  // State of the current motion segment
+  // State of the current motion stage
   Edge edges_[kNumEdges];
   uint8_t current_edge_;
   int32_t value_;
