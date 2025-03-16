@@ -303,7 +303,7 @@ void Voice::NoteOn(
   if (trigger) {
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
-    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_];
+    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_ >> 1];
     NoteOff();
   }
   gate_ = true;
@@ -324,10 +324,10 @@ void Voice::NoteOn(
   portamento_phase_ = 0;
   uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE >> 1;
   if (portamento < split_point) {
-    portamento_phase_increment_ = lut_portamento_increments[(split_point - portamento) << 1];
+    portamento_phase_increment_ = lut_portamento_increments[(split_point - portamento)];
     portamento_exponential_shape_ = true;
   } else {
-    uint32_t base_increment = lut_portamento_increments[(portamento - split_point) << 1];
+    uint32_t base_increment = lut_portamento_increments[(portamento - split_point)];
     uint32_t delta = abs(note_target_ - note_source_) + 1;
     portamento_phase_increment_ = (1536 * (base_increment >> 11) / delta) << 11;
     CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
