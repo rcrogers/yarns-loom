@@ -284,9 +284,9 @@ void CVOutput::RenderSamples() {
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
       audio_voices_[v]->oscillator()->Render();
       q15_multiply_accumulate<kAudioBlockSize>(
-        dac_buffer_.write_ptr(),
         audio_voices_[v]->oscillator()->audio_buffer.read_ptr(),
-        audio_voices_[v]->oscillator()->gain_buffer.read_ptr()
+        audio_voices_[v]->oscillator()->gain_buffer.read_ptr(),
+        dac_buffer_.write_ptr()
       );
     }
     dac_buffer_.advance_write_ptr(kAudioBlockSize);
