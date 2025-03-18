@@ -40,7 +40,7 @@ const uint16_t kPinClk = GPIO_Pin_7; // DISP_SCK, SHCP, shift register clock inp
 const uint16_t kPinEnable = GPIO_Pin_8; // DISP_EN, STCP, storage register clock input
 const uint16_t kPinData = GPIO_Pin_9; // DISP_SER, DS, serial data input
 
-const uint16_t kScrollingDelay = 180;
+const uint16_t kScrollingDelay = 260;
 const uint16_t kScrollingPreDelay = 600;
 const uint16_t kBlinkMask = 128;
 
