@@ -288,12 +288,12 @@ Options for vector accumulator:
 #define RENDER_LOOP(samples_exp, slope_exp) \
   const int32_t slope = (slope_exp); \
   size_t samples = (samples_exp); \
-  while (samples--) { \
+  do { \
     value += slope; \
     bias += bias_slope; \
     int32_t biased_value = (value >> 16) + (bias >> 16); \
     buffer->Overwrite(Clip16(biased_value)); \
-  }
+  } while (--samples);
 
 template<size_t BUFFER_SIZE>
 void Envelope::RenderSamples(
