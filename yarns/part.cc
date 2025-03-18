@@ -813,10 +813,23 @@ void Part::VoiceNoteOn(
 
   ADSR adsr;
   adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));
+
   adsr.sustain  = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain , vel) << (16 - 13);
-  adsr.attack   = modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << (16 - 13);
-  adsr.decay    = modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << (16 - 13);
-  adsr.release  = modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (16 - 13);
+
+  // Acts as a "Interpolate58"
+  STATIC_ASSERT(LUT_ENVELOPE_SAMPLE_COUNTS_SIZE == (1 << 5) + 1, sample_counts);
+  adsr.attack   = Interpolate88(
+    lut_envelope_sample_counts,
+    modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel)
+  );
+  adsr.decay    = Interpolate88(
+    lut_envelope_sample_counts,
+    modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel)
+  );
+  adsr.release  = Interpolate88(
+    lut_envelope_sample_counts,
+    modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel)
+  );
 
   voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);
 }

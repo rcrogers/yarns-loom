@@ -41,6 +41,7 @@ const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
 const uint8_t kEdgeBits = 3;
 const uint8_t kNumEdges = 1 << kEdgeBits;
+STATIC_ASSERT(kNumEdges == LUT_EXPO_SLOPE_SHIFT_SIZE, kNumEdges);
 
 enum EnvelopeStage {
   ENV_STAGE_ATTACK,   // manual start, auto/manual end
@@ -53,12 +54,12 @@ enum EnvelopeStage {
 
 struct ADSR {
   uint16_t peak, sustain; // Platonic, unscaled targets
-  uint32_t attack, decay, release; // Timing
+  size_t attack, decay, release;
 };
 
 struct ExpoCurve {
-  int32_t target, nominal_offset, scale, offset;
-  uint32_t phase_increment;
+  size_t nominal_samples; // X length
+  int32_t target, nominal_offset; // Y values
 };
 
 struct Edge {
@@ -79,10 +80,11 @@ class Envelope {
     ADSR& adsr,
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   );
-  void Trigger(EnvelopeStage stage, bool is_manual); // Populates expo slope table for the new stage
+  void Trigger(EnvelopeStage stage); // Populates expo slope table for the new stage
+  int32_t compute_edge_slope(int32_t linear_slope, uint8_t edge, uint8_t max_shift) const;
 
   template<size_t BUFFER_SIZE>
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t new_output_bias, size_t render_samples_needed = kAudioBlockSize);
+  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t new_bias);
 
  private:
   ExpoCurve attack_, decay_, release_;
@@ -94,9 +96,9 @@ class Envelope {
   // State of the current motion stage
   Edge edges_[kNumEdges];
   uint8_t current_edge_;
+
   int32_t value_;
-  uint32_t phase_;
-  int32_t output_bias_;
+  int32_t bias_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

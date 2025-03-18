@@ -77,10 +77,8 @@ Edge cases when a manually started stage has an off-nominal delta to target:
 
 void Envelope::Init(int32_t value) {
   value_ = value;
-  phase_ = 0;
-  output_bias_ = 0;
+  bias_ = 0;
   stage_ = ENV_STAGE_DEAD;
-  expo_ = NULL;
   for (uint8_t i = 0; i < kNumEdges; ++i) {
     edges_[i].slope = 0;
     edges_[i].samples = 0;
@@ -90,7 +88,7 @@ void Envelope::Init(int32_t value) {
 
 void Envelope::NoteOff() {
   if (stage_ < ENV_STAGE_RELEASE) {
-    Trigger(ENV_STAGE_RELEASE, true);
+    Trigger(ENV_STAGE_RELEASE);
   }
 }
 
@@ -99,56 +97,59 @@ void Envelope::NoteOn(
   int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
 ) {
   // NB: min_target changes between notes IFF calibration/settings change
+  // TODO scale is only dynamic for timbre envelopes
   int16_t scale = max_target - min_target; // TODO overflow?
   min_target <<= 16;
+  // TODO can delay calculating sustain level until decay is triggered
   int32_t peak = min_target + scale * adsr.peak;
   int32_t sustain = min_target + scale * adsr.sustain;
 
+  attack_.nominal_samples = adsr.attack;
   attack_.nominal_offset = min_target;
   attack_.target = peak;
-  attack_.phase_increment = adsr.attack;
-  attack_.scale = 0;
-  attack_.offset = 0;
 
+  decay_.nominal_samples = adsr.decay;
   decay_.nominal_offset = peak;
   decay_.target = sustain;
-  decay_.phase_increment = adsr.decay;
-  decay_.scale = 0;
-  decay_.offset = 0;
 
+  release_.nominal_samples = adsr.release;
   release_.nominal_offset = sustain;
   release_.target = min_target;
-  release_.phase_increment = adsr.release;
-  release_.scale = 0;
-  release_.offset = 0;
 
   // TODO could precompute decay/release slopes here, don't have to wait for them to arrive.  downside is that decay can be skipped (release cannot).  Trigger would need to know whether to use the precomputed slope or compute a new one.
 
   if (stage_ > ENV_STAGE_SUSTAIN) {
     // multi.PrintInt32E(value_);
-    Trigger(ENV_STAGE_ATTACK, true);
+    Trigger(ENV_STAGE_ATTACK);
   }
 }
 
-int16_t Envelope::tremolo(uint16_t strength) const {
+int16_t Envelope::tremolo(const uint16_t strength) const {
   int32_t relative_value = (value_ - release_.target) >> 16;
   return relative_value * -strength >> 16;
 }
 
-void Envelope::Trigger(EnvelopeStage stage, bool manual) {
+void Envelope::Trigger(EnvelopeStage stage) {
+  // multi.PrintDebugByte(0x09 + (stage << 4));
+
   stage_ = stage;
+  expo_ = NULL;
   switch (stage) {
-    case ENV_STAGE_ATTACK : expo_ = &attack_  ; break;
-    case ENV_STAGE_DECAY  : expo_ = &decay_   ; break;
-    case ENV_STAGE_RELEASE: expo_ = &release_ ; break;
-    default:
-      expo_ = NULL;
-      return;
+    case ENV_STAGE_ATTACK:
+      expo_ = &attack_;
+      break;
+    case ENV_STAGE_DECAY:
+      expo_ = &decay_;
+      break;
+    case ENV_STAGE_RELEASE:
+      expo_ = &release_;
+      break;
+    default: return;
   }
 
-  int32_t nominal_scale = SatSub(expo_->target, expo_->nominal_offset);
-  int32_t measured_scale = SatSub(expo_->target, value_);
-  bool movement_expected = nominal_scale != 0;
+  const int32_t nominal_scale = SatSub(expo_->target, expo_->nominal_offset);
+  const int32_t measured_scale = SatSub(expo_->target, value_);
+  const bool movement_expected = nominal_scale != 0;
 
   // Skip stage if there is a direction disagreement or nowhere to go
   if (
@@ -165,120 +166,95 @@ void Envelope::Trigger(EnvelopeStage stage, bool manual) {
   ) {
     // Seeing some of these after a totally normal ADS to 0 sustain, probably indicating underflow.  How to avoid overshoot?
     // multi.PrintDebugByte(0x0F + (stage << 4));
-    return Trigger(static_cast<EnvelopeStage>(stage + 1), manual);
+    return Trigger(static_cast<EnvelopeStage>(stage + 1));
   }
 
-  // multi.PrintDebugByte(0x09 + (stage << 4));
+  // Skip beginning of stage if closer to target than expected
+  // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack 
+  const bool truncate_start = movement_expected && (
+    // NB: we already ruled out direction disagreement
+    abs(measured_scale) < abs(nominal_scale)
+  );
 
   // Determine X and Y distance to travel during this stage
-  
-  if ( // Closer to target than expected
-    movement_expected && (
-      // NB: we already ruled out direction disagreement
-      abs(measured_scale) < abs(nominal_scale)
-    )
-  ) {
-    // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack 
-
-    // multi.PrintDebugByte(0x0B + (stage << 4));
-
+  int32_t final_scale;
+  size_t stage_samples;
+  if (truncate_start) {
     // Keep the nominal stage steepness
-    expo_->scale = nominal_scale;
-    expo_->offset = expo_->nominal_offset;
+    final_scale = nominal_scale;
 
     // Pre-advance X to reflect Y already traveled
-    int32_t progress_amount = SatSub(value_, expo_->nominal_offset);
-    int32_t progress_fraction = progress_amount / (expo_->scale >> 16);
-    phase_ = Interpolate88(lut_env_inverse_expo, stmlib::ClipU16(progress_fraction));
-    phase_ <<= 16;
+    // TODO performance here may be painfully bad
+    // TODO the result, stage_samples, could be shared between voice's envelopes
+    const int32_t y_progress_amount = SatSub(value_, expo_->nominal_offset);
+    const int32_t y_progress_fraction_16 = y_progress_amount / (final_scale >> 16);
+    const uint16_t x_progress_fraction = Interpolate88(lut_env_inverse_expo, stmlib::ClipU16(y_progress_fraction_16));
+    const uint16_t x_remaining_fraction = UINT16_MAX - x_progress_fraction;
+    
+    // We assume max lut_envelope_sample_counts is 2^18, so we only need 2 prelim downshifts
+    stage_samples = ((expo_->nominal_samples >> 1) * static_cast<size_t>(x_remaining_fraction >> 1)) >> 14;
+    if (!stage_samples) return Trigger(static_cast<EnvelopeStage>(stage + 1));
+    // multi.PrintDebugByte(0x0B + (stage << 4));
   } else {
     // We're at least as far as expected (possibly farther).  Make the curve as steep as needed to cover the Y distance in the expected time
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
+    final_scale = measured_scale;
+
+    stage_samples = expo_->nominal_samples;
     // multi.PrintDebugByte(0x0A + (stage << 4));
-    expo_->scale = measured_scale;
-    expo_->offset = value_;
-    phase_ = 0;
+  }  
+
+  /*
+    Slope calculation methods, from most accurate/slow to least:
+    1. 2 mults per edge: calculate a scaled expo endpoint for each edge (1 mult) and a delta from the last endpoint, then calculate a slope from the delta (1 mult)
+    2. 1 mult per edge: scale linear slope via LUT of ratios in 3.13 or 2.14 format 
+    4. 0 mults per edge: if function has a constant 2nd derivative, generate a single scaled number that is *added* to the slope each slice, e.g. -x² + 2x
+      - https://claude.ai/chat/2f2083f0-11b9-42ea-a62c-f85652cda175
+    3. 0 mults per edge: scale linear slope with bit shifts
+  */
+
+  // uint32_t phase_increment = Interpolate88(lut_envelope_phase_increments, expo_->duration >> (8 - 5));
+  // int32_t linear_slope = (static_cast<int64_t>(final_scale) * phase_increment) >> 32;
+  const int32_t linear_slope = final_scale / static_cast<int32_t>(expo_->nominal_samples);
+  if (!linear_slope) return Trigger(static_cast<EnvelopeStage>(stage + 1));
+  const uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
+  const uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
+
+  // Set current_edge_, edge slopes, and edge samples
+  const size_t edge_samples = expo_->nominal_samples >> kEdgeBits;
+  const size_t remainder_samples = stage_samples % edge_samples;
+  if (truncate_start) {
+    uint8_t num_full_edges = stage_samples / edge_samples;
+    current_edge_ = kNumEdges - num_full_edges;
+    for (uint8_t i = current_edge_; i < kNumEdges; i++) {
+      edges_[i].samples = edge_samples;
+      edges_[i].slope = compute_edge_slope(linear_slope, i, max_shift);
+    }
+    // All remainder samples go in a partial beginning edge
+    if (remainder_samples) {
+      current_edge_--;
+      edges_[current_edge_].samples = remainder_samples;
+      edges_[current_edge_].slope = compute_edge_slope(linear_slope, current_edge_, max_shift);
+    }
+  } else {
+    // Use euclidean pattern to distribute remainder samples among edges
+    const uint16_t euclidean_pattern_offset = static_cast<uint16_t>(kNumEdges - 1) << 5;
+    const uint32_t euclidean_pattern = lut_euclidean[euclidean_pattern_offset + remainder_samples];
+    current_edge_ = 0;
+    for (uint8_t i = 0; i < kNumEdges; i++) {
+      const uint32_t mask = static_cast<uint32_t>(1) << (i % kNumEdges);
+      const size_t remainder_contribution = (euclidean_pattern & mask) ? 1 : 0;
+      edges_[i].samples = edge_samples + remainder_contribution;
+      edges_[i].slope = compute_edge_slope(linear_slope, i, max_shift);
+    }
   }
+}
 
-  // int32_t linear_slope = (static_cast<int64_t>(motion_->actual_delta_31) * motion_->phase_increment) >> 31;
-  // // multi.PrintInt32E(linear_slope);
-  // int32_t minimal_slope = actual_delta_31 > 0 ? 1 : -1;
-  // if (!linear_slope) linear_slope = minimal_slope;
-
-  // // Create segment curve from linear slope
-  // if (motion_->phase_increment >= (UINT32_MAX / (LUT_EXPO_SLOPE_SHIFT_SIZE * 2))) {
-  //   // This segment is so short that the expo slope slices are on the order of 1 sample, which will cause significant error.  Fall back on linear slope.
-  //   std::fill(
-  //     &expo_slope_[0],
-  //     &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-  //     linear_slope
-  //   );
-  // } else {
-  //   uint32_t slope_for_clz = abs(linear_slope >= 0 ? linear_slope : linear_slope + 1);
-  //   uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
-  //   for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-  //     int8_t shift = lut_expo_slope_shift[i];
-  //     int32_t expo_slope = shift >= 0
-  //       ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
-  //       : linear_slope >> static_cast<uint8_t>(-shift);
-  //     if (!expo_slope) expo_slope = minimal_slope;
-  //     expo_slope_[i] = expo_slope;
-  //   }
-  // }
-
-  // uint32_t edge_phase_fraction = UINT32_MAX >> kEdgeBits;
-  // int32_t simulated_value = expo_->offset;
-  // int32_t last_scaled_expo = 0;
-
-  int32_t linear_slope = (static_cast<int64_t>(expo_->scale) * expo_->phase_increment) >> 32;
-  uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
-  uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1; // 0..31
-
-  // Assign the number of samples to each edge.  The first edges may be partly or completely skipped if some phase has been skipped.  The last edge may have a remainder. 
-  // TODO need to apportion samples toward the end, not evenly, for phase skipping
-  size_t stage_samples = (UINT32_MAX - phase_) / expo_->phase_increment;
-  size_t max_edge_samples = (UINT32_MAX / expo_->phase_increment) >> kEdgeBits;
-
-  // Iterate backwards from last edge
-  for (int32_t i = kNumEdges - 1; i >= 0; --i) {
-    // TODO handle remainder
-    size_t edge_samples = std::min(stage_samples, max_edge_samples);
-    stage_samples -= edge_samples;
-    edges_[i].samples = edge_samples;
-
-    int8_t shift = lut_expo_slope_shift[i];
-    int32_t expo_slope = shift >= 0
-      ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
-      : linear_slope >> static_cast<uint8_t>(-shift);
-    edges_[i].slope = expo_slope;
-
-    // uint32_t edge_end_phase = (UINT32_MAX >> kEdgeBits) * (i + 1);
-    // uint8_t edge_end_phase = ((i + 1) << (8 - kEdgeBits)) - 1;
-    // // uint16_t expo_fraction = Interpolate88(lut_env_expo, edge_end_phase);
-    // uint16_t expo_fraction = lut_env_expo[edge_end_phase];  
-
-    // Super accurate, but 2 mults + 1 div per slice
-    // int32_t scaled_expo = (expo_->scale >> 12) * (expo_fraction >> 4);
-    // int32_t edge_target = expo_->offset + scaled_expo;
-    // int32_t edge_delta = SatSub(edge_target, simulated_value);
-    // edges_[i].slope = (edge_delta / static_cast<int32_t>(edges_[i].samples));
-    // simulated_value = edge_target;
-    // // simulated_value += edges_[i].slope * static_cast<int32_t>(edges_[i].samples);
-    
-    // This is way more accurate than shifts, but requires 2 multiplications per slice
-    // int32_t scaled_expo = (expo_->scale >> 12) * (expo_fraction >> 4);
-    // int32_t edge_delta = SatSub(scaled_expo, last_scaled_expo);
-    // // TODO constrain to min/max from noteon?
-    // edges_[i].slope = (edge_delta >> 16) * static_cast<int32_t>(expo_->phase_increment >> 16);
-    // last_scaled_expo = scaled_expo;
-
-    // a compromise with 1 mult per slice: LUT of "slope ratios" in 3.13 or 2.14 format
-  
-    // If the curve function has a constant 2nd derivative, it should be possible to generate a single scaled number that is *added* to the slope each slice, e.g. -x² + 2x
-    // https://claude.ai/chat/2f2083f0-11b9-42ea-a62c-f85652cda175
-  }
-
-  current_edge_ = phase_ >> (32 - kEdgeBits);
+int32_t Envelope::compute_edge_slope(int32_t linear_slope, uint8_t edge, uint8_t max_shift) const {
+  int8_t shift = lut_expo_slope_shift[edge];
+  return shift >= 0
+    ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
+    : linear_slope >> static_cast<uint8_t>(-shift);
 }
 
 /* Render TODO
@@ -290,69 +266,106 @@ Write to output buffer 4 samples at a time?
 
 Try outputting slopes instead, then computing a running total
 https://claude.ai/chat/127cae75-04b9-4d95-87ac-d01114bd7cf3
-Complication: shifting slopes before summing will cause error
+Complication: shifting slopes to 16-bit before summing will cause error
 Running total must be 32-bit, slope vector must be 32-bit, output buffer can be 16-bit
+
+Options for vector accumulator:
+1. Offset slope vector
+  - Render buffer of envelope slopes
+    - Have to handle corners
+  - Offset envelope slope buffer by interpolator slope
+  - Compute prefix sum of slope buffer
+2. Apply slope/value bias inline, like an idiot
+  - Optionally MAKE_BIASED_EXPO_SLOPES
+3. Sum 2 q15 vectors
+  - Render buffer of interpolator values (with prefix sum?)
+  - Sum interpolator value buffer with envelope buffer
+4. In-place addition on single buffer
+  - Render buffer of interpolator values (with prefix sum?)
+  - In render loop, SatAdd with envelope value (into same buffer)
+*/
+
+#define RENDER_LOOP(samples_exp, slope_exp) \
+  const int32_t slope = (slope_exp); \
+  size_t samples = (samples_exp); \
+  while (samples--) { \
+    value += slope; \
+    int16_t sample_bias = *(buffer->write_ptr()); \
+    int32_t biased_value = (value >> 16) + sample_bias; \
+    buffer->Overwrite(Clip16(biased_value)); \
+  }
+
+/*
+#define RENDER_LOOP(samples_exp, slope_31) \
+  size_t samples = (samples_exp); \
+  while (samples--) { \
+    biased_value_31 += (slope_31); \
+    int32_t output_31 = ClipS31(biased_value_31); \
+    buffer->Overwrite(output_31 >> (31 - 16)); \
+  }
 */
 
 template<size_t BUFFER_SIZE>
 void Envelope::RenderSamples(
   stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, 
-  int32_t new_output_bias, // TODO should be 16-bit?
-  size_t render_samples_needed
+  int32_t new_bias
 ) {
-  new_output_bias = 0; // TODO
-
-  int32_t current_output_value = value_ + output_bias_;
-
-  if (!expo_) {
-    // TODO this probably would cause noise by jumping to the new bias
-    // int32_t slope = (DIFF_DOWNSHIFT(new_output_bias, output_bias_) / static_cast<int32_t>(render_samples_needed)) << 1;
-    int32_t slope = 0;
-    while (render_samples_needed--) {
-      current_output_value += slope;
-      buffer->Overwrite(current_output_value >> 16);
-    }
-    output_bias_ = new_output_bias;
-    return;
+  size_t samples_needed = kAudioBlockSize; // Even if double buffering
+  int32_t bias = bias_;
+  const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
+  // Render bias values into buffer first, before summing them with envelope values
+  int16_t* write_ptr = buffer->write_ptr();
+  while (samples_needed--) {
+    bias += bias_slope;
+    // buffer->Overwrite(bias >> 16);
+    *write_ptr++ = bias >> 16;
   }
-  output_bias_ = new_output_bias;
+  bias_ = bias;
 
-  Edge& edge = edges_[current_edge_];
-  size_t samples_rendered = std::min(edge.samples, render_samples_needed);
-  int32_t slope = edge.slope;
-  // TODO sum with bias slope? may accumulate error unless bias slope is calculated from an accumulator
-  // bias slope may also need to be proportional to how much of the render we're doing here
-  // multi.PrintInt32E(slope);
-  for (size_t i = samples_rendered; i--; ) {
-    current_output_value += slope;
-    buffer->Overwrite(current_output_value >> 16);
-  }
+  int32_t value = value_;
+  samples_needed = kAudioBlockSize;
+  // TODO reset write ptr!
+  while (true) {
+    if (expo_) {
+      const Edge edge = edges_[current_edge_];
+      const bool finish_edge = samples_needed >= edge.samples;
+      const size_t edge_samples_to_render = finish_edge ? edge.samples : samples_needed;
+      // const int32_t biased_expo_slope_31 = (edge.slope >> 1) + bias_slope_31;
 
-  if (samples_rendered == edge.samples) {
-    edge.samples = 0; // Probably unncessary
-    current_edge_ = (current_edge_ + 1) % kNumEdges;
-    if (current_edge_ == 0) { // Begin next stage
-      value_ = expo_->target;
-      Trigger(static_cast<EnvelopeStage>(stage_ + 1), false);
+      RENDER_LOOP(edge_samples_to_render, edge.slope);
+
+      if (finish_edge) {
+        // Advance edge/stage as needed
+        samples_needed -= edge.samples;
+        current_edge_++;
+        // multi.PrintDebugByte(0x0C + (current_edge_ << 4));
+        if (current_edge_ == kNumEdges) { // Stage is done
+          // TODO this may glitch, but hard to reconstruct value_ from biased_value because we are somewhere between old and new bias
+          value = value_ = expo_->target;
+          Trigger(static_cast<EnvelopeStage>(stage_ + 1));
+          // what happens to biased_value_31 if we go to SUSTAIN/DEAD?  prob fucked
+        }
+        if (!samples_needed) break;
+      } else {
+        // Save edge state
+        edges_[current_edge_].samples -= edge_samples_to_render;
+        break;
+      }
     } else {
-      // jump to edge target?
+      RENDER_LOOP(samples_needed, 0);
+      break;
     }
-
-    render_samples_needed -= samples_rendered;
-    if (render_samples_needed) {
-      // NB: may cause yet another Trigger if next stage is short
-      return RenderSamples(buffer, new_output_bias, render_samples_needed);
-    }
-  } else {
-    // We'll continue rendering this stage next time
-    value_ = current_output_value - new_output_bias; // CONSTRAIN complicates this
-    edge.samples -= samples_rendered;
   }
+
+  // value_ = (biased_value_31 - (new_bias >> 1)) << 1;  
+  // bias_ = new_bias;
+
+  value_ = value;
 }
 
 template void Envelope::RenderSamples(
-  stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t new_output_bias, size_t render_samples_needed);
+  stmlib::RingBuffer<int16_t, kAudioBlockSize>* buffer, int32_t new_bias);
 template void Envelope::RenderSamples(
-  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t new_output_bias, size_t render_samples_needed);
+  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2>* buffer, int32_t new_bias);
 
 }  // namespace yarns
