@@ -290,20 +290,10 @@ Options for vector accumulator:
   size_t samples = (samples_exp); \
   while (samples--) { \
     value += slope; \
-    int16_t sample_bias = *(buffer->write_ptr()); \
-    int32_t biased_value = (value >> 16) + sample_bias; \
+    bias += bias_slope; \
+    int32_t biased_value = (value >> 16) + (bias >> 16); \
     buffer->Overwrite(Clip16(biased_value)); \
   }
-
-/*
-#define RENDER_LOOP(samples_exp, slope_31) \
-  size_t samples = (samples_exp); \
-  while (samples--) { \
-    biased_value_31 += (slope_31); \
-    int32_t output_31 = ClipS31(biased_value_31); \
-    buffer->Overwrite(output_31 >> (31 - 16)); \
-  }
-*/
 
 template<size_t BUFFER_SIZE>
 void Envelope::RenderSamples(
@@ -311,26 +301,16 @@ void Envelope::RenderSamples(
   int32_t new_bias
 ) {
   size_t samples_needed = kAudioBlockSize; // Even if double buffering
-  int32_t bias = bias_;
-  const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
-  // Render bias values into buffer first, before summing them with envelope values
-  int16_t* write_ptr = buffer->write_ptr();
-  while (samples_needed--) {
-    bias += bias_slope;
-    // buffer->Overwrite(bias >> 16);
-    *write_ptr++ = bias >> 16;
-  }
-  bias_ = bias;
 
   int32_t value = value_;
-  samples_needed = kAudioBlockSize;
-  // TODO reset write ptr!
+  int32_t bias = bias_;
+  const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
+
   while (true) {
     if (expo_) {
       const Edge edge = edges_[current_edge_];
       const bool finish_edge = samples_needed >= edge.samples;
       const size_t edge_samples_to_render = finish_edge ? edge.samples : samples_needed;
-      // const int32_t biased_expo_slope_31 = (edge.slope >> 1) + bias_slope_31;
 
       RENDER_LOOP(edge_samples_to_render, edge.slope);
 
@@ -357,10 +337,8 @@ void Envelope::RenderSamples(
     }
   }
 
-  // value_ = (biased_value_31 - (new_bias >> 1)) << 1;  
-  // bias_ = new_bias;
-
   value_ = value;
+  bias_ = bias;
 }
 
 template void Envelope::RenderSamples(
