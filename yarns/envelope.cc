@@ -292,7 +292,7 @@ Options for vector accumulator:
     value += slope; \
     bias += bias_slope; \
     int32_t biased_value = (value >> 16) + (bias >> 16); \
-    buffer->Overwrite(Clip16(biased_value)); \
+    local_buffer[local_buffer_index++] = Clip16(biased_value); \
   } while (--samples);
 
 template<size_t BUFFER_SIZE>
@@ -301,6 +301,8 @@ void Envelope::RenderSamples(
   int32_t new_bias
 ) {
   size_t samples_needed = kAudioBlockSize; // Even if double buffering
+  int16_t local_buffer[kAudioBlockSize];
+  size_t local_buffer_index = 0;
 
   int32_t value = value_;
   int32_t bias = bias_;
@@ -339,6 +341,9 @@ void Envelope::RenderSamples(
 
   value_ = value;
   bias_ = bias;
+
+  std::copy(local_buffer, local_buffer + kAudioBlockSize, buffer->write_ptr());
+  buffer->advance_write_ptr(kAudioBlockSize);
 }
 
 template void Envelope::RenderSamples(
