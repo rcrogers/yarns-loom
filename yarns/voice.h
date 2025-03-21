@@ -348,7 +348,7 @@ class CVOutput {
 
   uint16_t RefreshEnvelope(uint16_t tremolo) {
     tremolo_.SetTarget(envelope_.tremolo(tremolo));
-    tremolo_.ComputeSlope();
+    tremolo_.ComputeSlope(); // TODO remove
     uint16_t envelope_value_15 = dac_buffer_.ImmediatePeek();
     return volts_dac_code(0) - (envelope_value_15 << 1);
   }

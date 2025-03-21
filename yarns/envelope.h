@@ -27,6 +27,7 @@
 #define YARNS_ENVELOPE_H_
 
 #include "stmlib/utils/ring_buffer.h"
+#include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
 
@@ -67,6 +68,10 @@ struct Edge {
   int32_t slope;
 };
 
+struct InlineLocalSampleBuffer {
+  int16_t buffer[kAudioBlockSize];
+};
+
 class Envelope {
  public:
   Envelope() { }
@@ -83,8 +88,89 @@ class Envelope {
   void Trigger(EnvelopeStage stage); // Populates expo slope table for the new stage
   int32_t compute_edge_slope(int32_t linear_slope, uint8_t edge, uint8_t max_shift) const;
 
-  template<size_t BUFFER_SIZE>
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t new_bias);
+  /* Render TODO
+
+  Try copying expo slope to local
+
+  Separate inline buffer of length 4-8?
+  Write to output buffer 4 samples at a time?
+
+  Try outputting slopes instead, then computing a running total
+  https://claude.ai/chat/127cae75-04b9-4d95-87ac-d01114bd7cf3
+  Complication: shifting slopes to 16-bit before summing will cause error
+  Running total must be 32-bit, slope vector must be 32-bit, output buffer can be 16-bit
+
+  Options for vector accumulator:
+  1. Offset slope vector
+    - Render buffer of envelope slopes
+      - Have to handle corners
+    - Offset envelope slope buffer by interpolator slope
+    - Compute prefix sum of slope buffer
+  2. Apply slope/value bias inline, like an idiot
+    - Optionally MAKE_BIASED_EXPO_SLOPES
+  3. Sum 2 q15 vectors
+    - Render buffer of interpolator values (with prefix sum?)
+    - Sum interpolator value buffer with envelope buffer
+  4. In-place addition on single buffer
+    - Render buffer of interpolator values (with prefix sum?)
+    - In render loop, SatAdd with envelope value (into same buffer)
+  */
+
+  #define RENDER_LOOP(samples_exp, slope_exp) \
+    const int32_t slope = (slope_exp); \
+    size_t samples = (samples_exp); \
+    do { \
+      value += slope; \
+      bias += bias_slope; \
+      int32_t biased_value = (value >> 16) + (bias >> 16); \
+      res.buffer[local_buffer_index++] = Clip16(biased_value); \
+    } while (--samples);
+
+  InlineLocalSampleBuffer RenderSamples(int32_t new_bias) __attribute__((always_inline)) {
+    size_t samples_needed = kAudioBlockSize; // Even if double buffering
+    InlineLocalSampleBuffer res;
+    size_t local_buffer_index = 0;
+
+    int32_t value = value_;
+    int32_t bias = bias_;
+    const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
+
+    while (true) {
+      if (expo_) {
+        const Edge edge = edges_[current_edge_];
+        const bool finish_edge = samples_needed >= edge.samples;
+        const size_t edge_samples_to_render = finish_edge ? edge.samples : samples_needed;
+
+        RENDER_LOOP(edge_samples_to_render, edge.slope);
+
+        if (finish_edge) {
+          // Advance edge/stage as needed
+          samples_needed -= edge.samples;
+          current_edge_++;
+          // multi.PrintDebugByte(0x0C + (current_edge_ << 4));
+          if (current_edge_ == kNumEdges) { // Stage is done
+            // TODO this may glitch, but hard to reconstruct value_ from biased_value because we are somewhere between old and new bias
+            value = value_ = expo_->target;
+            Trigger(static_cast<EnvelopeStage>(stage_ + 1));
+            // what happens to biased_value_31 if we go to SUSTAIN/DEAD?  prob fucked
+          }
+          if (!samples_needed) break;
+        } else {
+          // Save edge state
+          edges_[current_edge_].samples -= edge_samples_to_render;
+          break;
+        }
+      } else {
+        RENDER_LOOP(samples_needed, 0);
+        break;
+      }
+    }
+
+    value_ = value;
+    bias_ = bias;
+
+    return res;
+  }
 
  private:
   ExpoCurve attack_, decay_, release_;

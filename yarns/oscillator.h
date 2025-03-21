@@ -85,24 +85,26 @@ enum OscillatorShape {
   OSC_SHAPE_FM,
 };
 
+static const uint16_t kHighestNote = 128 * 128;
+
 class Oscillator {
  public:
-  typedef void (Oscillator::*RenderFn)();
+  typedef InlineLocalSampleBuffer (Oscillator::*RenderFn)();
 
   Oscillator() { }
   ~Oscillator() { }
 
-  stmlib::RingBuffer<int16_t, kAudioBlockSize> audio_buffer, gain_buffer;
+  // stmlib::RingBuffer<int16_t, kAudioBlockSize> audio_buffer, gain_buffer;
 
   inline void Init(uint16_t scale) {
-    audio_buffer.Init();
+    // audio_buffer.Init();
     scale_ = scale;
     gain_.Init();
     timbre_.Init();
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
-    timbre_buffer_.Init();
-    gain_buffer.Init();
+    // timbre_buffer_.Init();
+    // gain_buffer.Init();
     svf_.Init();
     pitch_ = 60 << 7;
     phase_ = 0;
@@ -111,9 +113,9 @@ class Oscillator {
     next_sample_ = 0;
   }
 
-  inline int16_t ReadSample() {
-    return audio_buffer.ImmediateRead();
-  }
+  // inline int16_t ReadSample() {
+  //   return audio_buffer.ImmediateRead();
+  // }
 
   void Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo);
   
@@ -133,26 +135,38 @@ class Oscillator {
     timbre_envelope_.NoteOff();
   }
   
-  void Render();
+  inline InlineLocalSampleBuffer Render() {
+    if (pitch_ >= kHighestNote) {
+      pitch_ = kHighestNote - 1;
+    } else if (pitch_ < 0) {
+      pitch_ = 0;
+    }
+    phase_increment_ = ComputePhaseIncrement(pitch_);
+
+    uint8_t fn_index = shape_;
+    CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
+    RenderFn fn = fn_table_[fn_index];
+    return (this->*fn)();
+  }
   
  private:
-  void RenderFilteredNoise();
-  void RenderPhaseDistortionPulse();
-  void RenderPhaseDistortionSaw();
-  void RenderLPPulse();
-  void RenderLPSaw();
-  void RenderVariablePulse();
-  void RenderVariableSaw();
-  void RenderSawPulseMorph();
-  void RenderSyncSine();
-  void RenderSyncPulse();
-  void RenderSyncSaw();
-  void RenderFoldSine();
-  void RenderFoldTriangle();
-  void RenderDiracComb();
-  void RenderTanhSine();
-  void RenderExponentialSine();
-  void RenderFM();
+  inline InlineLocalSampleBuffer RenderFilteredNoise();
+  inline InlineLocalSampleBuffer RenderPhaseDistortionPulse();
+  inline InlineLocalSampleBuffer RenderPhaseDistortionSaw();
+  inline InlineLocalSampleBuffer RenderLPPulse();
+  inline InlineLocalSampleBuffer RenderLPSaw();
+  inline InlineLocalSampleBuffer RenderVariablePulse();
+  inline InlineLocalSampleBuffer RenderVariableSaw();
+  inline InlineLocalSampleBuffer RenderSawPulseMorph();
+  inline InlineLocalSampleBuffer RenderSyncSine();
+  inline InlineLocalSampleBuffer RenderSyncPulse();
+  inline InlineLocalSampleBuffer RenderSyncSaw();
+  inline InlineLocalSampleBuffer RenderFoldSine();
+  inline InlineLocalSampleBuffer RenderFoldTriangle();
+  inline InlineLocalSampleBuffer RenderDiracComb();
+  inline InlineLocalSampleBuffer RenderTanhSine();
+  inline InlineLocalSampleBuffer RenderExponentialSine();
+  inline InlineLocalSampleBuffer RenderFM();
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
@@ -188,7 +202,7 @@ class Oscillator {
   int32_t next_sample_;
   uint16_t scale_;
   // Double buffering not needed for gain/timbre because they're synchronous from the standpoint of audio rendering
-  stmlib::RingBuffer<int16_t, kAudioBlockSize> timbre_buffer_;
+  // stmlib::RingBuffer<int16_t, kAudioBlockSize> timbre_buffer_;
   
   static RenderFn fn_table_[];
   

@@ -338,7 +338,8 @@ void Multi::Refresh() {
 
   if (can_advance_lfos_) {
     backup_clock_lfo_.Refresh();
-    uint32_t swing_phase = abs(settings_.clock_swing) << (32 - 6);
+    // uint32_t swing_phase = abs(settings_.clock_swing) << (32 - 6);
+    uint8_t swing_phase = (settings_.clock_swing >= 0 ? settings_.clock_swing : -settings_.clock_swing) << (32 - 6);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       Part& part = part_[p];
 

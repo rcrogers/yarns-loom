@@ -282,7 +282,8 @@ void CVOutput::RenderSamples() {
         zero_dac_code_
     );
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
-      audio_voices_[v]->oscillator()->Render();
+      InlineLocalSampleBuffer audio = audio_voices_[v]->oscillator()->Render();
+      InlineLocalSampleBuffer gain = audio_voices_[v]->envelope()-RenderSamples(gain_.target() << 16);
       q15_multiply_accumulate<kAudioBlockSize>(
         audio_voices_[v]->oscillator()->audio_buffer.read_ptr(),
         audio_voices_[v]->oscillator()->gain_buffer.read_ptr(),
