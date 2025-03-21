@@ -59,10 +59,6 @@ void SVC_Handler(void) { }
 void DebugMon_Handler(void) { }
 void PendSV_Handler(void) { }
 
-}
-
-extern "C" {
-
 uint16_t cv[4];
 bool gate[4];
 bool is_high_freq[4];
@@ -109,10 +105,10 @@ void SysTick_Handler() {
     multi.Refresh();
     multi.GetCvGate(cv, gate);
 
-    is_high_freq[0] = multi.cv_output(0).is_high_freq();
-    is_high_freq[1] = multi.cv_output(1).is_high_freq();
-    is_high_freq[2] = multi.cv_output(2).is_high_freq();
-    is_high_freq[3] = multi.cv_output(3).is_high_freq();
+    // is_high_freq[0] = multi.cv_output(0).is_high_freq();
+    // is_high_freq[1] = multi.cv_output(1).is_high_freq();
+    // is_high_freq[2] = multi.cv_output(2).is_high_freq();
+    // is_high_freq[3] = multi.cv_output(3).is_high_freq();
     
     // In calibration mode, overrides the DAC outputs with the raw calibration
     // table values.
@@ -135,48 +131,58 @@ void SysTick_Handler() {
       ++factory_testing_counter;
     }
     
-    dac.PrepareWrites(cv);
+    for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
+      if (multi.cv_output(channel).is_high_freq()) {
+        dac.SetMode(channel, Dac::MODE_DMA);
+      } else {
+        dac.SetMode(channel, Dac::MODE_MANUAL);
+        dac.set_channel(channel, cv[channel]);
+      }
+    }
   }
 }
 
-// Modified DMA IRQ handler
-extern "C" {
-void DMA1_Channel5_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_TC5)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC5);
-    
-    extern yarns::Dac dac;
-    dac.HandleDMAComplete();
-  }
-}
-}
-
-extern "C" {
 void TIM1_UP_IRQHandler(void) {
   if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
     return;
   }
   TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
-  dac.Cycle();
-  
-  // Prepare and start new transfer based on source type
-  if (is_high_freq[dac.channel()]) {
-    uint16_t sample = multi.mutable_cv_output(dac.channel())->GetDACSample();
-    dac.PrepareWrite(dac.channel(), sample);
-    dac.WriteIfDirty();  // This will use double buffering internally
-  } else {
-    // Regular CV output - will use double buffering if value has changed
-    dac.WriteIfDirty();
-  }
-  
-  if (dac.channel() == 0) {
-    multi.RefreshInternalClock();
-  }
-}
+  multi.RefreshInternalClock();
 }
 
+// DMA interrupt handlers
+void DMA1_Channel1_IRQHandler(void) {
+  if (DMA_GetITStatus(DMA1_IT_TC1)) {
+    // Clear interrupt flag
+    DMA_ClearITPendingBit(DMA1_IT_TC1);
+    // Notify DAC
+    dac.HandleDmaInterrupt(0);
+  }
 }
+
+void DMA1_Channel2_IRQHandler(void) {
+  if (DMA_GetITStatus(DMA1_IT_TC2)) {
+    DMA_ClearITPendingBit(DMA1_IT_TC2);
+    dac.HandleDmaInterrupt(1);
+  }
+}
+
+void DMA1_Channel3_IRQHandler(void) {
+  if (DMA_GetITStatus(DMA1_IT_TC3)) {
+    DMA_ClearITPendingBit(DMA1_IT_TC3);
+    dac.HandleDmaInterrupt(2);
+  }
+}
+
+void DMA1_Channel4_IRQHandler(void) {
+  if (DMA_GetITStatus(DMA1_IT_TC4)) {
+    DMA_ClearITPendingBit(DMA1_IT_TC4);
+    dac.HandleDmaInterrupt(3);
+  }
+}
+
+} // extern "C"
 
 void Init() {
   sys.Init();

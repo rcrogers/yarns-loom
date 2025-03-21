@@ -43,7 +43,7 @@ void System::Init() {
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI2, ENABLE);
 
   TIM_TimeBaseInitTypeDef timer_init;
-  timer_init.TIM_Period = F_CPU / (40000 * 4) - 1;
+  timer_init.TIM_Period = F_CPU / 40000 - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;
@@ -61,19 +61,11 @@ void System::Init() {
   timer_interrupt.NVIC_IRQChannelSubPriority = 0;
   timer_interrupt.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&timer_interrupt);
-
-  // DMA interrupt initialization
-  NVIC_InitTypeDef dma_interrupt;
-  dma_interrupt.NVIC_IRQChannel = DMA1_Channel5_IRQn;
-  dma_interrupt.NVIC_IRQChannelPreemptionPriority = 0; // Higher priority than TIM1_UP
-  dma_interrupt.NVIC_IRQChannelSubPriority = 0;
-  dma_interrupt.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&dma_interrupt);
 }
 
 void System::StartTimers() {
   TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);  
-  SysTick_Config(F_CPU / 8000);
+  SysTick_Config(F_CPU / 8000 - 1);
 }
 
 }  // namespace yarns

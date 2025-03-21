@@ -30,97 +30,97 @@
 #define YARNS_DRIVERS_DAC_H_
 
 #include "stmlib/stmlib.h"
-
 #include <stm32f10x_conf.h>
 
 namespace yarns {
 
 const uint8_t kNumChannels = 4;
-const uint16_t kPinSS = GPIO_Pin_12;
+const uint16_t kDmaBufSize = 64; // Match your block size
 
 class Dac {
  public:
   Dac() { }
   ~Dac() { }
   
-  void Init();
-  void InitDMA();
-  
-  inline void PrepareWrite(uint8_t channel, uint16_t value) {
-    if (value_[channel] != value) {
-      value_[channel] = value;
-      update_[channel] = true;
-    }
-  }
-  
-  inline void PrepareWrites(const uint16_t* values) {
-    PrepareWrite(0, values[0]);
-    PrepareWrite(1, values[1]);
-    PrepareWrite(2, values[2]);
-    PrepareWrite(3, values[3]);
-  }
-  
-  inline void Cycle() {
-    active_channel_ = (active_channel_ + 1) % kNumChannels;
-  }
-  
-  inline void WriteIfDirty() {
-    if (update_[active_channel_]) {
-      PrepareNextBuffer();
-      StartTransferIfNeeded();
-      update_[active_channel_] = false;
-    }
-  }
-  
-  inline uint8_t channel() { return active_channel_; }
-  
-  // Called from ISR to handle buffer switching
-  void HandleDMAComplete();
- 
- private:
-  // Double buffer configuration
-  static const uint16_t kDMABufferSize = 2;  // Two 16-bit words per transfer
-  static const uint8_t kNumBuffers = 2;
-  
-  struct DMABuffer {
-    uint16_t data[kDMABufferSize];
-    bool ready;  // Indicates buffer is prepared and ready to send
+  enum Mode {
+    MODE_MANUAL, // Low-frequency manual output
+    MODE_DMA     // High-frequency DMA-driven output
   };
   
-  DMABuffer buffers_[kNumBuffers];
-  volatile uint8_t active_buffer_;  // Currently transmitting buffer
-  volatile uint8_t next_buffer_;    // Buffer being prepared
+  void Init();
   
-  bool update_[kNumChannels];
-  uint16_t value_[kNumChannels];
-  uint8_t active_channel_;
-  volatile bool transfer_in_progress_;
-  
-  inline void PrepareNextBuffer() {
-    // Format data for DAC in the next buffer
-    uint16_t dac_channel = kNumChannels - 1 - active_channel_;
-    buffers_[next_buffer_].data[0] = 0x1000 | (dac_channel << 9) | (value_[active_channel_] >> 8);
-    buffers_[next_buffer_].data[1] = value_[active_channel_] << 8;
-    buffers_[next_buffer_].ready = true;
+  // Set channel output mode (high-frequency DMA or low-frequency manual)
+  // Returns true if mode was changed, false if already in specified mode
+  bool SetMode(uint8_t channel, Mode mode);
+
+  // For low-frequency mode: set single value for DAC channel
+  inline void set_channel(uint8_t channel, uint16_t value) {
+    if (channel >= kNumChannels || mode_[channel] != MODE_MANUAL) {
+      return;
+    }
+    
+    if (value_[channel] != value) {
+      value_[channel] = value;
+      WriteDacChannel(channel, value);
+    }
   }
   
-  inline void StartTransferIfNeeded() {
-    if (!transfer_in_progress_ && buffers_[next_buffer_].ready) {
-      // Start new transfer
-      transfer_in_progress_ = true;
-      active_buffer_ = next_buffer_;
-      next_buffer_ = (next_buffer_ + 1) % kNumBuffers;
-      buffers_[active_buffer_].ready = false;
-      
-      // Configure DMA for new transfer
-      DMA1_Channel5->CMAR = (uint32_t)buffers_[active_buffer_].data;
-      DMA1_Channel5->CNDTR = kDMABufferSize;
-      
-      // Toggle SS pin and start transfer
-      GPIOB->BSRR = kPinSS; // Set SS pin high
-      GPIOB->BRR = kPinSS;  // Set SS pin low
-      DMA_Cmd(DMA1_Channel5, ENABLE);
+  // For low-frequency mode: write values to all channels
+  inline void Write(const uint16_t* values) {
+    for (uint8_t i = 0; i < kNumChannels; ++i) {
+      set_channel(i, values[i]);
     }
+  }
+  
+  // For high-frequency mode: check if buffer is ready to be filled
+  bool IsBufferReady(uint8_t channel);
+  
+  // For high-frequency mode: fill the next DMA buffer with samples
+  // Returns true if buffer was filled, false if buffer wasn't ready
+  bool FillBuffer(uint8_t channel, const uint16_t* samples, uint16_t count);
+  
+  // Called in DMA transfer complete ISR
+  void HandleDmaInterrupt(uint8_t channel);
+  
+ private:
+  // Internal buffer state for each channel
+  struct ChannelBuffer {
+    uint16_t buffer[2][kDmaBufSize];  // Double buffer
+    volatile uint8_t write_index;     // Which buffer to write to (0 or 1)
+    volatile uint8_t active_index;    // Which buffer DMA is reading from
+    volatile bool buffer_ready;       // Is the inactive buffer ready to be filled
+  };
+  
+  Mode mode_[kNumChannels];
+  ChannelBuffer channel_buffers_[kNumChannels];
+  uint16_t value_[kNumChannels];      // Current value for manual mode
+  
+  // Start DMA transfers for a channel
+  void StartDma(uint8_t channel);
+  
+  // Stop DMA transfers for a channel
+  void StopDma(uint8_t channel);
+  
+  // Configure DMA for specific channel
+  void ConfigureDma(uint8_t channel);
+  
+  // Helper to write to specific DAC channel using SPI with CS toggle
+  inline void WriteDacChannel(uint8_t channel, uint16_t value) {
+    // Assert CS
+    GPIOB->BRR = GPIO_Pin_12;
+    
+    // Format the command: 0x1000 | (channel << 9) | (value >> 8)
+    uint16_t dac_channel = kNumChannels - 1 - channel;
+    uint16_t word = 0x1000 | (dac_channel << 9) | (value & 0x0FFF);
+    
+    // Send the data
+    SPI_I2S_SendData(SPI2, word);
+    
+    // Wait for transmission to complete
+    while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY) == SET);
+    
+    // Deassert CS
+    GPIOB->BSRR = GPIO_Pin_12;
   }
   
   DISALLOW_COPY_AND_ASSIGN(Dac);
