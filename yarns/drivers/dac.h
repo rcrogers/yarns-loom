@@ -34,8 +34,12 @@
 
 namespace yarns {
 
-const uint8_t kNumChannels = 4;
-const uint16_t kDmaBufSize = 64; // Match your block size
+const uint8_t kNumCVOutputs = 4;
+const uint8_t kAudioBlockSizeBits = 6; // 64 samples
+const uint16_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
+
+const uint16_t kDacCommandWrite = 0x1000;
+const uint32_t kSpiTimeout = 1000;
 
 class Dac {
  public:
@@ -49,51 +53,43 @@ class Dac {
   
   void Init();
   
-  // Set channel output mode (high-frequency DMA or low-frequency manual)
   // Returns true if mode was changed, false if already in specified mode
   bool SetMode(uint8_t channel, Mode mode);
 
   // For low-frequency mode: set single value for DAC channel
-  inline void set_channel(uint8_t channel, uint16_t value) {
-    if (channel >= kNumChannels || mode_[channel] != MODE_MANUAL) {
-      return;
-    }
-    
-    if (value_[channel] != value) {
-      value_[channel] = value;
-      WriteDacChannel(channel, value);
-    }
-  }
+  void WriteIfManual(uint8_t channel, uint16_t value);
   
   // For low-frequency mode: write values to all channels
-  inline void Write(const uint16_t* values) {
-    for (uint8_t i = 0; i < kNumChannels; ++i) {
-      set_channel(i, values[i]);
-    }
-  }
+  void WriteAllIfManual(const uint16_t* values);
   
-  // For high-frequency mode: check if buffer is ready to be filled
-  bool IsBufferReady(uint8_t channel);
-  
-  // For high-frequency mode: fill the next DMA buffer with samples
-  // Returns true if buffer was filled, false if buffer wasn't ready
+  // Fill half of the DMA buffer with new samples
+  // Returns true if buffer was filled, false if buffer not ready
   bool FillBuffer(uint8_t channel, const uint16_t* samples, uint16_t count);
+
+  // Check if a buffer needs filling (true = needs samples)
+  bool NeedsSamples(uint8_t channel);
   
-  // Called in DMA transfer complete ISR
-  void HandleDmaInterrupt(uint8_t channel);
+  // Called in DMA transfer half/complete ISR
+  void HandleDMAIrq(uint8_t channel);
+  
+  void AssertCS();
+  void DeassertCS();
   
  private:
-  // Internal buffer state for each channel
+  
+  // Buffer structure using circular buffer with half-transfer interrupts
   struct ChannelBuffer {
-    uint16_t buffer[2][kDmaBufSize];  // Double buffer
-    volatile uint8_t write_index;     // Which buffer to write to (0 or 1)
-    volatile uint8_t active_index;    // Which buffer DMA is reading from
-    volatile bool buffer_ready;       // Is the inactive buffer ready to be filled
+    uint16_t buffer[kAudioBlockSize];     // Circular buffer for DMA
+    volatile bool first_half_free;        // Is first half ready for filling
+    volatile bool second_half_free;       // Is second half ready for filling
   };
   
-  Mode mode_[kNumChannels];
-  ChannelBuffer channel_buffers_[kNumChannels];
-  uint16_t value_[kNumChannels];      // Current value for manual mode
+  Mode mode_[kNumCVOutputs];
+  ChannelBuffer channel_buffers_[kNumCVOutputs];
+  uint16_t value_[kNumCVOutputs];      // Current value for manual mode
+  
+  // Initialize DMA for a channel in circular mode
+  void InitDma(uint8_t channel);
   
   // Start DMA transfers for a channel
   void StartDma(uint8_t channel);
@@ -101,30 +97,19 @@ class Dac {
   // Stop DMA transfers for a channel
   void StopDma(uint8_t channel);
   
-  // Configure DMA for specific channel
-  void ConfigureDma(uint8_t channel);
+  // Format samples for DAC - add channel/command bits to 12-bit value
+  inline uint16_t FormatDacWord(uint8_t channel, uint16_t value) {
+    // Command: write, channel address, 12-bit value
+    return kDacCommandWrite | ((kNumCVOutputs - 1 - channel) << 9) | (value & 0x0FFF);
+  }
   
   // Helper to write to specific DAC channel using SPI with CS toggle
-  inline void WriteDacChannel(uint8_t channel, uint16_t value) {
-    // Assert CS
-    GPIOB->BRR = GPIO_Pin_12;
-    
-    // Format the command: 0x1000 | (channel << 9) | (value >> 8)
-    uint16_t dac_channel = kNumChannels - 1 - channel;
-    uint16_t word = 0x1000 | (dac_channel << 9) | (value & 0x0FFF);
-    
-    // Send the data
-    SPI_I2S_SendData(SPI2, word);
-    
-    // Wait for transmission to complete
-    while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY) == SET);
-    
-    // Deassert CS
-    GPIOB->BSRR = GPIO_Pin_12;
-  }
+  void DirectWrite(uint8_t channel, uint16_t value);
   
   DISALLOW_COPY_AND_ASSIGN(Dac);
 };
+
+extern Dac dac;
 
 }  // namespace yarns
 

@@ -222,10 +222,6 @@ class Voice {
     return &oscillator_;
   }
   inline FastSyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
-
-  inline uint16_t ReadSample() {
-    return oscillator_.ReadSample();
-  }
   
  private:
   FastSyncedLFO lfos_[LFO_ROLE_LAST];
@@ -349,15 +345,11 @@ class CVOutput {
   uint16_t RefreshEnvelope(uint16_t tremolo) {
     tremolo_.SetTarget(envelope_.tremolo(tremolo));
     tremolo_.ComputeSlope();
-    uint16_t envelope_value_15 = dac_buffer_.ImmediatePeek();
+    uint16_t envelope_value_15 = envelope_.value();
     return volts_dac_code(0) - (envelope_value_15 << 1);
   }
 
-  void RenderSamples();
-
-  inline uint16_t GetDACSample() {
-    return dac_buffer_.ImmediateRead() << 1;
-  }
+  void RenderSamples(uint8_t channel);
 
   void Refresh();
 
@@ -424,7 +416,6 @@ class CVOutput {
   uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
-  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2> dac_buffer_;
   Interpolator<kAudioBlockSizeBits> tremolo_; // 2^4 = 16 approximates the ratio between 4 kHz Refresh and 40 kHz GetEnvelopeSample
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);

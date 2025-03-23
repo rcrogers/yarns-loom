@@ -43,7 +43,6 @@
 using namespace yarns;
 using namespace stmlib;
 
-Dac dac;
 GateOutput gate_output;
 MidiIO midi_io;
 System sys;
@@ -61,7 +60,6 @@ void PendSV_Handler(void) { }
 
 uint16_t cv[4];
 bool gate[4];
-bool is_high_freq[4];
 uint16_t factory_testing_counter;
 
 void SysTick_Handler() {
@@ -132,12 +130,8 @@ void SysTick_Handler() {
     }
     
     for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
-      if (multi.cv_output(channel).is_high_freq()) {
-        dac.SetMode(channel, Dac::MODE_DMA);
-      } else {
-        dac.SetMode(channel, Dac::MODE_MANUAL);
-        dac.set_channel(channel, cv[channel]);
-      }
+      dac.SetMode(channel, multi.cv_output(channel).is_high_freq() ? Dac::MODE_DMA : Dac::MODE_MANUAL);
+      dac.WriteIfManual(channel, cv[channel]);
     }
   }
 }
@@ -151,35 +145,17 @@ void TIM1_UP_IRQHandler(void) {
   multi.RefreshInternalClock();
 }
 
-// DMA interrupt handlers
 void DMA1_Channel1_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_TC1)) {
-    // Clear interrupt flag
-    DMA_ClearITPendingBit(DMA1_IT_TC1);
-    // Notify DAC
-    dac.HandleDmaInterrupt(0);
-  }
+  dac.HandleDMAIrq(0);
 }
-
 void DMA1_Channel2_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_TC2)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC2);
-    dac.HandleDmaInterrupt(1);
-  }
+  dac.HandleDMAIrq(1);
 }
-
 void DMA1_Channel3_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_TC3)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC3);
-    dac.HandleDmaInterrupt(2);
-  }
+  dac.HandleDMAIrq(2);
 }
-
 void DMA1_Channel4_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_TC4)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC4);
-    dac.HandleDmaInterrupt(3);
-  }
+  dac.HandleDMAIrq(3);
 }
 
 } // extern "C"

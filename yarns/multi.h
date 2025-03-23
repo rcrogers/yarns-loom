@@ -42,7 +42,6 @@
 namespace yarns {
 
 const uint8_t kNumParts = 4;
-const uint8_t kNumCVOutputs = 4;
 // One paraphonic part, one voice per remaining output
 const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
 const uint8_t kMaxBarDuration = 32;
@@ -458,9 +457,9 @@ class Multi {
           play ? &Part::LooperPlayNoteOff : NULL
         );
       }
-      for (uint8_t c = 0; c < kNumCVOutputs; ++c) {
-        cv_outputs_[c].RenderSamples();
-      }
+    }
+    for (uint8_t c = 0; c < kNumCVOutputs; ++c) {
+      cv_outputs_[c].RenderSamples(c);
     }
   }
   

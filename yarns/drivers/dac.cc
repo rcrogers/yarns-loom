@@ -28,11 +28,17 @@
 
 #include "yarns/drivers/dac.h"
 
+#include "yarns/multi.h"
+
 namespace yarns {
 
 using namespace std;
 
 const uint16_t kPinSS = GPIO_Pin_12;
+
+DMA_Channel_TypeDef* kDmaChannels[kNumCVOutputs] = {
+  DMA1_Channel1, DMA1_Channel2, DMA1_Channel3, DMA1_Channel4
+};
 
 void Dac::Init() {
   // Initialize SS pin
@@ -41,7 +47,7 @@ void Dac::Init() {
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
   gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;
   GPIO_Init(GPIOB, &gpio_init);
-  GPIOB->BSRR = kPinSS; // Set CS high initially
+  DeassertCS(); // Set CS high initially
   
   // Initialize MOSI and SCK pins
   gpio_init.GPIO_Pin = GPIO_Pin_13 | GPIO_Pin_15;
@@ -67,80 +73,59 @@ void Dac::Init() {
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
   
   // Initialize channel buffers and set default mode
-  for (uint8_t i = 0; i < kNumChannels; ++i) {
-    channel_buffers_[i].write_index = 0;
-    channel_buffers_[i].active_index = 0;
-    channel_buffers_[i].buffer_ready = true;
+  for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
     mode_[i] = MODE_MANUAL;
     value_[i] = 0;
+    channel_buffers_[i].first_half_free = true;
+    channel_buffers_[i].second_half_free = true;
+    
+    // Pre-initialize all buffers with zeros
+    for (uint16_t j = 0; j < kAudioBlockSize; ++j) {
+      channel_buffers_[i].buffer[j] = FormatDacWord(i, 0);
+    }
+    
+    // Configure DMA for each channel
+    InitDma(i);
   }
   
-  // Configure timer for sample rate (assuming TIM2)
-  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
-  TIM_TimeBaseInitTypeDef tim_init;
-  tim_init.TIM_Period = F_CPU / 40000 - 1;
-  tim_init.TIM_Prescaler = 0;
-  tim_init.TIM_ClockDivision = TIM_CKD_DIV1;
-  tim_init.TIM_CounterMode = TIM_CounterMode_Up;
-  TIM_TimeBaseInit(TIM2, &tim_init);
+  // Configure NVIC priorities for DMA interrupts
+  NVIC_InitTypeDef nvic_init;
   
-  // Configure timer DMA requests
-  TIM_DMACmd(TIM2, TIM_DMA_Update, ENABLE);
-  TIM_Cmd(TIM2, ENABLE); // Keep timer running for all channels
-  
-  // Initialize DMA configuration (but don't enable yet)
-  for (uint8_t i = 0; i < kNumChannels; ++i) {
-    ConfigureDma(i);
+  for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
+    nvic_init.NVIC_IRQChannel = DMA1_Channel1_IRQn + i;  // Channel IRQs are sequential
+    nvic_init.NVIC_IRQChannelPreemptionPriority = 0;
+    nvic_init.NVIC_IRQChannelSubPriority = i;  // Different subpriority for each channel
+    nvic_init.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&nvic_init);
   }
 }
 
-void Dac::ConfigureDma(uint8_t channel) {
-  // We'll use one DMA channel for each DAC channel
-  DMA_Channel_TypeDef* dma_channel = nullptr;
+void Dac::InitDma(uint8_t channel) {
+  if (channel >= kNumCVOutputs) return;
   
-  switch (channel) {
-    case 0: dma_channel = DMA1_Channel1; break;
-    case 1: dma_channel = DMA1_Channel2; break;
-    case 2: dma_channel = DMA1_Channel3; break;
-    case 3: dma_channel = DMA1_Channel4; break;
-    default: return;
-  }
-  
-  // Configure DMA for CS-toggling SPI transfers
-  // Each transfer needs to:
-  // 1. Assert CS
-  // 2. Send data
-  // 3. Deassert CS
-  
+  // Configure DMA for SPI transfers
   DMA_InitTypeDef dma_init;
   dma_init.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
-  dma_init.DMA_MemoryBaseAddr = (uint32_t)channel_buffers_[channel].buffer[0];
+  dma_init.DMA_MemoryBaseAddr = (uint32_t)channel_buffers_[channel].buffer;
   dma_init.DMA_DIR = DMA_DIR_PeripheralDST;
-  dma_init.DMA_BufferSize = kDmaBufSize;
+  dma_init.DMA_BufferSize = kAudioBlockSize;
   dma_init.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   dma_init.DMA_MemoryInc = DMA_MemoryInc_Enable;
   dma_init.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
   dma_init.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
-  dma_init.DMA_Mode = DMA_Mode_Circular;
+  dma_init.DMA_Mode = DMA_Mode_Circular;  // Circular mode for continuous playback
   dma_init.DMA_Priority = DMA_Priority_High;
   dma_init.DMA_M2M = DMA_M2M_Disable;
   
+  DMA_Channel_TypeDef* dma_channel = kDmaChannels[channel];
   DMA_Init(dma_channel, &dma_init);
   
-  // Enable DMA transfer complete interrupt
-  DMA_ITConfig(dma_channel, DMA_IT_TC, ENABLE);
-  
-  // Configure NVIC for DMA interrupt
-  NVIC_InitTypeDef nvic_init;
-  nvic_init.NVIC_IRQChannel = DMA1_Channel1_IRQn + channel; // Channels 1-4 have sequential IRQs
-  nvic_init.NVIC_IRQChannelPreemptionPriority = 0;
-  nvic_init.NVIC_IRQChannelSubPriority = 0;
-  nvic_init.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&nvic_init);
+  // Enable both half-transfer and complete-transfer interrupts
+  DMA_ITConfig(dma_channel, DMA_IT_TC | DMA_IT_HT, ENABLE);
 }
 
 bool Dac::SetMode(uint8_t channel, Mode mode) {
-  if (channel >= kNumChannels) {
+  if (channel >= kNumCVOutputs) {
     return false;
   }
   
@@ -164,115 +149,184 @@ bool Dac::SetMode(uint8_t channel, Mode mode) {
 }
 
 void Dac::StartDma(uint8_t channel) {
-  if (channel >= kNumChannels) return;
+  if (channel >= kNumCVOutputs) return;
   
-  DMA_Channel_TypeDef* dma_channel = nullptr;
-  switch (channel) {
-    case 0: dma_channel = DMA1_Channel1; break;
-    case 1: dma_channel = DMA1_Channel2; break;
-    case 2: dma_channel = DMA1_Channel3; break;
-    case 3: dma_channel = DMA1_Channel4; break;
-    default: return;
+  // Fill buffer with current value before starting
+  uint16_t formatted_value = FormatDacWord(channel, value_[channel]);
+  for (uint16_t i = 0; i < kAudioBlockSize; ++i) {
+    channel_buffers_[channel].buffer[i] = formatted_value;
   }
   
-  // Ensure at least one buffer is filled before starting
-  if (channel_buffers_[channel].buffer_ready) {
-    // Fill with current value if no data has been provided
-    uint16_t initial_value = value_[channel];
-    uint16_t* buffer = channel_buffers_[channel].buffer[0];
-    
-    for (uint16_t i = 0; i < kDmaBufSize; ++i) {
-      uint16_t dac_channel = kNumChannels - 1 - channel;
-      buffer[i] = 0x1000 | (dac_channel << 9) | (initial_value & 0x0FFF);
-    }
-    
-    channel_buffers_[channel].buffer_ready = false;
-  }
+  // Reset buffer state flags
+  channel_buffers_[channel].first_half_free = false;
+  channel_buffers_[channel].second_half_free = false;
   
-  // Enable DMA channel
-  DMA_Cmd(dma_channel, ENABLE);
+  // Enable SPI DMA request
+  SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
+  
+  // Enable DMA channel to start transfer
+  DMA_Cmd(kDmaChannels[channel], ENABLE);
 }
 
 void Dac::StopDma(uint8_t channel) {
-  if (channel >= kNumChannels) return;
-  
-  DMA_Channel_TypeDef* dma_channel = nullptr;
-  switch (channel) {
-    case 0: dma_channel = DMA1_Channel1; break;
-    case 1: dma_channel = DMA1_Channel2; break;
-    case 2: dma_channel = DMA1_Channel3; break;
-    case 3: dma_channel = DMA1_Channel4; break;
-    default: return;
-  }
+  if (channel >= kNumCVOutputs) return;
   
   // Disable DMA channel
-  DMA_Cmd(dma_channel, DISABLE);
+  DMA_Cmd(kDmaChannels[channel], DISABLE);
   
-  // Reset buffer state
-  channel_buffers_[channel].write_index = 0;
-  channel_buffers_[channel].active_index = 0;
-  channel_buffers_[channel].buffer_ready = true;
-}
-
-bool Dac::IsBufferReady(uint8_t channel) {
-  if (channel >= kNumChannels || mode_[channel] != MODE_DMA) {
-    return false;
-  }
-  return channel_buffers_[channel].buffer_ready;
-}
-
-bool Dac::FillBuffer(uint8_t channel, const uint16_t* samples, uint16_t count) {
-  if (channel >= kNumChannels || 
-      mode_[channel] != MODE_DMA || 
-      !channel_buffers_[channel].buffer_ready) {
-    return false;
-  }
-  
-  // Determine which buffer to fill (the one not being used by DMA)
-  uint8_t buffer_index = channel_buffers_[channel].write_index;
-  uint16_t* buffer = channel_buffers_[channel].buffer[buffer_index];
-  
-  // Copy data to buffer, transforming to DAC format
-  for (uint16_t i = 0; i < count && i < kDmaBufSize; ++i) {
-    // Format samples for DAC - add channel/command bits
-    uint16_t dac_value = samples[i] & 0x0FFF; // 12-bit DAC value
-    uint16_t dac_channel = kNumChannels - 1 - channel;
-    buffer[i] = 0x1000 | (dac_channel << 9) | dac_value;
-  }
-  
-  // Fill remainder with last value if count < kDmaBufSize
-  if (count < kDmaBufSize) {
-    uint16_t last_value = (count > 0) ? samples[count-1] & 0x0FFF : 0;
-    uint16_t dac_channel = kNumChannels - 1 - channel;
-    uint16_t formatted = 0x1000 | (dac_channel << 9) | last_value;
-    
-    for (uint16_t i = count; i < kDmaBufSize; ++i) {
-      buffer[i] = formatted;
+  // Disable SPI DMA request if no channels are in DMA mode
+  bool any_dma_active = false;
+  for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
+    if (i != channel && mode_[i] == MODE_DMA) {
+      any_dma_active = true;
+      break;
     }
   }
   
-  // Mark buffer as filled and not ready for more data
-  channel_buffers_[channel].buffer_ready = false;
+  if (!any_dma_active) {
+    SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, DISABLE);
+  }
+}
+
+bool Dac::NeedsSamples(uint8_t channel) {
+  if (channel >= kNumCVOutputs || mode_[channel] != MODE_DMA) {
+    return false;
+  }
   
-  // Toggle write index for next time
-  channel_buffers_[channel].write_index = (buffer_index + 1) % 2;
+  // Return true if either half of the buffer needs filling
+  return channel_buffers_[channel].first_half_free || 
+         channel_buffers_[channel].second_half_free;
+}
+
+bool Dac::FillBuffer(uint8_t channel, const uint16_t* samples, uint16_t count) {
+  multi.PrintDebugByte(0xA0 + channel);
+  if (channel >= kNumCVOutputs || mode_[channel] != MODE_DMA) {
+    return false;
+  }
+  multi.PrintDebugByte(0xB0 + channel);
+  
+  const uint16_t half_buffer_size = kAudioBlockSize / 2;
+  
+  // Determine which half of the buffer to fill
+  bool use_first_half = channel_buffers_[channel].first_half_free;
+  bool use_second_half = channel_buffers_[channel].second_half_free;
+  
+  // If both halves need filling, prioritize the first half
+  if (use_first_half && use_second_half) {
+    use_second_half = false;
+  }
+  
+  if (!use_first_half && !use_second_half) {
+    // No buffer half is ready for filling
+    return false;
+  }
+
+  multi.PrintDebugByte(0xC0 + channel);
+  
+  // Calculate start position in the buffer
+  uint16_t start_pos = use_first_half ? 0 : half_buffer_size;
+  
+  // Copy data to buffer, transforming to DAC format
+  for (uint16_t i = 0; i < count && i < half_buffer_size; ++i) {
+    channel_buffers_[channel].buffer[start_pos + i] = FormatDacWord(channel, samples[i]);
+  }
+  
+  // Fill remainder with last value if count < half_buffer_size
+  if (count < half_buffer_size) {
+    uint16_t formatted = count > 0 ? FormatDacWord(channel, samples[count-1]) : 
+                                    FormatDacWord(channel, 0);
+    for (uint16_t i = count; i < half_buffer_size; ++i) {
+      channel_buffers_[channel].buffer[start_pos + i] = formatted;
+    }
+  }
+  
+  // Mark buffer half as no longer free
+  if (use_first_half) {
+    channel_buffers_[channel].first_half_free = false;
+  } else {
+    channel_buffers_[channel].second_half_free = false;
+  }
   
   return true;
 }
 
-void Dac::HandleDmaInterrupt(uint8_t channel) {
-  if (channel >= kNumChannels || mode_[channel] != MODE_DMA) return;
+void Dac::HandleDMAIrq(uint8_t channel) {
+  if (channel >= kNumCVOutputs) return;
+
+  uint32_t flag;
+  switch (channel) {
+    case 0: flag = DMA1_IT_TC1; break;
+    case 1: flag = DMA1_IT_TC2; break;
+    case 2: flag = DMA1_IT_TC3; break;
+    case 3: flag = DMA1_IT_TC4; break;
+    default: return;
+  }
   
-  // For SPI DACs that need CS toggling, we need a custom DMA handling logic
-  // This would ideally involve a second DMA channel to toggle GPIO
-  // But for simplicity, we'll handle it in the interrupt
+  const uint32_t half_transfer_bit = flag & DMA_IT_HT;
+  if (DMA_GetITStatus(half_transfer_bit)) {
+    DMA_ClearITPendingBit(half_transfer_bit);    
+    channel_buffers_[channel].first_half_free = true;
+  }
   
-  // Toggle active buffer index
-  channel_buffers_[channel].active_index = 
-      (channel_buffers_[channel].active_index + 1) % 2;
-  
-  // Mark non-active buffer as ready to be filled
-  channel_buffers_[channel].buffer_ready = true;
+  const uint32_t transfer_complete_bit = flag & DMA_IT_TC;
+  if (DMA_GetITStatus(transfer_complete_bit)) {
+    DMA_ClearITPendingBit(transfer_complete_bit);    
+    channel_buffers_[channel].second_half_free = true;
+  }
 }
+
+void Dac::AssertCS() {
+  GPIOB->BRR = kPinSS;
+}
+
+void Dac::DeassertCS() {
+  GPIOB->BSRR = kPinSS;
+}
+
+void Dac::WriteIfManual(uint8_t channel, uint16_t value) {
+  if (channel >= kNumCVOutputs || mode_[channel] != MODE_MANUAL) {
+    return;
+  }
+  
+  if (value_[channel] != value) {
+    value_[channel] = value;
+    DirectWrite(channel, value);
+  }
+}
+
+void Dac::WriteAllIfManual(const uint16_t* values) {
+  for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
+    WriteIfManual(i, values[i]);
+  }
+}
+
+void Dac::DirectWrite(uint8_t channel, uint16_t value) {
+  if (channel >= kNumCVOutputs) return;
+  
+  // Format the data word with channel and command
+  uint16_t word = FormatDacWord(channel, value);
+  
+  // Assert chip select
+  AssertCS();
+  
+  // Send the data
+  SPI_I2S_SendData(SPI2, word);
+  
+  // Wait for transmission to complete with timeout protection
+  uint32_t timeout = kSpiTimeout;
+  while (SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY) == SET) {
+    if (--timeout == 0) {
+      // Timeout - abort transfer
+      DeassertCS();
+      return;
+    }
+  }
+  
+  // Deassert chip select
+  DeassertCS();
+}
+
+// extern
+Dac dac;
 
 }  // namespace yarns
