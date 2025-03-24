@@ -258,36 +258,29 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t channel) {
-  if (!dac.NeedsSamples(channel)) return;
+  bool is_first_half;
+  uint16_t* dac_buffer = dac.GetBufferHalfToFill(channel, &is_first_half);
+  if (!dac_buffer) return;
 
-  uint16_t dac_buffer[kAudioBlockSize];
+  uint16_t samples[kAudioBlockSize];
   if (is_envelope()) {
-    // size_t size = kAudioBlockSize;
-    // while (size--) {
-    //   tremolo_.Tick();
-    //   envelope_.Tick();
-    //   int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-    //   value = stmlib::ClipU16(value);
-    //   dac_buffer_.Overwrite(value);
-    // }
-
-    // tremolo_.SetTarget(envelope_.tremolo(tremolo));
-    // tremolo_.ComputeSlope();
-
-    envelope_.RenderSamples(dac_buffer, tremolo_.target() << 16);
-    dac.FillBuffer(channel, dac_buffer, kAudioBlockSize);
+    envelope_.RenderSamples(samples, tremolo_.target() << 16);
     // TODO upshift value
   } else if (is_audio()) {
     std::fill(
-        &dac_buffer[0],
-        &dac_buffer[kAudioBlockSize],
+        &samples[0],
+        &samples[kAudioBlockSize],
         zero_dac_code_
     );
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
-      audio_voices_[v]->oscillator()->Render(dac_buffer);
+      audio_voices_[v]->oscillator()->Render(samples);
     }
-    dac.FillBuffer(channel, dac_buffer, kAudioBlockSize);
   }
+
+  for (uint16_t i = 0; i < kAudioBlockSize; ++i) {
+    dac_buffer[i] = dac.FormatDacWord(channel, samples[i]);
+  }
+  dac.MarkBufferHalfFilled(channel, is_first_half);
 }
 
 void Voice::NoteOn(

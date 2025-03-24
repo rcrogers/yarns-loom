@@ -149,30 +149,6 @@ void Oscillator::Render(uint16_t* output_mix_samples) {
     pitch_ = 0;
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
-  
-  // gain_.ComputeSlope();
-  // TODO how was tremolo functioning here?
-  // size_t size;
-  // size = kAudioBlockSize;
-  // while (size--) {
-  //   gain_envelope_.Tick();
-  //   // gain_.Tick();
-  //   // int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
-  //   // gain = stmlib::ClipU16(gain);
-  //   // gain_buffer_.Overwrite(gain >> 1);
-  //   gain_buffer_.Overwrite(gain_envelope_.value());
-  // }
-
-  // timbre_.ComputeSlope();
-  // size = kAudioBlockSize;
-  // while (size--) {
-  //   timbre_envelope_.Tick();
-  //   // timbre_.Tick();
-  //   // int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
-  //   // timbre = stmlib::ClipU16(timbre);
-  //   // timbre_buffer_.Overwrite(timbre >> 1);
-  //   timbre_buffer_.Overwrite(timbre_envelope_.value());
-  // }
 
   uint16_t timbre_to_audio_buffer[kAudioBlockSize];
   timbre_envelope_.RenderSamples(timbre_to_audio_buffer, timbre_.target() << 16);
@@ -186,9 +162,6 @@ void Oscillator::Render(uint16_t* output_mix_samples) {
   gain_envelope_.RenderSamples(gain_buffer, gain_.target() << 16);
 
   q15_multiply_accumulate<kAudioBlockSize>(
-    // &timbre_to_audio_buffer,
-    // &gain_buffer,
-    // &output_mix_samples
     reinterpret_cast<int16_t*>(&timbre_to_audio_buffer),
     reinterpret_cast<int16_t*>(&gain_buffer),
     reinterpret_cast<int16_t*>(output_mix_samples)
