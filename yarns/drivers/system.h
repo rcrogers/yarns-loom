@@ -33,8 +33,6 @@
 
 namespace yarns {
 
-const uint16_t kSampleRate = 40000; // 40kHz
-
 class System {
  public:
   System() { }

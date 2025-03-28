@@ -144,13 +144,27 @@ void SysTick_Handler() {
   }
 }
 
-void TIM3_IRQHandler(void) {
-  if (TIM_GetITStatus(TIM3, TIM_IT_Update) == RESET) {
+void TIM1_UP_IRQHandler(void) {
+  // DAC refresh at 4x 40kHz.
+  if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
     return;
   }
-  TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
+  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
-  multi.RefreshInternalClock();
+  dac.Cycle();
+  if (has_audio_source[dac.channel()]) {
+    dac.Write(multi.mutable_cv_output(dac.channel())->GetAudioSample());
+  } else if (has_envelope[dac.channel()]) {
+    dac.Write(multi.mutable_cv_output(dac.channel())->GetEnvelopeSample());
+  } else {
+    // Use value written there during previous CV refresh.
+    dac.Write();
+  }
+  
+  if (dac.channel() == 0) {
+    // Internal clock refresh at 40kHz
+    multi.RefreshInternalClock();
+  }
 }
 
 }
