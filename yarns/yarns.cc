@@ -148,6 +148,29 @@ void TIM3_IRQHandler(void) {
   multi.RefreshInternalClock();
 }
 
+// Debugging: Count TIM2 triggers between TIM1 resets
+volatile uint32_t triggers = 0;
+uint32_t prints = 0;
+void TIM1_UP_IRQHandler() {
+  if (TIM_GetITStatus(TIM1, TIM_IT_Update)) {
+    // printf("Triggers: %lu\n", triggers);
+    ++prints;
+    if (prints >= 100) {
+      prints = 0;
+      multi.PrintDebugByte(triggers & 0xFF);
+    }
+    triggers = 0;
+    TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
+  }
+}
+
+void TIM2_IRQHandler(void) {
+  if (TIM_GetITStatus(TIM2, TIM_IT_CC1)) {
+    triggers++;
+    TIM_ClearITPendingBit(TIM2, TIM_IT_CC1);
+  }
+}
+
 } // extern "C"
 
 void Init() {
@@ -182,7 +205,8 @@ int main(void) {
         multi.mutable_cv_output(channel)->RenderSamples(
           buffer_half, channel, cv[channel]
         );
-        multi.PrintDebugByte(0xA0 | channel);
+        // multi.PrintDebugByte(0xA0 | channel);
+        // multi.PrintDebugByte(RCC_GetClocksFreq());
       }
       dac.OnHalfBufferFilled();
     }

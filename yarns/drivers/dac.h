@@ -99,7 +99,8 @@ class Dac {
  private:
   // Multipliers express the time-ordering of the buffer: half-buffer, sample, channel, word
   // Channels must be interleaved so they output at a consistent phase of each 40kHz tick
-  uint16_t buffer_[kNumBuffers * kAudioBlockSize * kFrameSize];
+  uint16_t buffer_[kNumBuffers * kAudioBlockSize * kFrameSize]
+    __attribute__((aligned(4)));
   volatile uint8_t fillable_buffer_half_;
   volatile bool can_fill_;
   

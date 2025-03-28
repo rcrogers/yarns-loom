@@ -73,14 +73,24 @@ void Dac::Init() {
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 
+  // RCC_ClocksTypeDef rcc_clocks;
+  // RCC_GetClocksFreq(&rcc_clocks);
+  // uint32_t freq_pclk1 = rcc_clocks.PCLK1_Frequency;
+  // uint32_t apb1_prescaler = (RCC->CFGR & RCC_CFGR_PPRE1) >> RCC_CFGR_PPRE1_Pos;
+
   // 449 for 160kHz
-  uint32_t ss_period = F_CPU / (kSampleRate * kNumCVOutputs) - 1;
+  
+  uint32_t ss_period = 72000000 / (kSampleRate * kNumCVOutputs) - 1;
+
   // uint32_t ss_high_period = ss_period * 18 / 20; // 90%
   // uint32_t ss_low_period  = ss_period * 19 / 20; // 95%
-  uint32_t ss_high_period = ss_period - 2;
-  uint32_t ss_low_period  = ss_period - 1;
-  // uint32_t ss_high_period = ss_period * 6/ 8; // 75%
-  // uint32_t ss_low_period  = ss_period * 7 / 8; // 87.5%
+
+  // Loudest garbage yet
+  // uint32_t ss_high_period = ss_period - 3;
+  // uint32_t ss_low_period  = ss_period - 2;
+  
+  uint32_t ss_high_period = ss_period * 6 / 8; // 75%
+  uint32_t ss_low_period  = ss_period * 7 / 8; // 87.5%
 
   // TIM1 (160kHz) for SYNC
   TIM_TimeBaseInitTypeDef tim1_init = {0};
@@ -88,6 +98,25 @@ void Dac::Init() {
   tim1_init.TIM_Period = ss_period;
   tim1_init.TIM_CounterMode = TIM_CounterMode_Up;
   TIM_TimeBaseInit(TIM1, &tim1_init);
+  TIM_UpdateRequestConfig(TIM1, TIM_UpdateSource_Global);
+  TIM_ARRPreloadConfig(TIM1, DISABLE); // Ensure immediate reload
+
+  // Debug
+  TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);
+  NVIC_InitTypeDef tim1_up_it;
+  tim1_up_it.NVIC_IRQChannel = TIM1_UP_IRQn;
+  tim1_up_it.NVIC_IRQChannelPreemptionPriority = 0;
+  tim1_up_it.NVIC_IRQChannelSubPriority = 0;
+  tim1_up_it.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&tim1_up_it);
+  TIM_ITConfig(TIM2, TIM_IT_CC1, ENABLE);
+  NVIC_InitTypeDef tim2_cc1_it = {
+    .NVIC_IRQChannel = TIM2_IRQn,             // TIM2 global interrupt
+    .NVIC_IRQChannelPreemptionPriority = 1,    // Lower priority than DMA
+    .NVIC_IRQChannelSubPriority = 0,
+    .NVIC_IRQChannelCmd = ENABLE
+  };
+  NVIC_Init(&tim2_cc1_it);
   
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
@@ -98,30 +127,36 @@ void Dac::Init() {
   
   oc_init.TIM_Pulse = ss_low_period;
   TIM_OC2Init(TIM1, &oc_init);
-  
-  // TODO timer sync disabled for now
-  TIM_SelectMasterSlaveMode(TIM1, TIM_MasterSlaveMode_Enable);
-  TIM_SelectOutputTrigger(TIM1, TIM_TRGOSource_Update);
 
-  // TIM2 (320kHz) for DAC data, slaved to TIM1
+  // TIM2 for DAC data, slaved to TIM1.  Runs just under 2x the rate of TIM1 so that it will trigger exactly twice per TIM1 cycle
   TIM_TimeBaseInitTypeDef data_timer = {0};
   data_timer.TIM_Prescaler = 0;
   const uint32_t half_sync_period = (ss_period + 1) / 2; // 320kHz
-  const uint32_t dac_period = half_sync_period * 17/16 - 1; // Reduce freq to ~300kHz
-  data_timer.TIM_Period = dac_period; 
+  const uint32_t dac_period = half_sync_period * 24/16; // Reduce freq to ~300kHz, to be absolutely sure this doesn't trigger 3x before the next TIM1 update.
+  data_timer.TIM_Period = dac_period / 2 - 1; // TODO double freq because APB1 is slow
   data_timer.TIM_CounterMode = TIM_CounterMode_Up;
   TIM_TimeBaseInit(TIM2, &data_timer);
   
-  // TODO timer sync disabled for now
-  TIM_SelectInputTrigger(TIM2, TIM_TS_ITR0); // TIM1 → TIM2 sync
+  // Reset TIM2 on update event from TIM1
   TIM_SelectSlaveMode(TIM2, TIM_SlaveMode_Reset);
+  TIM_SelectInputTrigger(TIM2, TIM_TS_ITR0);
+  TIM2->SMCR |= TIM_TS_ITR0 | TIM_SlaveMode_Reset;
+  TIM_SelectMasterSlaveMode(TIM1, TIM_MasterSlaveMode_Enable);
+  TIM_SelectOutputTrigger(TIM1, TIM_TRGOSource_Update);
   
-  // // Compare channel for DMA trigger
-  // // TODO why use this instead of TIM_DMA_Update ?
+  // Compare channel for DMA trigger
+  // We use this instead of update because DMA request mappings are fixed!
   // TIM_OC1Init(TIM2, &oc_init);
   // TIM_SetCompare1(TIM2, 0);
   // TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Disable);
-  // TIM_ARRPreloadConfig(TIM2, ENABLE);
+  // TIM_ARRPreloadConfig(TIM2, ENABLE); // TODO needed?
+  TIM_OCInitTypeDef data_timer_init = {0};
+  data_timer_init.TIM_OCMode = TIM_OCMode_Timing;
+  data_timer_init.TIM_OutputState = TIM_OutputState_Disable;
+  data_timer_init.TIM_Pulse = 0; // Trigger immediately after reset
+  TIM_OC1Init(TIM2, &data_timer_init);
+  TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Disable);
+  TIM_ARRPreloadConfig(TIM2, DISABLE);
   
   DMA_InitTypeDef ss_dma = {0};
   ss_dma.DMA_DIR = DMA_DIR_PeripheralDST;
@@ -132,7 +167,7 @@ void Dac::Init() {
   ss_dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Word;
   ss_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Word;
   ss_dma.DMA_Mode = DMA_Mode_Circular;
-  ss_dma.DMA_Priority = DMA_Priority_High;
+  ss_dma.DMA_Priority = DMA_Priority_VeryHigh;
 
   // DMA for SYNC High (TIM1_CH1)
   DMA_InitTypeDef high_ss_dma = ss_dma;
@@ -146,7 +181,7 @@ void Dac::Init() {
   low_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_low;
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
-  // DMA for SPI (TIM2_CH1)
+  // DMA channel 5 for SPI (TIM2_CH1)
   DMA_InitTypeDef spi_dma = {0};
   spi_dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
   spi_dma.DMA_MemoryBaseAddr = (uint32_t)&buffer_[0];
@@ -158,13 +193,13 @@ void Dac::Init() {
   spi_dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
   spi_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
   spi_dma.DMA_Mode = DMA_Mode_Circular;
-  spi_dma.DMA_Priority = DMA_Priority_VeryHigh;
+  spi_dma.DMA_Priority = DMA_Priority_High;
   DMA_Init(DMA1_Channel5, &spi_dma);
 
-  SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
+  // SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
 
   TIM_DMACmd(TIM1, TIM_DMA_CC1 | TIM_DMA_CC2, ENABLE);
-  TIM_DMACmd(TIM2, TIM_DMA_Update, ENABLE);
+  TIM_DMACmd(TIM2, TIM_DMA_CC1, ENABLE);
 
   DMA_ITConfig(DMA1_Channel5, DMA_IT_TC | DMA_IT_HT, ENABLE);
   NVIC_InitTypeDef nvic_init;
@@ -178,11 +213,16 @@ void Dac::Init() {
   DMA_Cmd(DMA1_Channel3, ENABLE);
   DMA_Cmd(DMA1_Channel5, ENABLE);
 
+  TIM2->CNT = 0;          // Explicitly reset counter
+  TIM2->EGR = TIM_EGR_UG; // Force update to reload registers
+  TIM2->SR = 0;           // Clear all flags manually
+
   TIM_Cmd(TIM1, ENABLE);
   TIM_Cmd(TIM2, ENABLE);
+  for (volatile int i = 0; i < 10000; i++); // Small delay
 
   can_fill_ = true;
-  fillable_buffer_half_ = 1; // DMA will be consuming the first half
+  fillable_buffer_half_ = 1; // DMA will initially be consuming the first half
 }
 
 /* extern */
