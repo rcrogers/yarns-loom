@@ -39,33 +39,33 @@ void System::Init() {
 
   RCC_APB2PeriphClockCmd(
       RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB | RCC_APB2Periph_GPIOC |
-      RCC_APB2Periph_TIM1 | RCC_APB2Periph_USART1, ENABLE);
-  RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI2, ENABLE);
+      RCC_APB2Periph_USART1, ENABLE);
+  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3 | RCC_APB1Periph_SPI2, ENABLE);
 
   TIM_TimeBaseInitTypeDef timer_init;
-  timer_init.TIM_Period = F_CPU / 40000 - 1;
+  timer_init.TIM_Period = F_CPU / kSampleRate - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;
   timer_init.TIM_RepetitionCounter = 0;
-  TIM_InternalClockConfig(TIM1);
-  TIM_TimeBaseInit(TIM1, &timer_init);
-  TIM_Cmd(TIM1, ENABLE);
+  TIM_InternalClockConfig(TIM3);
+  TIM_TimeBaseInit(TIM3, &timer_init);
+  TIM_Cmd(TIM3, ENABLE);
     
   NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);  // 2.2 priority split.
     
   // DAC interrupt is given highest priority
   NVIC_InitTypeDef timer_interrupt;
-  timer_interrupt.NVIC_IRQChannel = TIM1_UP_IRQn;
-  timer_interrupt.NVIC_IRQChannelPreemptionPriority = 1; // Lower priority than DMA
-  timer_interrupt.NVIC_IRQChannelSubPriority = 0;
+  timer_interrupt.NVIC_IRQChannel = TIM3_IRQn;
+  timer_interrupt.NVIC_IRQChannelPreemptionPriority = 0;
+  timer_interrupt.NVIC_IRQChannelSubPriority = 1;
   timer_interrupt.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&timer_interrupt);
 }
 
 void System::StartTimers() {
-  TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);  
-  SysTick_Config(F_CPU / 8000 - 1);
+  TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
+  SysTick_Config(F_CPU / 8000);
 }
 
 }  // namespace yarns

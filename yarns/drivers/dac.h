@@ -30,16 +30,19 @@
 #define YARNS_DRIVERS_DAC_H_
 
 #include "stmlib/stmlib.h"
+
 #include <stm32f10x_conf.h>
 
 namespace yarns {
 
 const uint8_t kNumCVOutputs = 4;
-const uint8_t kAudioBlockSizeBits = 6; // 64 samples
+
+// Number of samples per channel that will be filled at once
+const uint8_t kAudioBlockSizeBits = 6;
 const uint8_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
-const uint16_t kDacCommandWrite = 0x1000;
-const uint32_t kSpiTimeout = 1000;
+const uint8_t kDacValuesPerSample = 2; // 2x 16-bit values per sample
+const uint8_t kNumBuffers = 2; // Double buffer
 
 class Dac {
  public:
@@ -47,58 +50,45 @@ class Dac {
   ~Dac() { }
   
   void Init();
-  
-  // Set channel to high-frequency (DMA) or low-frequency (manual) mode
-  // Returns true if mode was changed
-  bool SetHighFrequencyMode(uint8_t channel, bool high_freq);
 
-  // For low-frequency mode: set single value for DAC channel
-  void WriteManual(uint8_t channel, uint16_t value);
+  bool CanFill() const { return can_fill_; }
   
-  // For low-frequency mode: write values to all channels
-  void WriteAllManual(const uint16_t* values);
+  void OnDmaReadComplete() { can_fill_ = true; }
   
-  // For high-frequency mode: get pointer to buffer half that needs filling
-  // Returns nullptr if no buffer half needs filling
-  uint16_t* GetBufferHalfToFill(uint8_t channel, bool* is_first_half);
-  
-  // For high-frequency mode: mark buffer half as filled
-  void MarkBufferHalfFilled(uint8_t channel, bool is_first_half);
-  
-  // Called in DMA transfer half/complete ISR
-  void HandleDMAIrq(uint8_t channel, bool is_half_transfer);
-
-  // Format value for DAC - adds channel/command bits to 12-bit value
-  inline uint16_t FormatDacWord(uint8_t channel, uint16_t value) const {
-    return kDacCommandWrite | ((kNumCVOutputs - 1 - channel) << 9) | (value & 0x0FFF);
+  // Call after filling all channels
+  inline void OnFillComplete() { 
+    can_fill_ = false;
+    fillable_buffer_ ^= 1; // Toggle buffer
   }
-  
+
+  // Pack 2 16-bit DMA/SPI words into a 32-bit value
+  inline uint32_t FormatDacValues(uint8_t channel, uint16_t sample) {
+    uint16_t dac_channel = kNumCVOutputs - 1 - channel;
+    uint16_t high = 0x1000 | (dac_channel << 9) | (sample >> 8);
+    uint16_t low = sample << 8;
+    return (static_cast<uint32_t>(high) << 16) | low;
+  }
+
+  inline void BufferSamples(uint8_t channel, uint16_t* samples) {
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+      uint32_t dac_values = FormatDacValues(channel, samples[i]);
+      buffer_[fillable_buffer_][i][channel][0] = dac_values >> 16;
+      buffer_[fillable_buffer_][i][channel][1] = dac_values & 0xFFFF;
+    }
+  }
+
+  inline void BufferStaticSample(uint8_t channel, uint16_t sample) {
+    uint32_t dac_values = FormatDacValues(channel, sample);
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+      buffer_[fillable_buffer_][i][channel][0] = dac_values >> 16;
+      buffer_[fillable_buffer_][i][channel][1] = dac_values & 0xFFFF;
+    }
+  }
+ 
  private:
-  // Buffer structure for DMA circular buffer
-  struct ChannelBuffer {
-    uint16_t buffer[kAudioBlockSize * 2];
-    volatile bool half_needs_filling[2];  // [0] = first half, [1] = second half
-  };
-  
-  bool high_freq_mode_[kNumCVOutputs];
-  ChannelBuffer buffers_[kNumCVOutputs];
-  uint16_t current_value_[kNumCVOutputs];
-  
-  // Initialize DMA for a channel
-  void InitDma(uint8_t channel);
-  
-  // Start DMA transfers for a channel
-  void StartDma(uint8_t channel);
-  
-  // Stop DMA transfers for a channel
-  void StopDma(uint8_t channel);
-  
-  // Direct SPI write to DAC
-  void DirectWrite(uint8_t channel, uint16_t value);
-  
-  // CS control for SPI transfers
-  inline void AssertCS() { GPIOB->BRR = GPIO_Pin_12; }
-  inline void DeassertCS() { GPIOB->BSRR = GPIO_Pin_12; }
+  uint16_t buffer_[kNumBuffers][kAudioBlockSize][kNumCVOutputs][kDacValuesPerSample];
+  volatile uint8_t fillable_buffer_;
+  volatile bool can_fill_;
   
   DISALLOW_COPY_AND_ASSIGN(Dac);
 };

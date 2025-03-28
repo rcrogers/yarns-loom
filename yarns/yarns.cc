@@ -123,70 +123,29 @@ void SysTick_Handler() {
       gate[3] = (factory_testing_counter % 200) < 100;
       ++factory_testing_counter;
     }
-    
-    for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
-      bool high_freq = multi.cv_output(channel).is_high_freq();
-      dac.SetHighFrequencyMode(channel, high_freq);
-      dac.WriteManual(channel, cv[channel]);
-    }
   }
 }
 
-void TIM1_UP_IRQHandler(void) {
-  if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
+void DMA1_Channel5_IRQHandler(void) {
+  if(DMA_GetITStatus(DMA1_IT_HT5)) {
+    DMA_ClearITPendingBit(DMA1_IT_HT5);
+    dac.OnDmaReadComplete();
+  }
+  
+  if(DMA_GetITStatus(DMA1_IT_TC5)) {
+    DMA_ClearITPendingBit(DMA1_IT_TC5);
+    dac.OnDmaReadComplete();
+  }
+}
+
+void TIM3_IRQHandler(void) {
+  if (TIM_GetITStatus(TIM3, TIM_IT_Update) == RESET) {
     return;
   }
-  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
+  TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
 
+  // Internal clock refresh at 40kHz
   multi.RefreshInternalClock();
-}
-
-void DMA1_Channel1_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_HT1)) {
-    DMA_ClearITPendingBit(DMA1_IT_HT1);
-    dac.HandleDMAIrq(0, true);  // Channel 0, half-transfer
-  }
-  
-  if (DMA_GetITStatus(DMA1_IT_TC1)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC1);
-    dac.HandleDMAIrq(0, false);  // Channel 0, transfer-complete
-  }
-}
-
-void DMA1_Channel2_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_HT2)) {
-    DMA_ClearITPendingBit(DMA1_IT_HT2);
-    dac.HandleDMAIrq(1, true);  // Channel 1, half-transfer
-  }
-  
-  if (DMA_GetITStatus(DMA1_IT_TC2)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC2);
-    dac.HandleDMAIrq(1, false);  // Channel 1, transfer-complete
-  }
-}
-
-void DMA1_Channel3_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_HT3)) {
-    DMA_ClearITPendingBit(DMA1_IT_HT3);
-    dac.HandleDMAIrq(2, true);  // Channel 2, half-transfer
-  }
-  
-  if (DMA_GetITStatus(DMA1_IT_TC3)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC3);
-    dac.HandleDMAIrq(2, false);  // Channel 2, transfer-complete
-  }
-}
-
-void DMA1_Channel4_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_HT4)) {
-    DMA_ClearITPendingBit(DMA1_IT_HT4);
-    dac.HandleDMAIrq(3, true);  // Channel 3, half-transfer
-  }
-  
-  if (DMA_GetITStatus(DMA1_IT_TC4)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC4);
-    dac.HandleDMAIrq(3, false);  // Channel 3, transfer-complete
-  }
 }
 
 } // extern "C"
