@@ -36,6 +36,9 @@
 namespace yarns {
 
 const uint8_t kNumChannels = 4;
+const uint8_t kAudioBlockSize = 64; // Number of samples per channel that will be filled at once
+const uint8_t kDacValuesPerSample = 2; // 2x 16-bit values per sample
+const uint8_t kNumBuffers = 2; // Double buffer
 
 class Dac {
  public:
@@ -43,48 +46,45 @@ class Dac {
   ~Dac() { }
   
   void Init();
+
+  bool CanFill() const { return can_fill_; }
   
-  inline void set_channel(uint8_t channel, uint16_t value) {
-    if (value_[channel] != value) {
-      value_[channel] = value;
-      update_[channel] = true;
+  void OnDmaReadComplete() { can_fill_ = true; }
+  
+  // Call after filling all channels
+  inline void OnFillComplete() { 
+    can_fill_ = false;
+    fillable_buffer_ ^= 1; // Toggle buffer
+  }
+
+  // Pack 2 16-bit DMA/SPI words into a 32-bit value
+  inline uint32_t FormatDacValues(uint8_t channel, uint16_t sample) {
+    uint16_t dac_channel = kNumChannels - 1 - channel;
+    uint16_t high = 0x1000 | (dac_channel << 9) | (sample >> 8);
+    uint16_t low = sample << 8;
+    return (static_cast<uint32_t>(high) << 16) | low;
+  }
+
+  inline void BufferSamples(uint8_t channel, uint16_t* samples) {
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+      uint32_t dac_values = FormatDacValues(channel, samples[i]);
+      buffer_[fillable_buffer_][i][channel][0] = dac_values >> 16;
+      buffer_[fillable_buffer_][i][channel][1] = dac_values & 0xFFFF;
     }
   }
-  
-  inline void Write(const uint16_t* values) {
-    set_channel(0, values[0]);
-    set_channel(1, values[1]);
-    set_channel(2, values[2]);
-    set_channel(3, values[3]);
-  }
-  
-  inline void Cycle() {
-    active_channel_ = (active_channel_ + 1) % kNumChannels;
-  }
-  
-  inline void Write() {
-    if (update_[active_channel_]) {
-      Write(value_[active_channel_]);
-      update_[active_channel_] = false;
+
+  inline void BufferStaticSample(uint8_t channel, uint16_t sample) {
+    uint32_t dac_values = FormatDacValues(channel, sample);
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+      buffer_[fillable_buffer_][i][channel][0] = dac_values >> 16;
+      buffer_[fillable_buffer_][i][channel][1] = dac_values & 0xFFFF;
     }
   }
-  
-  inline void Write(uint16_t value) {
-    // GPIOB->BSRR = GPIO_Pin_12;
-    // GPIOB->BRR = GPIO_Pin_12;
-    uint16_t word = value;
-    uint16_t dac_channel = kNumChannels - 1 - active_channel_;
-    SPI_I2S_SendData(SPI2, 0x1000 | (dac_channel << 9) | (word >> 8));
-    SPI_I2S_SendData(SPI2, word << 8);
-  }
-  
-  inline uint8_t channel() { return active_channel_; }
  
  private:
-  bool update_[kNumChannels];
-  uint16_t value_[kNumChannels];
-  
-  uint8_t active_channel_;
+  uint16_t buffer_[kNumBuffers][kAudioBlockSize][kNumChannels][kDacValuesPerSample];
+  volatile uint8_t fillable_buffer_;
+  volatile bool can_fill_;
   
   DISALLOW_COPY_AND_ASSIGN(Dac);
 };
