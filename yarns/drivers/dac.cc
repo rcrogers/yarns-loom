@@ -88,17 +88,18 @@ void Dac::Init() {
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
   
   // SS High at 90% (404)
-  oc_init.TIM_Pulse = 18 * ss_period / 20;
+  // oc_init.TIM_Pulse = 18 * ss_period / 20;
+  oc_init.TIM_Pulse = ss_period - 2;
   TIM_OC1Init(TIM1, &oc_init);
   
   // SS Low at 95% (426)
-  // oc_init.TIM_Pulse = 426;
-  oc_init.TIM_Pulse = 19 * ss_period / 20;
+  // oc_init.TIM_Pulse = 19 * ss_period / 20;
+  oc_init.TIM_Pulse = ss_period - 1;
   TIM_OC2Init(TIM1, &oc_init);
   
   // TODO timer sync disabled for now
-  // TIM_SelectMasterSlaveMode(TIM1, TIM_MasterSlaveMode_Enable);
-  // TIM_SelectOutputTrigger(TIM1, TIM_TRGOSource_Update);
+  TIM_SelectMasterSlaveMode(TIM1, TIM_MasterSlaveMode_Enable);
+  TIM_SelectOutputTrigger(TIM1, TIM_TRGOSource_Update);
 
   // TIM2 (320kHz) for DAC data, slaved to TIM1
   TIM_TimeBaseInitTypeDef data_timer = {0};
@@ -110,8 +111,8 @@ void Dac::Init() {
   TIM_TimeBaseInit(TIM2, &data_timer);
   
   // TODO timer sync disabled for now
-  // TIM_SelectInputTrigger(TIM2, TIM_TS_ITR0); // TIM1 → TIM2 sync
-  // TIM_SelectSlaveMode(TIM2, TIM_SlaveMode_Reset);
+  TIM_SelectInputTrigger(TIM2, TIM_TS_ITR0); // TIM1 → TIM2 sync
+  TIM_SelectSlaveMode(TIM2, TIM_SlaveMode_Reset);
   
   // Compare channel for DMA trigger
   TIM_OC1Init(TIM2, &oc_init);
@@ -176,6 +177,9 @@ void Dac::Init() {
 
   TIM_Cmd(TIM1, ENABLE);
   TIM_Cmd(TIM2, ENABLE);
+
+  can_fill_ = true;
+  fillable_buffer_half_ = 1; // DMA will be consuming the first half
 }
 
 /* extern */

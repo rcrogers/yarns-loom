@@ -44,6 +44,9 @@ const uint8_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 const uint8_t kDacValuesPerSample = 2; // 2x 16-bit values per sample
 const uint8_t kNumBuffers = 2; // Double buffer
 
+// Frame: one 40kHz tick's worth of DAC data for all channels
+const size_t kFrameSize = kNumCVOutputs * kDacValuesPerSample;
+
 class Dac {
  public:
   Dac() { }
@@ -51,43 +54,53 @@ class Dac {
   
   void Init();
 
-  bool CanFill() const { return can_fill_; }
+  volatile uint8_t* FillableBufferHalf() {
+    return can_fill_ ? &fillable_buffer_half_ : NULL;
+  }
   
-  void OnDmaReadComplete() { can_fill_ = true; }
+  void OnHalfBufferConsumed(bool first_half) {
+    can_fill_ = true;
+    fillable_buffer_half_ = first_half ? 0 : 1;
+  }
   
   // Call after filling all channels
-  inline void OnFillComplete() { 
-    can_fill_ = false;
-    fillable_buffer_ ^= 1; // Toggle buffer
-  }
+  inline void OnHalfBufferFilled() { can_fill_ = false; }
 
   // Pack 2 16-bit DMA/SPI words into a 32-bit value
-  inline uint32_t FormatDacValues(uint8_t channel, uint16_t sample) {
+  inline uint32_t FormatDacWords(uint8_t channel, uint16_t sample) {
     uint16_t dac_channel = kNumCVOutputs - 1 - channel;
     uint16_t high = 0x1000 | (dac_channel << 9) | (sample >> 8);
     uint16_t low = sample << 8;
     return (static_cast<uint32_t>(high) << 16) | low;
   }
 
-  inline void BufferSamples(uint8_t channel, uint16_t* samples) {
-    for (size_t i = 0; i < kAudioBlockSize; ++i) {
-      uint32_t dac_values = FormatDacValues(channel, samples[i]);
-      buffer_[fillable_buffer_][i][channel][0] = dac_values >> 16;
-      buffer_[fillable_buffer_][i][channel][1] = dac_values & 0xFFFF;
+  #define BUFFER_SAMPLES(channel, dac_words_exp) \
+    uint16_t* ptr = &buffer_[0]; \
+    /* Offset for buffer half */ \
+    ptr += buffer_half * kAudioBlockSize * kFrameSize; \
+    /* Offset for channel */ \
+    ptr += channel * kDacValuesPerSample; \
+    for (size_t i = 0; i < kAudioBlockSize; ++i) { \
+      uint32_t words = (dac_words_exp); \
+      ptr[0] = (words >> 16) & 0xFFFF; \
+      ptr[1] = words & 0xFFFF; \
+      ptr += kFrameSize; \
     }
+
+  inline void BufferSamples(uint8_t buffer_half, uint8_t channel, uint16_t* samples) {
+    BUFFER_SAMPLES(channel, FormatDacWords(channel, samples[i]))
   }
 
-  inline void BufferStaticSample(uint8_t channel, uint16_t sample) {
-    uint32_t dac_values = FormatDacValues(channel, sample);
-    for (size_t i = 0; i < kAudioBlockSize; ++i) {
-      buffer_[fillable_buffer_][i][channel][0] = dac_values >> 16;
-      buffer_[fillable_buffer_][i][channel][1] = dac_values & 0xFFFF;
-    }
+  inline void BufferStaticSample(uint8_t buffer_half, uint8_t channel, uint16_t sample) {
+    uint32_t static_words = FormatDacWords(channel, sample);
+    BUFFER_SAMPLES(channel, static_words)
   }
  
  private:
-  uint16_t buffer_[kNumBuffers][kAudioBlockSize][kNumCVOutputs][kDacValuesPerSample];
-  volatile uint8_t fillable_buffer_;
+  // Multipliers express the time-ordering of the buffer: half-buffer, sample, channel, word
+  // Channels must be interleaved so they output at a consistent phase of each 40kHz tick
+  uint16_t buffer_[kNumBuffers * kAudioBlockSize * kFrameSize];
+  volatile uint8_t fillable_buffer_half_;
   volatile bool can_fill_;
   
   DISALLOW_COPY_AND_ASSIGN(Dac);

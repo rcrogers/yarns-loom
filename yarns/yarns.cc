@@ -129,12 +129,12 @@ void SysTick_Handler() {
 void DMA1_Channel5_IRQHandler(void) {
   if(DMA_GetITStatus(DMA1_IT_HT5)) {
     DMA_ClearITPendingBit(DMA1_IT_HT5);
-    dac.OnDmaReadComplete();
+    dac.OnHalfBufferConsumed(true);
   }
   
   if(DMA_GetITStatus(DMA1_IT_TC5)) {
     DMA_ClearITPendingBit(DMA1_IT_TC5);
-    dac.OnDmaReadComplete();
+    dac.OnHalfBufferConsumed(false);
   }
 }
 
@@ -175,6 +175,17 @@ int main(void) {
     ui.DoEvents();
     midi_handler.ProcessInput();
     multi.LowPriority();
+    volatile uint8_t* buffer_half_ptr = dac.FillableBufferHalf();
+    if (buffer_half_ptr) {
+      uint8_t buffer_half = *buffer_half_ptr;
+      for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
+        multi.mutable_cv_output(channel)->RenderSamples(
+          buffer_half, channel, cv[channel]
+        );
+        multi.PrintDebugByte(0xA0 | channel);
+      }
+      dac.OnHalfBufferFilled();
+    }
     if (midi_handler.factory_testing_requested()) {
       midi_handler.AcknowledgeFactoryTestingRequest();
       ui.StartFactoryTesting();

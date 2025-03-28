@@ -458,9 +458,6 @@ class Multi {
         );
       }
     }
-    for (uint8_t c = 0; c < kNumCVOutputs; ++c) {
-      cv_outputs_[c].RenderSamples(c);
-    }
   }
   
   bool Set(uint8_t address, uint8_t value);

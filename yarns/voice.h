@@ -349,7 +349,7 @@ class CVOutput {
     return volts_dac_code(0) - (envelope_value_15 << 1);
   }
 
-  void RenderSamples(uint8_t channel);
+  void RenderSamples(uint8_t buffer_half, uint8_t channel, uint16_t default_low_freq_cv);
 
   void Refresh();
 
