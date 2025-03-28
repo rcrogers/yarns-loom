@@ -70,11 +70,17 @@ void Dac::Init() {
   
   // Initialize timers and DMA
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
-  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2 | RCC_APB1Periph_SPI2, ENABLE);
+  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 
   // 449 for 160kHz
   uint32_t ss_period = F_CPU / (kSampleRate * kNumCVOutputs) - 1;
+  // uint32_t ss_high_period = ss_period * 18 / 20; // 90%
+  // uint32_t ss_low_period  = ss_period * 19 / 20; // 95%
+  uint32_t ss_high_period = ss_period - 2;
+  uint32_t ss_low_period  = ss_period - 1;
+  // uint32_t ss_high_period = ss_period * 6/ 8; // 75%
+  // uint32_t ss_low_period  = ss_period * 7 / 8; // 87.5%
 
   // TIM1 (160kHz) for SYNC
   TIM_TimeBaseInitTypeDef tim1_init = {0};
@@ -87,14 +93,10 @@ void Dac::Init() {
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
   
-  // SS High at 90% (404)
-  // oc_init.TIM_Pulse = 18 * ss_period / 20;
-  oc_init.TIM_Pulse = ss_period - 2;
+  oc_init.TIM_Pulse = ss_high_period;
   TIM_OC1Init(TIM1, &oc_init);
   
-  // SS Low at 95% (426)
-  // oc_init.TIM_Pulse = 19 * ss_period / 20;
-  oc_init.TIM_Pulse = ss_period - 1;
+  oc_init.TIM_Pulse = ss_low_period;
   TIM_OC2Init(TIM1, &oc_init);
   
   // TODO timer sync disabled for now
@@ -104,8 +106,8 @@ void Dac::Init() {
   // TIM2 (320kHz) for DAC data, slaved to TIM1
   TIM_TimeBaseInitTypeDef data_timer = {0};
   data_timer.TIM_Prescaler = 0;
-  // 224 for 320kHz
-  const uint32_t dac_period = F_CPU / (kSampleRate * kNumCVOutputs * kDacValuesPerSample) - 1;
+  const uint32_t half_sync_period = (ss_period + 1) / 2; // 320kHz
+  const uint32_t dac_period = half_sync_period * 17/16 - 1; // Reduce freq to ~300kHz
   data_timer.TIM_Period = dac_period; 
   data_timer.TIM_CounterMode = TIM_CounterMode_Up;
   TIM_TimeBaseInit(TIM2, &data_timer);
@@ -114,11 +116,12 @@ void Dac::Init() {
   TIM_SelectInputTrigger(TIM2, TIM_TS_ITR0); // TIM1 → TIM2 sync
   TIM_SelectSlaveMode(TIM2, TIM_SlaveMode_Reset);
   
-  // Compare channel for DMA trigger
-  TIM_OC1Init(TIM2, &oc_init);
-  TIM_SetCompare1(TIM2, 0);
-  TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Disable);
-  TIM_ARRPreloadConfig(TIM2, ENABLE);
+  // // Compare channel for DMA trigger
+  // // TODO why use this instead of TIM_DMA_Update ?
+  // TIM_OC1Init(TIM2, &oc_init);
+  // TIM_SetCompare1(TIM2, 0);
+  // TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Disable);
+  // TIM_ARRPreloadConfig(TIM2, ENABLE);
   
   DMA_InitTypeDef ss_dma = {0};
   ss_dma.DMA_DIR = DMA_DIR_PeripheralDST;
@@ -161,7 +164,7 @@ void Dac::Init() {
   SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
 
   TIM_DMACmd(TIM1, TIM_DMA_CC1 | TIM_DMA_CC2, ENABLE);
-  TIM_DMACmd(TIM2, TIM_DMA_CC1, ENABLE);
+  TIM_DMACmd(TIM2, TIM_DMA_Update, ENABLE);
 
   DMA_ITConfig(DMA1_Channel5, DMA_IT_TC | DMA_IT_HT, ENABLE);
   NVIC_InitTypeDef nvic_init;
