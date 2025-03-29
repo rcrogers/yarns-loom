@@ -150,7 +150,7 @@ void Oscillator::Render(uint16_t* output_mix_samples) {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
 
-  uint16_t timbre_to_audio_buffer[kAudioBlockSize];
+  uint16_t timbre_to_audio_buffer[kAudioBlockSize] = {0};
   timbre_envelope_.RenderSamples(timbre_to_audio_buffer, timbre_.target() << 16);
 
   uint8_t fn_index = shape_;
@@ -158,14 +158,19 @@ void Oscillator::Render(uint16_t* output_mix_samples) {
   RenderFn fn = fn_table_[fn_index];
   (this->*fn)(timbre_to_audio_buffer);
 
-  uint16_t gain_buffer[kAudioBlockSize];
-  gain_envelope_.RenderSamples(gain_buffer, gain_.target() << 16);
+  // uint16_t gain_buffer[kAudioBlockSize] = {0};
+  // gain_envelope_.RenderSamples(gain_buffer, gain_.target() << 16);
 
-  q15_multiply_accumulate<kAudioBlockSize>(
-    reinterpret_cast<int16_t*>(&timbre_to_audio_buffer),
-    reinterpret_cast<int16_t*>(&gain_buffer),
-    reinterpret_cast<int16_t*>(output_mix_samples)
-  );
+  // q15_multiply_accumulate<kAudioBlockSize>(
+  //   reinterpret_cast<int16_t*>(&timbre_to_audio_buffer),
+  //   reinterpret_cast<int16_t*>(&gain_buffer),
+  //   reinterpret_cast<int16_t*>(output_mix_samples)
+  // );
+
+  // TODO temp lock at 100%
+  for (size_t i = 0; i < kAudioBlockSize; ++i) {
+    output_mix_samples[i] = timbre_to_audio_buffer[i];
+  }
 }
 
 #define SET_TIMBRE \

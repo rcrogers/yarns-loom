@@ -36,6 +36,8 @@
 #include "stmlib/utils/random.h"
 #include "stmlib/dsp/dsp.h"
 
+#include "yarns/multi.h"
+
 #include "yarns/resources.h"
 
 namespace yarns {
@@ -258,23 +260,32 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t buffer_half, uint8_t channel, uint16_t default_low_freq_cv) {
-  uint16_t samples[kAudioBlockSize];
+  uint16_t samples[kAudioBlockSize] = {0};
   if (is_envelope()) {
     envelope_.RenderSamples(samples, tremolo_.target() << 16);
     dac.BufferSamples(buffer_half, channel, samples);
     // TODO upshift value
+    // if (channel == 0) multi.PrintDebugByte(0xE0);
   } else if (is_audio()) {
     std::fill(
-        &samples[0],
-        &samples[kAudioBlockSize],
-        zero_dac_code_
+      &samples[0],
+      &samples[kAudioBlockSize],
+      zero_dac_code_
     );
-    for (uint8_t v = 0; v < num_audio_voices_; ++v) {
-      audio_voices_[v]->oscillator()->Render(samples);
+    // for (uint8_t v = 0; v < num_audio_voices_; ++v) {
+    //   audio_voices_[v]->oscillator()->Render(samples);
+    // }
+
+    // TODO temp replace with square wave
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+      samples[i] = (i % 64 < 32) ? 0xFFFF : 0x0000;
     }
+
     dac.BufferSamples(buffer_half, channel, samples);
+    // if (channel == 0) multi.PrintDebugByte(samples[0] >> 8);
   } else {
     dac.BufferStaticSample(buffer_half, channel, default_low_freq_cv);
+    // if (channel == 0) multi.PrintDebugByte(0xD0);
   }
 }
 

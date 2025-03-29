@@ -47,6 +47,8 @@ const uint8_t kNumBuffers = 2; // Double buffer
 // Frame: one 40kHz tick's worth of DAC data for all channels
 const size_t kFrameSize = kNumCVOutputs * kDacValuesPerSample;
 
+const size_t kDacBufferSize = kNumBuffers * kAudioBlockSize * kFrameSize;
+
 class Dac {
  public:
   Dac() { }
@@ -61,46 +63,21 @@ class Dac {
   void OnHalfBufferConsumed(bool first_half) {
     can_fill_ = true;
     fillable_buffer_half_ = first_half ? 0 : 1;
+    __DMB();
   }
   
   // Call after filling all channels
   inline void OnHalfBufferFilled() { can_fill_ = false; }
 
   // Pack 2 16-bit DMA/SPI words into a 32-bit value
-  inline uint32_t FormatDacWords(uint8_t channel, uint16_t sample) {
-    uint16_t dac_channel = kNumCVOutputs - 1 - channel;
-    uint16_t high = 0x1000 | (dac_channel << 9) | (sample >> 8);
-    uint16_t low = sample << 8;
-    return (static_cast<uint32_t>(high) << 16) | low;
-  }
-
-  #define BUFFER_SAMPLES(channel, dac_words_exp) \
-    uint16_t* ptr = &buffer_[0]; \
-    /* Offset for buffer half */ \
-    ptr += buffer_half * kAudioBlockSize * kFrameSize; \
-    /* Offset for channel */ \
-    ptr += channel * kDacValuesPerSample; \
-    for (size_t i = 0; i < kAudioBlockSize; ++i) { \
-      uint32_t words = (dac_words_exp); \
-      ptr[0] = (words >> 16) & 0xFFFF; \
-      ptr[1] = words & 0xFFFF; \
-      ptr += kFrameSize; \
-    }
-
-  inline void BufferSamples(uint8_t buffer_half, uint8_t channel, uint16_t* samples) {
-    BUFFER_SAMPLES(channel, FormatDacWords(channel, samples[i]))
-  }
-
-  inline void BufferStaticSample(uint8_t buffer_half, uint8_t channel, uint16_t sample) {
-    uint32_t static_words = FormatDacWords(channel, sample);
-    BUFFER_SAMPLES(channel, static_words)
-  }
+  uint32_t FormatDacWords(uint8_t channel, uint16_t sample);
+  void BufferSamples(uint8_t buffer_half, uint8_t channel, uint16_t* samples);
+  void BufferStaticSample(uint8_t buffer_half, uint8_t channel, uint16_t sample);
  
  private:
   // Multipliers express the time-ordering of the buffer: half-buffer, sample, channel, word
   // Channels must be interleaved so they output at a consistent phase of each 40kHz tick
-  uint16_t buffer_[kNumBuffers * kAudioBlockSize * kFrameSize]
-    __attribute__((aligned(4)));
+  volatile uint16_t buffer_[kDacBufferSize] __attribute__((aligned(4)));
   volatile uint8_t fillable_buffer_half_;
   volatile bool can_fill_;
   

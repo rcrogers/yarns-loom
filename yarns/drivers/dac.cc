@@ -30,6 +30,8 @@
 
 #include "yarns/drivers/system.h"
 
+#include "yarns/multi.h"
+
 #include <algorithm>
 
 namespace yarns {
@@ -41,6 +43,11 @@ volatile uint32_t dma_ss_high = kPinSS;
 volatile uint32_t dma_ss_low  = kPinSS;
 
 void Dac::Init() {
+  can_fill_ = true;
+  fillable_buffer_half_ = 1; // DMA will initially be consuming the first half
+  std::fill(&buffer_[0], &buffer_[kDacBufferSize], 0);
+  __DMB();
+
   // Initialize SS pin.
   GPIO_InitTypeDef gpio_init;
   gpio_init.GPIO_Pin = kPinSS;
@@ -67,6 +74,7 @@ void Dac::Init() {
   spi_init.SPI_CRCPolynomial = 7;
   SPI_Init(SPI2, &spi_init);
   SPI_Cmd(SPI2, ENABLE);
+  __DSB();
   
   // Initialize timers and DMA
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
@@ -79,7 +87,6 @@ void Dac::Init() {
   // uint32_t apb1_prescaler = (RCC->CFGR & RCC_CFGR_PPRE1) >> RCC_CFGR_PPRE1_Pos;
 
   // 449 for 160kHz
-  
   uint32_t ss_period = 72000000 / (kSampleRate * kNumCVOutputs) - 1;
 
   // uint32_t ss_high_period = ss_period * 18 / 20; // 90%
@@ -204,7 +211,7 @@ void Dac::Init() {
   DMA_ITConfig(DMA1_Channel5, DMA_IT_TC | DMA_IT_HT, ENABLE);
   NVIC_InitTypeDef nvic_init;
   nvic_init.NVIC_IRQChannel = DMA1_Channel5_IRQn;
-  nvic_init.NVIC_IRQChannelPreemptionPriority = 1;
+  nvic_init.NVIC_IRQChannelPreemptionPriority = 0;
   nvic_init.NVIC_IRQChannelSubPriority = 0;
   nvic_init.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&nvic_init);
@@ -220,9 +227,44 @@ void Dac::Init() {
   TIM_Cmd(TIM1, ENABLE);
   TIM_Cmd(TIM2, ENABLE);
   for (volatile int i = 0; i < 10000; i++); // Small delay
+}
 
-  can_fill_ = true;
-  fillable_buffer_half_ = 1; // DMA will initially be consuming the first half
+// Pack 2 16-bit DMA/SPI words into a 32-bit value
+uint32_t Dac::FormatDacWords(uint8_t channel, uint16_t sample) {
+  uint16_t dac_channel = kNumCVOutputs - 1 - channel;
+  uint16_t high = 0x1000 | (dac_channel << 9) | (sample >> 8);
+  uint16_t low = sample << 8;
+  return (static_cast<uint32_t>(high) << 16) | low;
+}
+
+#define BUFFER_SAMPLES(channel, dac_words_exp) \
+  volatile uint16_t* ptr = &buffer_[0]; \
+  /* Offset for buffer half */ \
+  ptr += buffer_half * kAudioBlockSize * kFrameSize; \
+  /* Offset for channel */ \
+  ptr += channel * kDacValuesPerSample; \
+  for (size_t i = 0; i < kAudioBlockSize; ++i) { \
+    uint32_t words = (dac_words_exp); \
+    ptr[0] = (words >> 16) & 0xFFFF; \
+    ptr[1] = words & 0xFFFF; \
+    ptr += kFrameSize; \
+  }
+
+void Dac::BufferSamples(uint8_t buffer_half, uint8_t channel, uint16_t* samples) {
+  // BUFFER_SAMPLES(channel, FormatDacWords(channel, samples[i]))
+  // BUFFER_SAMPLES(channel, FormatDacWords(channel, 0xCfff))
+  BufferStaticSample(buffer_half, channel, 0xCfff);
+  multi.PrintDebugByte(0x0C + (channel << 4));
+  __DMB();
+}
+
+// TODO this actually has about 13x the latency of SysTick write
+// consider dynamic injection into the DMA buffer being consumed?
+// low-freq channels could use a "no change word"
+void Dac::BufferStaticSample(uint8_t buffer_half, uint8_t channel, uint16_t sample) {
+  uint32_t static_words = FormatDacWords(channel, sample);
+  BUFFER_SAMPLES(channel, static_words)
+  __DMB();
 }
 
 /* extern */

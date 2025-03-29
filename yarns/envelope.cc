@@ -299,7 +299,7 @@ Options for vector accumulator:
 
 void Envelope::RenderSamples(uint16_t* buffer, int32_t new_bias) {
   size_t samples_needed = kAudioBlockSize; // Even if double buffering
-  int16_t local_buffer[kAudioBlockSize];
+  int16_t local_buffer[kAudioBlockSize] = {0};
   size_t local_buffer_index = 0;
 
   int32_t value = value_;
