@@ -102,21 +102,21 @@ void Dac::Init() {
   TIM_ARRPreloadConfig(TIM1, DISABLE); // Ensure immediate reload
 
   // Debug
-  TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);
-  NVIC_InitTypeDef tim1_up_it;
-  tim1_up_it.NVIC_IRQChannel = TIM1_UP_IRQn;
-  tim1_up_it.NVIC_IRQChannelPreemptionPriority = 0;
-  tim1_up_it.NVIC_IRQChannelSubPriority = 0;
-  tim1_up_it.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&tim1_up_it);
-  TIM_ITConfig(TIM2, TIM_IT_CC1, ENABLE);
-  NVIC_InitTypeDef tim2_cc1_it = {
-    .NVIC_IRQChannel = TIM2_IRQn,             // TIM2 global interrupt
-    .NVIC_IRQChannelPreemptionPriority = 1,    // Lower priority than DMA
-    .NVIC_IRQChannelSubPriority = 0,
-    .NVIC_IRQChannelCmd = ENABLE
-  };
-  NVIC_Init(&tim2_cc1_it);
+  // TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);
+  // NVIC_InitTypeDef tim1_up_it;
+  // tim1_up_it.NVIC_IRQChannel = TIM1_UP_IRQn;
+  // tim1_up_it.NVIC_IRQChannelPreemptionPriority = 0;
+  // tim1_up_it.NVIC_IRQChannelSubPriority = 0;
+  // tim1_up_it.NVIC_IRQChannelCmd = ENABLE;
+  // NVIC_Init(&tim1_up_it);
+  // TIM_ITConfig(TIM2, TIM_IT_CC1, ENABLE);
+  // NVIC_InitTypeDef tim2_cc1_it = {
+  //   .NVIC_IRQChannel = TIM2_IRQn,             // TIM2 global interrupt
+  //   .NVIC_IRQChannelPreemptionPriority = 1,    // Lower priority than DMA
+  //   .NVIC_IRQChannelSubPriority = 0,
+  //   .NVIC_IRQChannelCmd = ENABLE
+  // };
+  // NVIC_Init(&tim2_cc1_it);
   
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
