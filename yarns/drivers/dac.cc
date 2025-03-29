@@ -132,17 +132,17 @@ void Dac::Init() {
   TIM_TimeBaseInitTypeDef data_timer = {0};
   data_timer.TIM_Prescaler = 0;
   const uint32_t half_sync_period = (ss_period + 1) / 2; // 320kHz
-  const uint32_t dac_period = half_sync_period * 24/16; // Reduce freq to ~300kHz, to be absolutely sure this doesn't trigger 3x before the next TIM1 update.
+  const uint32_t dac_period = half_sync_period * 20/16; // Reduce freq to ~300kHz, to be absolutely sure this doesn't trigger 3x before the next TIM1 update.
   data_timer.TIM_Period = dac_period / 2 - 1; // TODO double freq because APB1 is slow
   data_timer.TIM_CounterMode = TIM_CounterMode_Up;
   TIM_TimeBaseInit(TIM2, &data_timer);
   
   // Reset TIM2 on update event from TIM1
-  TIM_SelectSlaveMode(TIM2, TIM_SlaveMode_Reset);
-  TIM_SelectInputTrigger(TIM2, TIM_TS_ITR0);
-  TIM2->SMCR |= TIM_TS_ITR0 | TIM_SlaveMode_Reset;
   TIM_SelectMasterSlaveMode(TIM1, TIM_MasterSlaveMode_Enable);
   TIM_SelectOutputTrigger(TIM1, TIM_TRGOSource_Update);
+  TIM_SelectSlaveMode(TIM2, TIM_SlaveMode_Reset);
+  TIM_SelectInputTrigger(TIM2, TIM_TS_ITR0);
+  TIM2->SMCR |= TIM_SMCR_MSM;
   
   // Compare channel for DMA trigger
   // We use this instead of update because DMA request mappings are fixed!
