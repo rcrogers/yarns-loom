@@ -89,66 +89,31 @@ void Dac::Init() {
       : rcc_clocks.PCLK1_Frequency * 2;
 
   uint32_t sync_period = (apb1_clock / (kSampleRate * kNumCVOutputs)) - 1;
-  // TIM_TimeBaseInitTypeDef tim4_init = {
-  //   .TIM_Prescaler = 0,
-  //   .TIM_Period = sync_period,
-  //   .TIM_CounterMode = TIM_CounterMode_Up
-  // };
-  TIM_TimeBaseInitTypeDef tim4_init = {0};
-  tim4_init.TIM_Prescaler = 0;
-  tim4_init.TIM_Period = sync_period;
-  tim4_init.TIM_CounterMode = TIM_CounterMode_Up;
-  TIM_TimeBaseInit(TIM4, &tim4_init);
-
-  // uint32_t ss_high_period = ss_period * 18 / 20; // 90%
-  // uint32_t ss_low_period  = ss_period * 19 / 20; // 95%
-
-  // Loudest garbage yet
-  // uint32_t ss_high_period = ss_period - 3;
-  // uint32_t ss_low_period  = ss_period - 2;
-  
-  // uint32_t ss_high_period = ss_period * 12 / 16; // 75%
-  // uint32_t ss_low_period  = ss_period * 13 / 16; // 81.25%
-
-  // Still works at 20/16
-  // uint32_t ss_low_period  = ss_period - ss_period / 16;     // 93.75%
-  // uint32_t ss_high_period = ss_low_period - ss_period / 64; // 92.19%
+  TIM_TimeBaseInitTypeDef tim_init = {0};
+  tim_init.TIM_Prescaler = 0;
+  tim_init.TIM_Period = sync_period;
+  tim_init.TIM_CounterMode = TIM_CounterMode_Up;
+  TIM_TimeBaseInit(TIM2, &tim_init);
 
   uint32_t sync_low_period = sync_period - sync_period / 16;
   uint32_t sync_high_period = sync_low_period - sync_period / 16;
 
-  // TIM1 (160kHz) for SYNC
-  // TIM_TimeBaseInitTypeDef tim1_init = {0};
-  // tim1_init.TIM_Prescaler = 0;
-  // tim1_init.TIM_Period = ss_period;
-  // tim1_init.TIM_CounterMode = TIM_CounterMode_Up;
-  // TIM_TimeBaseInit(TIM1, &tim1_init);
-  // TIM_UpdateRequestConfig(TIM1, TIM_UpdateSource_Global);
-  // TIM_ARRPreloadConfig(TIM1, DISABLE); // Ensure immediate reload
-
   // Debug
-  // TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);
-  // NVIC_InitTypeDef tim1_up_it;
-  // tim1_up_it.NVIC_IRQChannel = TIM1_UP_IRQn;
-  // tim1_up_it.NVIC_IRQChannelPreemptionPriority = 0;
-  // tim1_up_it.NVIC_IRQChannelSubPriority = 0;
-  // tim1_up_it.NVIC_IRQChannelCmd = ENABLE;
-  // NVIC_Init(&tim1_up_it);
-  NVIC_InitTypeDef tim4_it = {
-    .NVIC_IRQChannel = TIM4_IRQn,             // TIM4 global interrupt
-    .NVIC_IRQChannelPreemptionPriority = 0,    // Higher priority than DMA
-    .NVIC_IRQChannelSubPriority = 0,
-    .NVIC_IRQChannelCmd = ENABLE
-  };
-  NVIC_Init(&tim4_it);
-  TIM_ITConfig(TIM2, TIM_IT_CC1, ENABLE);
-  NVIC_InitTypeDef tim2_cc1_it = {
-    .NVIC_IRQChannel = TIM2_IRQn,             // TIM2 global interrupt
-    .NVIC_IRQChannelPreemptionPriority = 1,    // Lower priority than DMA
-    .NVIC_IRQChannelSubPriority = 0,
-    .NVIC_IRQChannelCmd = ENABLE
-  };
-  NVIC_Init(&tim2_cc1_it);
+  // NVIC_InitTypeDef tim4_it = {
+  //   .NVIC_IRQChannel = TIM4_IRQn,             // TIM4 global interrupt
+  //   .NVIC_IRQChannelPreemptionPriority = 0,    // Higher priority than DMA
+  //   .NVIC_IRQChannelSubPriority = 0,
+  //   .NVIC_IRQChannelCmd = ENABLE
+  // };
+  // NVIC_Init(&tim4_it);
+  // TIM_ITConfig(TIM2, TIM_IT_CC1, ENABLE);
+  // NVIC_InitTypeDef tim2_cc1_it = {
+  //   .NVIC_IRQChannel = TIM2_IRQn,             // TIM2 global interrupt
+  //   .NVIC_IRQChannelPreemptionPriority = 1,    // Lower priority than DMA
+  //   .NVIC_IRQChannelSubPriority = 0,
+  //   .NVIC_IRQChannelCmd = ENABLE
+  // };
+  // NVIC_Init(&tim2_cc1_it);
   
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
@@ -250,13 +215,7 @@ void Dac::Init() {
   DMA_Cmd(DMA1_Channel4, ENABLE);
   DMA_Cmd(DMA1_Channel5, ENABLE);
 
-  TIM2->CNT = 0;          // Explicitly reset counter
-  TIM2->EGR = TIM_EGR_UG; // Force update to reload registers
-  TIM2->SR = 0;           // Clear all flags manually
-
-  TIM_Cmd(TIM4, ENABLE);
   TIM_Cmd(TIM2, ENABLE);
-  for (volatile int i = 0; i < 10000; i++); // Small delay
 }
 
 // Pack 2 16-bit DMA/SPI words into a 32-bit value
@@ -281,10 +240,10 @@ uint32_t Dac::FormatDacWords(uint8_t channel, uint16_t sample) {
   }
 
 void Dac::BufferSamples(uint8_t buffer_half, uint8_t channel, uint16_t* samples) {
-  // BUFFER_SAMPLES(channel, FormatDacWords(channel, samples[i]))
+  BUFFER_SAMPLES(channel, FormatDacWords(channel, samples[i]))
   // BUFFER_SAMPLES(channel, FormatDacWords(channel, 0xCfff))
-  BufferStaticSample(buffer_half, channel, 0xCfff);
-  multi.PrintDebugByte(0x0C + (channel << 4));
+  // BufferStaticSample(buffer_half, channel, 0x3fff);
+  // multi.PrintDebugByte(0x0C + (channel << 4));
   __DMB();
 }
 
