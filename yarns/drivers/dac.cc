@@ -78,7 +78,6 @@ void Dac::Init() {
 
   DMA_InitTypeDef ss_dma = {0};
   ss_dma.DMA_DIR = DMA_DIR_PeripheralDST;
-  ss_dma.DMA_BufferSize = kDacWordsPerSample;
   ss_dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   ss_dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
   ss_dma.DMA_M2M = DMA_M2M_Disable;
@@ -90,13 +89,11 @@ void Dac::Init() {
   // DMA for SYNC High (TIM1_CH1)
   DMA_InitTypeDef high_ss_dma = ss_dma;
   high_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BSRR;
-  high_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_high[0];
   DMA_Init(DMA1_Channel2, &high_ss_dma);
 
   // DMA for SYNC Low (TIM1_CH2)
   DMA_InitTypeDef low_ss_dma = ss_dma;
   low_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BRR;
-  low_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_low[0];
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
   TIM_DMACmd(TIM1, TIM_DMA_CC1 | TIM_DMA_CC2, ENABLE);
