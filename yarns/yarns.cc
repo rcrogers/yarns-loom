@@ -43,7 +43,6 @@
 using namespace yarns;
 using namespace stmlib;
 
-Dac dac;
 GateOutput gate_output;
 MidiIO midi_io;
 System sys;
@@ -139,12 +138,12 @@ void SysTick_Handler() {
   }
 }
 
-void TIM3_IRQHandler(void) {
+void TIM1_UP_IRQHandler(void) {
   // DAC refresh at 4x 40kHz.
-  if (TIM_GetITStatus(TIM3, TIM_IT_Update) == RESET) {
+  if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
     return;
   }
-  TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
+  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
   dac.Cycle();
   

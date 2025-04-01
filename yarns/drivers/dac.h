@@ -36,6 +36,7 @@
 namespace yarns {
 
 const uint8_t kNumChannels = 4;
+const uint32_t kFrameRate = 40000; // 40kHz
 
 class Dac {
  public:
@@ -79,6 +80,9 @@ class Dac {
   }
   
   inline uint8_t channel() { return active_channel_; }
+
+  uint32_t timer_base_freq(uint8_t apb) const;
+  uint32_t timer_period() const;
  
  private:
   bool update_[kNumChannels];
@@ -88,6 +92,8 @@ class Dac {
   
   DISALLOW_COPY_AND_ASSIGN(Dac);
 };
+
+extern Dac dac;
 
 }  // namespace yarns
 
