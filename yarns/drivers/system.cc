@@ -51,7 +51,7 @@ void System::Init() {
   uint32_t apb2_timer_base_freq = hclk == pclk2 ? pclk2 : pclk2 * 2;
 
   TIM_TimeBaseInitTypeDef timer_init;
-  timer_init.TIM_Period = apb2_timer_base_freq / (40000 * 4) - 1;
+  timer_init.TIM_Period = apb2_timer_base_freq / (kFrameRate * 4) - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;

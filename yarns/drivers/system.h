@@ -33,6 +33,8 @@
 
 namespace yarns {
 
+const uint32_t kFrameRate = 40000;
+
 class System {
  public:
   System() { }
