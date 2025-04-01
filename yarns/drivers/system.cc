@@ -116,18 +116,10 @@ void System::Init() {
   // DAC interrupt is given highest priority
   NVIC_InitTypeDef timer_interrupt;
   timer_interrupt.NVIC_IRQChannel = TIM1_UP_IRQn;
-  timer_interrupt.NVIC_IRQChannelPreemptionPriority = 1; // Lower priority than DMA
+  timer_interrupt.NVIC_IRQChannelPreemptionPriority = 0;
   timer_interrupt.NVIC_IRQChannelSubPriority = 0;
   timer_interrupt.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&timer_interrupt);
-
-  // DMA interrupt initialization
-  NVIC_InitTypeDef dma_interrupt;
-  dma_interrupt.NVIC_IRQChannel = DMA1_Channel5_IRQn;
-  dma_interrupt.NVIC_IRQChannelPreemptionPriority = 0; // Higher priority than TIM1_UP
-  dma_interrupt.NVIC_IRQChannelSubPriority = 0;
-  dma_interrupt.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&dma_interrupt);
 }
 
 void System::StartTimers() {

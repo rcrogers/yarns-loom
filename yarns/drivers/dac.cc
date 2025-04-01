@@ -34,6 +34,8 @@ namespace yarns {
 
 using namespace std;
 
+const uint16_t kPinSS = GPIO_Pin_12;
+
 void Dac::Init() {
   // Initialize SS pin.
   GPIO_InitTypeDef gpio_init;
@@ -64,65 +66,7 @@ void Dac::Init() {
   
   fill(&value_[0], &value_[kNumChannels], 0);
   fill(&update_[0], &update_[kNumChannels], false);
-  
-  // Initialize double buffer system
   active_channel_ = 0;
-  active_buffer_ = 0;
-  next_buffer_ = 1;
-  transfer_in_progress_ = false;
-  
-  for (uint8_t i = 0; i < kNumBuffers; ++i) {
-    buffers_[i].ready = false;
-  }
-  
-  InitDMA();
-}
-
-void Dac::InitDMA() {
-  // Enable DMA1 clock
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
-  
-  // Configure DMA channel for SPI2 TX (Channel 5)
-  DMA_InitTypeDef dma_init;
-  DMA_StructInit(&dma_init);
-  dma_init.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
-  dma_init.DMA_MemoryBaseAddr = (uint32_t)buffers_[0].data;  // Initial buffer
-  dma_init.DMA_DIR = DMA_DIR_PeripheralDST;
-  dma_init.DMA_BufferSize = kDMABufferSize;
-  dma_init.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
-  dma_init.DMA_MemoryInc = DMA_MemoryInc_Enable;
-  dma_init.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
-  dma_init.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
-  dma_init.DMA_Mode = DMA_Mode_Normal;
-  dma_init.DMA_Priority = DMA_Priority_High;
-  dma_init.DMA_M2M = DMA_M2M_Disable;
-  
-  DMA_Init(DMA1_Channel5, &dma_init);
-  
-  // Enable DMA transfer complete interrupt
-  DMA_ITConfig(DMA1_Channel5, DMA_IT_TC, ENABLE);
-  
-  // Enable DMA1 Channel5 interrupt
-  NVIC_InitTypeDef nvic_init;
-  nvic_init.NVIC_IRQChannel = DMA1_Channel5_IRQn;
-  nvic_init.NVIC_IRQChannelPreemptionPriority = 0;
-  nvic_init.NVIC_IRQChannelSubPriority = 0;
-  nvic_init.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&nvic_init);
-  
-  // Enable SPI2 DMA TX request
-  SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
-}
-
-void Dac::HandleDMAComplete() {
-  // Clear DMA flags and disable channel
-  DMA_ClearFlag(DMA1_FLAG_TC5);
-  DMA_Cmd(DMA1_Channel5, DISABLE);
-  
-  transfer_in_progress_ = false;
-  
-  // If next buffer is ready, start its transfer immediately
-  StartTransferIfNeeded();
 }
 
 }  // namespace yarns

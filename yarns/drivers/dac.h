@@ -36,7 +36,6 @@
 namespace yarns {
 
 const uint8_t kNumChannels = 4;
-const uint16_t kPinSS = GPIO_Pin_12;
 
 class Dac {
  public:
@@ -44,7 +43,6 @@ class Dac {
   ~Dac() { }
   
   void Init();
-  void InitDMA();
   
   inline void PrepareWrite(uint8_t channel, uint16_t value) {
     if (value_[channel] != value) {
@@ -66,62 +64,27 @@ class Dac {
   
   inline void WriteIfDirty() {
     if (update_[active_channel_]) {
-      PrepareNextBuffer();
-      StartTransferIfNeeded();
+      Write(value_[active_channel_]);
       update_[active_channel_] = false;
     }
   }
   
-  inline uint8_t channel() { return active_channel_; }
+  inline void Write(uint16_t value) {
+    GPIOB->BSRR = GPIO_Pin_12;
+    GPIOB->BRR = GPIO_Pin_12;
+    uint16_t word = value;
+    uint16_t dac_channel = kNumChannels - 1 - active_channel_;
+    SPI_I2S_SendData(SPI2, 0x1000 | (dac_channel << 9) | (word >> 8));
+    SPI_I2S_SendData(SPI2, word << 8);
+  }
   
-  // Called from ISR to handle buffer switching
-  void HandleDMAComplete();
+  inline uint8_t channel() { return active_channel_; }
  
  private:
-  // Double buffer configuration
-  static const uint16_t kDMABufferSize = 2;  // Two 16-bit words per transfer
-  static const uint8_t kNumBuffers = 2;
-  
-  struct DMABuffer {
-    uint16_t data[kDMABufferSize];
-    bool ready;  // Indicates buffer is prepared and ready to send
-  };
-  
-  DMABuffer buffers_[kNumBuffers];
-  volatile uint8_t active_buffer_;  // Currently transmitting buffer
-  volatile uint8_t next_buffer_;    // Buffer being prepared
-  
   bool update_[kNumChannels];
   uint16_t value_[kNumChannels];
+  
   uint8_t active_channel_;
-  volatile bool transfer_in_progress_;
-  
-  inline void PrepareNextBuffer() {
-    // Format data for DAC in the next buffer
-    uint16_t dac_channel = kNumChannels - 1 - active_channel_;
-    buffers_[next_buffer_].data[0] = 0x1000 | (dac_channel << 9) | (value_[active_channel_] >> 8);
-    buffers_[next_buffer_].data[1] = value_[active_channel_] << 8;
-    buffers_[next_buffer_].ready = true;
-  }
-  
-  inline void StartTransferIfNeeded() {
-    if (!transfer_in_progress_ && buffers_[next_buffer_].ready) {
-      // Start new transfer
-      transfer_in_progress_ = true;
-      active_buffer_ = next_buffer_;
-      next_buffer_ = (next_buffer_ + 1) % kNumBuffers;
-      buffers_[active_buffer_].ready = false;
-      
-      // Configure DMA for new transfer
-      DMA1_Channel5->CMAR = (uint32_t)buffers_[active_buffer_].data;
-      DMA1_Channel5->CNDTR = kDMABufferSize;
-      
-      // Toggle SS pin and start transfer
-      GPIOB->BSRR = kPinSS; // Set SS pin high
-      GPIOB->BRR = kPinSS;  // Set SS pin low
-      DMA_Cmd(DMA1_Channel5, ENABLE);
-    }
-  }
   
   DISALLOW_COPY_AND_ASSIGN(Dac);
 };

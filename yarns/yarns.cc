@@ -139,20 +139,8 @@ void SysTick_Handler() {
   }
 }
 
-// Modified DMA IRQ handler
-extern "C" {
-void DMA1_Channel5_IRQHandler(void) {
-  if (DMA_GetITStatus(DMA1_IT_TC5)) {
-    DMA_ClearITPendingBit(DMA1_IT_TC5);
-    
-    extern yarns::Dac dac;
-    dac.HandleDMAComplete();
-  }
-}
-}
-
-extern "C" {
 void TIM1_UP_IRQHandler(void) {
+  // DAC refresh at 4x 40kHz.
   if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
     return;
   }
@@ -160,20 +148,19 @@ void TIM1_UP_IRQHandler(void) {
 
   dac.Cycle();
   
-  // Prepare and start new transfer based on source type
   if (is_high_freq[dac.channel()]) {
     uint16_t sample = multi.mutable_cv_output(dac.channel())->GetDACSample();
     dac.PrepareWrite(dac.channel(), sample);
-    dac.WriteIfDirty();  // This will use double buffering internally
+    dac.WriteIfDirty();
   } else {
-    // Regular CV output - will use double buffering if value has changed
+    // Use value written there during previous CV refresh.
     dac.WriteIfDirty();
   }
   
   if (dac.channel() == 0) {
+    // Internal clock refresh at 40kHz
     multi.RefreshInternalClock();
   }
-}
 }
 
 }
