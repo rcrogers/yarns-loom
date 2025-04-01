@@ -42,8 +42,16 @@ void System::Init() {
       RCC_APB2Periph_TIM1 | RCC_APB2Periph_USART1, ENABLE);
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI2, ENABLE);
 
+  RCC_ClocksTypeDef rcc_clocks;
+  RCC_GetClocksFreq(&rcc_clocks);
+  uint32_t hclk = rcc_clocks.HCLK_Frequency;
+  // uint32_t pclk1 = rcc_clocks.PCLK1_Frequency;
+  uint32_t pclk2 = rcc_clocks.PCLK2_Frequency;
+  // uint32_t apb1_timer_base_freq = hclk == pclk1 ? pclk1 : pclk1 * 2;
+  uint32_t apb2_timer_base_freq = hclk == pclk2 ? pclk2 : pclk2 * 2;
+
   TIM_TimeBaseInitTypeDef timer_init;
-  timer_init.TIM_Period = F_CPU / (40000 * 4) - 1;
+  timer_init.TIM_Period = apb2_timer_base_freq / (40000 * 4) - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;
