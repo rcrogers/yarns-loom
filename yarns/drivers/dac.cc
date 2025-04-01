@@ -64,18 +64,8 @@ void Dac::Init() {
   SPI_Init(SPI2, &spi_init);
   SPI_Cmd(SPI2, ENABLE);
   
-  // Initialize timers and DMA
-  // RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
-  // RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2 | RCC_APB1Periph_SPI2, ENABLE);
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 
-  // // TIM1 (160kHz) for SYNC
-  // TIM_TimeBaseInitTypeDef tim1_init = {0};
-  // tim1_init.TIM_Prescaler = 0;
-  // tim1_init.TIM_Period = ss_period;
-  // tim1_init.TIM_CounterMode = TIM_CounterMode_Up;
-  // TIM_TimeBaseInit(TIM1, &tim1_init);
-  
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
@@ -85,28 +75,6 @@ void Dac::Init() {
   
   oc_init.TIM_Pulse = timer_period() * 9375 / 10000 - 1; // Low at 93.75%
   TIM_OC2Init(TIM1, &oc_init);
-  
-  // TIM_SelectMasterSlaveMode(TIM1, TIM_MasterSlaveMode_Enable);
-  // TIM_SelectOutputTrigger(TIM1, TIM_TRGOSource_Update);
-  // TIM_Cmd(TIM1, ENABLE);
-
-  // // TIM2 (320kHz) for DAC data, slaved to TIM1
-  // TIM_TimeBaseInitTypeDef dac_dma_timer = {0};
-  // dac_dma_timer.TIM_Prescaler = 0;
-  // // 224 for 320kHz
-  // const uint32_t dac_period = F_CPU / (kSampleRate * kNumChannels * kDacValuesPerSample) - 1;
-  // dac_dma_timer.TIM_Period = dac_period; 
-  // dac_dma_timer.TIM_CounterMode = TIM_CounterMode_Up;
-  // TIM_TimeBaseInit(TIM2, &dac_dma_timer);
-  
-  // TIM_SelectSlaveMode(TIM2, TIM_SlaveMode_Reset);
-  // TIM_SelectInputTrigger(TIM2, TIM_TS_ITR0); // Trigger from TIM1
-  
-  // // Compare channel for DMA trigger
-  // TIM_OC1Init(TIM2, &oc_init);
-  // TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Disable);
-  // TIM_ARRPreloadConfig(TIM2, ENABLE);
-  // TIM_Cmd(TIM2, ENABLE);
 
   DMA_InitTypeDef ss_dma = {0};
   ss_dma.DMA_DIR = DMA_DIR_PeripheralDST;
@@ -132,8 +100,6 @@ void Dac::Init() {
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
   TIM_DMACmd(TIM1, TIM_DMA_CC1 | TIM_DMA_CC2, ENABLE);
-
-  // TIM_Cmd(TIM1, ENABLE);
 
   DMA_Cmd(DMA1_Channel2, ENABLE);
   DMA_Cmd(DMA1_Channel3, ENABLE);
