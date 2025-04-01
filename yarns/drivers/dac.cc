@@ -135,7 +135,7 @@ uint32_t Dac::timer_base_freq(uint8_t apb) const {
 
 // Time to send both DAC words
 uint32_t Dac::timer_period() const {
-  return timer_base_freq(2) / kTimerHz;
+  return timer_base_freq(2) / kDacWordsHz;
 }
 
 /* extern */

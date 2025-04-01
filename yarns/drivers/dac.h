@@ -35,14 +35,16 @@
 
 namespace yarns {
 
-
+const size_t kAudioBlockSizeBits = 6;
+const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
 const uint32_t kNumChannels = 4;
 const uint32_t kDacWordsPerSample = 2;
-const uint32_t kFrameSize = kNumChannels * kDacWordsPerSample;
+const uint32_t kDacWordsPerFrame = kNumChannels * kDacWordsPerSample;
+const uint32_t kDacWordsPerBlock = kAudioBlockSize * kDacWordsPerFrame;
 
 const uint32_t kFrameHz = 40000;
-const uint32_t kTimerHz = kFrameHz * kFrameSize;
+const uint32_t kDacWordsHz = kFrameHz * kDacWordsPerFrame;
 
 const uint16_t kPinSS = GPIO_Pin_12;
 static volatile uint32_t dma_ss_high[kDacWordsPerSample] __attribute__((aligned(4))) = {0, kPinSS};

@@ -35,14 +35,12 @@
 
 #include "yarns/envelope.h"
 #include "yarns/interpolator.h"
+#include "yarns/drivers/dac.h"
 
 #include <cstring>
 #include <cstdio>
 
 namespace yarns {
-
-const size_t kAudioBlockSizeBits = 6;
-const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
 class StateVariableFilter {
  public:
