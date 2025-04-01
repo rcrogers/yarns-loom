@@ -37,8 +37,8 @@ namespace yarns {
 using namespace std;
 
 const uint16_t kPinSS = GPIO_Pin_12;
-volatile uint32_t dma_ss_high = kPinSS;
-volatile uint32_t dma_ss_low  = kPinSS;
+volatile uint32_t dma_ss_high[1] = {kPinSS};
+volatile uint32_t dma_ss_low[1] = {kPinSS};
 
 void Dac::Init() {
   // Initialize SS pin.
@@ -119,7 +119,7 @@ void Dac::Init() {
   ss_dma.DMA_DIR = DMA_DIR_PeripheralDST;
   ss_dma.DMA_BufferSize = 1;
   ss_dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
-  ss_dma.DMA_MemoryInc = DMA_MemoryInc_Disable;
+  ss_dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
   ss_dma.DMA_M2M = DMA_M2M_Disable;
   ss_dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Word;
   ss_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Word;
