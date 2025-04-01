@@ -33,7 +33,7 @@
 
 namespace yarns {
 
-const uint32_t kFrameRate = 40000;
+const uint32_t kFrameRate = 40000; // 40kHz
 
 class System {
  public:
