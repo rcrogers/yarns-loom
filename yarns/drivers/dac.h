@@ -65,14 +65,19 @@ class Dac {
       update_[channel] = false;
     }
   }
+
+  // Bits: 8 command | 16 data | 8 padding
+  inline uint32_t FormatCommandWords(uint8_t channel, uint16_t value) {
+    uint16_t dac_channel = kNumChannels - 1 - channel;
+    uint16_t high = 0x1000 | (dac_channel << 9) | (value >> 8);
+    uint16_t low = value << 8;
+    return (high << 16) | low;
+  }
   
   inline void Write(uint8_t channel, uint16_t value) {
-    // GPIOB->BSRR = GPIO_Pin_12;
-    // GPIOB->BRR = GPIO_Pin_12;
-    uint16_t word = value;
-    uint16_t dac_channel = kNumChannels - 1 - channel;
-    SPI_I2S_SendData(SPI2, 0x1000 | (dac_channel << 9) | (word >> 8));
-    SPI_I2S_SendData(SPI2, word << 8);
+    uint32_t words = FormatCommandWords(channel, value);
+    SPI_I2S_SendData(SPI2, words >> 16);
+    SPI_I2S_SendData(SPI2, words & 0xFFFF);
   }
 
   uint32_t timer_base_freq(uint8_t apb) const;
