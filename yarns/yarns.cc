@@ -140,15 +140,14 @@ void SysTick_Handler() {
 }
 
 void TIM1_UP_IRQHandler(void) {
-  // DAC refresh at 4x 40kHz.
   if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
     return;
   }
   TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
-  uint8_t channel = dac_counter / kDacWordsPerSample;
-  
   if ((dac_counter & 1) == 0) {
+    uint8_t channel = dac_counter >> 1;
+
     if (is_high_freq[channel]) {
       uint16_t sample = multi.mutable_cv_output(channel)->GetDACSample();
       dac.PrepareWrite(channel, sample);
@@ -157,11 +156,21 @@ void TIM1_UP_IRQHandler(void) {
       // Use value written there during previous CV refresh.
       dac.WriteIfDirty(channel);
     }
-  }
-  
-  if (channel == 0) {
-    // Internal clock refresh at 40kHz
-    multi.RefreshInternalClock();
+
+    if (channel == 0) {
+      // Internal clock refresh at 40kHz
+      multi.RefreshInternalClock();
+
+      // // Reset DMA1 channels 2/3 to start of buffer
+      // DMA_Cmd(DMA1_Channel2, DISABLE);
+      // DMA_Cmd(DMA1_Channel3, DISABLE);
+      // DMA1_Channel2->CNDTR = kDacWordsPerSample;
+      // DMA1_Channel3->CNDTR = kDacWordsPerSample;
+      // DMA1_Channel2->CMAR = (uint32_t)&dma_ss_high[0];
+      // DMA1_Channel3->CMAR = (uint32_t)&dma_ss_low[0];
+      // DMA_Cmd(DMA1_Channel2, ENABLE);
+      // DMA_Cmd(DMA1_Channel3, ENABLE);
+    }
   }
 
   dac_counter++;

@@ -36,10 +36,6 @@ namespace yarns {
 
 using namespace std;
 
-const uint16_t kPinSS = GPIO_Pin_12;
-volatile uint32_t dma_ss_high[2] = {0, kPinSS};
-volatile uint32_t dma_ss_low[2] = {0, kPinSS};
-
 void Dac::Init() {
   // Initialize SS pin.
   GPIO_InitTypeDef gpio_init;
@@ -84,13 +80,10 @@ void Dac::Init() {
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
   
-  // SS High at 90% (404)
-  oc_init.TIM_Pulse = timer_period() * 90 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 8500 / 10000 - 1; // High at 85%
   TIM_OC1Init(TIM1, &oc_init);
   
-  // SS Low at 95% (426)
-  // oc_init.TIM_Pulse = 426;
-  oc_init.TIM_Pulse = timer_period() * 95 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 9375 / 10000 - 1; // Low at 93.75%
   TIM_OC2Init(TIM1, &oc_init);
   
   // TIM_SelectMasterSlaveMode(TIM1, TIM_MasterSlaveMode_Enable);
@@ -129,13 +122,13 @@ void Dac::Init() {
   // DMA for SYNC High (TIM1_CH1)
   DMA_InitTypeDef high_ss_dma = ss_dma;
   high_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BSRR;
-  high_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_high;
+  high_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_high[0];
   DMA_Init(DMA1_Channel2, &high_ss_dma);
 
   // DMA for SYNC Low (TIM1_CH2)
   DMA_InitTypeDef low_ss_dma = ss_dma;
   low_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BRR;
-  low_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_low;
+  low_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_low[0];
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
   TIM_DMACmd(TIM1, TIM_DMA_CC1 | TIM_DMA_CC2, ENABLE);

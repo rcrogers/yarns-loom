@@ -35,6 +35,10 @@
 
 namespace yarns {
 
+const uint16_t kPinSS = GPIO_Pin_12;
+static volatile uint32_t dma_ss_high[2] = {0, kPinSS};
+static volatile uint32_t dma_ss_low[2] = {0, kPinSS};
+
 const uint32_t kNumChannels = 4;
 const uint32_t kDacWordsPerSample = 2;
 const uint32_t kFrameSize = kNumChannels * kDacWordsPerSample;
