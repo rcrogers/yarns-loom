@@ -147,18 +147,17 @@ void TIM1_UP_IRQHandler(void) {
   TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
   dac_counter++;
-  dac_counter = dac_counter % kFrameSize;
-  uint8_t channel = dac_counter / kDacWordsPerSample;
+  dac_counter = dac_counter % kNumChannels;
+
+  uint8_t channel = dac_counter;
   
-  if ((channel & 1) == 0) {
-    if (is_high_freq[channel]) {
-      uint16_t sample = multi.mutable_cv_output(channel)->GetDACSample();
-      dac.PrepareWrite(channel, sample);
-      dac.WriteIfDirty(channel);
-    } else {
-      // Use value written there during previous CV refresh.
-      dac.WriteIfDirty(channel);
-    }
+  if (is_high_freq[channel]) {
+    uint16_t sample = multi.mutable_cv_output(channel)->GetDACSample();
+    dac.PrepareWrite(channel, sample);
+    dac.WriteIfDirty(channel);
+  } else {
+    // Use value written there during previous CV refresh.
+    dac.WriteIfDirty(channel);
   }
   
   if (channel == 0) {

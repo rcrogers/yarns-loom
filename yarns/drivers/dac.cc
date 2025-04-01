@@ -37,8 +37,8 @@ namespace yarns {
 using namespace std;
 
 const uint16_t kPinSS = GPIO_Pin_12;
-volatile uint32_t dma_ss_high[2] = {0, kPinSS};
-volatile uint32_t dma_ss_low[2] = {0, kPinSS};
+volatile uint32_t dma_ss_high[1] = {kPinSS};
+volatile uint32_t dma_ss_low[1] = {kPinSS};
 
 void Dac::Init() {
   // Initialize SS pin.
@@ -117,7 +117,7 @@ void Dac::Init() {
 
   DMA_InitTypeDef ss_dma = {0};
   ss_dma.DMA_DIR = DMA_DIR_PeripheralDST;
-  ss_dma.DMA_BufferSize = kDacWordsPerSample;
+  ss_dma.DMA_BufferSize = 1;
   ss_dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   ss_dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
   ss_dma.DMA_M2M = DMA_M2M_Disable;
@@ -176,7 +176,7 @@ uint32_t Dac::timer_base_freq(uint8_t apb) const {
 
 // Time to send both DAC words
 uint32_t Dac::timer_period() const {
-  return timer_base_freq(2) / kTimerHz;
+  return timer_base_freq(2) / (kFrameRate * 4);
 }
 
 /* extern */

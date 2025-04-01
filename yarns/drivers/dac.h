@@ -35,12 +35,8 @@
 
 namespace yarns {
 
-const uint32_t kNumChannels = 4;
-const uint32_t kDacWordsPerSample = 2;
-const uint32_t kFrameSize = kNumChannels * kDacWordsPerSample;
-
-const uint32_t kFrameHz = 40000;
-const uint32_t kTimerHz = kFrameHz * kFrameSize;
+const uint8_t kNumChannels = 4;
+const uint32_t kFrameRate = 40000; // 40kHz
 
 class Dac {
  public:
