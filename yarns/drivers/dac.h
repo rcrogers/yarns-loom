@@ -59,27 +59,21 @@ class Dac {
     PrepareWrite(3, values[3]);
   }
   
-  inline void Cycle() {
-    active_channel_ = (active_channel_ + 1) % kNumChannels;
-  }
-  
-  inline void WriteIfDirty() {
-    if (update_[active_channel_]) {
-      Write(value_[active_channel_]);
-      update_[active_channel_] = false;
+  inline void WriteIfDirty(uint8_t channel) {
+    if (update_[channel]) {
+      Write(channel, value_[channel]);
+      update_[channel] = false;
     }
   }
   
-  inline void Write(uint16_t value) {
+  inline void Write(uint8_t channel, uint16_t value) {
     // GPIOB->BSRR = GPIO_Pin_12;
     // GPIOB->BRR = GPIO_Pin_12;
     uint16_t word = value;
-    uint16_t dac_channel = kNumChannels - 1 - active_channel_;
+    uint16_t dac_channel = kNumChannels - 1 - channel;
     SPI_I2S_SendData(SPI2, 0x1000 | (dac_channel << 9) | (word >> 8));
     SPI_I2S_SendData(SPI2, word << 8);
   }
-  
-  inline uint8_t channel() { return active_channel_; }
 
   uint32_t timer_base_freq(uint8_t apb) const;
   uint32_t timer_period() const;
@@ -87,8 +81,6 @@ class Dac {
  private:
   bool update_[kNumChannels];
   uint16_t value_[kNumChannels];
-  
-  uint8_t active_channel_;
   
   DISALLOW_COPY_AND_ASSIGN(Dac);
 };

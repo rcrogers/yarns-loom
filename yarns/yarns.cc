@@ -66,6 +66,7 @@ uint16_t cv[4];
 bool gate[4];
 bool is_high_freq[4];
 uint16_t factory_testing_counter;
+uint16_t dac_counter;
 
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
@@ -145,18 +146,21 @@ void TIM1_UP_IRQHandler(void) {
   }
   TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
-  dac.Cycle();
+  dac_counter++;
+  dac_counter = dac_counter % kNumChannels;
+
+  uint8_t channel = dac_counter;
   
-  if (is_high_freq[dac.channel()]) {
-    uint16_t sample = multi.mutable_cv_output(dac.channel())->GetDACSample();
-    dac.PrepareWrite(dac.channel(), sample);
-    dac.WriteIfDirty();
+  if (is_high_freq[channel]) {
+    uint16_t sample = multi.mutable_cv_output(channel)->GetDACSample();
+    dac.PrepareWrite(channel, sample);
+    dac.WriteIfDirty(channel);
   } else {
     // Use value written there during previous CV refresh.
-    dac.WriteIfDirty();
+    dac.WriteIfDirty(channel);
   }
   
-  if (dac.channel() == 0) {
+  if (channel == 0) {
     // Internal clock refresh at 40kHz
     multi.RefreshInternalClock();
   }

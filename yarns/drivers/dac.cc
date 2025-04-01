@@ -164,7 +164,6 @@ void Dac::Init() {
 
   fill(&value_[0], &value_[kNumChannels], 0);
   fill(&update_[0], &update_[kNumChannels], false);
-  active_channel_ = 0;
 }
 
 uint32_t Dac::timer_base_freq(uint8_t apb) const {
