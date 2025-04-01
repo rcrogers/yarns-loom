@@ -70,8 +70,8 @@ class Dac {
   }
   
   inline void Write(uint16_t value) {
-    GPIOB->BSRR = GPIO_Pin_12;
-    GPIOB->BRR = GPIO_Pin_12;
+    // GPIOB->BSRR = GPIO_Pin_12;
+    // GPIOB->BRR = GPIO_Pin_12;
     uint16_t word = value;
     uint16_t dac_channel = kNumChannels - 1 - active_channel_;
     SPI_I2S_SendData(SPI2, 0x1000 | (dac_channel << 9) | (word >> 8));
