@@ -168,7 +168,7 @@ void TIM1_UP_IRQHandler(void) {
   }
 
   dac_words_count++;
-  dac_words_count = dac_words_count % (kDacWordsPerBlock << 10);
+  dac_words_count = dac_words_count % (kDacWordsPerBlock << 12);
 }
 
 }

@@ -142,6 +142,8 @@ void Dac::RestartSyncDMA() {
   DMA1_Channel2->CMAR = (uint32_t)&dma_ss_high[0];
   DMA1_Channel3->CMAR = (uint32_t)&dma_ss_low[0];
 
+  __DSB();
+
   DMA_Cmd(DMA1_Channel2, ENABLE);
   DMA_Cmd(DMA1_Channel3, ENABLE);
 }
