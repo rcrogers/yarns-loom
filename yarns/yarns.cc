@@ -66,7 +66,7 @@ uint16_t cv[4];
 bool gate[4];
 bool is_high_freq[4];
 uint16_t factory_testing_counter;
-uint16_t dac_words_count;
+uint32_t dac_words_count;
 
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
@@ -145,6 +145,10 @@ void TIM1_UP_IRQHandler(void) {
   }
   TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
+  if (dac_words_count == 0) {
+    dac.RestartSyncDMA();
+  }
+
   if ((dac_words_count & 1) == 0) {
     uint8_t channel = (dac_words_count % kDacWordsPerFrame) / kDacWordsPerSample;
 
@@ -160,21 +164,11 @@ void TIM1_UP_IRQHandler(void) {
     if (channel == 0) {
       // Internal clock refresh at 40kHz
       multi.RefreshInternalClock();
-
-      // // Reset DMA1 channels 2/3 to start of buffer
-      // DMA_Cmd(DMA1_Channel2, DISABLE);
-      // DMA_Cmd(DMA1_Channel3, DISABLE);
-      // DMA1_Channel2->CNDTR = kDacWordsPerSample;
-      // DMA1_Channel3->CNDTR = kDacWordsPerSample;
-      // DMA1_Channel2->CMAR = (uint32_t)&dma_ss_high[0];
-      // DMA1_Channel3->CMAR = (uint32_t)&dma_ss_low[0];
-      // DMA_Cmd(DMA1_Channel2, ENABLE);
-      // DMA_Cmd(DMA1_Channel3, ENABLE);
     }
   }
 
   dac_words_count++;
-  dac_words_count = dac_words_count % kDacWordsPerBlock;
+  dac_words_count = dac_words_count % (kDacWordsPerBlock << 10);
 }
 
 }

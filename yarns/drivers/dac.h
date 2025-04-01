@@ -56,6 +56,7 @@ class Dac {
   ~Dac() { }
   
   void Init();
+  void RestartSyncDMA();
   
   inline void PrepareWrite(uint8_t channel, uint16_t value) {
     if (value_[channel] != value) {

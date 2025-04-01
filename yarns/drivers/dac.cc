@@ -101,8 +101,7 @@ void Dac::Init() {
 
   TIM_DMACmd(TIM1, TIM_DMA_CC1 | TIM_DMA_CC2, ENABLE);
 
-  DMA_Cmd(DMA1_Channel2, ENABLE);
-  DMA_Cmd(DMA1_Channel3, ENABLE);
+  RestartSyncDMA();
 
   // // DMA for SPI (TIM2_CH1)
   // DMA_InitTypeDef spi_dma = {0};
@@ -123,6 +122,28 @@ void Dac::Init() {
 
   fill(&value_[0], &value_[kNumChannels], 0);
   fill(&update_[0], &update_[kNumChannels], false);
+}
+
+#define CCR_ENABLE_Set          ((uint32_t)0x00000001)
+#define CCR_ENABLE_Reset        ((uint32_t)0xFFFFFFFE)
+
+void Dac::RestartSyncDMA() {
+  DMA_Cmd(DMA1_Channel2, DISABLE);
+  DMA_Cmd(DMA1_Channel3, DISABLE);
+
+  while (
+    DMA1_Channel2->CCR & CCR_ENABLE_Set ||
+    DMA1_Channel3->CCR & CCR_ENABLE_Set
+  ) { /* Wait for both channels to be disabled */ }
+
+  DMA1_Channel2->CNDTR = kDacWordsPerSample;
+  DMA1_Channel3->CNDTR = kDacWordsPerSample;
+
+  DMA1_Channel2->CMAR = (uint32_t)&dma_ss_high[0];
+  DMA1_Channel3->CMAR = (uint32_t)&dma_ss_low[0];
+
+  DMA_Cmd(DMA1_Channel2, ENABLE);
+  DMA_Cmd(DMA1_Channel3, ENABLE);
 }
 
 uint32_t Dac::timer_base_freq(uint8_t apb) const {
