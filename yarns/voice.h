@@ -335,9 +335,10 @@ class CVOutput {
     return num_audio_voices_ > 0 && audio_voices_[0]->uses_audio();
   }
   inline bool is_envelope() const {
-    return
+    return !is_audio() && (
       (dc_role_ == DC_AUX_1 && dc_voice_->aux_1_envelope()) ||
-      (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope());
+      (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope())
+    );
   }
   inline void NoteOn(ADSR& adsr) {
     envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
