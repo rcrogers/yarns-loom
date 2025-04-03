@@ -58,6 +58,27 @@ class Dac {
   void Init();
   void RestartSyncDMA();
   
+  inline void PrepareWrite(uint8_t channel, uint16_t value) {
+    if (value_[channel] != value) {
+      value_[channel] = value;
+      update_[channel] = true;
+    }
+  }
+  
+  inline void PrepareWrites(const uint16_t* values) {
+    PrepareWrite(0, values[0]);
+    PrepareWrite(1, values[1]);
+    PrepareWrite(2, values[2]);
+    PrepareWrite(3, values[3]);
+  }
+  
+  inline void WriteIfDirty(uint8_t channel) {
+    if (update_[channel]) {
+      Write(channel, value_[channel]);
+      update_[channel] = false;
+    }
+  }
+
   // Bits: 8 command | 16 data | 8 padding
   inline uint32_t FormatCommandWords(uint8_t channel, uint16_t value) {
     uint16_t dac_channel = kNumChannels - 1 - channel;
@@ -65,11 +86,19 @@ class Dac {
     uint16_t low = value << 8;
     return (high << 16) | low;
   }
+  
+  inline void Write(uint8_t channel, uint16_t value) {
+    uint32_t words = FormatCommandWords(channel, value);
+    SPI_I2S_SendData(SPI2, words >> 16);
+    SPI_I2S_SendData(SPI2, words & 0xFFFF);
+  }
 
   uint32_t timer_base_freq(uint8_t apb) const;
   uint32_t timer_period() const;
  
  private:
+  bool update_[kNumChannels];
+  uint16_t value_[kNumChannels];
   
   DISALLOW_COPY_AND_ASSIGN(Dac);
 };

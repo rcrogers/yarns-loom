@@ -116,6 +116,9 @@ void Dac::Init() {
   // DMA_Init(DMA1_Channel5, &spi_dma);
   // TIM_DMACmd(TIM2, TIM_DMA_CC1, ENABLE);
   // SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
+
+  fill(&value_[0], &value_[kNumChannels], 0);
+  fill(&update_[0], &update_[kNumChannels], false);
 }
 
 #define CCR_ENABLE_Set          ((uint32_t)0x00000001)
