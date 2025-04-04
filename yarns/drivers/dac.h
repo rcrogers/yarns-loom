@@ -73,10 +73,10 @@ class Dac {
   }
   
   inline void WriteIfDirty(uint8_t channel) {
-    if (update_[channel]) {
+    // if (update_[channel]) {
       Write(channel, value_[channel]);
       update_[channel] = false;
-    }
+    // }
   }
 
   // Bits: 8 command | 16 data | 8 padding
