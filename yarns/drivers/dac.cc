@@ -37,6 +37,9 @@ namespace yarns {
 
 using namespace std;
 
+static volatile uint32_t dma_ss_high[kDacWordsPerSample] __attribute__((aligned(4))) = {kPinSS, 0};
+static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(4))) = {kPinSS, 0};
+
 void Dac::Init() {
   // Initialize SS pin.
   GPIO_InitTypeDef gpio_init;
@@ -71,20 +74,16 @@ void Dac::Init() {
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
   
-  oc_init.TIM_Pulse = timer_period() * 8500 / 10000 - 1; // High at 85%
+  // SYNC high (conditional)
+  oc_init.TIM_Pulse = timer_period() * 00 / 10 - 1;
   TIM_OC1Init(TIM1, &oc_init);
   
-  oc_init.TIM_Pulse = timer_period() * 9375 / 10000 - 1; // Low at 93.75%
+  // SYNC low (conditional)
+  oc_init.TIM_Pulse = timer_period() * 07 / 100 - 1;
   TIM_OC2Init(TIM1, &oc_init);
 
-  // SPI2 TX at TBD
-  // Unresponsive at 0%, 20%
-  // Audibly quantized at 25%, 30%, 40%, 50%
-  //    - Off by 0.4-0.7V at 40%
-  //    - Suggests ~8-bit quantization: 11V / 2^8 = 0.043V
-  // Borderline unresponsive/garbage at 60%
-  // Garbage at 70%
-  oc_init.TIM_Pulse = timer_period() * 4000 / 10000 - 1;
+  // SPI2 TX
+  oc_init.TIM_Pulse = timer_period() * 40 / 100 - 1;
   TIM_OC3Init(TIM1, &oc_init);
 
   // multi.PrintInt32E(timer_period()); => 225

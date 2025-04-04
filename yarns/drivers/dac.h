@@ -47,8 +47,6 @@ const uint32_t kFrameHz = 40000;
 const uint32_t kDacWordsHz = kFrameHz * kDacWordsPerFrame;
 
 const uint16_t kPinSS = GPIO_Pin_12;
-static volatile uint32_t dma_ss_high[kDacWordsPerSample] __attribute__((aligned(4))) = {0, kPinSS};
-static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(4))) = {0, kPinSS};
 
 class Dac {
  public:
