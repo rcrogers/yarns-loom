@@ -71,6 +71,13 @@ void System::Init() {
   timer_interrupt.NVIC_IRQChannelSubPriority = 1;
   timer_interrupt.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&timer_interrupt);
+
+  // Reduce SysTick priority to below DAC interrupt
+  timer_interrupt.NVIC_IRQChannel = SysTick_IRQn;
+  timer_interrupt.NVIC_IRQChannelPreemptionPriority = 1;
+  timer_interrupt.NVIC_IRQChannelSubPriority = 1;
+  timer_interrupt.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&timer_interrupt);
 }
 
 void System::StartTimers() {
