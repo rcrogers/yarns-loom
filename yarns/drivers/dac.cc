@@ -99,9 +99,9 @@ void Dac::Init() {
   low_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BRR;
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
-  TIM_DMACmd(TIM1, TIM_DMA_CC1 | TIM_DMA_CC2, ENABLE);
-
   RestartSyncDMA();
+
+  TIM_DMACmd(TIM1, TIM_DMA_CC1 | TIM_DMA_CC2, ENABLE);
 
   // // DMA for SPI (TIM2_CH1)
   // DMA_InitTypeDef spi_dma = {0};

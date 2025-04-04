@@ -146,7 +146,7 @@ void TIM1_UP_IRQHandler(void) {
   TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 
   if (dac_words_count_ == 0) {
-    dac.RestartSyncDMA();
+    // dac.RestartSyncDMA();
   }
 
   if ((dac_words_count_ & 1) == 0) {
