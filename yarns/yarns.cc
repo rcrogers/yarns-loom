@@ -62,7 +62,7 @@ void PendSV_Handler(void) { }
 
 extern "C" {
 
-uint16_t cv[4];
+volatile uint16_t cv[4];
 bool gate[4];
 bool is_high_freq[4];
 uint16_t factory_testing_counter;
@@ -134,8 +134,6 @@ void SysTick_Handler() {
       gate[3] = (factory_testing_counter % 200) < 100;
       ++factory_testing_counter;
     }
-    
-    dac.PrepareWrites(cv);
   }
 }
 

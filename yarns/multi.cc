@@ -476,7 +476,7 @@ void Multi::AssignVoicesToCVOutputs() {
   }
 }
 
-void Multi::GetCvGate(uint16_t* cv, bool* gate) {
+void Multi::GetCvGate(volatile uint16_t* cv, bool* gate) {
   for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
     cv[i] = cv_outputs_[i].dc_dac_code();
     gate[i] = cv_outputs_[i].gate();

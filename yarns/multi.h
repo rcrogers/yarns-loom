@@ -524,7 +524,7 @@ class Multi {
     cv_outputs_[cv_i].assign(&voice_[voice_i], r, num_audio_voices);
   }
   void AssignVoicesToCVOutputs();
-  void GetCvGate(uint16_t* cv, bool* gate);
+  void GetCvGate(volatile uint16_t* cv, bool* gate);
   void GetLedsBrightness(uint8_t* brightness);
 
   template<typename T>
