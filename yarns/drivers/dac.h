@@ -58,27 +58,6 @@ class Dac {
   void Init();
   void RestartSyncDMA();
   
-  inline void PrepareWrite(uint8_t channel, uint16_t value) {
-    if (value_[channel] != value) {
-      value_[channel] = value;
-      update_[channel] = true;
-    }
-  }
-  
-  inline void PrepareWrites(const uint16_t* values) {
-    PrepareWrite(0, values[0]);
-    PrepareWrite(1, values[1]);
-    PrepareWrite(2, values[2]);
-    PrepareWrite(3, values[3]);
-  }
-  
-  inline void WriteIfDirty(uint8_t channel) {
-    // if (update_[channel]) {
-      Write(channel, value_[channel]);
-      update_[channel] = false;
-    // }
-  }
-
   // Bits: 8 command | 16 data | 8 padding
   inline uint32_t FormatCommandWords(uint8_t channel, uint16_t value) {
     uint16_t dac_channel = kNumChannels - 1 - channel;
