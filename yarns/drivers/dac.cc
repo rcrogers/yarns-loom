@@ -29,6 +29,7 @@
 #include "yarns/drivers/dac.h"
 
 #include "yarns/drivers/system.h"
+#include "yarns/multi.h"
 
 #include <algorithm>
 
@@ -75,6 +76,8 @@ void Dac::Init() {
   
   oc_init.TIM_Pulse = timer_period() * 9375 / 10000 - 1; // Low at 93.75%
   TIM_OC2Init(TIM1, &oc_init);
+
+  // multi.PrintInt32E(timer_period()); => 225
 
   DMA_InitTypeDef ss_dma = {0};
   ss_dma.DMA_DIR = DMA_DIR_PeripheralDST;
@@ -149,13 +152,17 @@ uint32_t Dac::timer_base_freq(uint8_t apb) const {
   RCC_ClocksTypeDef rcc_clocks;
   RCC_GetClocksFreq(&rcc_clocks);
   uint32_t hclk = rcc_clocks.HCLK_Frequency;
+  // multi.PrintInt32E(hclk); // => 72000000
   uint32_t pclk = apb == 1 ? rcc_clocks.PCLK1_Frequency : rcc_clocks.PCLK2_Frequency;
+  // multi.PrintInt32E(pclk); // => 72000000
   return hclk == pclk ? pclk : pclk * 2;
 }
 
 // Time to send both DAC words
 uint32_t Dac::timer_period() const {
-  return timer_base_freq(2) / kDacWordsHz;
+  uint32_t base_freq = timer_base_freq(2);
+  // multi.PrintInt32E(base_freq); // => 72000000
+  return base_freq / kDacWordsHz;
 }
 
 /* extern */
