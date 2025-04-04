@@ -134,6 +134,8 @@ void SysTick_Handler() {
       gate[3] = (factory_testing_counter % 200) < 100;
       ++factory_testing_counter;
     }
+    
+    dac.PrepareWrites(cv);
   }
 }
 
