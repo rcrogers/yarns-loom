@@ -68,6 +68,8 @@ class Dac {
 
   uint32_t timer_base_freq(uint8_t apb) const;
   uint32_t timer_period() const;
+
+  volatile uint16_t spi_tx_buffer[kDacWordsPerSample]; // TODO
  
  private:
   DISALLOW_COPY_AND_ASSIGN(Dac);
