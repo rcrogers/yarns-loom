@@ -52,7 +52,7 @@ void Dac::Init() {
   
   // Initialize SPI
   SPI_InitTypeDef spi_init;
-  spi_init.SPI_Direction = SPI_Direction_2Lines_FullDuplex;
+  spi_init.SPI_Direction = SPI_Direction_1Line_Tx;
   spi_init.SPI_Mode = SPI_Mode_Master;
   spi_init.SPI_DataSize = SPI_DataSize_16b;
   spi_init.SPI_CPOL = SPI_CPOL_High;
