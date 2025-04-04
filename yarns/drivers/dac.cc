@@ -134,6 +134,14 @@ void Dac::Init() {
     TIM_DMA_CC2,
     ENABLE
   );
+
+  DMA_ITConfig(DMA1_Channel6, DMA_IT_TC | DMA_IT_HT, ENABLE);
+  NVIC_InitTypeDef nvic_init;
+  nvic_init.NVIC_IRQChannel = DMA1_Channel6_IRQn;
+  nvic_init.NVIC_IRQChannelPreemptionPriority = 1;
+  nvic_init.NVIC_IRQChannelSubPriority = 0;
+  nvic_init.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&nvic_init);
 }
 
 #define CCR_ENABLE_Set          ((uint32_t)0x00000001)
@@ -168,6 +176,42 @@ void Dac::RestartSyncDMA() {
 
   DMA_Cmd(DMA1_Channel2, ENABLE);
   DMA_Cmd(DMA1_Channel3, ENABLE);
+
+  can_fill_ = true;
+  fillable_block_ = 1; // DMA will initially be consuming the first half
+  std::fill(&spi_tx_buffer[0], &spi_tx_buffer[kBufferSize], 0);
+  __DMB();
+}
+
+#define BUFFER_SAMPLES(channel, dac_words_exp) \
+  volatile uint16_t* ptr = &spi_tx_buffer[0]; \
+  /* Offset for buffer half */ \
+  ptr += block * kAudioBlockSize * kDacWordsPerFrame; \
+  /* Offset for channel */ \
+  ptr += channel * kDacWordsPerSample; \
+  for (size_t i = 0; i < kAudioBlockSize; ++i) { \
+    uint32_t words = (dac_words_exp); \
+    ptr[0] = (words >> 16) & 0xFFFF; \
+    ptr[1] = words & 0xFFFF; \
+    ptr += kDacWordsPerFrame; \
+  }
+
+void Dac::BufferSamples(uint8_t block, uint8_t channel, uint16_t* samples) {
+  BUFFER_SAMPLES(channel, FormatCommandWords(channel, samples[i]))
+  // BUFFER_SAMPLES(channel, FormatDacWords(channel, 0xCfff))
+  // BufferStaticSample(buffer_half, channel, 0x3fff);
+  // multi.PrintDebugByte(0x0C + (channel << 4));
+  __DMB();
+}
+
+// TODO this has ~1.6ms latency, ~13x direct SysTick write
+// consider dynamic injection into the DMA buffer being consumed?
+// low-freq channels could buffer NOOP words -- probably simpler than injecting
+// Are there low-freq CV for which this latency matters?  maybe at max LFO freq?
+void Dac::BufferStaticSample(uint8_t block, uint8_t channel, uint16_t sample) {
+  uint32_t static_words = FormatCommandWords(channel, sample);
+  BUFFER_SAMPLES(channel, static_words)
+  __DMB();
 }
 
 uint32_t Dac::timer_base_freq(uint8_t apb) const {

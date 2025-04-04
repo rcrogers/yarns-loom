@@ -356,11 +356,7 @@ class CVOutput {
     return value;
    }
 
-  void RenderSamples();
-
-  inline uint16_t GetDACSample() {
-    return dac_buffer_.ImmediateRead();
-  }
+  void RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv);
 
   void Refresh();
 
@@ -427,7 +423,7 @@ class CVOutput {
   uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
-  stmlib::RingBuffer<int16_t, kAudioBlockSize * 2> dac_buffer_;
+  stmlib::RingBuffer<int16_t, kAudioBlockSize> dac_buffer_;
   Interpolator<kAudioBlockSizeBits> tremolo_; // 2^4 = 16 approximates the ratio between 4 kHz Refresh and 40 kHz GetEnvelopeSample
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);

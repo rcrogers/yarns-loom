@@ -138,6 +138,20 @@ void SysTick_Handler() {
   }
 }
 
+void DMA1_Channel6_IRQHandler(void) {
+  if(DMA_GetITStatus(DMA1_IT_HT6) == SET) {
+    DMA_ClearITPendingBit(DMA1_IT_HT6);
+    dac.OnBlockConsumed(true);
+    multi.PrintDebugByte(0xC0);
+  }
+
+  if(DMA_GetITStatus(DMA1_IT_TC6) == SET) {
+    DMA_ClearITPendingBit(DMA1_IT_TC6);
+    dac.OnBlockConsumed(false);
+    multi.PrintDebugByte(0xC1);
+  }
+}
+
 void TIM1_UP_IRQHandler(void) {
   if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
     return;
@@ -151,12 +165,12 @@ void TIM1_UP_IRQHandler(void) {
   if ((dac_words_count_ & 1) == 0) {
     uint8_t channel = (dac_words_count_ % kDacWordsPerFrame) / kDacWordsPerSample;
 
-    uint16_t sample = is_high_freq[channel]
-      ? multi.mutable_cv_output(channel)->GetDACSample()
-      : cv[channel];
-    current_dac_words = dac.FormatCommandWords(channel, sample);
-    dac.spi_tx_buffer[dac_words_count_] = current_dac_words >> 16;
-    dac.spi_tx_buffer[dac_words_count_ + 1] = current_dac_words & 0xFFFF;
+    // uint16_t sample = is_high_freq[channel]
+    //   ? multi.mutable_cv_output(channel)->GetDACSample()
+    //   : cv[channel];
+    // current_dac_words = dac.FormatCommandWords(channel, sample);
+    // dac.spi_tx_buffer[dac_words_count_] = current_dac_words >> 16;
+    // dac.spi_tx_buffer[dac_words_count_ + 1] = current_dac_words & 0xFFFF;
     if (channel == 0) {
       // Internal clock refresh at 40kHz
       multi.RefreshInternalClock();
@@ -197,6 +211,18 @@ int main(void) {
     ui.DoEvents();
     midi_handler.ProcessInput();
     multi.LowPriority();
+    volatile uint8_t* block_num_ptr = dac.PtrToFillableBlockNum();
+    if (block_num_ptr) {
+      uint8_t block = *block_num_ptr;
+      for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
+        multi.mutable_cv_output(channel)->RenderSamples(
+          block, channel, cv[channel]
+        );
+        // multi.PrintDebugByte(0xA0 | channel);
+        // multi.PrintDebugByte(RCC_GetClocksFreq());
+      }
+      dac.OnBlockFilled();
+    }
     if (midi_handler.factory_testing_requested()) {
       midi_handler.AcknowledgeFactoryTestingRequest();
       ui.StartFactoryTesting();

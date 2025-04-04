@@ -458,9 +458,6 @@ class Multi {
           play ? &Part::LooperPlayNoteOff : NULL
         );
       }
-      for (uint8_t c = 0; c < kNumCVOutputs; ++c) {
-        cv_outputs_[c].RenderSamples();
-      }
     }
   }
   
