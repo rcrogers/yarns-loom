@@ -67,7 +67,9 @@ class Dac {
   uint32_t timer_base_freq(uint8_t apb) const;
   uint32_t timer_period() const;
 
-  volatile uint16_t spi_tx_buffer[kDacWordsPerSample]; // TODO
+  // Multipliers express the time-ordering of the buffer: half-buffer, sample, channel, word
+  // Channels must be interleaved so they output at a consistent phase of each 40kHz tick
+  volatile uint16_t spi_tx_buffer[kDacWordsPerBlock] __attribute__((aligned(4)));
  
  private:
   DISALLOW_COPY_AND_ASSIGN(Dac);

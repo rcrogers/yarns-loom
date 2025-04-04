@@ -67,6 +67,7 @@ bool gate[4];
 bool is_high_freq[4];
 uint16_t factory_testing_counter;
 uint32_t dac_words_count_;
+volatile uint32_t current_dac_words;
 
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
@@ -153,22 +154,20 @@ void TIM1_UP_IRQHandler(void) {
     uint16_t sample = is_high_freq[channel]
       ? multi.mutable_cv_output(channel)->GetDACSample()
       : cv[channel];
-    uint32_t current_dac_words = dac.FormatCommandWords(channel, sample);
-    dac.spi_tx_buffer[0] = current_dac_words >> 16;
-    dac.spi_tx_buffer[1] = current_dac_words & 0xFFFF;
-
-    // SPI_I2S_SendData(SPI2, dac.spi_tx_buffer[0]);
-
+    current_dac_words = dac.FormatCommandWords(channel, sample);
+    dac.spi_tx_buffer[dac_words_count_] = current_dac_words >> 16;
+    dac.spi_tx_buffer[dac_words_count_ + 1] = current_dac_words & 0xFFFF;
     if (channel == 0) {
       // Internal clock refresh at 40kHz
       multi.RefreshInternalClock();
-    } else {
-      // SPI_I2S_SendData(SPI2, dac.spi_tx_buffer[1]);
     }
+  } else {
+    // multi.PrintDebugByte(0xA0);
+    // dac.spi_tx_buffer[1] = current_dac_words & 0xFFFF;
   }
 
   dac_words_count_++;
-  dac_words_count_ = dac_words_count_ % (kDacWordsPerBlock << 12);
+  dac_words_count_ %= kDacWordsPerBlock;
 }
 
 }
