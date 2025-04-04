@@ -65,12 +65,6 @@ class Dac {
     uint16_t low = value << 8;
     return (high << 16) | low;
   }
-  
-  inline void Write(uint8_t channel, uint16_t value) {
-    uint32_t words = FormatCommandWords(channel, value);
-    SPI_I2S_SendData(SPI2, words >> 16);
-    SPI_I2S_SendData(SPI2, words & 0xFFFF);
-  }
 
   uint32_t timer_base_freq(uint8_t apb) const;
   uint32_t timer_period() const;
