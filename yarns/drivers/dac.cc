@@ -77,8 +77,14 @@ void Dac::Init() {
   oc_init.TIM_Pulse = timer_period() * 9375 / 10000 - 1; // Low at 93.75%
   TIM_OC2Init(TIM1, &oc_init);
 
-  // SPI2 TX at 25%
-  oc_init.TIM_Pulse = timer_period() * 2500 / 10000 - 1;
+  // SPI2 TX at TBD
+  // Unresponsive at 0%, 20%
+  // Audibly quantized at 25%, 30%, 40%, 50%
+  //    - Off by 0.4-0.7V at 40%
+  //    - Suggests ~8-bit quantization: 11V / 2^8 = 0.043V
+  // Borderline unresponsive/garbage at 60%
+  // Garbage at 70%
+  oc_init.TIM_Pulse = timer_period() * 4000 / 10000 - 1;
   TIM_OC3Init(TIM1, &oc_init);
 
   // multi.PrintInt32E(timer_period()); => 225
@@ -106,9 +112,9 @@ void Dac::Init() {
   // DMA for SPI2 TX (TIM1_CH3)
   DMA_InitTypeDef spi_dma = {0};
   spi_dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
-  // spi_dma.DMA_MemoryBaseAddr = (uint32_t)&spi_tx_buffer[0];
+  spi_dma.DMA_MemoryBaseAddr = (uint32_t)&spi_tx_buffer[0];
   spi_dma.DMA_DIR = DMA_DIR_PeripheralDST;
-  // spi_dma.DMA_BufferSize = kDacWordsPerSample; // TODO
+  spi_dma.DMA_BufferSize = kDacWordsPerSample; // TODO
   spi_dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   spi_dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
   spi_dma.DMA_M2M = DMA_M2M_Disable;
@@ -120,6 +126,8 @@ void Dac::Init() {
 
   RestartSyncDMA();
 
+  DMA_Cmd(DMA1_Channel6, ENABLE);
+
   TIM_DMACmd(
     TIM1,
     TIM_DMA_CC3 |
@@ -127,42 +135,27 @@ void Dac::Init() {
     TIM_DMA_CC2,
     ENABLE
   );
-
-  // // DMA for SPI (TIM2_CH1)
-  // DMA_InitTypeDef spi_dma = {0};
-  // spi_dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
-  // spi_dma.DMA_MemoryBaseAddr = (uint32_t)dac_buffer_;
-  // spi_dma.DMA_DIR = DMA_DIR_PeripheralDST;
-  // spi_dma.DMA_BufferSize = 8;
-  // spi_dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
-  // spi_dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
-  // spi_dma.DMA_M2M = DMA_M2M_Disable;
-  // spi_dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
-  // spi_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
-  // spi_dma.DMA_Mode = DMA_Mode_Circular;
-  // spi_dma.DMA_Priority = DMA_Priority_VeryHigh;
-  // DMA_Init(DMA1_Channel5, &spi_dma);
-  // TIM_DMACmd(TIM2, TIM_DMA_CC1, ENABLE);
-  // SPI_I2S_DMACmd(SPI2, SPI_I2S_DMAReq_Tx, ENABLE);
 }
 
 #define CCR_ENABLE_Set          ((uint32_t)0x00000001)
 #define CCR_ENABLE_Reset        ((uint32_t)0xFFFFFFFE)
 
 void Dac::RestartSyncDMA() {
-  DMA_Cmd(DMA1_Channel6, DISABLE);
+  // DMA_Cmd(DMA1_Channel6, DISABLE);
 
   DMA_Cmd(DMA1_Channel2, DISABLE);
   DMA_Cmd(DMA1_Channel3, DISABLE);
 
   while (
-    DMA1_Channel6->CCR & CCR_ENABLE_Set ||
+    // DMA1_Channel6->CCR & CCR_ENABLE_Set ||
     DMA1_Channel2->CCR & CCR_ENABLE_Set ||
     DMA1_Channel3->CCR & CCR_ENABLE_Set
   ) { /* Wait for all channels to be disabled */ }
 
-  DMA1_Channel6->CNDTR = kDacWordsPerSample; // TODO
-  DMA1_Channel6->CMAR = (uint32_t)&spi_tx_buffer[0];
+  // DMA1_Channel6->CNDTR = kDacWordsPerSample; // TODO
+  // DMA1_Channel6->CMAR = (uint32_t)&spi_tx_buffer[0];
+  // // Enable memory increment -- this breaks it!
+  // // DMA1_Channel6->CCR |= DMA_MemoryInc_Enable;
 
   DMA1_Channel2->CNDTR = kDacWordsPerSample;
   DMA1_Channel3->CNDTR = kDacWordsPerSample;
@@ -172,7 +165,7 @@ void Dac::RestartSyncDMA() {
 
   __DSB();
 
-  DMA_Cmd(DMA1_Channel6, ENABLE);
+  // DMA_Cmd(DMA1_Channel6, ENABLE);
 
   DMA_Cmd(DMA1_Channel2, ENABLE);
   DMA_Cmd(DMA1_Channel3, ENABLE);
