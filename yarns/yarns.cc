@@ -152,14 +152,10 @@ void TIM1_UP_IRQHandler(void) {
   if ((dac_words_count_ & 1) == 0) {
     uint8_t channel = (dac_words_count_ % kDacWordsPerFrame) / kDacWordsPerSample;
 
-    if (is_high_freq[channel]) {
-      uint16_t sample = multi.mutable_cv_output(channel)->GetDACSample();
-      dac.PrepareWrite(channel, sample);
-      dac.WriteIfDirty(channel);
-    } else {
-      // Use value written there during previous CV refresh.
-      dac.WriteIfDirty(channel);
-    }
+    uint16_t sample = is_high_freq[channel]
+      ? multi.mutable_cv_output(channel)->GetDACSample()
+      : cv[channel];
+    dac.Write(channel, sample);
 
     if (channel == 0) {
       // Internal clock refresh at 40kHz
