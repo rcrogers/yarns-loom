@@ -43,14 +43,13 @@ class InternalClock {
 
   ~InternalClock() { }
   
-  inline void Start(uint32_t tempo, uint8_t swing) {
+  inline void Start(uint32_t phase_increment) {
     phase_ = 0;
-    set_tempo(tempo);
+    set_phase_increment(phase_increment);
   }
   
-  inline void set_tempo(uint32_t tempo) {
-    // phase_increment_ = 178957UL * tempo / 10;  // For 48kHz
-    phase_increment_ = 128849UL * tempo / 6;  // For 40kHz
+  inline void set_phase_increment(uint32_t phase_increment) {
+    phase_increment_ = phase_increment;
   }
   
   inline bool Process() {

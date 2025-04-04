@@ -219,7 +219,7 @@ void Multi::Start(bool started_by_keyboard) {
   }
   if (internal_clock()) {
     internal_clock_ticks_ = 0;
-    internal_clock_.Start(settings_.clock_tempo, settings_.clock_swing);
+    internal_clock_.Start(settings_.clock_tempo * kTempoToTickPhaseIncrement);
   }
   midi_handler.OnStart();
 
@@ -806,12 +806,14 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
 
 
 void Multi::UpdateTempo() {
-  internal_clock_.set_tempo(settings_.clock_tempo);
+  // phase_increment = 178957UL * tempo / 10; // For 48kHz interrupt
+  // phase_increment = 128849UL * tempo / 6;  // For 40kHz interrupt
+  uint32_t phase_increment = settings_.clock_tempo * kTempoToTickPhaseIncrement;
+  internal_clock_.set_phase_increment(phase_increment);
   if (running_) return; // If running, backup LFO will get Tap
   if (!multi.internal_clock()) return; // We don't know the new tempo
 
   // If we're on a stopped internal clock, calculate an updated clock speed
-  uint32_t phase_increment = settings_.clock_tempo * kTempoToTickPhaseIncrement;
   phase_increment /= settings_.clock_input_division;
   phase_increment >>= kBackupClockLFOPeriodTicksBits;
   backup_clock_lfo_.SetPhaseIncrement(phase_increment);
