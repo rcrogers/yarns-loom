@@ -141,13 +141,13 @@ void DMA1_Channel6_IRQHandler(void) {
   if(DMA_GetITStatus(DMA1_IT_HT6) == SET) {
     DMA_ClearITPendingBit(DMA1_IT_HT6);
     dac.OnBlockConsumed(true);
-    // multi.PrintDebugByte(0xC0);
+    multi.PrintDebugByte(0xC0);
   }
 
   if(DMA_GetITStatus(DMA1_IT_TC6) == SET) {
     DMA_ClearITPendingBit(DMA1_IT_TC6);
     dac.OnBlockConsumed(false);
-    // multi.PrintDebugByte(0xC1);
+    multi.PrintDebugByte(0xC1);
   }
 }
 
