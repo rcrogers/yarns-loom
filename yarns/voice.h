@@ -209,6 +209,7 @@ class Voice {
   inline bool uses_audio() const {
     return audio_output_ && oscillator_mode_ != OSCILLATOR_MODE_OFF;
   }
+  // Is this a gate-only part?
   inline bool has_cv_output() const {
     if (uses_audio()) return true;
     for (uint8_t i = 0; i < DC_LAST; ++i) {
@@ -306,6 +307,7 @@ class CVOutput {
 
     num_audio_voices_ = num_audio;
     zero_dac_code_ = volts_dac_code(0);
+    envelope_.Init(zero_dac_code_ >> 1);
     uint16_t scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
     scale /= num_audio_voices_;
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
@@ -348,13 +350,9 @@ class CVOutput {
   uint16_t RefreshEnvelope(uint16_t tremolo) {
     tremolo_.SetTarget(envelope_.tremolo(tremolo));
     tremolo_.ComputeSlope();
-    return volts_dac_code(0) - envelope_value();
+    uint16_t envelope_value_15 = dac_buffer_.ImmediatePeek();
+    return volts_dac_code(0) - (envelope_value_15 << 1);
   }
-  inline uint16_t envelope_value() {
-    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-    CONSTRAIN(value, 0, UINT16_MAX);
-    return value;
-   }
 
   void RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv);
 

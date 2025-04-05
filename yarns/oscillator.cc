@@ -69,7 +69,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderSyncSaw,
   &Oscillator::RenderFoldSine,
   &Oscillator::RenderFoldTriangle,
-  &Oscillator::RenderDiracComb,
+  // &Oscillator::RenderDiracComb,
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderExponentialSine,
   &Oscillator::RenderFM,
@@ -150,25 +150,30 @@ void Oscillator::Render() {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
-  gain_.ComputeSlope();
-  size_t size;
-  size = kAudioBlockSize;
-  while (size--) {
-    gain_envelope_.Tick();
-    gain_.Tick();
-    int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
-    gain = stmlib::ClipU16(gain);
-    gain_buffer_.Overwrite(gain);
-  }
-  timbre_.ComputeSlope();
-  size = kAudioBlockSize;
-  while (size--) {
-    timbre_envelope_.Tick();
-    timbre_.Tick();
-    int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
-    timbre = stmlib::ClipU16(timbre);
-    timbre_buffer_.Overwrite(timbre >> 1);
-  }
+  // gain_.ComputeSlope();
+  // TODO how was tremolo functioning here?
+  // size_t size;
+  // size = kAudioBlockSize;
+  // while (size--) {
+  //   gain_envelope_.Tick();
+  //   // gain_.Tick();
+  //   // int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
+  //   // gain = stmlib::ClipU16(gain);
+  //   // gain_buffer_.Overwrite(gain >> 1);
+  //   gain_buffer_.Overwrite(gain_envelope_.value());
+  // }
+  gain_envelope_.RenderSamples(&gain_buffer, gain_.target() << 16);
+  // timbre_.ComputeSlope();
+  // size = kAudioBlockSize;
+  // while (size--) {
+  //   timbre_envelope_.Tick();
+  //   // timbre_.Tick();
+  //   // int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
+  //   // timbre = stmlib::ClipU16(timbre);
+  //   // timbre_buffer_.Overwrite(timbre >> 1);
+  //   timbre_buffer_.Overwrite(timbre_envelope_.value());
+  // }
+  timbre_envelope_.RenderSamples(&timbre_buffer_, timbre_.target() << 16);
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
@@ -182,16 +187,13 @@ void Oscillator::Render() {
 #define RENDER_CORE(body) \
   int32_t next_sample = next_sample_; \
   size_t size = kAudioBlockSize; \
-  int16_t* audio_start = audio_buffer.write_ptr(); \
-  int16_t* gain_start = gain_buffer_.write_ptr(); \
   while (size--) { \
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     body \
     audio_buffer.Overwrite(this_sample); \
   } \
-  next_sample_ = next_sample; \
-  q15_mult<kAudioBlockSize>(gain_start, audio_start, audio_start); \
+  next_sample_ = next_sample;
 
 #define RENDER_WITH_PHASE_GAIN(body) \
   uint32_t phase = phase_; \
@@ -516,19 +518,19 @@ void Oscillator::RenderPhaseDistortionSaw() {
   )
 }
 
-void Oscillator::RenderDiracComb() {
-  RENDER_WITH_PHASE_GAIN_TIMBRE(
-    int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
-    uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
-    size_t index = zone_14 >> 10; // Use highest 4 bits
-    CONSTRAIN(index, 0, kNumZones - 1);
-    const int16_t* wave_1 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
-    index += 1;
-    CONSTRAIN(index, 0, kNumZones - 1);
-    const int16_t* wave_2 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
-    this_sample = Crossfade(wave_1, wave_2, phase, crossfade);
-  )
-}
+// void Oscillator::RenderDiracComb() {
+//   RENDER_WITH_PHASE_GAIN_TIMBRE(
+//     int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
+//     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
+//     size_t index = zone_14 >> 10; // Use highest 4 bits
+//     CONSTRAIN(index, 0, kNumZones - 1);
+//     const int16_t* wave_1 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
+//     index += 1;
+//     CONSTRAIN(index, 0, kNumZones - 1);
+//     const int16_t* wave_2 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
+//     this_sample = Crossfade(wave_1, wave_2, phase, crossfade);
+//   )
+// }
 
 void Oscillator::RenderFilteredNoise() {
   SET_TIMBRE;

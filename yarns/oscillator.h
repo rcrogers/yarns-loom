@@ -80,7 +80,7 @@ enum OscillatorShape {
   OSC_SHAPE_SYNC_SAW,
   OSC_SHAPE_FOLD_SINE,
   OSC_SHAPE_FOLD_TRIANGLE,
-  OSC_SHAPE_DIRAC_COMB,
+  // OSC_SHAPE_DIRAC_COMB,
   OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_EXP_SINE,
   OSC_SHAPE_FM,
@@ -93,17 +93,17 @@ class Oscillator {
   Oscillator() { }
   ~Oscillator() { }
 
-  stmlib::RingBuffer<int16_t, kAudioBlockSize> audio_buffer;
+  stmlib::RingBuffer<int16_t, kAudioBlockSize> audio_buffer, gain_buffer;
 
   inline void Init(uint16_t scale) {
     audio_buffer.Init();
     scale_ = scale;
     gain_.Init();
     timbre_.Init();
-    gain_envelope_.Init();
-    timbre_envelope_.Init();
+    gain_envelope_.Init(0);
+    timbre_envelope_.Init(0);
     timbre_buffer_.Init();
-    gain_buffer_.Init();
+    gain_buffer.Init();
     svf_.Init();
     pitch_ = 60 << 7;
     phase_ = 0;
@@ -122,6 +122,9 @@ class Oscillator {
     shape_ = shape;
   }
 
+  // TODO ensure that inactive oscillators aren't getting this!
+  // also maybe just skip envelope and gain mult in drone mode?
+  // still want tremolo tho
   inline void NoteOn(ADSR& adsr, bool drone, int16_t timbre_envelope_target) {
     gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
     timbre_envelope_.NoteOn(adsr, 0, timbre_envelope_target);
@@ -171,7 +174,8 @@ class Oscillator {
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;
-  Interpolator<kAudioBlockSizeBits> timbre_, gain_;
+  Interpolator<kAudioBlockSizeBits> timbre_;
+  Interpolator<kAudioBlockSizeBits> gain_; // Damping amount
   int16_t pitch_;
 
   uint32_t phase_;
@@ -185,7 +189,7 @@ class Oscillator {
   int32_t next_sample_;
   uint16_t scale_;
   // Double buffering not needed for gain/timbre because they're synchronous from the standpoint of audio rendering
-  stmlib::RingBuffer<int16_t, kAudioBlockSize> gain_buffer_, timbre_buffer_;
+  stmlib::RingBuffer<int16_t, kAudioBlockSize> timbre_buffer_;
   
   static RenderFn fn_table_[];
   

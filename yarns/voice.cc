@@ -97,7 +97,7 @@ void CVOutput::Init(bool reset_calibration) {
   }
   dirty_ = false;
   dc_role_ = DC_PITCH;
-  envelope_.Init();
+  envelope_.Init(0);
   dac_buffer_.Init();
   tremolo_.Init();
 }
@@ -194,6 +194,7 @@ void Voice::Refresh() {
 
   if (refresh_counter_ == 0) {
     uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
+    // Fraction by which gain envelope should be damped
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
     amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
@@ -260,17 +261,19 @@ void CVOutput::Refresh() {
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
   uint16_t* samples = reinterpret_cast<uint16_t*>(dac_buffer_.write_ptr());
   if (is_envelope()) {
-    size_t size = kAudioBlockSize;
-    while (size--) {
-      tremolo_.Tick();
-      envelope_.Tick();
-      int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-      value = stmlib::ClipU16(value);
-      dac_buffer_.Overwrite(value);
-    }
-    dac.BufferSamples(block, channel, samples);
-    // TODO upshift value
-    // if (channel == 0) multi.PrintDebugByte(0xE0);
+    // size_t size = kAudioBlockSize;
+    // while (size--) {
+    //   tremolo_.Tick();
+    //   envelope_.Tick();
+    //   int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+    //   value = stmlib::ClipU16(value);
+    //   dac_buffer_.Overwrite(value);
+    // }
+
+    // tremolo_.SetTarget(envelope_.tremolo(tremolo));
+    // tremolo_.ComputeSlope();
+
+    envelope_.RenderSamples(&dac_buffer_, tremolo_.target() << 16);
   } else if (is_audio()) {
     std::fill(
         samples,
@@ -279,10 +282,10 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
     );
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
       audio_voices_[v]->oscillator()->Render();
-      q15_add<kAudioBlockSize, false>(
-          audio_voices_[v]->oscillator()->audio_buffer.read_ptr(),
-          reinterpret_cast<int16_t*>(samples),
-          reinterpret_cast<int16_t*>(samples)
+      q15_multiply_accumulate<kAudioBlockSize>(
+        audio_voices_[v]->oscillator()->audio_buffer.read_ptr(),
+        audio_voices_[v]->oscillator()->gain_buffer.read_ptr(),
+        dac_buffer_.write_ptr()
       );
     }
     dac.BufferSamples(block, channel, samples);
@@ -303,12 +306,13 @@ void Voice::NoteOn(
   if (trigger) {
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
-    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_];
+    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_ >> 1];
     NoteOff();
   }
   gate_ = true;
   adsr_ = adsr;
-  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
+
+  if (uses_audio()) oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 
@@ -323,10 +327,10 @@ void Voice::NoteOn(
   portamento_phase_ = 0;
   uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE >> 1;
   if (portamento < split_point) {
-    portamento_phase_increment_ = lut_portamento_increments[(split_point - portamento) << 1];
+    portamento_phase_increment_ = lut_portamento_increments[(split_point - portamento)];
     portamento_exponential_shape_ = true;
   } else {
-    uint32_t base_increment = lut_portamento_increments[(portamento - split_point) << 1];
+    uint32_t base_increment = lut_portamento_increments[(portamento - split_point)];
     uint32_t delta = abs(note_target_ - note_source_) + 1;
     portamento_phase_increment_ = (1536 * (base_increment >> 11) / delta) << 11;
     CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
@@ -337,8 +341,9 @@ void Voice::NoteOn(
 }
 
 void Voice::NoteOff() {
+  if (!gate_) return; // TODO
   gate_ = false;
-  oscillator_.NoteOff();
+  if (uses_audio()) oscillator_.NoteOff();
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
 }
