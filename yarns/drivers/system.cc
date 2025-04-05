@@ -60,6 +60,7 @@ void System::Init() {
   timer_init.TIM_RepetitionCounter = 0;
   TIM_InternalClockConfig(TIM1);
   TIM_TimeBaseInit(TIM1, &timer_init);
+  TIM_ITConfig(TIM1, TIM_IT_Update, DISABLE);
   TIM_Cmd(TIM1, ENABLE);
     
   NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);  // 2.2 priority split.
@@ -69,7 +70,7 @@ void System::Init() {
   timer_interrupt.NVIC_IRQChannel = TIM1_UP_IRQn;
   timer_interrupt.NVIC_IRQChannelPreemptionPriority = 0;
   timer_interrupt.NVIC_IRQChannelSubPriority = 1;
-  timer_interrupt.NVIC_IRQChannelCmd = ENABLE;
+  timer_interrupt.NVIC_IRQChannelCmd = DISABLE;
   NVIC_Init(&timer_interrupt);
 
   // Reduce SysTick priority to below DAC interrupt
@@ -81,7 +82,10 @@ void System::Init() {
 }
 
 void System::StartTimers() {
-  TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);
+  for (uint32_t i = 0; i < 10000; ++i) { __NOP(); }
+  // Clear UIF
+  TIM_ClearFlag(TIM1, TIM_FLAG_Update);
+  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
   SysTick_Config(F_CPU / 8000);
 }
 
