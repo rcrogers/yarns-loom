@@ -243,7 +243,7 @@ void Ui::Poll() {
     leds_brightness[3] = (((x + 000) & 511) < 128) ? 255 : 0;
   }
   
-  leds_.Write(leds_brightness);
+  leds_.SetBrightness(leds_brightness);
   leds_.Write();
 }
 

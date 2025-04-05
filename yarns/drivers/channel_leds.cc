@@ -32,6 +32,10 @@
 
 namespace yarns {
 
+// Because we increment by 16, there are only 256/16 = 16 levels of brightness,
+// but the PWM cycle is fast enough to achieve 1000/16 = 62.5 Hz refresh rate.
+const uint8_t kLedPwmIncrement = 16;
+
 void ChannelLeds::Init() {
   GPIO_InitTypeDef gpio_init;
   gpio_init.GPIO_Pin = GPIO_Pin_11 | GPIO_Pin_12 | GPIO_Pin_8;
@@ -45,23 +49,29 @@ void ChannelLeds::Init() {
   GPIO_Init(GPIOB, &gpio_init);
   
   pwm_counter_ = 0;
-  std::fill(&brightness_[0], &brightness_[4], 0);
+  std::fill(&brightness_[0], &brightness_[kNumLeds], 0);
+  std::fill(&on_[0], &on_[kNumLeds], false);
 }
 
 void ChannelLeds::Write() {
-  // Because we increment by 16, there are only 256/16 = 16 levels of
-  // brightness, but the PWM cycle is fast enough to achieve 1000/16 = 62.5 Hz
-  // refresh rate.
-  pwm_counter_ += 16;
-  
-  GPIO_WriteBit(GPIOA, GPIO_Pin_12,
-                static_cast<BitAction>(brightness_[0] > pwm_counter_));
-  GPIO_WriteBit(GPIOA, GPIO_Pin_11,
-                static_cast<BitAction>(brightness_[1] > pwm_counter_));
-  GPIO_WriteBit(GPIOA, GPIO_Pin_8,
-                static_cast<BitAction>(brightness_[2] > pwm_counter_));
-  GPIO_WriteBit(GPIOB, GPIO_Pin_14,
-                static_cast<BitAction>(brightness_[3] > pwm_counter_));
+  pwm_counter_ += kLedPwmIncrement;
+
+  bool changed[kNumLeds] = {0};
+  for (size_t i = 0; i < kNumLeds; ++i) {
+    bool on_before = on_[i];
+    on_[i] = brightness_[i] > pwm_counter_;
+    changed[i] = on_[i] != on_before;
+  }
+
+  uint32_t gpioa_bsrr =
+    changed[0] ? (on_[0] ? GPIO_Pin_12 : GPIO_Pin_12 << 16) : 0 |
+    changed[1] ? (on_[1] ? GPIO_Pin_11 : GPIO_Pin_11 << 16) : 0 |
+    changed[2] ? (on_[2] ? GPIO_Pin_8 : GPIO_Pin_8 << 16) : 0;
+  if (gpioa_bsrr) GPIOA->BSRR = gpioa_bsrr;
+
+  uint32_t gpiob_bsrr =
+    changed[3] ? (on_[3] ? GPIO_Pin_14 : GPIO_Pin_14 << 16) : 0;
+  if (gpiob_bsrr) GPIOB->BSRR = gpiob_bsrr;
 }
 
 }  // namespace yarns
