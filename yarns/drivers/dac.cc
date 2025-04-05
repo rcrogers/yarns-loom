@@ -70,30 +70,21 @@ void Dac::Init() {
   
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 
-  TIM_TimeBaseInitTypeDef timer_init;
-  timer_init.TIM_Period = timer_period() - 1;
-  timer_init.TIM_Prescaler = 0;
-  timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
-  timer_init.TIM_CounterMode = TIM_CounterMode_Up;
-  timer_init.TIM_RepetitionCounter = 0;
-  TIM_InternalClockConfig(TIM2);
-  TIM_TimeBaseInit(TIM2, &timer_init);
-
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
   
   // SYNC high (conditional)
   oc_init.TIM_Pulse = timer_period() * 00 / 10 - 1;
-  TIM_OC1Init(TIM2, &oc_init);
+  TIM_OC1Init(TIM1, &oc_init);
   
   // SYNC low (conditional)
   oc_init.TIM_Pulse = timer_period() * 07 / 100 - 1;
-  TIM_OC2Init(TIM2, &oc_init);
+  TIM_OC2Init(TIM1, &oc_init);
 
   // SPI2 TX
   oc_init.TIM_Pulse = timer_period() * 40 / 100 - 1;
-  TIM_OC3Init(TIM2, &oc_init);
+  TIM_OC3Init(TIM1, &oc_init);
 
   // multi.PrintInt32E(timer_period()); => 225
 
@@ -107,17 +98,17 @@ void Dac::Init() {
   ss_dma.DMA_Mode = DMA_Mode_Circular;
   ss_dma.DMA_Priority = DMA_Priority_High;
 
-  // DMA for SYNC High (TIM2_CH1)
+  // DMA for SYNC High (TIM1_CH1)
   DMA_InitTypeDef high_ss_dma = ss_dma;
   high_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BSRR;
-  DMA_Init(DMA1_Channel5, &high_ss_dma);
+  DMA_Init(DMA1_Channel2, &high_ss_dma);
 
-  // DMA for SYNC Low (TIM2_CH2)
+  // DMA for SYNC Low (TIM1_CH2)
   DMA_InitTypeDef low_ss_dma = ss_dma;
   low_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BRR;
-  DMA_Init(DMA1_Channel7, &low_ss_dma);
+  DMA_Init(DMA1_Channel3, &low_ss_dma);
 
-  // DMA for SPI2 TX (TIM2_CH3)
+  // DMA for SPI2 TX (TIM1_CH3)
   DMA_InitTypeDef spi_dma = {0};
   spi_dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
   spi_dma.DMA_MemoryBaseAddr = (uint32_t)&spi_tx_buffer[0];
@@ -130,23 +121,23 @@ void Dac::Init() {
   spi_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
   spi_dma.DMA_Mode = DMA_Mode_Circular;
   spi_dma.DMA_Priority = DMA_Priority_VeryHigh;
-  DMA_Init(DMA1_Channel1, &spi_dma);
+  DMA_Init(DMA1_Channel6, &spi_dma);
 
   RestartSyncDMA();
 
-  DMA_Cmd(DMA1_Channel1, ENABLE);
+  DMA_Cmd(DMA1_Channel6, ENABLE);
 
   TIM_DMACmd(
-    TIM2,
+    TIM1,
     TIM_DMA_CC3 |
     TIM_DMA_CC1 |
     TIM_DMA_CC2,
     ENABLE
   );
 
-  DMA_ITConfig(DMA1_Channel1, DMA_IT_TC | DMA_IT_HT, ENABLE);
+  DMA_ITConfig(DMA1_Channel6, DMA_IT_TC | DMA_IT_HT, ENABLE);
   NVIC_InitTypeDef nvic_init;
-  nvic_init.NVIC_IRQChannel = DMA1_Channel1_IRQn;
+  nvic_init.NVIC_IRQChannel = DMA1_Channel6_IRQn;
   nvic_init.NVIC_IRQChannelPreemptionPriority = 1;
   nvic_init.NVIC_IRQChannelSubPriority = 0;
   nvic_init.NVIC_IRQChannelCmd = ENABLE;
@@ -157,40 +148,34 @@ void Dac::Init() {
 #define CCR_ENABLE_Reset        ((uint32_t)0xFFFFFFFE)
 
 void Dac::RestartSyncDMA() {
-  // DMA_Cmd(DMA1_Channel1, DISABLE);
+  // DMA_Cmd(DMA1_Channel6, DISABLE);
 
-  DMA_Cmd(DMA1_Channel5, DISABLE);
-  DMA_Cmd(DMA1_Channel7, DISABLE);
+  DMA_Cmd(DMA1_Channel2, DISABLE);
+  DMA_Cmd(DMA1_Channel3, DISABLE);
 
   while (
-    // DMA1_Channel1->CCR & CCR_ENABLE_Set ||
-    DMA1_Channel5->CCR & CCR_ENABLE_Set ||
-    DMA1_Channel7->CCR & CCR_ENABLE_Set
+    // DMA1_Channel6->CCR & CCR_ENABLE_Set ||
+    DMA1_Channel2->CCR & CCR_ENABLE_Set ||
+    DMA1_Channel3->CCR & CCR_ENABLE_Set
   ) { /* Wait for all channels to be disabled */ }
 
-  // DMA1_Channel1->CNDTR = kDacWordsPerSample; // TODO
-  // DMA1_Channel1->CMAR = (uint32_t)&spi_tx_buffer[0];
+  // DMA1_Channel6->CNDTR = kDacWordsPerSample; // TODO
+  // DMA1_Channel6->CMAR = (uint32_t)&spi_tx_buffer[0];
   // // Enable memory increment -- this breaks it!
-  // // DMA1_Channel1->CCR |= DMA_MemoryInc_Enable;
+  // // DMA1_Channel6->CCR |= DMA_MemoryInc_Enable;
 
-  DMA1_Channel5->CNDTR = kDacWordsPerSample;
-  DMA1_Channel7->CNDTR = kDacWordsPerSample;
+  DMA1_Channel2->CNDTR = kDacWordsPerSample;
+  DMA1_Channel3->CNDTR = kDacWordsPerSample;
 
-  DMA1_Channel5->CMAR = (uint32_t)&dma_ss_high[0];
-  DMA1_Channel7->CMAR = (uint32_t)&dma_ss_low[0];
+  DMA1_Channel2->CMAR = (uint32_t)&dma_ss_high[0];
+  DMA1_Channel3->CMAR = (uint32_t)&dma_ss_low[0];
 
   __DSB();
 
-  // DMA_Cmd(DMA1_Channel1, ENABLE);
+  // DMA_Cmd(DMA1_Channel6, ENABLE);
 
-  DMA_Cmd(DMA1_Channel5, ENABLE);
-  DMA_Cmd(DMA1_Channel7, ENABLE);
-
-  TIM_Cmd(TIM2, ENABLE);
-
-  TIM_CCxCmd(TIM2, TIM_Channel_1, TIM_CCx_Enable);
-  TIM_CCxCmd(TIM2, TIM_Channel_2, TIM_CCx_Enable);
-  TIM_CCxCmd(TIM2, TIM_Channel_3, TIM_CCx_Enable);
+  DMA_Cmd(DMA1_Channel2, ENABLE);
+  DMA_Cmd(DMA1_Channel3, ENABLE);
 
   can_fill_ = true;
   fillable_block_ = 1; // DMA will initially be consuming the first half
@@ -241,9 +226,8 @@ uint32_t Dac::timer_base_freq(uint8_t apb) const {
 
 // Time to send one 16-bit word
 uint32_t Dac::timer_period() const {
-  uint32_t base_freq = timer_base_freq(1);
-  // TODO period not integer if base is 36MHz !!!
-  multi.PrintInt32E(base_freq); // => 72000000
+  uint32_t base_freq = timer_base_freq(2);
+  // multi.PrintInt32E(base_freq); // => 72000000
   return base_freq / kDacWordsHz;
 }
 
