@@ -75,15 +75,15 @@ void Dac::Init() {
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
   
   // SYNC high (conditional)
-  oc_init.TIM_Pulse = timer_period() * 00 / 10 - 1;
+  oc_init.TIM_Pulse = timer_period() * 50 / 10 - 1;
   TIM_OC1Init(TIM1, &oc_init);
   
   // SYNC low (conditional)
-  oc_init.TIM_Pulse = timer_period() * 07 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 58 / 100 - 1;
   TIM_OC2Init(TIM1, &oc_init);
 
   // SPI2 TX
-  oc_init.TIM_Pulse = timer_period() * 40 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 64 / 100 - 1;
   TIM_OC3Init(TIM1, &oc_init);
 
   // multi.PrintInt32E(timer_period()); => 225
