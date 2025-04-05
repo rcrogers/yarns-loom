@@ -42,10 +42,10 @@ void GateOutput::Init() {
 
 void GateOutput::Write(const bool* gate) {
   GPIOB->BSRR =
-    (gate[0] ? GPIO_Pin_10 : GPIO_Pin_10 << 16) |
-    (gate[1] ? GPIO_Pin_11 : GPIO_Pin_11 << 16) |
-    (gate[2] ? GPIO_Pin_0 : GPIO_Pin_0 << 16) |
-    (gate[3] ? GPIO_Pin_1 : GPIO_Pin_1 << 16);
+    (gate[0] ? GPIO_Pin_10  : GPIO_Pin_10 << 16) |
+    (gate[1] ? GPIO_Pin_11  : GPIO_Pin_11 << 16) |
+    (gate[2] ? GPIO_Pin_0   : GPIO_Pin_0  << 16) |
+    (gate[3] ? GPIO_Pin_1   : GPIO_Pin_1  << 16);
 }
 
 }  // namespace yarns

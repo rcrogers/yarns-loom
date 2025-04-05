@@ -53,7 +53,6 @@ class ChannelLeds {
  private:
   uint8_t pwm_counter_;
   uint8_t brightness_[kNumLeds];
-  bool on_[kNumLeds];
   
   DISALLOW_COPY_AND_ASSIGN(ChannelLeds);
 };
