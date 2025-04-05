@@ -41,10 +41,11 @@ void GateOutput::Init() {
 }
 
 void GateOutput::Write(const bool* gate) {
-  GPIO_WriteBit(GPIOB, GPIO_Pin_10, static_cast<BitAction>(gate[0]));
-  GPIO_WriteBit(GPIOB, GPIO_Pin_11, static_cast<BitAction>(gate[1]));
-  GPIO_WriteBit(GPIOB, GPIO_Pin_0, static_cast<BitAction>(gate[2]));
-  GPIO_WriteBit(GPIOB, GPIO_Pin_1, static_cast<BitAction>(gate[3]));
+  GPIOB->BSRR =
+    (gate[0] ? GPIO_Pin_10 : GPIO_Pin_10 << 16) |
+    (gate[1] ? GPIO_Pin_11 : GPIO_Pin_11 << 16) |
+    (gate[2] ? GPIO_Pin_0 : GPIO_Pin_0 << 16) |
+    (gate[3] ? GPIO_Pin_1 : GPIO_Pin_1 << 16);
 }
 
 }  // namespace yarns
