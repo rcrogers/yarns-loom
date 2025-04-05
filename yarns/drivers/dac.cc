@@ -75,8 +75,8 @@ void Dac::Init() {
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
   
   // SYNC high (conditional)
-  // oc_init.TIM_Pulse = timer_period() * 00 / 10 - 1;
-  // TIM_OC1Init(TIM1, &oc_init);
+  oc_init.TIM_Pulse = timer_period() * 00 / 10 - 1;
+  TIM_OC1Init(TIM1, &oc_init);
   
   // SYNC low (conditional)
   oc_init.TIM_Pulse = timer_period() * 07 / 100 - 1;
@@ -96,17 +96,16 @@ void Dac::Init() {
   ss_dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Word;
   ss_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Word;
   ss_dma.DMA_Mode = DMA_Mode_Circular;
+  ss_dma.DMA_Priority = DMA_Priority_High;
 
-  // DMA for SYNC High (TIM1_UP)
+  // DMA for SYNC High (TIM1_CH1)
   DMA_InitTypeDef high_ss_dma = ss_dma;
   high_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BSRR;
-  high_ss_dma.DMA_Priority = DMA_Priority_VeryHigh;
-  DMA_Init(DMA1_Channel5, &high_ss_dma);
+  DMA_Init(DMA1_Channel2, &high_ss_dma);
 
   // DMA for SYNC Low (TIM1_CH2)
   DMA_InitTypeDef low_ss_dma = ss_dma;
   low_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BRR;
-  ss_dma.DMA_Priority = DMA_Priority_High;
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
   // DMA for SPI2 TX (TIM1_CH3)
@@ -121,7 +120,7 @@ void Dac::Init() {
   spi_dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
   spi_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
   spi_dma.DMA_Mode = DMA_Mode_Circular;
-  spi_dma.DMA_Priority = DMA_Priority_Medium;
+  spi_dma.DMA_Priority = DMA_Priority_VeryHigh;
   DMA_Init(DMA1_Channel6, &spi_dma);
 
   RestartSyncDMA();
@@ -131,7 +130,7 @@ void Dac::Init() {
   TIM_DMACmd(
     TIM1,
     TIM_DMA_CC3 |
-    TIM_DMA_Update |
+    TIM_DMA_CC1 |
     TIM_DMA_CC2,
     ENABLE
   );
@@ -151,12 +150,12 @@ void Dac::Init() {
 void Dac::RestartSyncDMA() {
   // DMA_Cmd(DMA1_Channel6, DISABLE);
 
-  DMA_Cmd(DMA1_Channel5, DISABLE);
+  DMA_Cmd(DMA1_Channel2, DISABLE);
   DMA_Cmd(DMA1_Channel3, DISABLE);
 
   while (
     // DMA1_Channel6->CCR & CCR_ENABLE_Set ||
-    DMA1_Channel5->CCR & CCR_ENABLE_Set ||
+    DMA1_Channel2->CCR & CCR_ENABLE_Set ||
     DMA1_Channel3->CCR & CCR_ENABLE_Set
   ) { /* Wait for all channels to be disabled */ }
 
@@ -165,17 +164,17 @@ void Dac::RestartSyncDMA() {
   // // Enable memory increment -- this breaks it!
   // // DMA1_Channel6->CCR |= DMA_MemoryInc_Enable;
 
-  DMA1_Channel5->CNDTR = kDacWordsPerSample;
+  DMA1_Channel2->CNDTR = kDacWordsPerSample;
   DMA1_Channel3->CNDTR = kDacWordsPerSample;
 
-  DMA1_Channel5->CMAR = (uint32_t)&dma_ss_high[0];
+  DMA1_Channel2->CMAR = (uint32_t)&dma_ss_high[0];
   DMA1_Channel3->CMAR = (uint32_t)&dma_ss_low[0];
 
   __DSB();
 
   // DMA_Cmd(DMA1_Channel6, ENABLE);
 
-  DMA_Cmd(DMA1_Channel5, ENABLE);
+  DMA_Cmd(DMA1_Channel2, ENABLE);
   DMA_Cmd(DMA1_Channel3, ENABLE);
 
   can_fill_ = true;
