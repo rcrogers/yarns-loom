@@ -43,6 +43,8 @@
 using namespace yarns;
 using namespace stmlib;
 
+const char* const kVersion = "Loom 2_8_0";
+
 GateOutput gate_output;
 MidiIO midi_io;
 System sys;
@@ -181,6 +183,7 @@ void Init() {
 
 int main(void) {
   Init();
+  ui.SplashString(kVersion);
   while (1) {
     ui.DoEvents();
     midi_handler.ProcessInput();
