@@ -61,31 +61,31 @@ void System::Init() {
   TIM_InternalClockConfig(TIM1);
   TIM_TimeBaseInit(TIM1, &timer_init);
   TIM_ITConfig(TIM1, TIM_IT_Update, DISABLE);
-
-  for (uint32_t i = 0; i < 10000; ++i) { __NOP(); }
-  // Clear UIF
-  TIM_ClearFlag(TIM1, TIM_FLAG_Update);
-  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
-
   TIM_Cmd(TIM1, ENABLE);
-
-  for (uint32_t i = 0; i < 10000; ++i) { __NOP(); }
-  // Clear UIF
-  TIM_ClearFlag(TIM1, TIM_FLAG_Update);
-  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
     
   NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);  // 2.2 priority split.
     
+  // DAC interrupt is given highest priority
   NVIC_InitTypeDef timer_interrupt;
-  timer_interrupt.NVIC_IRQChannel = SysTick_IRQn;
+  timer_interrupt.NVIC_IRQChannel = TIM1_UP_IRQn;
   timer_interrupt.NVIC_IRQChannelPreemptionPriority = 0;
+  timer_interrupt.NVIC_IRQChannelSubPriority = 1;
+  timer_interrupt.NVIC_IRQChannelCmd = DISABLE;
+  NVIC_Init(&timer_interrupt);
+
+  // Reduce SysTick priority to below DAC interrupt
+  timer_interrupt.NVIC_IRQChannel = SysTick_IRQn;
+  timer_interrupt.NVIC_IRQChannelPreemptionPriority = 1;
   timer_interrupt.NVIC_IRQChannelSubPriority = 1;
   timer_interrupt.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&timer_interrupt);
 }
 
 void System::StartTimers() {
-  
+  for (uint32_t i = 0; i < 10000; ++i) { __NOP(); }
+  // Clear UIF
+  TIM_ClearFlag(TIM1, TIM_FLAG_Update);
+  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
   SysTick_Config(F_CPU / 8000);
 }
 
