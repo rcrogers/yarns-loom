@@ -29,6 +29,7 @@
 #include "stmlib/utils/ring_buffer.h"
 
 #include "yarns/resources.h"
+#include "yarns/drivers/dac.h"
 
 // #include "yarns/multi.h" // TODO
 
@@ -72,6 +73,7 @@ class Envelope {
   void Init(int32_t value);
   // Compute the max damp-ability of the envelope for a given tremolo strength
   int16_t tremolo(uint16_t strength) const;
+  int16_t value() const { return value_ >> 16; }
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
@@ -80,8 +82,7 @@ class Envelope {
   void Trigger(EnvelopeStage stage); // Populates expo slope table for the new stage
   int32_t compute_edge_slope(int32_t linear_slope, uint8_t edge, uint8_t max_shift) const;
 
-  template<size_t BUFFER_SIZE>
-  void RenderSamples(stmlib::RingBuffer<int16_t, BUFFER_SIZE>* buffer, int32_t new_bias);
+  void RenderSamples(uint16_t* buffer, int32_t new_bias);
 
  private:
   ExpoCurve attack_, decay_, release_;

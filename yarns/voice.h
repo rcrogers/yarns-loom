@@ -222,10 +222,6 @@ class Voice {
     return &oscillator_;
   }
   inline FastSyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
-
-  inline uint16_t ReadSample() {
-    return oscillator_.ReadSample();
-  }
   
  private:
   FastSyncedLFO lfos_[LFO_ROLE_LAST];
