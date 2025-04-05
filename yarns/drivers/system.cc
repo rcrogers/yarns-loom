@@ -53,7 +53,7 @@ void System::Init() {
   );
 
   TIM_TimeBaseInitTypeDef timer_init;
-  timer_init.TIM_Period = dac.timer_period() - 1;
+  timer_init.TIM_Period = 225 - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;
