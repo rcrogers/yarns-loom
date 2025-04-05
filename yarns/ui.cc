@@ -168,7 +168,6 @@ void Ui::Init() {
       &factory_testing_number_;
 
   refresh_was_automatic_ = true;
-  display_.Scroll();
 }
 
 void Ui::Poll() {
@@ -458,6 +457,7 @@ void Ui::SplashOn(Splash splash) {
 void Ui::SplashString(const char* text) {
   display_.Print(text);
   SplashOn(SPLASH_STRING);
+  display_.Scroll();
 }
 
 void Ui::SplashPartString(const char* label, uint8_t part) {
