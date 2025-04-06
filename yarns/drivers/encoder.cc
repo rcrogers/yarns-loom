@@ -31,7 +31,7 @@
 namespace yarns {
 
 void Encoder::Init() {
-  GPIO_InitTypeDef gpio_init = {0};
+  GPIO_InitTypeDef gpio_init;
 
   gpio_init.GPIO_Pin = GPIO_Pin_13 | GPIO_Pin_14 | GPIO_Pin_15;
   gpio_init.GPIO_Speed = GPIO_Speed_10MHz;

@@ -36,7 +36,7 @@ namespace yarns {
 void Switches::Init() {
   memset(&switch_state_, 0xff, sizeof(switch_state_));
   
-  GPIO_InitTypeDef gpio_init = {0};
+  GPIO_InitTypeDef gpio_init;
 
   gpio_init.GPIO_Pin = GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6;
   gpio_init.GPIO_Speed = GPIO_Speed_10MHz;

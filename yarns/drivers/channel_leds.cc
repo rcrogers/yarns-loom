@@ -37,7 +37,7 @@ namespace yarns {
 const uint8_t kLedPwmIncrement = 16;
 
 void ChannelLeds::Init() {
-  GPIO_InitTypeDef gpio_init = {0};
+  GPIO_InitTypeDef gpio_init;
   gpio_init.GPIO_Pin = GPIO_Pin_11 | GPIO_Pin_12 | GPIO_Pin_8;
   gpio_init.GPIO_Speed = GPIO_Speed_10MHz;
   gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;

@@ -33,7 +33,7 @@
 namespace yarns {
 
 void GateOutput::Init() {
-  GPIO_InitTypeDef gpio_init = {0};
+  GPIO_InitTypeDef gpio_init;
   gpio_init.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_10 | GPIO_Pin_11;
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
   gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;

@@ -34,7 +34,7 @@ namespace yarns {
 
 void MidiIO::Init() {
   // Initialize TX pin.
-  GPIO_InitTypeDef gpio_init = {0};
+  GPIO_InitTypeDef gpio_init;
   gpio_init.GPIO_Pin = GPIO_Pin_9;
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
   gpio_init.GPIO_Mode = GPIO_Mode_AF_PP;
@@ -47,7 +47,7 @@ void MidiIO::Init() {
   GPIO_Init(GPIOA, &gpio_init);
   
   // Initialize USART.
-  USART_InitTypeDef usart_init = {0};
+  USART_InitTypeDef usart_init;
   usart_init.USART_BaudRate = 31250;
   usart_init.USART_WordLength = USART_WordLength_8b;
   usart_init.USART_StopBits = USART_StopBits_1;

@@ -42,7 +42,7 @@ static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(
 
 void Dac::Init() {
   // Initialize SS pin.
-  GPIO_InitTypeDef gpio_init = {0};
+  GPIO_InitTypeDef gpio_init;
   gpio_init.GPIO_Pin = kPinSS;
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
   gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;
@@ -55,7 +55,7 @@ void Dac::Init() {
   GPIO_Init(GPIOB, &gpio_init);
   
   // Initialize SPI
-  SPI_InitTypeDef spi_init = {0};
+  SPI_InitTypeDef spi_init;
   spi_init.SPI_Direction = SPI_Direction_1Line_Tx;
   spi_init.SPI_Mode = SPI_Mode_Master;
   spi_init.SPI_DataSize = SPI_DataSize_16b;
@@ -144,7 +144,7 @@ void Dac::Init() {
   );
 
   DMA_ITConfig(DMA1_Channel6, DMA_IT_TC | DMA_IT_HT, ENABLE);
-  NVIC_InitTypeDef nvic_init = {0};
+  NVIC_InitTypeDef nvic_init;
   nvic_init.NVIC_IRQChannel = DMA1_Channel6_IRQn;
   nvic_init.NVIC_IRQChannelPreemptionPriority = 1;
   nvic_init.NVIC_IRQChannelSubPriority = 0;
