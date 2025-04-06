@@ -150,6 +150,7 @@ void Oscillator::Render() {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
+  int16_t* gain_start = gain_buffer_.write_ptr(); \
   gain_.ComputeSlope();
   size_t size;
   size = kAudioBlockSize;
@@ -173,7 +174,10 @@ void Oscillator::Render() {
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
+  int16_t* audio_start = audio_buffer.write_ptr(); \
   (this->*fn)();
+  
+  q15_mult<kAudioBlockSize>(gain_start, audio_start, audio_start); \
 }
 
 #define SET_TIMBRE \
@@ -182,8 +186,6 @@ void Oscillator::Render() {
 #define RENDER_CORE(body) \
   int32_t next_sample = next_sample_; \
   size_t size = kAudioBlockSize; \
-  int16_t* audio_start = audio_buffer.write_ptr(); \
-  int16_t* gain_start = gain_buffer_.write_ptr(); \
   while (size--) { \
     int32_t this_sample = next_sample; \
     next_sample = 0; \
@@ -191,7 +193,6 @@ void Oscillator::Render() {
     audio_buffer.Overwrite(this_sample); \
   } \
   next_sample_ = next_sample; \
-  q15_mult<kAudioBlockSize>(gain_start, audio_start, audio_start); \
 
 #define RENDER_WITH_PHASE_GAIN(body) \
   uint32_t phase = phase_; \
