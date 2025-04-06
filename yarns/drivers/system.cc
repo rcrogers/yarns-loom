@@ -52,7 +52,7 @@ void System::Init() {
     ENABLE
   );
 
-  TIM_TimeBaseInitTypeDef timer_init;
+  TIM_TimeBaseInitTypeDef timer_init = {0};
   timer_init.TIM_Period = 225 - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
@@ -66,7 +66,7 @@ void System::Init() {
   NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);  // 2.2 priority split.
     
   // DAC interrupt is given highest priority
-  NVIC_InitTypeDef timer_interrupt;
+  NVIC_InitTypeDef timer_interrupt = {0};
   timer_interrupt.NVIC_IRQChannel = TIM1_UP_IRQn;
   timer_interrupt.NVIC_IRQChannelPreemptionPriority = 0;
   timer_interrupt.NVIC_IRQChannelSubPriority = 1;

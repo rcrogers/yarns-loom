@@ -54,7 +54,7 @@ const uint16_t kCharacterEnablePins[] = {
 };
 
 void Display::Init() {
-  GPIO_InitTypeDef gpio_init;
+  GPIO_InitTypeDef gpio_init = {0};
   gpio_init.GPIO_Pin = kPinClk;
   gpio_init.GPIO_Pin |= kPinEnable;
   gpio_init.GPIO_Pin |= kPinData;
