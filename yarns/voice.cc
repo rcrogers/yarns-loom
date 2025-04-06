@@ -98,7 +98,6 @@ void CVOutput::Init(bool reset_calibration) {
   dirty_ = false;
   dc_role_ = DC_PITCH;
   envelope_.Init();
-  dac_buffer_.Init();
   tremolo_.Init();
 }
 
@@ -258,15 +257,16 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
-  uint16_t* samples = reinterpret_cast<uint16_t*>(dac_buffer_.write_ptr());
+  uint16_t samples[kAudioBlockSize] = {0};
   if (is_envelope()) {
     size_t size = kAudioBlockSize;
+    size_t sample_index = 0;
     while (size--) {
       tremolo_.Tick();
       envelope_.Tick();
       int32_t value = (tremolo_.value() + envelope_.value()) << 1;
       value = stmlib::ClipU16(value);
-      dac_buffer_.Overwrite(value);
+      samples[sample_index++] = value;
     }
     dac.BufferSamples(block, channel, samples);
     // TODO upshift value
