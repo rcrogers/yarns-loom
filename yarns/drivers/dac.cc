@@ -68,8 +68,6 @@ void Dac::Init() {
   SPI_Init(SPI2, &spi_init);
   SPI_Cmd(SPI2, ENABLE);
   
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
-
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
   oc_init.TIM_OutputState = TIM_OutputState_Disable;

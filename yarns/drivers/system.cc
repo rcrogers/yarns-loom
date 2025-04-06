@@ -51,6 +51,7 @@ void System::Init() {
     RCC_APB1Periph_SPI2,
     ENABLE
   );
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 
   TIM_TimeBaseInitTypeDef timer_init;
   timer_init.TIM_Period = 225 - 1;
