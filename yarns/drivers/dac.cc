@@ -109,7 +109,7 @@ void Dac::Init() {
   ss_dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Word;
   ss_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Word;
   ss_dma.DMA_Mode = DMA_Mode_Circular;
-  ss_dma.DMA_Priority = DMA_Priority_High;
+  ss_dma.DMA_Priority = DMA_Priority_VeryHigh;
   ss_dma.DMA_BufferSize = kDacWordsPerSample;
 
   // DMA for SYNC High (TIM1_CH1)
