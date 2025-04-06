@@ -69,7 +69,7 @@ void Dac::Init() {
   SPI_Cmd(SPI2, ENABLE);
 
   TIM_TimeBaseInitTypeDef timer_init = {0};
-  timer_init.TIM_Period = 225 - 1;
+  timer_init.TIM_Period = timer_period() - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;
