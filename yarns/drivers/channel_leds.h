@@ -51,7 +51,8 @@ class ChannelLeds {
   void Write();
   
  private:
-  uint8_t pwm_counter_;
+  uint8_t bcm_bit_pos_;
+  uint8_t bcm_bit_countdown_;
   uint8_t brightness_[kNumLeds];
   
   DISALLOW_COPY_AND_ASSIGN(ChannelLeds);
