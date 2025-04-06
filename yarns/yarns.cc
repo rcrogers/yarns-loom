@@ -172,7 +172,6 @@ void Init() {
   midi_io.Init();
   midi_handler.Init();
   sys.StartTimers();
-  dac.Start();
 }
 
 int main(void) {
