@@ -222,6 +222,7 @@ class Voice {
   }
   inline FastSyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
 
+  // TODO remove both
   inline uint16_t ReadSample() {
     return oscillator_.ReadSample();
   }
