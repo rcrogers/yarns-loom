@@ -161,18 +161,7 @@ void Dac::Init() {
   nvic_init.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&nvic_init);
 
-  // DAC interrupt is given highest priority
-  NVIC_InitTypeDef timer_interrupt;
-  timer_interrupt.NVIC_IRQChannel = TIM1_UP_IRQn;
-  timer_interrupt.NVIC_IRQChannelPreemptionPriority = 0;
-  timer_interrupt.NVIC_IRQChannelSubPriority = 1;
-  timer_interrupt.NVIC_IRQChannelCmd = DISABLE;
-  NVIC_Init(&timer_interrupt);
-
   for (uint32_t i = 0; i < 10000; ++i) { __NOP(); }
-  // Clear UIF
-  TIM_ClearFlag(TIM1, TIM_FLAG_Update);
-  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 }
 
 #define CCR_ENABLE_Set          ((uint32_t)0x00000001)
