@@ -39,7 +39,8 @@ const size_t kAudioBlockSizeBits = 6;
 const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
 
 const uint32_t kNumChannels = 4;
-const uint32_t kDacWordsPerSample = 2;
+const uint8_t kDacWordsPerSampleBits = 1;
+const uint32_t kDacWordsPerSample = 1 << kDacWordsPerSampleBits;
 const size_t kNumBlocks = 2;
 
 const uint32_t kDacWordsPerFrame = kNumChannels * kDacWordsPerSample;

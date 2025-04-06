@@ -183,12 +183,13 @@ void Dac::RestartSyncDMA() {
   __DMB();
 }
 
+// Write interleaved DAC words
 #define BUFFER_SAMPLES(channel, dac_words_exp) \
   volatile uint16_t* ptr = &spi_tx_buffer[0]; \
   /* Offset for buffer half */ \
-  ptr += block * kAudioBlockSize * kDacWordsPerFrame; \
+  ptr += block * kDacWordsPerBlock; \
   /* Offset for channel */ \
-  ptr += channel * kDacWordsPerSample; \
+  ptr += channel << kDacWordsPerSampleBits; \
   for (size_t i = 0; i < kAudioBlockSize; ++i) { \
     uint32_t words = (dac_words_exp); \
     ptr[0] = (words >> 16) & 0xFFFF; \
