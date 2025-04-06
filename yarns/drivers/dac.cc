@@ -42,7 +42,7 @@ static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(
 
 void Dac::Init() {
   // Initialize SS pin.
-  GPIO_InitTypeDef gpio_init;
+  GPIO_InitTypeDef gpio_init = {0};
   gpio_init.GPIO_Pin = kPinSS;
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
   gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;
@@ -55,7 +55,7 @@ void Dac::Init() {
   GPIO_Init(GPIOB, &gpio_init);
   
   // Initialize SPI
-  SPI_InitTypeDef spi_init;
+  SPI_InitTypeDef spi_init = {0};
   spi_init.SPI_Direction = SPI_Direction_1Line_Tx;
   spi_init.SPI_Mode = SPI_Mode_Master;
   spi_init.SPI_DataSize = SPI_DataSize_16b;
@@ -68,7 +68,7 @@ void Dac::Init() {
   SPI_Init(SPI2, &spi_init);
   SPI_Cmd(SPI2, ENABLE);
 
-  TIM_TimeBaseInitTypeDef timer_init;
+  TIM_TimeBaseInitTypeDef timer_init = {0};
   timer_init.TIM_Period = 225 - 1;
   timer_init.TIM_Prescaler = 0;
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
@@ -154,7 +154,7 @@ void Dac::Init() {
   );
 
   DMA_ITConfig(DMA1_Channel6, DMA_IT_TC | DMA_IT_HT, ENABLE);
-  NVIC_InitTypeDef nvic_init;
+  NVIC_InitTypeDef nvic_init = {0};
   nvic_init.NVIC_IRQChannel = DMA1_Channel6_IRQn;
   nvic_init.NVIC_IRQChannelPreemptionPriority = 1;
   nvic_init.NVIC_IRQChannelSubPriority = 0;
@@ -168,6 +168,11 @@ void Dac::Init() {
   timer_interrupt.NVIC_IRQChannelSubPriority = 1;
   timer_interrupt.NVIC_IRQChannelCmd = DISABLE;
   NVIC_Init(&timer_interrupt);
+
+  for (uint32_t i = 0; i < 10000; ++i) { __NOP(); }
+  // Clear UIF
+  TIM_ClearFlag(TIM1, TIM_FLAG_Update);
+  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
 }
 
 #define CCR_ENABLE_Set          ((uint32_t)0x00000001)

@@ -47,7 +47,7 @@ void MidiIO::Init() {
   GPIO_Init(GPIOA, &gpio_init);
   
   // Initialize USART.
-  USART_InitTypeDef usart_init;
+  USART_InitTypeDef usart_init = {0};
   usart_init.USART_BaudRate = 31250;
   usart_init.USART_WordLength = USART_WordLength_8b;
   usart_init.USART_StopBits = USART_StopBits_1;

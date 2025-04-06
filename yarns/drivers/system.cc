@@ -65,10 +65,6 @@ void System::Init() {
 }
 
 void System::StartTimers() {
-  for (uint32_t i = 0; i < 10000; ++i) { __NOP(); }
-  // Clear UIF
-  TIM_ClearFlag(TIM1, TIM_FLAG_Update);
-  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
   SysTick_Config(F_CPU / 8000);
 }
 
