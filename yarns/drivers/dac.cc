@@ -41,6 +41,10 @@ static volatile uint32_t dma_ss_high[kDacWordsPerSample] __attribute__((aligned(
 static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(4))) = {kPinSS, 0};
 
 void Dac::Init() {
+  can_fill_ = true;
+  fillable_block_ = 1; // DMA will initially be consuming the first half
+  std::fill(&spi_tx_buffer[0], &spi_tx_buffer[kBufferSize], 0);
+
   // Initialize SS pin.
   GPIO_InitTypeDef gpio_init = {0};
   gpio_init.GPIO_Pin = kPinSS;
@@ -196,9 +200,6 @@ void Dac::RestartSyncDMA() {
   DMA_Cmd(DMA1_Channel2, ENABLE);
   DMA_Cmd(DMA1_Channel3, ENABLE);
 
-  can_fill_ = true;
-  fillable_block_ = 1; // DMA will initially be consuming the first half
-  std::fill(&spi_tx_buffer[0], &spi_tx_buffer[kBufferSize], 0);
   __DMB();
 }
 
