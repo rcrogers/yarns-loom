@@ -58,7 +58,7 @@ class Dac {
   ~Dac() { }
   
   void Init();
-  void RestartSyncDMA();
+  void Start();
   
   volatile uint8_t* PtrToFillableBlockNum() {
     return can_fill_ ? &fillable_block_ : NULL;
