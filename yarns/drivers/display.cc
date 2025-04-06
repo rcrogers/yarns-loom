@@ -183,12 +183,9 @@ void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t 
 }
 
 # define SHIFT_BIT \
-  GPIOB->BRR = kPinClk; \
-  if (data & 1) { \
-    GPIOB->BSRR = kPinData; \
-  } else { \
-    GPIOB->BRR = kPinData; \
-  } \
+  GPIOB->BSRR = \
+    kPinClk << 16 | \
+    ((data & 1) ? kPinData : kPinData << 16); \
   data >>= 1; \
   /* Data is shifted on the LOW-to-HIGH transitions of the SHCP input. */ \
   GPIOB->BSRR = kPinClk;
