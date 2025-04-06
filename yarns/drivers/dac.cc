@@ -67,7 +67,17 @@ void Dac::Init() {
   spi_init.SPI_CRCPolynomial = 7;
   SPI_Init(SPI2, &spi_init);
   SPI_Cmd(SPI2, ENABLE);
-  
+
+  TIM_TimeBaseInitTypeDef timer_init;
+  timer_init.TIM_Period = 225 - 1;
+  timer_init.TIM_Prescaler = 0;
+  timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
+  timer_init.TIM_CounterMode = TIM_CounterMode_Up;
+  timer_init.TIM_RepetitionCounter = 0;
+  TIM_InternalClockConfig(TIM1);
+  TIM_TimeBaseInit(TIM1, &timer_init);
+  TIM_ITConfig(TIM1, TIM_IT_Update, DISABLE);
+
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
@@ -129,6 +139,8 @@ void Dac::Init() {
   spi_dma.DMA_Priority = DMA_Priority_VeryHigh;
   DMA_Init(DMA1_Channel6, &spi_dma);
 
+  TIM_Cmd(TIM1, ENABLE);
+
   RestartSyncDMA();
 
   DMA_Cmd(DMA1_Channel6, ENABLE);
@@ -148,6 +160,14 @@ void Dac::Init() {
   nvic_init.NVIC_IRQChannelSubPriority = 0;
   nvic_init.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&nvic_init);
+
+  // DAC interrupt is given highest priority
+  NVIC_InitTypeDef timer_interrupt;
+  timer_interrupt.NVIC_IRQChannel = TIM1_UP_IRQn;
+  timer_interrupt.NVIC_IRQChannelPreemptionPriority = 0;
+  timer_interrupt.NVIC_IRQChannelSubPriority = 1;
+  timer_interrupt.NVIC_IRQChannelCmd = DISABLE;
+  NVIC_Init(&timer_interrupt);
 }
 
 #define CCR_ENABLE_Set          ((uint32_t)0x00000001)
