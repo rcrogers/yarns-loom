@@ -73,6 +73,11 @@ void Dac::Init() {
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
   oc_init.TIM_OutputState = TIM_OutputState_Disable;
+  oc_init.TIM_OutputNState = TIM_OutputNState_Disable;
+  oc_init.TIM_OCIdleState = TIM_OCIdleState_Reset;
+  oc_init.TIM_OCNIdleState = TIM_OCNIdleState_Reset;
+  oc_init.TIM_OCPolarity = TIM_OCPolarity_High;
+  oc_init.TIM_OCNPolarity = TIM_OCNPolarity_High;
   
   // SYNC high (conditional)
   oc_init.TIM_Pulse = timer_period() * 50 / 10 - 1;
@@ -97,15 +102,18 @@ void Dac::Init() {
   ss_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_Word;
   ss_dma.DMA_Mode = DMA_Mode_Circular;
   ss_dma.DMA_Priority = DMA_Priority_High;
+  ss_dma.DMA_BufferSize = kDacWordsPerSample;
 
   // DMA for SYNC High (TIM1_CH1)
   DMA_InitTypeDef high_ss_dma = ss_dma;
   high_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BSRR;
+  high_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_high[0];
   DMA_Init(DMA1_Channel2, &high_ss_dma);
 
   // DMA for SYNC Low (TIM1_CH2)
   DMA_InitTypeDef low_ss_dma = ss_dma;
   low_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BRR;
+  low_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_low[0];
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
   // DMA for SPI2 TX (TIM1_CH3)
