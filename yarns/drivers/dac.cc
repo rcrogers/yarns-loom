@@ -92,7 +92,7 @@ void Dac::Init() {
   oc_init.TIM_OCNPolarity = TIM_OCNPolarity_High;
   
   // SYNC high (conditional)
-  oc_init.TIM_Pulse = timer_period() * 50 / 10 - 1;
+  oc_init.TIM_Pulse = timer_period() * 50 / 100 - 1;
   TIM_OC1Init(TIM1, &oc_init);
   
   // SYNC low (conditional)
@@ -182,25 +182,10 @@ void Dac::RestartSyncDMA() {
     DMA1_Channel3->CCR & CCR_ENABLE_Set
   ) { /* Wait for all channels to be disabled */ }
 
-  // DMA1_Channel6->CNDTR = kDacWordsPerSample; // TODO
-  // DMA1_Channel6->CMAR = (uint32_t)&spi_tx_buffer[0];
-  // // Enable memory increment -- this breaks it!
-  // // DMA1_Channel6->CCR |= DMA_MemoryInc_Enable;
-
-  DMA1_Channel2->CNDTR = kDacWordsPerSample;
-  DMA1_Channel3->CNDTR = kDacWordsPerSample;
-
-  DMA1_Channel2->CMAR = (uint32_t)&dma_ss_high[0];
-  DMA1_Channel3->CMAR = (uint32_t)&dma_ss_low[0];
-
-  __DSB();
-
   // DMA_Cmd(DMA1_Channel6, ENABLE);
 
   DMA_Cmd(DMA1_Channel2, ENABLE);
   DMA_Cmd(DMA1_Channel3, ENABLE);
-
-  __DMB();
 }
 
 // Write interleaved DAC words
@@ -219,10 +204,6 @@ void Dac::RestartSyncDMA() {
 
 void Dac::BufferSamples(uint8_t block, uint8_t channel, uint16_t* samples) {
   BUFFER_SAMPLES(channel, FormatCommandWords(channel, samples[i]))
-  // BUFFER_SAMPLES(channel, FormatDacWords(channel, 0xCfff))
-  // BufferStaticSample(buffer_half, channel, 0x3fff);
-  // multi.PrintDebugByte(0x0C + (channel << 4));
-  __DMB();
 }
 
 // TODO this has ~1.6ms latency, ~13x direct SysTick write
@@ -233,7 +214,6 @@ void Dac::BufferSamples(uint8_t block, uint8_t channel, uint16_t* samples) {
 void Dac::BufferStaticSample(uint8_t block, uint8_t channel, uint16_t sample) {
   uint32_t static_words = FormatCommandWords(channel, sample);
   BUFFER_SAMPLES(channel, static_words)
-  __DMB();
 }
 
 uint32_t Dac::timer_base_freq(uint8_t apb) const {
