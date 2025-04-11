@@ -167,6 +167,10 @@ void Oscillator::Render(int16_t* audio_mix) {
   RenderFn fn = fn_table_[fn_index];
   int16_t audio_samples[kAudioBlockSize] = {0};
   (this->*fn)(timbre_samples, audio_samples);
+  
+  // This experiment shows major clipping
+  // (this->*fn)(timbre_samples, audio_mix);
+  // return;
 
   int16_t gain_samples[kAudioBlockSize] = {0};
   // int16_t* gain_ptr = gain_samples;
