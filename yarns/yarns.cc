@@ -69,6 +69,11 @@ bool gate[4];
 bool is_high_freq[4];
 uint16_t factory_testing_counter;
 
+uint32_t err_count = 0;
+uint32_t txe_count = 0;
+uint32_t rxne_count = 0;
+uint32_t ovr_count = 0;
+
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
   // UI polling and LED refresh at 1kHz.
@@ -140,16 +145,28 @@ void SysTick_Handler() {
 }
 
 void DMA1_Channel6_IRQHandler(void) {
+  // static uint32_t debug_counter = 0;
+
   if(DMA_GetITStatus(DMA1_IT_HT6) == SET) {
     DMA_ClearITPendingBit(DMA1_IT_HT6);
     dac.OnBlockConsumed(true);
-    // multi.PrintDebugByte(0xC0);
+    // if (++debug_counter == 0) {
+    //   multi.PrintDebugByte(0xC0);
+    // }
   }
 
   if(DMA_GetITStatus(DMA1_IT_TC6) == SET) {
     DMA_ClearITPendingBit(DMA1_IT_TC6);
     dac.OnBlockConsumed(false);
-    // multi.PrintDebugByte(0xC1);
+    // if (debug_counter++ % 1000 == 0) {
+    //   multi.PrintDebugByte(0xC1);
+    // }
+
+    // This adds occasional glitch if DAC is working at all
+    // DMA_Cmd(DMA1_Channel2, DISABLE);
+    // DMA_Cmd(DMA1_Channel3, DISABLE);
+    // DMA_Cmd(DMA1_Channel2, ENABLE);
+    // DMA_Cmd(DMA1_Channel3, ENABLE);
   }
 }
 
@@ -178,6 +195,35 @@ int main(void) {
   Init();
   ui.SplashString(kVersion);
   while (1) {
+    // static uint32_t debug_counter = 0;
+    // debug_counter++;
+
+    // bool spi2_disabled = !(SPI2->CR1 & SPI_CR1_SPE);
+
+    // FlagStatus txe = SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_TXE);
+    // FlagStatus rxne = SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_RXNE);
+    // FlagStatus bsy = SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY);
+    // FlagStatus ovr = SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_OVR);
+    // FlagStatus modf = SPI_I2S_GetFlagStatus(SPI2, SPI_FLAG_MODF);
+    // FlagStatus crcerr = SPI_I2S_GetFlagStatus(SPI2, SPI_FLAG_CRCERR);
+    
+    // uint32_t debug = debug_counter % 100000;
+    // if (debug == 10000 * 0) {
+    //   multi.PrintDebugByte(0xE0 + spi2_disabled);
+    // } else if (debug == 10000 * 1) {
+    //   multi.PrintDebugByte(0x10 + txe);
+    // } else if (debug == 10000 * 2) {
+    //   multi.PrintDebugByte(0x20 + rxne);
+    // } else if (debug == 10000 * 3) {
+    //   multi.PrintDebugByte(0x30 + bsy);
+    // } else if (debug == 10000 * 4) {
+    //   multi.PrintDebugByte(0x40 + ovr);
+    // } else if (debug == 10000 * 5) {
+    //   multi.PrintDebugByte(0x50 + modf);
+    // } else if (debug == 10000 * 6) {
+    //   multi.PrintDebugByte(0x60 + crcerr);
+    // }
+
     ui.DoEvents();
     midi_handler.ProcessInput();
     multi.LowPriority();

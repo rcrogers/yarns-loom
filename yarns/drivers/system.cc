@@ -65,7 +65,6 @@ void System::Init() {
 }
 
 void System::StartTimers() {
-  DMA_ITConfig(DMA1_Channel6, DMA_IT_TC | DMA_IT_HT, ENABLE);
   SysTick_Config(F_CPU / 8000);
 }
 

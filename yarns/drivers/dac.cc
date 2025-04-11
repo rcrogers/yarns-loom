@@ -41,7 +41,7 @@ static volatile uint32_t dma_ss_high[kDacWordsPerSample] __attribute__((aligned(
 static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(4))) = {kPinSS, 0};
 
 void Dac::Init() {
-  can_fill_ = true;
+  can_fill_ = false;
   fillable_block_ = 1; // DMA will initially be consuming the first half
   std::fill(&spi_tx_buffer[0], &spi_tx_buffer[kBufferSize], 0);
 
@@ -69,7 +69,10 @@ void Dac::Init() {
   spi_init.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_2;
   spi_init.SPI_FirstBit = SPI_FirstBit_MSB;
   spi_init.SPI_CRCPolynomial = 7;
+  SPI_Cmd(SPI2, DISABLE);
+  SPI_I2S_DeInit(SPI2);
   SPI_Init(SPI2, &spi_init);
+
   SPI_Cmd(SPI2, ENABLE);
 
   TIM_TimeBaseInitTypeDef timer_init = {0};
@@ -78,8 +81,11 @@ void Dac::Init() {
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;
   timer_init.TIM_RepetitionCounter = 0;
+  TIM_Cmd(TIM1, DISABLE);
+  TIM_DeInit(TIM1);
   TIM_InternalClockConfig(TIM1);
   TIM_TimeBaseInit(TIM1, &timer_init);
+  // TIM_ARRPreloadConfig(TIM1, ENABLE);
   TIM_ITConfig(TIM1, TIM_IT_Update, DISABLE);
 
   TIM_OCInitTypeDef oc_init = {0};
@@ -92,15 +98,15 @@ void Dac::Init() {
   oc_init.TIM_OCNPolarity = TIM_OCNPolarity_High;
   
   // SYNC high (conditional)
-  oc_init.TIM_Pulse = timer_period() * 50 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 1 / 100 - 1;
   TIM_OC1Init(TIM1, &oc_init);
   
   // SYNC low (conditional)
-  oc_init.TIM_Pulse = timer_period() * 58 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 9 / 100 - 1;
   TIM_OC2Init(TIM1, &oc_init);
 
   // SPI2 TX
-  oc_init.TIM_Pulse = timer_period() * 64 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 17 / 100 - 1;
   TIM_OC3Init(TIM1, &oc_init);
 
   // multi.PrintInt32E(timer_period()); => 225
@@ -120,12 +126,16 @@ void Dac::Init() {
   DMA_InitTypeDef high_ss_dma = ss_dma;
   high_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BSRR;
   high_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_high[0];
+  DMA_Cmd(DMA1_Channel2, DISABLE);
+  DMA_DeInit(DMA1_Channel2);
   DMA_Init(DMA1_Channel2, &high_ss_dma);
 
   // DMA for SYNC Low (TIM1_CH2)
   DMA_InitTypeDef low_ss_dma = ss_dma;
   low_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BRR;
   low_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_low[0];
+  DMA_Cmd(DMA1_Channel3, DISABLE);
+  DMA_DeInit(DMA1_Channel3);
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
   // DMA for SPI2 TX (TIM1_CH3)
@@ -141,13 +151,20 @@ void Dac::Init() {
   spi_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
   spi_dma.DMA_Mode = DMA_Mode_Circular;
   spi_dma.DMA_Priority = DMA_Priority_VeryHigh;
+  DMA_Cmd(DMA1_Channel6, DISABLE);
+  DMA_DeInit(DMA1_Channel6);
   DMA_Init(DMA1_Channel6, &spi_dma);
 
-  TIM_Cmd(TIM1, ENABLE);
+  DMA_ITConfig(DMA1_Channel6, DMA_IT_TC | DMA_IT_HT, ENABLE);
 
-  RestartSyncDMA();
+  NVIC_InitTypeDef nvic_init = {0};
+  nvic_init.NVIC_IRQChannel = DMA1_Channel6_IRQn;
+  nvic_init.NVIC_IRQChannelPreemptionPriority = 1;
+  nvic_init.NVIC_IRQChannelSubPriority = 0;
+  nvic_init.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&nvic_init);
 
-  DMA_Cmd(DMA1_Channel6, ENABLE);
+  StartDMA();
 
   TIM_DMACmd(
     TIM1,
@@ -157,33 +174,14 @@ void Dac::Init() {
     ENABLE
   );
 
-  NVIC_InitTypeDef nvic_init = {0};
-  nvic_init.NVIC_IRQChannel = DMA1_Channel6_IRQn;
-  nvic_init.NVIC_IRQChannelPreemptionPriority = 1;
-  nvic_init.NVIC_IRQChannelSubPriority = 0;
-  nvic_init.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&nvic_init);
-
-  for (uint32_t i = 0; i < 10000; ++i) { __NOP(); }
+  TIM_Cmd(TIM1, ENABLE);
 }
 
 #define CCR_ENABLE_Set          ((uint32_t)0x00000001)
 #define CCR_ENABLE_Reset        ((uint32_t)0xFFFFFFFE)
 
-void Dac::RestartSyncDMA() {
-  // DMA_Cmd(DMA1_Channel6, DISABLE);
-
-  DMA_Cmd(DMA1_Channel2, DISABLE);
-  DMA_Cmd(DMA1_Channel3, DISABLE);
-
-  while (
-    // DMA1_Channel6->CCR & CCR_ENABLE_Set ||
-    DMA1_Channel2->CCR & CCR_ENABLE_Set ||
-    DMA1_Channel3->CCR & CCR_ENABLE_Set
-  ) { /* Wait for all channels to be disabled */ }
-
-  // DMA_Cmd(DMA1_Channel6, ENABLE);
-
+void Dac::StartDMA() {
+  DMA_Cmd(DMA1_Channel6, ENABLE);
   DMA_Cmd(DMA1_Channel2, ENABLE);
   DMA_Cmd(DMA1_Channel3, ENABLE);
 }
