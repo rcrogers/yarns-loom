@@ -64,7 +64,7 @@ void PendSV_Handler(void) { }
 
 extern "C" {
 
-volatile uint16_t cv[4];
+uint16_t cv[4];
 bool gate[4];
 bool is_high_freq[4];
 uint16_t factory_testing_counter;
@@ -227,7 +227,7 @@ int main(void) {
     ui.DoEvents();
     midi_handler.ProcessInput();
     multi.LowPriority();
-    volatile uint8_t* block_num_ptr = dac.PtrToFillableBlockNum();
+    uint8_t* block_num_ptr = dac.PtrToFillableBlockNum();
     if (block_num_ptr) {
       uint8_t block = *block_num_ptr;
       for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
@@ -237,7 +237,6 @@ int main(void) {
         // multi.PrintDebugByte(0xA0 | channel);
         // multi.PrintDebugByte(RCC_GetClocksFreq());
       }
-      dac.OnBlockFilled();
     }
     if (midi_handler.factory_testing_requested()) {
       midi_handler.AcknowledgeFactoryTestingRequest();

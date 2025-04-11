@@ -32,6 +32,7 @@
 
 #include "stmlib/stmlib.h"
 
+#include "yarns/drivers/dac.h"
 #include "yarns/internal_clock.h"
 #include "yarns/layout_configurator.h"
 #include "yarns/part.h"
@@ -42,7 +43,6 @@
 namespace yarns {
 
 const uint8_t kNumParts = 4;
-const uint8_t kNumCVOutputs = 4;
 // One paraphonic part, one voice per remaining output
 const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
 const uint8_t kMaxBarDuration = 32;
@@ -521,7 +521,7 @@ class Multi {
     cv_outputs_[cv_i].assign(&voice_[voice_i], r, num_audio_voices);
   }
   void AssignVoicesToCVOutputs();
-  void GetCvGate(volatile uint16_t* cv, bool* gate);
+  void GetCvGate(uint16_t* cv, bool* gate);
   void GetLedsBrightness(uint8_t* brightness);
 
   template<typename T>

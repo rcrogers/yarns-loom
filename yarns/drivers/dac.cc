@@ -43,7 +43,7 @@ static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(
 void Dac::Init() {
   can_fill_ = false;
   fillable_block_ = 1; // DMA will initially be consuming the first half
-  std::fill(&spi_tx_buffer[0], &spi_tx_buffer[kBufferSize], 0);
+  std::fill(&spi_tx_buffer_[0], &spi_tx_buffer_[kBufferSize], 0);
 
   // Initialize SS pin.
   GPIO_InitTypeDef gpio_init = {0};
@@ -102,11 +102,11 @@ void Dac::Init() {
   TIM_OC1Init(TIM1, &oc_init);
   
   // SYNC low (conditional)
-  oc_init.TIM_Pulse = timer_period() * 9 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 3 / 100 - 1;
   TIM_OC2Init(TIM1, &oc_init);
 
   // SPI2 TX
-  oc_init.TIM_Pulse = timer_period() * 17 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 5 / 100 - 1;
   TIM_OC3Init(TIM1, &oc_init);
 
   // multi.PrintInt32E(timer_period()); => 225
@@ -141,7 +141,7 @@ void Dac::Init() {
   // DMA for SPI2 TX (TIM1_CH3)
   DMA_InitTypeDef spi_dma = {0};
   spi_dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
-  spi_dma.DMA_MemoryBaseAddr = (uint32_t)&spi_tx_buffer[0];
+  spi_dma.DMA_MemoryBaseAddr = (uint32_t)&spi_tx_buffer_[0];
   spi_dma.DMA_DIR = DMA_DIR_PeripheralDST;
   spi_dma.DMA_BufferSize = kDacWordsPerBlock;
   spi_dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
@@ -188,9 +188,9 @@ void Dac::StartDMA() {
 
 // Write interleaved DAC words
 #define BUFFER_SAMPLES(channel, dac_words_exp) \
-  volatile uint16_t* ptr = &spi_tx_buffer[0]; \
+  volatile uint16_t* ptr = &spi_tx_buffer_[0]; \
   /* Offset for buffer half */ \
-  ptr += block * kDacWordsPerBlock; \
+  ptr += block ? kDacWordsPerBlock : 0; \
   /* Offset for channel */ \
   ptr += channel << kDacWordsPerSampleBits; \
   for (size_t i = 0; i < kAudioBlockSize; ++i) { \
@@ -200,7 +200,7 @@ void Dac::StartDMA() {
     ptr += kDacWordsPerFrame; \
   }
 
-void Dac::BufferSamples(uint8_t block, uint8_t channel, uint16_t* samples) {
+void Dac::BufferSamples(uint8_t block, uint8_t channel, int16_t* samples) {
   BUFFER_SAMPLES(channel, FormatCommandWords(channel, samples[i]))
 }
 
@@ -209,7 +209,7 @@ void Dac::BufferSamples(uint8_t block, uint8_t channel, uint16_t* samples) {
 // low-freq channels could buffer NOOP words -- probably simpler than injecting
 // Are there low-freq CV for which this latency matters?  maybe at max LFO freq?
 // Pitch is probably the main one
-void Dac::BufferStaticSample(uint8_t block, uint8_t channel, uint16_t sample) {
+void Dac::BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample) {
   uint32_t static_words = FormatCommandWords(channel, sample);
   BUFFER_SAMPLES(channel, static_words)
 }
