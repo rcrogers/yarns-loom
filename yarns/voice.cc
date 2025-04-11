@@ -258,16 +258,13 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
+  // TODO count envelope renders
   int16_t samples[kAudioBlockSize] = {0};
   if (is_envelope()) {
-    size_t size = kAudioBlockSize;
-    size_t sample_index = 0;
-    while (size--) {
+    envelope_.RenderSamples(samples);
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
       tremolo_.Tick();
-      envelope_.Tick();
-      int32_t value = (tremolo_.value() + envelope_.value()) << 1;
-      value = stmlib::ClipU16(value);
-      samples[sample_index++] = value;
+      samples[i] = stmlib::ClipU16((tremolo_.value() + samples[i]) << 1);
     }
     dac.BufferSamples(block, channel, samples);
     // if (channel == 0) multi.PrintDebugByte(0xE0);
@@ -281,6 +278,15 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
       audio_voices_[v]->oscillator()->Render(samples);
     }
     dac.BufferSamples(block, channel, samples);
+
+    // static int16_t lowest_sample_value_seen = INT16_MAX;
+    // for (size_t i = 0; i < kAudioBlockSize; ++i) {
+    //   if (samples[i] < lowest_sample_value_seen) {
+    //     lowest_sample_value_seen = samples[i];
+    //   }
+    // }
+    // multi.PrintDebugByte(lowest_sample_value_seen >> 8);
+
     // if (channel == 0) multi.PrintDebugByte(samples[0] >> 8);
   } else {
     dac.BufferStaticSample(block, channel, default_low_freq_cv);

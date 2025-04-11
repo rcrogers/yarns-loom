@@ -151,15 +151,16 @@ void Oscillator::Render(int16_t* audio_mix) {
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
   int16_t timbre_samples[kAudioBlockSize] = {0};
-  int16_t* timbre_ptr = timbre_samples;
-  timbre_.ComputeSlope();
-  for (size_t size = kAudioBlockSize; size--;) {
-    timbre_envelope_.Tick();
-    timbre_.Tick();
-    int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
-    timbre = stmlib::ClipU16(timbre);
-    *timbre_ptr++ = timbre >> 1;
-  }
+  // int16_t* timbre_ptr = timbre_samples;
+  // timbre_.ComputeSlope();
+  // for (size_t size = kAudioBlockSize; size--;) {
+  //   timbre_envelope_.Tick();
+  //   timbre_.Tick();
+  //   int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
+  //   timbre = stmlib::ClipU16(timbre);
+  //   *timbre_ptr++ = timbre >> 1;
+  // }
+  timbre_envelope_.RenderSamples(timbre_samples);
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
@@ -168,17 +169,24 @@ void Oscillator::Render(int16_t* audio_mix) {
   (this->*fn)(timbre_samples, audio_samples);
 
   int16_t gain_samples[kAudioBlockSize] = {0};
-  int16_t* gain_ptr = gain_samples;
-  gain_.ComputeSlope();
-  for (size_t size = kAudioBlockSize; size--;) {
-    gain_envelope_.Tick();
-    gain_.Tick();
-    int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
-    gain = stmlib::ClipU16(gain);
-    *gain_ptr++ = gain;
-  }
+  // int16_t* gain_ptr = gain_samples;
+  // gain_.ComputeSlope();
+  // for (size_t size = kAudioBlockSize; size--;) {
+  //   gain_envelope_.Tick();
+  //   gain_.Tick();
+  //   int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
+  //   gain = stmlib::ClipU16(gain);
+  //   *gain_ptr++ = gain;
+  // }
+  gain_envelope_.RenderSamples(gain_samples);
   
   q15_multiply_accumulate<kAudioBlockSize>(gain_samples, audio_samples, audio_mix);
+  // for (size_t i = 0; i < kAudioBlockSize; ++i) {
+  //   int32_t gain = gain_samples[i];
+  //   int32_t sample = audio_samples[i];
+  //   int32_t result = (gain * sample) >> 15;
+  //   audio_mix[i] += result;
+  // }
 }
 
 #define SET_TIMBRE \
