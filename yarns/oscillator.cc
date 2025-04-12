@@ -34,6 +34,7 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
+#include "yarns/drivers/dac.h"
 
 namespace yarns {
 
@@ -142,7 +143,7 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
   return phase_increment;
 }
 
-void Oscillator::Render(uint16_t* audio_mix) {
+void Oscillator::Render() {
   if (pitch_ >= kHighestNote) {
     pitch_ = kHighestNote - 1;
   } else if (pitch_ < 0) {
@@ -150,64 +151,48 @@ void Oscillator::Render(uint16_t* audio_mix) {
   }
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
-  int16_t timbre_samples[kAudioBlockSize] = {0};
-  // int16_t* timbre_ptr = timbre_samples;
-  // timbre_.ComputeSlope();
-  // for (size_t size = kAudioBlockSize; size--;) {
-  //   timbre_envelope_.Tick();
-  //   timbre_.Tick();
-  //   int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
-  //   timbre = stmlib::ClipU16(timbre);
-  //   *timbre_ptr++ = timbre >> 1;
-  // }
-  timbre_envelope_.RenderSamples(timbre_samples);
+  gain_.ComputeSlope();
+  size_t size;
+  size = kAudioBlockSize;
+  while (size--) {
+    gain_envelope_.Tick();
+    gain_.Tick();
+    int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
+    gain = stmlib::ClipU16(gain);
+    gain_buffer_.Overwrite(gain);
+  }
+  timbre_.ComputeSlope();
+  size = kAudioBlockSize;
+  while (size--) {
+    timbre_envelope_.Tick();
+    timbre_.Tick();
+    int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
+    timbre = stmlib::ClipU16(timbre);
+    timbre_buffer_.Overwrite(timbre >> 1);
+  }
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
-  uint16_t audio_samples[kAudioBlockSize] = {0};
-  (this->*fn)(timbre_samples, audio_samples);
-  
-  // This experiment shows major clipping
-  // (this->*fn)(timbre_samples, audio_mix);
-  // return;
-
-  int16_t gain_samples[kAudioBlockSize] = {0};
-  // int16_t* gain_ptr = gain_samples;
-  // gain_.ComputeSlope();
-  // for (size_t size = kAudioBlockSize; size--;) {
-  //   gain_envelope_.Tick();
-  //   gain_.Tick();
-  //   int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
-  //   gain = stmlib::ClipU16(gain);
-  //   *gain_ptr++ = gain;
-  // }
-  gain_envelope_.RenderSamples(gain_samples);
-  
-  // u16_multiply_accumulate<kAudioBlockSize>(gain_samples, audio_samples, audio_mix);
-  for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    // int16_t audio = audio_samples[i];
-    // int16_t gain = gain_samples[i];
-    // int32_t result = (gain * audio) >> 15;
-    // audio_mix[i] += static_cast<uint16_t>(static_cast<int16_t>(result));
-
-    uint16_t audio = audio_samples[i];
-    audio_mix[i] -= audio;
-  }
+  (this->*fn)();
 }
 
 #define SET_TIMBRE \
-  int16_t timbre = timbre_samples[kAudioBlockSize - 1]; \
+  int16_t timbre = timbre_buffer_.ImmediatePeek();
 
 #define RENDER_CORE(body) \
   int32_t next_sample = next_sample_; \
-  for (size_t size = kAudioBlockSize; size--;) { \
+  size_t size = kAudioBlockSize; \
+  int16_t* audio_start = audio_buffer.write_ptr(); \
+  int16_t* gain_start = gain_buffer_.write_ptr(); \
+  while (size--) { \
     int32_t this_sample = next_sample; \
     next_sample = 0; \
     body \
-    *audio_samples++ = this_sample; \
+    audio_buffer.Overwrite(this_sample); \
   } \
   next_sample_ = next_sample; \
+  q15_mult<kAudioBlockSize>(gain_start, audio_start, audio_start); \
 
 #define RENDER_WITH_PHASE_GAIN(body) \
   uint32_t phase = phase_; \
@@ -222,7 +207,7 @@ void Oscillator::Render(uint16_t* audio_mix) {
 
 #define RENDER_WITH_PHASE_GAIN_TIMBRE(body) \
   RENDER_WITH_PHASE_GAIN( \
-    int16_t timbre = *timbre_samples++; \
+    int16_t timbre = timbre_buffer_.ImmediateRead(); \
     body \
   )
 
@@ -283,7 +268,7 @@ void Oscillator::Render(uint16_t* audio_mix) {
   int32_t cutoff = (pitch_ >> 1) + (timbre >> 1); \
   CONSTRAIN(cutoff, 0, 0x7fff);
 
-void Oscillator::RenderLPPulse(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderLPPulse() {
   StateVariableFilter svf = svf_;
   SET_TRACKING_FILTER_CUTOFF;
   svf.RenderInit(cutoff, 0x7fff);
@@ -299,7 +284,7 @@ void Oscillator::RenderLPPulse(int16_t* timbre_samples, uint16_t* audio_samples)
   svf_ = svf;
 }
 
-void Oscillator::RenderLPSaw(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderLPSaw() {
   StateVariableFilter svf = svf_;
   SET_TRACKING_FILTER_CUTOFF;
   svf.RenderInit(cutoff, 0x6000);
@@ -314,7 +299,7 @@ void Oscillator::RenderLPSaw(int16_t* timbre_samples, uint16_t* audio_samples) {
   svf_ = svf;
 }
 
-void Oscillator::RenderVariablePulse(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderVariablePulse() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     timbre = timbre + (timbre >> 1); // 3/4
     uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo, timbre)) << 15; // 50-0%
@@ -325,7 +310,7 @@ void Oscillator::RenderVariablePulse(int16_t* timbre_samples, uint16_t* audio_sa
   )
 }
 
-void Oscillator::RenderVariableSaw(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderVariableSaw() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_SAW(phase, phase_increment) }
@@ -339,7 +324,7 @@ void Oscillator::RenderVariableSaw(int16_t* timbre_samples, uint16_t* audio_samp
 
 // Rotates the rising edge's slope from saw to pulse
 // ⟋|⟋| -> _/‾|_/‾| -> _|‾|_|‾|
-void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderSawPulseMorph() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     // Prevent saw from reaching an infinitely steep rise, else we'd have to
     // clumsily transition into a BLEP of what is now a rising pulse edge
@@ -365,7 +350,7 @@ void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, uint16_t* audio_sa
   CONSTRAIN(modulator_pitch, 0, kHighestNote - 1); \
   uint32_t modulator_phase_increment = ComputePhaseIncrement(modulator_pitch);
 
-void Oscillator::RenderSyncSine(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderSyncSine() {
   SET_SYNC_INCREMENT;
   RENDER_WITH_PHASE_GAIN(
     SYNC(
@@ -377,7 +362,7 @@ void Oscillator::RenderSyncSine(int16_t* timbre_samples, uint16_t* audio_samples
   )
 }
 
-void Oscillator::RenderSyncPulse(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderSyncPulse() {
   SET_SYNC_INCREMENT;
   uint32_t pw = 0x80000000;
   RENDER_WITH_PHASE_GAIN(
@@ -390,7 +375,7 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, uint16_t* audio_sample
   )
 }
 
-void Oscillator::RenderSyncSaw(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderSyncSaw() {
   SET_SYNC_INCREMENT;
   RENDER_WITH_PHASE_GAIN(
     SYNC(
@@ -402,7 +387,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, uint16_t* audio_samples)
   )
 }
 
-void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderFoldTriangle() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     uint16_t phase_16 = phase >> 16;
     this_sample = (phase_16 << 1) ^ (phase_16 & 0x8000 ? 0xffff : 0x0000);
@@ -412,7 +397,7 @@ void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, uint16_t* audio_sam
   )
 }
 
-void Oscillator::RenderFoldSine(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderFoldSine() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     this_sample = Interpolate824(wav_sine, phase);
     this_sample = this_sample * timbre >> 15;
@@ -420,7 +405,7 @@ void Oscillator::RenderFoldSine(int16_t* timbre_samples, uint16_t* audio_samples
   )
 }
 
-void Oscillator::RenderTanhSine(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderTanhSine() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     this_sample = Interpolate824(wav_sine, phase);
     int16_t baseline = this_sample >> 6;
@@ -429,7 +414,7 @@ void Oscillator::RenderTanhSine(int16_t* timbre_samples, uint16_t* audio_samples
   )
 }
 
-void Oscillator::RenderExponentialSine(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderExponentialSine() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff;
     this_sample = Interpolate824(wav_sine, phase);
@@ -438,7 +423,7 @@ void Oscillator::RenderExponentialSine(int16_t* timbre_samples, uint16_t* audio_
   )
 }
 
-void Oscillator::RenderFM(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderFM() {
   uint8_t fm_shape = shape_ - OSC_SHAPE_FM;
   int16_t interval = lut_fm_modulator_intervals[fm_shape];
   uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
@@ -480,7 +465,7 @@ const uint32_t kPhaseResetPulse[] = {
   0x80000000,
 };
 
-void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderPhaseDistortionPulse() {
   SET_PHASE_DISTORTION_INCREMENT;
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
   int32_t integrator = pd_square_.integrator;
@@ -512,7 +497,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, uint16_t* a
   pd_square_.integrator = integrator;
 }
 
-void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderPhaseDistortionSaw() {
   SET_PHASE_DISTORTION_INCREMENT;
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
   RENDER_WITH_PHASE_GAIN(
@@ -532,7 +517,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, uint16_t* aud
   )
 }
 
-void Oscillator::RenderDiracComb(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderDiracComb() {
   RENDER_WITH_PHASE_GAIN_TIMBRE(
     int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
@@ -546,7 +531,7 @@ void Oscillator::RenderDiracComb(int16_t* timbre_samples, uint16_t* audio_sample
   )
 }
 
-void Oscillator::RenderFilteredNoise(int16_t* timbre_samples, uint16_t* audio_samples) {
+void Oscillator::RenderFilteredNoise() {
   SET_TIMBRE;
   int32_t cutoff = 0x1000 + (timbre >> 1); // 1/4...1/2
   StateVariableFilter svf = svf_;

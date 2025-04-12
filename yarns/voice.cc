@@ -37,7 +37,7 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
-#include "yarns/multi.h"
+#include "yarns/drivers/dac.h"
 
 namespace yarns {
   
@@ -99,6 +99,7 @@ void CVOutput::Init(bool reset_calibration) {
   dirty_ = false;
   dc_role_ = DC_PITCH;
   envelope_.Init();
+  dac_buffer_.Init();
   tremolo_.Init();
 }
 
@@ -258,49 +259,46 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
-  // TODO count envelope renders
+  if (dac_buffer_.writable() < kAudioBlockSize) return;
+
   if (is_envelope()) {
-    int16_t raw_samples[kAudioBlockSize] = {0};
-    envelope_.RenderSamples(raw_samples);
-    uint16_t samples[kAudioBlockSize];
-    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+    size_t size = kAudioBlockSize;
+    while (size--) {
       tremolo_.Tick();
-      uint16_t raw_sample = raw_samples[i];
-      samples[i] = stmlib::ClipU16((tremolo_.value() + raw_sample) << 1);
+      envelope_.Tick();
+      int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+      value = stmlib::ClipU16(value);
+      dac_buffer_.Overwrite(value);
     }
-    dac.BufferSamples(block, channel, samples);
-    // if (channel == 0) multi.PrintDebugByte(0xE0);
   } else if (is_audio()) {
-    // if (channel == 0) {
-    //   static uint32_t debug_count = 0;
-    //   if (debug_count % (1 << 12) == 0) multi.PrintInt32E(zero_dac_code_);
-    //   ++debug_count;
-    // }
-
-    uint16_t samples[kAudioBlockSize] = {0};
     std::fill(
-      samples,
-      samples + kAudioBlockSize,
-      zero_dac_code_
-  );
+        dac_buffer_.write_ptr(),
+        dac_buffer_.write_ptr() + kAudioBlockSize,
+        zero_dac_code_
+    );
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
-      audio_voices_[v]->oscillator()->Render(samples);
+      audio_voices_[v]->oscillator()->Render();
+      q15_add<kAudioBlockSize, false>(
+          audio_voices_[v]->oscillator()->audio_buffer.read_ptr(),
+          dac_buffer_.write_ptr(),
+          dac_buffer_.write_ptr()
+      );
     }
-    dac.BufferSamples(block, channel, samples);
-
-    // static int16_t lowest_sample_value_seen = INT16_MAX;
-    // for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    //   if (samples[i] < lowest_sample_value_seen) {
-    //     lowest_sample_value_seen = samples[i];
-    //   }
-    // }
-    // multi.PrintDebugByte(lowest_sample_value_seen >> 8);
-
-    // if (channel == 0) multi.PrintDebugByte(samples[0] >> 8);
+    dac_buffer_.advance_write_ptr(kAudioBlockSize);
   } else {
-    dac.BufferStaticSample(block, channel, default_low_freq_cv);
-    // if (channel == 0) multi.PrintDebugByte(0xD0);
+    std::fill(
+        dac_buffer_.write_ptr(),
+        dac_buffer_.write_ptr() + kAudioBlockSize,
+        default_low_freq_cv
+    );
+    dac_buffer_.advance_write_ptr(kAudioBlockSize);
   }
+  
+  uint16_t conv_samples[kAudioBlockSize];
+  for (size_t i = 0; i < kAudioBlockSize; ++i) {
+    conv_samples[i] = GetDACSample();
+  }
+  dac.BufferSamples(block, channel, conv_samples);
 }
 
 void Voice::NoteOn(

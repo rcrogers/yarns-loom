@@ -88,23 +88,32 @@ enum OscillatorShape {
 
 class Oscillator {
  public:
-  typedef void (Oscillator::*RenderFn)(int16_t* timbre_samples, uint16_t* audio_samples);
+  typedef void (Oscillator::*RenderFn)();
 
   Oscillator() { }
   ~Oscillator() { }
 
+  stmlib::RingBuffer<int16_t, kAudioBlockSize> audio_buffer;
+
   inline void Init(uint16_t scale) {
+    audio_buffer.Init();
     scale_ = scale;
     gain_.Init();
     timbre_.Init();
     gain_envelope_.Init();
     timbre_envelope_.Init();
+    timbre_buffer_.Init();
+    gain_buffer_.Init();
     svf_.Init();
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
     high_ = false;
     next_sample_ = 0;
+  }
+
+  inline int16_t ReadSample() {
+    return audio_buffer.ImmediateRead();
   }
 
   void Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo);
@@ -122,26 +131,26 @@ class Oscillator {
     timbre_envelope_.NoteOff();
   }
   
-  void Render(uint16_t* audio_mix);
+  void Render();
   
  private:
-  void RenderFilteredNoise(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderPhaseDistortionPulse(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderPhaseDistortionSaw(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderLPPulse(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderLPSaw(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderVariablePulse(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderVariableSaw(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderSawPulseMorph(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderSyncSine(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderSyncPulse(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderSyncSaw(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderFoldSine(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderFoldTriangle(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderDiracComb(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderTanhSine(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderExponentialSine(int16_t* timbre_samples, uint16_t* audio_samples);
-  void RenderFM(int16_t* timbre_samples, uint16_t* audio_samples);
+  void RenderFilteredNoise();
+  void RenderPhaseDistortionPulse();
+  void RenderPhaseDistortionSaw();
+  void RenderLPPulse();
+  void RenderLPSaw();
+  void RenderVariablePulse();
+  void RenderVariableSaw();
+  void RenderSawPulseMorph();
+  void RenderSyncSine();
+  void RenderSyncPulse();
+  void RenderSyncSaw();
+  void RenderFoldSine();
+  void RenderFoldTriangle();
+  void RenderDiracComb();
+  void RenderTanhSine();
+  void RenderExponentialSine();
+  void RenderFM();
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
@@ -175,6 +184,8 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
+  // Double buffering not needed for gain/timbre because they're synchronous from the standpoint of audio rendering
+  stmlib::RingBuffer<int16_t, kAudioBlockSize> gain_buffer_, timbre_buffer_;
   
   static RenderFn fn_table_[];
   
