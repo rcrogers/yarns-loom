@@ -269,6 +269,12 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
     dac.BufferSamples(block, channel, samples);
     // if (channel == 0) multi.PrintDebugByte(0xE0);
   } else if (is_audio()) {
+    if (channel == 0) {
+      static uint32_t debug_count = 0;
+      if (debug_count % (1 << 12) == 0) multi.PrintInt32E(zero_dac_code_);
+      ++debug_count;
+    }
+
     std::fill(
         samples,
         samples + kAudioBlockSize,
