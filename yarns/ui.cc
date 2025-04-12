@@ -28,6 +28,7 @@
 // User interface.
 
 #include "stmlib/system/system_clock.h"
+#include "stmlib/utils/print.h"
 
 #include "yarns/multi.h"
 #include "yarns/ui.h"
@@ -1054,6 +1055,37 @@ void Ui::PrintLatch() {
     ++note_ordinal;
   }
   display_.PrintMasks(masks);
+}
+
+void Ui::PrintDebugByte(uint8_t byte) {
+  char buffer[3];
+  buffer[2] = '\0';
+  buffer[0] = hexadecimal[byte >> 4];
+  buffer[1] = hexadecimal[byte & 0xf];
+  display_.Print(buffer);
+  queue_.Touch();
+}
+
+void Ui::PrintDebugInt32(int32_t value) {
+  // Print a "+" or "-" followed by a hex representation value
+  char buffer[11];
+  buffer[10] = '\0';
+  buffer[0] = value < 0 ? '-' : '+';
+  value = value < 0 ? -value : value;
+  for (int i = 9; i > 0; --i) {
+    buffer[i] = hexadecimal[value & 0xf];
+    value >>= 4;
+  }
+  display_.Print(buffer);
+  display_.Scroll();
+  queue_.Touch();
+}
+
+void Ui::PrintInt32E(int32_t value) {
+  stmlib::int32E(value, buffer_, sizeof(buffer_));
+  display_.Print(buffer_);
+  display_.Scroll();
+  queue_.Touch();
 }
 
 /* extern */

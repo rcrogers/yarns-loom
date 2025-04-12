@@ -226,6 +226,7 @@ class Multi {
   ~Multi() { }
 
   void PrintDebugByte(uint8_t byte);
+  void PrintInt32E(int32_t value);
   
   void Init(bool reset_calibration);
 

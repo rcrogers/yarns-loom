@@ -37,6 +37,7 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
+#include "yarns/multi.h"
 
 namespace yarns {
   
@@ -284,6 +285,21 @@ void CVOutput::RenderSamples() {
       );
     }
     dac_buffer_.advance_write_ptr(kAudioBlockSize);
+
+    // Lowest max seen on FM 1/1: 1.63E4
+    static uint32_t debug_count = 0;
+    if (debug_count % (1 << 12) == 0) {
+      // Get the biggest sample-to-sample delta in dac_buffer_ and print it
+      int32_t largest_delta = 0;
+      for (uint8_t i = 0; i < kAudioBlockSize - 1; ++i) {
+        int32_t delta = abs(dac_buffer_.read_ptr()[i] - dac_buffer_.read_ptr()[i + 1]);
+        if (abs(delta) > abs(largest_delta)) {
+          largest_delta = delta;
+        }
+      }
+      multi.PrintInt32E(largest_delta);
+    }
+    ++debug_count;
   }
 }
 
