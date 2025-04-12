@@ -79,8 +79,8 @@ class Dac {
     return (high << 16) | low;
   }
 
-  void BufferSamples(uint8_t block, uint8_t channel, int16_t* samples);
-  void BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample);
+  void BufferSamples(uint8_t block, uint8_t channel, uint16_t* samples);
+  void BufferStaticSample(uint8_t block, uint8_t channel, uint16_t sample);
 
   uint32_t timer_base_freq(uint8_t apb) const;
   uint32_t timer_period() const;

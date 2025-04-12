@@ -259,27 +259,30 @@ void CVOutput::Refresh() {
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
   // TODO count envelope renders
-  int16_t samples[kAudioBlockSize] = {0};
   if (is_envelope()) {
-    envelope_.RenderSamples(samples);
+    int16_t raw_samples[kAudioBlockSize] = {0};
+    envelope_.RenderSamples(raw_samples);
+    uint16_t samples[kAudioBlockSize];
     for (size_t i = 0; i < kAudioBlockSize; ++i) {
       tremolo_.Tick();
-      samples[i] = stmlib::ClipU16((tremolo_.value() + samples[i]) << 1);
+      uint16_t raw_sample = raw_samples[i];
+      samples[i] = stmlib::ClipU16((tremolo_.value() + raw_sample) << 1);
     }
     dac.BufferSamples(block, channel, samples);
     // if (channel == 0) multi.PrintDebugByte(0xE0);
   } else if (is_audio()) {
-    if (channel == 0) {
-      static uint32_t debug_count = 0;
-      if (debug_count % (1 << 12) == 0) multi.PrintInt32E(zero_dac_code_);
-      ++debug_count;
-    }
+    // if (channel == 0) {
+    //   static uint32_t debug_count = 0;
+    //   if (debug_count % (1 << 12) == 0) multi.PrintInt32E(zero_dac_code_);
+    //   ++debug_count;
+    // }
 
+    uint16_t samples[kAudioBlockSize] = {0};
     std::fill(
-        samples,
-        samples + kAudioBlockSize,
-        zero_dac_code_
-    );
+      samples,
+      samples + kAudioBlockSize,
+      zero_dac_code_
+  );
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
       audio_voices_[v]->oscillator()->Render(samples);
     }
