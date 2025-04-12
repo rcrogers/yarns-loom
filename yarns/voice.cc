@@ -38,6 +38,7 @@
 
 #include "yarns/resources.h"
 #include "yarns/multi.h"
+#include "stmlib/system/system_clock.h"
 
 namespace yarns {
   
@@ -297,7 +298,8 @@ void CVOutput::RenderSamples() {
           largest_delta = delta;
         }
       }
-      multi.PrintInt32E(largest_delta);
+      // multi.PrintInt32E(largest_delta);
+      multi.PrintInt32E(debug_count / (system_clock.milliseconds() / 1000));
     }
     ++debug_count;
   }
