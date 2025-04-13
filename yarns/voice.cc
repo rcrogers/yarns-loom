@@ -38,7 +38,6 @@
 
 #include "yarns/resources.h"
 #include "yarns/drivers/dac.h"
-#include "yarns/multi.h"
 
 namespace yarns {
   
@@ -286,21 +285,6 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
       );
     }
     dac_buffer_.advance_write_ptr(kAudioBlockSize);
-
-    // fd8bd24: Lowest max seen on FM 1/1: 1.63E4
-    static uint32_t debug_count = 0;
-    if (debug_count % (1 << 12) == 0) {
-      // Get the biggest sample-to-sample delta in dac_buffer_ and print it
-      int32_t largest_delta = 0;
-      for (uint8_t i = 0; i < kAudioBlockSize - 1; ++i) {
-        int32_t delta = abs(dac_buffer_.read_ptr()[i] - dac_buffer_.read_ptr()[i + 1]);
-        if (abs(delta) > abs(largest_delta)) {
-          largest_delta = delta;
-        }
-      }
-      multi.PrintInt32E(largest_delta);
-    }
-    ++debug_count;
   } else {
     std::fill(
         dac_buffer_.write_ptr(),
