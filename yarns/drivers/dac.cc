@@ -143,7 +143,7 @@ void Dac::Init() {
   spi_dma.DMA_PeripheralBaseAddr = (uint32_t)&SPI2->DR;
   spi_dma.DMA_MemoryBaseAddr = (uint32_t)&spi_tx_buffer_[0];
   spi_dma.DMA_DIR = DMA_DIR_PeripheralDST;
-  spi_dma.DMA_BufferSize = kDacWordsPerBlock;
+  spi_dma.DMA_BufferSize = kBufferSize;
   spi_dma.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   spi_dma.DMA_MemoryInc = DMA_MemoryInc_Enable;
   spi_dma.DMA_M2M = DMA_M2M_Disable;
