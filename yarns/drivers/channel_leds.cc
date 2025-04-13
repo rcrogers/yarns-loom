@@ -32,7 +32,9 @@
 
 namespace yarns {
 
-const uint8_t kBcmBits = 7; // 8000/128 = 62.5 Hz refresh rate
+// 8000/2^(6+1) = 62.5 Hz refresh rate
+// Add 1 because we do a mirrored duty cycle to prevent transition artifacts
+const uint8_t kBcmBits = 6;
 
 void ChannelLeds::Init() {
   GPIO_InitTypeDef gpio_init = {0};
@@ -46,7 +48,8 @@ void ChannelLeds::Init() {
   gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;
   GPIO_Init(GPIOB, &gpio_init);
   
-  bcm_bit_pos_ = kBcmBits - 1;  // Start at last bit to roll over to 0 first
+  bcm_bit_pos_ = -1;  // Start at last bit to roll over to 0 first
+  bcm_bit_pos_increment_ = 1;
   bcm_bit_countdown_ = 0;
   std::fill(&brightness_[0], &brightness_[kNumLeds], 0);
 }
@@ -57,9 +60,13 @@ void ChannelLeds::Write() {
     return;
   }
 
-  ++bcm_bit_pos_;
+  bcm_bit_pos_ += bcm_bit_pos_increment_;
   if (bcm_bit_pos_ >= kBcmBits) {
+    bcm_bit_pos_ = kBcmBits - 1;
+    bcm_bit_pos_increment_ = -1;
+  } else if (bcm_bit_pos_ < 0) {
     bcm_bit_pos_ = 0;
+    bcm_bit_pos_increment_ = 1;
   }
   bcm_bit_countdown_ = (1 << (kBcmBits - 1 - bcm_bit_pos_)) - 1;
 
