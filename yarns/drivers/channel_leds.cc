@@ -32,7 +32,7 @@
 
 namespace yarns {
 
-const uint8_t kBcmBits = 4; // 1000/16 = 62.5 Hz refresh rate
+const uint8_t kBcmBits = 7; // 8000/128 = 62.5 Hz refresh rate
 
 void ChannelLeds::Init() {
   GPIO_InitTypeDef gpio_init = {0};
@@ -71,5 +71,8 @@ void ChannelLeds::Write() {
   GPIOB->BSRR =
     (brightness_[3] & mask ? GPIO_Pin_14  : GPIO_Pin_14 << 16);
 }
+
+/* extern */
+ChannelLeds channel_leds;
 
 }  // namespace yarns

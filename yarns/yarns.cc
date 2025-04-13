@@ -76,13 +76,16 @@ uint32_t ovr_count = 0;
 
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
-  // UI polling and LED refresh at 1kHz.
+  // UI polling at 1kHz.
   static uint8_t counter;
   if ((++counter & 7) == 0) {
     ui.Poll();
     system_clock.Tick();
   }
-  ui.PollFast(); // Display refresh at 8kHz
+
+  // Display refresh at 8kHz
+  ui.PollFast();
+  channel_leds.Write();
   
   // Try to read some MIDI input if available.
   if (midi_io.readable()) {
@@ -169,6 +172,7 @@ void Init() {
   
   system_clock.Init();
   gate_output.Init();
+  channel_leds.Init();
   dac.Init();
   midi_io.Init();
   midi_handler.Init();

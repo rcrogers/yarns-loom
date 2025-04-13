@@ -138,7 +138,6 @@ void Ui::Init() {
   display_.Init();
   switches_.Init();
   queue_.Init();
-  leds_.Init();
   
   mode_ = UI_MODE_PARAMETER_SELECT;
   active_part_ = 0;
@@ -239,8 +238,7 @@ void Ui::Poll() {
     leds_brightness[3] = (((x + 000) & 511) < 128) ? 255 : 0;
   }
   
-  leds_.SetBrightness(leds_brightness);
-  leds_.Write();
+  channel_leds.SetBrightness(leds_brightness);
 }
 
 void Ui::PollSwitch(const UiSwitch ui_switch, uint32_t& press_time, bool& long_press_event_sent) {

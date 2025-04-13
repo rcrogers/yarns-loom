@@ -58,6 +58,8 @@ class ChannelLeds {
   DISALLOW_COPY_AND_ASSIGN(ChannelLeds);
 };
 
+extern ChannelLeds channel_leds;
+
 }  // namespace yarns
 
 #endif  // YARNS_DRIVERS_CHANNEL_LEDS_H_

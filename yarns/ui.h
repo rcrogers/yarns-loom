@@ -246,7 +246,6 @@ class Ui {
   
   stmlib::EventQueue<32> queue_;
   
-  ChannelLeds leds_;
   Display display_;
   Encoder encoder_;
   Switches switches_;
