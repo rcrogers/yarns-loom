@@ -47,7 +47,7 @@ const uint32_t kDacWordsPerFrame = kNumCVOutputs * kDacWordsPerSample;
 const uint32_t kDacWordsPerBlock = kAudioBlockSize * kDacWordsPerFrame;
 const uint32_t kBufferSize = kNumBlocks * kDacWordsPerBlock;
 
-const uint32_t kFrameHz = 40000;
+const uint32_t kFrameHz = 45000;
 const uint32_t kDacWordsHz = kFrameHz * kDacWordsPerFrame;
 
 const uint16_t kPinSS = GPIO_Pin_12;

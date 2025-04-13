@@ -43,7 +43,7 @@ LFO and portamento increments.
 ----------------------------------------------------------------------------"""
 
 refresh_rate = 4000
-audio_rate = 40000
+audio_rate = 45000
 
 
 min_frequency = 1.0 / 8.0  # Hertz
