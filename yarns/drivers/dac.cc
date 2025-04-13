@@ -157,12 +157,7 @@ void Dac::Init() {
 
   DMA_ITConfig(DMA1_Channel6, DMA_IT_TC | DMA_IT_HT, ENABLE);
 
-  NVIC_InitTypeDef nvic_init = {0};
-  nvic_init.NVIC_IRQChannel = DMA1_Channel6_IRQn;
-  nvic_init.NVIC_IRQChannelPreemptionPriority = 1;
-  nvic_init.NVIC_IRQChannelSubPriority = 0;
-  nvic_init.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&nvic_init);
+  NVIC_EnableIRQ(DMA1_Channel6_IRQn);
 
   StartDMA();
 

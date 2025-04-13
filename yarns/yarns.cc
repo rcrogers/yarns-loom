@@ -145,28 +145,12 @@ void SysTick_Handler() {
 }
 
 void DMA1_Channel6_IRQHandler(void) {
-  // static uint32_t debug_counter = 0;
-
-  if(DMA_GetITStatus(DMA1_IT_HT6) == SET) {
-    DMA_ClearITPendingBit(DMA1_IT_HT6);
+  uint32_t flags = DMA1->ISR;
+  DMA1->IFCR = DMA1_FLAG_HT6 | DMA1_FLAG_TC6;
+  if (flags & DMA1_FLAG_HT6) {
     dac.OnBlockConsumed(true);
-    // if (++debug_counter == 0) {
-    //   multi.PrintDebugByte(0xC0);
-    // }
-  }
-
-  if(DMA_GetITStatus(DMA1_IT_TC6) == SET) {
-    DMA_ClearITPendingBit(DMA1_IT_TC6);
+  } else if (flags & DMA1_FLAG_TC6) {
     dac.OnBlockConsumed(false);
-    // if (debug_counter++ % 1000 == 0) {
-    //   multi.PrintDebugByte(0xC1);
-    // }
-
-    // This adds occasional glitch if DAC is working at all
-    // DMA_Cmd(DMA1_Channel2, DISABLE);
-    // DMA_Cmd(DMA1_Channel3, DISABLE);
-    // DMA_Cmd(DMA1_Channel2, ENABLE);
-    // DMA_Cmd(DMA1_Channel3, ENABLE);
   }
 }
 
