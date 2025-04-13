@@ -31,6 +31,7 @@
 #include "stmlib/utils/dsp.h"
 
 #include "yarns/resources.h"
+#include "yarns/drivers/dac.h"
 
 namespace yarns {
 
@@ -166,32 +167,44 @@ class Envelope {
     phase_ = 0;
   }
 
-  inline void Tick() {
-    while (segment_ != next_tick_segment_) { // Event loop
-      Trigger(next_tick_segment_);
-    }
+  inline void RenderSamples(int16_t* samples) {
+    // int32_t value = value_;
+    // int32_t target_overshoot_threshold = target_overshoot_threshold_;
+    // int32_t phase = phase_;
+    // int32_t phase_increment = phase_increment_;
 
-    // Early-release segment stays at max slope until it reaches target
-    if (segment_ != ENV_SEGMENT_EARLY_RELEASE) {
-      if (!phase_increment_) return;
-      phase_ += phase_increment_;
-      if (phase_ < phase_increment_) phase_ = UINT32_MAX;
-    }
+    for (size_t size = kAudioBlockSize; size--; ) {
+      while (segment_ != next_tick_segment_) { // Event loop
+        Trigger(next_tick_segment_);
+      }
 
-    if (positive_segment_slope_ // The slope is about to overshoot the target
-      ? value_ > target_overshoot_threshold_
-      : value_ < target_overshoot_threshold_
-    ) {
-      // Because the target is closer than the expo slope would have taken us,
-      // this tick, which we spend on jumping to the target, is flatter than
-      // nominal.  The alternative would be to, instead of jumping, immediately
-      // Tick() again
-      value_ = target_;
-      next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
-      return;
-    }
+      // Early-release segment stays at max slope until it reaches target
+      if (segment_ != ENV_SEGMENT_EARLY_RELEASE) {
+        if (!phase_increment_) {
+          *samples++ = value_ >> 16;
+          continue;
+        }
+        phase_ += phase_increment_;
+        if (phase_ < phase_increment_) phase_ = UINT32_MAX;
+      }
 
-    value_ += expo_slope_[phase_ >> (32 - kLutExpoSlopeShiftSizeBits)];
+      if (positive_segment_slope_ // The slope is about to overshoot the target
+        ? value_ > target_overshoot_threshold_
+        : value_ < target_overshoot_threshold_
+      ) {
+        // Because the target is closer than the expo slope would have taken us,
+        // this tick, which we spend on jumping to the target, is flatter than
+        // nominal.  The alternative would be to, instead of jumping, immediately
+        // Tick() again
+        value_ = target_;
+        *samples++ = value_ >> 16;
+        next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
+        continue;
+      }
+
+      value_ += expo_slope_[phase_ >> (32 - kLutExpoSlopeShiftSizeBits)];
+      *samples++ = value_ >> 16;
+    }
   }
 
   inline int16_t value() const { return value_ >> 16; }
