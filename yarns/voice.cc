@@ -39,7 +39,6 @@
 #include "yarns/resources.h"
 #include "yarns/drivers/dac.h"
 #include "yarns/multi.h"
-#include "stmlib/system/system_clock.h"
 
 namespace yarns {
   
@@ -299,8 +298,7 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
           largest_delta = delta;
         }
       }
-      // multi.PrintInt32E(largest_delta);
-      multi.PrintInt32E(debug_count / (system_clock.milliseconds() / 1000));
+      multi.PrintInt32E(largest_delta);
     }
     ++debug_count;
   } else {
