@@ -1,4 +1,5 @@
 // Copyright 2013 Emilie Gillet.
+// Copyright 2025 Chris Rogers.
 //
 // Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
@@ -37,6 +38,8 @@ namespace yarns {
 
 using namespace std;
 
+const uint16_t kPinSS = GPIO_Pin_12;
+
 static volatile uint32_t dma_ss_high[kDacWordsPerSample] __attribute__((aligned(4))) = {kPinSS, 0};
 static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(4))) = {kPinSS, 0};
 
@@ -69,8 +72,6 @@ void Dac::Init() {
   spi_init.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_2;
   spi_init.SPI_FirstBit = SPI_FirstBit_MSB;
   spi_init.SPI_CRCPolynomial = 7;
-  SPI_Cmd(SPI2, DISABLE);
-  SPI_I2S_DeInit(SPI2);
   SPI_Init(SPI2, &spi_init);
 
   SPI_Cmd(SPI2, ENABLE);
@@ -81,12 +82,7 @@ void Dac::Init() {
   timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
   timer_init.TIM_CounterMode = TIM_CounterMode_Up;
   timer_init.TIM_RepetitionCounter = 0;
-  TIM_Cmd(TIM1, DISABLE);
-  TIM_DeInit(TIM1);
-  TIM_InternalClockConfig(TIM1);
   TIM_TimeBaseInit(TIM1, &timer_init);
-  // TIM_ARRPreloadConfig(TIM1, ENABLE);
-  TIM_ITConfig(TIM1, TIM_IT_Update, DISABLE);
 
   TIM_OCInitTypeDef oc_init = {0};
   oc_init.TIM_OCMode = TIM_OCMode_Timing;
@@ -109,7 +105,6 @@ void Dac::Init() {
   oc_init.TIM_Pulse = timer_period() * 5 / 100 - 1;
   TIM_OC3Init(TIM1, &oc_init);
 
-  // multi.PrintInt32E(timer_period()); => 225
 
   DMA_InitTypeDef ss_dma = {0};
   ss_dma.DMA_DIR = DMA_DIR_PeripheralDST;
@@ -126,16 +121,12 @@ void Dac::Init() {
   DMA_InitTypeDef high_ss_dma = ss_dma;
   high_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BSRR;
   high_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_high[0];
-  DMA_Cmd(DMA1_Channel2, DISABLE);
-  DMA_DeInit(DMA1_Channel2);
   DMA_Init(DMA1_Channel2, &high_ss_dma);
 
   // DMA for SYNC Low (TIM1_CH2)
   DMA_InitTypeDef low_ss_dma = ss_dma;
   low_ss_dma.DMA_PeripheralBaseAddr = (uint32_t)&GPIOB->BRR;
   low_ss_dma.DMA_MemoryBaseAddr = (uint32_t)&dma_ss_low[0];
-  DMA_Cmd(DMA1_Channel3, DISABLE);
-  DMA_DeInit(DMA1_Channel3);
   DMA_Init(DMA1_Channel3, &low_ss_dma);
 
   // DMA for SPI2 TX (TIM1_CH3)
@@ -151,15 +142,15 @@ void Dac::Init() {
   spi_dma.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
   spi_dma.DMA_Mode = DMA_Mode_Circular;
   spi_dma.DMA_Priority = DMA_Priority_VeryHigh;
-  DMA_Cmd(DMA1_Channel6, DISABLE);
-  DMA_DeInit(DMA1_Channel6);
   DMA_Init(DMA1_Channel6, &spi_dma);
 
   DMA_ITConfig(DMA1_Channel6, DMA_IT_TC | DMA_IT_HT, ENABLE);
 
   NVIC_EnableIRQ(DMA1_Channel6_IRQn);
 
-  StartDMA();
+  DMA_Cmd(DMA1_Channel6, ENABLE);
+  DMA_Cmd(DMA1_Channel2, ENABLE);
+  DMA_Cmd(DMA1_Channel3, ENABLE);
 
   TIM_DMACmd(
     TIM1,
@@ -170,15 +161,6 @@ void Dac::Init() {
   );
 
   TIM_Cmd(TIM1, ENABLE);
-}
-
-#define CCR_ENABLE_Set          ((uint32_t)0x00000001)
-#define CCR_ENABLE_Reset        ((uint32_t)0xFFFFFFFE)
-
-void Dac::StartDMA() {
-  DMA_Cmd(DMA1_Channel6, ENABLE);
-  DMA_Cmd(DMA1_Channel2, ENABLE);
-  DMA_Cmd(DMA1_Channel3, ENABLE);
 }
 
 // Write interleaved DAC words
@@ -213,16 +195,12 @@ uint32_t Dac::timer_base_freq(uint8_t apb) const {
   RCC_ClocksTypeDef rcc_clocks;
   RCC_GetClocksFreq(&rcc_clocks);
   uint32_t hclk = rcc_clocks.HCLK_Frequency;
-  // multi.PrintInt32E(hclk); // => 72000000
   uint32_t pclk = apb == 1 ? rcc_clocks.PCLK1_Frequency : rcc_clocks.PCLK2_Frequency;
-  // multi.PrintInt32E(pclk); // => 72000000
   return hclk == pclk ? pclk : pclk * 2;
 }
 
-// Time to send one 16-bit word
 uint32_t Dac::timer_period() const {
   uint32_t base_freq = timer_base_freq(2);
-  // multi.PrintInt32E(base_freq); // => 72000000
   return base_freq / kDacWordsHz;
 }
 

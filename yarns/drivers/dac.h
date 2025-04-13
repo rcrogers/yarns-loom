@@ -50,15 +50,12 @@ const uint32_t kBufferSize = kNumBlocks * kDacWordsPerBlock;
 const uint32_t kFrameHz = 45000;
 const uint32_t kDacWordsHz = kFrameHz * kDacWordsPerFrame;
 
-const uint16_t kPinSS = GPIO_Pin_12;
-
 class Dac {
  public:
   Dac() { }
   ~Dac() { }
   
   void Init();
-  void StartDMA();
   
   uint8_t* PtrToFillableBlockNum() {
     uint8_t* res = can_fill_ ? &fillable_block_ : NULL;

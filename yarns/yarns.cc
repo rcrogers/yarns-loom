@@ -179,35 +179,6 @@ int main(void) {
   Init();
   ui.SplashString(kVersion);
   while (1) {
-    // static uint32_t debug_counter = 0;
-    // debug_counter++;
-
-    // bool spi2_disabled = !(SPI2->CR1 & SPI_CR1_SPE);
-
-    // FlagStatus txe = SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_TXE);
-    // FlagStatus rxne = SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_RXNE);
-    // FlagStatus bsy = SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY);
-    // FlagStatus ovr = SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_OVR);
-    // FlagStatus modf = SPI_I2S_GetFlagStatus(SPI2, SPI_FLAG_MODF);
-    // FlagStatus crcerr = SPI_I2S_GetFlagStatus(SPI2, SPI_FLAG_CRCERR);
-    
-    // uint32_t debug = debug_counter % 100000;
-    // if (debug == 10000 * 0) {
-    //   multi.PrintDebugByte(0xE0 + spi2_disabled);
-    // } else if (debug == 10000 * 1) {
-    //   multi.PrintDebugByte(0x10 + txe);
-    // } else if (debug == 10000 * 2) {
-    //   multi.PrintDebugByte(0x20 + rxne);
-    // } else if (debug == 10000 * 3) {
-    //   multi.PrintDebugByte(0x30 + bsy);
-    // } else if (debug == 10000 * 4) {
-    //   multi.PrintDebugByte(0x40 + ovr);
-    // } else if (debug == 10000 * 5) {
-    //   multi.PrintDebugByte(0x50 + modf);
-    // } else if (debug == 10000 * 6) {
-    //   multi.PrintDebugByte(0x60 + crcerr);
-    // }
-
     ui.DoEvents();
     midi_handler.ProcessInput();
     multi.LowPriority();
@@ -218,8 +189,6 @@ int main(void) {
         multi.mutable_cv_output(channel)->RenderSamples(
           block, channel, cv[channel]
         );
-        // multi.PrintDebugByte(0xA0 | channel);
-        // multi.PrintDebugByte(RCC_GetClocksFreq());
       }
     }
     if (midi_handler.factory_testing_requested()) {
