@@ -34,6 +34,7 @@
 
 #include "stmlib/midi/midi.h"
 #include "stmlib/utils/random.h"
+#include "stmlib/utils/dsp.h"
 
 #include "yarns/just_intonation_processor.h"
 #include "yarns/midi_handler.h"

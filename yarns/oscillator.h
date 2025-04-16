@@ -31,7 +31,6 @@
 #define YARNS_ANALOG_OSCILLATOR_H_
 
 #include "stmlib/stmlib.h"
-#include "stmlib/utils/ring_buffer.h"
 
 #include "yarns/envelope.h"
 #include "yarns/interpolator.h"

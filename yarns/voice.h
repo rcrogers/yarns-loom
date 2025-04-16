@@ -31,7 +31,6 @@
 #define YARNS_VOICE_H_
 
 #include "stmlib/stmlib.h"
-#include "stmlib/utils/ring_buffer.h"
 
 #include "yarns/envelope.h"
 #include "yarns/oscillator.h"

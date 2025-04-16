@@ -25,10 +25,7 @@
 
 #include <stm32f10x_conf.h>
 
-#include "stmlib/utils/dsp.h"
-#include "stmlib/utils/ring_buffer.h"
 #include "stmlib/system/system_clock.h"
-#include "stmlib/system/uid.h"
 
 #include "yarns/drivers/dac.h"
 #include "yarns/drivers/gate_output.h"
