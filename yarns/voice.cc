@@ -233,7 +233,6 @@ void Voice::Refresh() {
   }
 
   oscillator_.Refresh(note, timbre_15, tremolo);
-  // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;

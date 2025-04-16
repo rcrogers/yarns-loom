@@ -152,7 +152,6 @@ void Oscillator::Render(int16_t* audio_mix) {
   
   int16_t timbre_samples[kAudioBlockSize] = {0};
   timbre_envelope_.RenderSamples(timbre_samples, timbre_bias_ << 16);
-  // TODO bounds wrong
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
