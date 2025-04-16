@@ -232,7 +232,8 @@ void Voice::Refresh() {
     mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
   }
 
-  oscillator_.Refresh(note, timbre_15, tremolo);
+  bool drone = oscillator_mode_ == OSCILLATOR_MODE_DRONE;
+  oscillator_.Refresh(note, timbre_15, tremolo, drone);
   // TODO with square tremolo, changes in the envelope could outpace this and cause sound to leak through?
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
@@ -296,7 +297,7 @@ void Voice::NoteOn(
   }
   gate_ = true;
   adsr_ = adsr;
-  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
+  oscillator_.NoteOn(adsr_, timbre_envelope_target);
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 

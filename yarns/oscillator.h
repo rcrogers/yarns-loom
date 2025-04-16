@@ -105,14 +105,14 @@ class Oscillator {
     next_sample_ = 0;
   }
 
-  void Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo);
+  void Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo, bool drone);
   
   inline void set_shape(OscillatorShape shape) {
     shape_ = shape;
   }
 
-  inline void NoteOn(ADSR& adsr, bool drone, int16_t timbre_envelope_target) {
-    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
+  inline void NoteOn(ADSR& adsr, int16_t timbre_envelope_target) {
+    gain_envelope_.NoteOn(adsr, 0, scale_ >> 1);
     timbre_envelope_.NoteOn(adsr, 0, timbre_envelope_target);
   }
   inline void NoteOff() {
@@ -168,12 +168,12 @@ class Oscillator {
   uint32_t phase_increment_;
   uint32_t modulator_phase_;
   bool high_;
-
   StateVariableFilter svf_;
   PhaseDistortionSquareModulator pd_square_;
-  
   int32_t next_sample_;
+
   uint16_t scale_;
+  bool drone_;
   
   static RenderFn fn_table_[];
   

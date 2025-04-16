@@ -98,24 +98,26 @@ void StateVariableFilter::RenderSample(int16_t in) {
   bp += cutoff.value() * hp >> 15;
 }
 
-void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
-    pitch_ = pitch;
-    // if (shape_ >= OSC_SHAPE_FM) {
-    //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
-    // }
-    gain_bias_ = gain_envelope_.tremolo(tremolo);
+void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo, bool drone) {
+  pitch_ = pitch;
+  // if (shape_ >= OSC_SHAPE_FM) {
+  //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
+  // }
+  gain_bias_ = gain_envelope_.tremolo(tremolo);
 
-    int32_t strength = 0x7fff - (pitch << 1);
-    CONSTRAIN(strength, 0, 0x7fff);
-    if (
-      shape_ == OSC_SHAPE_FOLD_SINE ||
-      shape_ == OSC_SHAPE_FOLD_TRIANGLE ||
-      shape_ >= OSC_SHAPE_EXP_SINE
-    ) {
-      timbre = timbre * strength >> 15;
-    }
-    timbre_bias_ = timbre;
+  int32_t strength = 0x7fff - (pitch << 1);
+  CONSTRAIN(strength, 0, 0x7fff);
+  if (
+    shape_ == OSC_SHAPE_FOLD_SINE ||
+    shape_ == OSC_SHAPE_FOLD_TRIANGLE ||
+    shape_ >= OSC_SHAPE_EXP_SINE
+  ) {
+    timbre = timbre * strength >> 15;
   }
+  timbre_bias_ = timbre;
+
+  drone_ = drone;
+}
 
 uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
   int16_t num_shifts = 0;
@@ -161,7 +163,12 @@ void Oscillator::Render(int16_t* audio_mix) {
   (this->*fn)(timbre_samples, audio_samples);
 
   int16_t gain_samples[kAudioBlockSize] = {0};
-  gain_envelope_.RenderSamples(gain_samples, gain_bias_ << 16);
+  if (drone_) {
+    // TODO need to take tremolo into account!
+    std::fill(gain_samples, gain_samples + kAudioBlockSize, INT16_MAX);
+  } else {
+    gain_envelope_.RenderSamples(gain_samples, gain_bias_ << 16);
+  }
   
   q15_multiply_accumulate<kAudioBlockSize>(gain_samples, audio_samples, audio_mix);
 }
