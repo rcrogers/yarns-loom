@@ -89,7 +89,7 @@ sine_input = numpy.arange(WAVETABLE_SIZE + 1) / float(WAVETABLE_SIZE)
 sine = -numpy.sin(2 * numpy.pi * sine_input) * 127.5 + 127.5
 
 # Band limited waveforms.
-SAMPLE_RATE=45000
+SAMPLE_RATE=50000
 num_zones = 15
 bl_pulse_tables = []
 

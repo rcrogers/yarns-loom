@@ -94,15 +94,15 @@ void Dac::Init() {
   oc_init.TIM_OCNPolarity = TIM_OCNPolarity_High;
   
   // SYNC high (conditional)
-  oc_init.TIM_Pulse = timer_period() * 1 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 1 / 1000 - 1;
   TIM_OC1Init(TIM1, &oc_init);
   
   // SYNC low (conditional)
-  oc_init.TIM_Pulse = timer_period() * 3 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 2 / 1000 - 1;
   TIM_OC2Init(TIM1, &oc_init);
 
   // SPI2 TX
-  oc_init.TIM_Pulse = timer_period() * 5 / 100 - 1;
+  oc_init.TIM_Pulse = timer_period() * 3 / 1000 - 1;
   TIM_OC3Init(TIM1, &oc_init);
 
 
