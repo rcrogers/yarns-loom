@@ -65,7 +65,7 @@ lfo()
 
 # Create lookup table for portamento.
 def portamento():
-  num_values = 128
+  num_values = 64
   max_time = 5.0  # seconds
 
   gamma = 0.25

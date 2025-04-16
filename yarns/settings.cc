@@ -396,7 +396,7 @@ const Setting Settings::settings_[] = {
   {
     "PO", "PORTAMENTO",
     SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO, 0 },
-    SETTING_UNIT_PORTAMENTO, 0, 127, NULL,
+    SETTING_UNIT_PORTAMENTO, 1, 127, NULL,
     5, 10,
   },
   {
@@ -818,7 +818,7 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       
     case SETTING_UNIT_PORTAMENTO:
     {
-      uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE >> 1;
+      uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
       if (value < split_point) {
         PrintInteger(buffer, split_point - value);
       } else {
