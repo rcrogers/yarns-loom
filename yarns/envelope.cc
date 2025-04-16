@@ -52,9 +52,9 @@ void Envelope::NoteOff() {
   switch (segment_) {
     case ENV_SEGMENT_ATTACK:
     case ENV_SEGMENT_DECAY:
-      next_tick_segment_ = ENV_SEGMENT_EARLY_RELEASE; break;
+      Trigger(ENV_SEGMENT_EARLY_RELEASE); break;
     case ENV_SEGMENT_SUSTAIN:
-      next_tick_segment_ = ENV_SEGMENT_RELEASE; break;
+      Trigger(ENV_SEGMENT_EARLY_RELEASE); break;
     default: break;
   }
 }
@@ -77,7 +77,7 @@ void Envelope::NoteOn(
 
   if (!gate_) {
     gate_ = true;
-    next_tick_segment_ = ENV_SEGMENT_ATTACK;
+    Trigger(ENV_SEGMENT_ATTACK);
   }
 }
 
@@ -88,7 +88,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
     segment = ENV_SEGMENT_RELEASE; // Skip sustain when gate is low
   }
-  segment_ = next_tick_segment_ = segment;
+  segment_ = segment;
   switch (segment) {
     case ENV_SEGMENT_ATTACK : phase_increment_ = adsr_->attack  ; break;
     case ENV_SEGMENT_DECAY  : phase_increment_ = adsr_->decay   ; break;
@@ -120,8 +120,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
       // TODO are direction skips good in case of polarity reversals? only if there are non-attack cases
     )
   ) {
-    next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
-    return;
+    return Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
   }
   // Pick the larger delta, and thus the steeper slope that reaches the target
   // more quickly.  If actual delta is smaller than nominal (e.g. from
@@ -135,8 +134,7 @@ void Envelope::Trigger(EnvelopeSegment segment) {
 
   int32_t linear_slope = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
   if (!linear_slope) {
-    next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
-    return;
+    return Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
   }
   const uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
   const uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1;
@@ -153,52 +151,65 @@ void Envelope::Trigger(EnvelopeSegment segment) {
 
 #define OUTPUT \
   bias += bias_slope; \
-  int32_t biased_value = (value_ >> 16) + (bias >> 16); \
-  CONSTRAIN(biased_value, 0, 0x7fff); \
-  *samples++ = biased_value;
+  int32_t overflowing_16 = (value >> 15) + (bias >> 15); \
+  uint16_t clipped_16 = ClipU16(overflowing_16); \
+  *samples++ = clipped_16 >> 1; // 0..INT16_MAX
+
+#define FETCH_LOCALS \
+  value = value_; \
+  target_overshoot_threshold = target_overshoot_threshold_; \
+  positive_segment_slope = positive_segment_slope_; \
+  phase = phase_; \
+  phase_increment = phase_increment_; \
+  segment = segment_;
 
 void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
-  // int32_t value = value_;
-  // int32_t target_overshoot_threshold = target_overshoot_threshold_;
-  // int32_t positive_segment_slope = positive_segment_slope_;
-  // int32_t phase = phase_;
-  // int32_t phase_increment = phase_increment_;
-
+  // This is unaffected by segment change, thus has distinct lifecycle from other locals
   int32_t bias = bias_;
   const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
 
-  for (size_t size = kAudioBlockSize; size--; ) {
-    while (segment_ != next_tick_segment_) { // Event loop
-      Trigger(next_tick_segment_);
-    }
+  int32_t value;
+  int32_t target_overshoot_threshold;
+  bool positive_segment_slope;
+  uint32_t phase;
+  uint32_t phase_increment;
+  EnvelopeSegment segment;
 
+  FETCH_LOCALS;
+
+  for (size_t size = kAudioBlockSize; size--; ) {
     // Early-release segment stays at max slope until it reaches target
-    if (segment_ != ENV_SEGMENT_EARLY_RELEASE) {
-      if (!phase_increment_) {
+    if (segment != ENV_SEGMENT_EARLY_RELEASE) {
+      if (!phase_increment) {
         OUTPUT;
         continue;
       }
-      phase_ += phase_increment_;
-      if (phase_ < phase_increment_) phase_ = UINT32_MAX;
+      phase += phase_increment;
+      if (phase < phase_increment) phase = UINT32_MAX;
     }
 
-    if (positive_segment_slope_ // The slope is about to overshoot the target
-      ? value_ > target_overshoot_threshold_
-      : value_ < target_overshoot_threshold_
+    if (positive_segment_slope // The slope is about to overshoot the target
+      ? value > target_overshoot_threshold
+      : value < target_overshoot_threshold
     ) {
       // Because the target is closer than the expo slope would have taken us,
       // this tick, which we spend on jumping to the target, is flatter than
       // nominal.  The alternative would be to, instead of jumping, immediately
       // Tick() again
-      value_ = target_;
+      value_ = value = target_;
       OUTPUT;
-      next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
+      Trigger(static_cast<EnvelopeSegment>(segment + 1));
+      FETCH_LOCALS;
       continue;
     }
 
-    value_ += expo_slope_[phase_ >> (32 - kLutExpoSlopeShiftSizeBits)];
+    value += expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
     OUTPUT;
   }
+
+  value_ = value;
+  phase_ = phase;
+  phase_increment_ = phase_increment;
 
   bias_ = bias;
 }

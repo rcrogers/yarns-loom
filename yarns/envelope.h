@@ -77,7 +77,6 @@ class Envelope {
  private:
   bool gate_;
   ADSR* adsr_;
-  EnvelopeSegment next_tick_segment_;
   
   // Value that needs to be reached at the end of each segment.
   int32_t segment_target_[ENV_SEGMENT_DEAD];
