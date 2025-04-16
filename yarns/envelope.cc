@@ -136,16 +136,28 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   if (!linear_slope) {
     return Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
   }
-  const uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
-  const uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1;
-  for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-    int8_t shift = lut_expo_slope_shift[i];
-    expo_slope_[i] = shift >= 0
-      ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
-      : linear_slope >> static_cast<uint8_t>(-shift);
-  }
-  target_overshoot_threshold_ = target_ - expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE - 1];
 
+  // Must get at least two samples per tick for expo slope to be accurate
+  const uint32_t max_expo_phase_increment = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
+  if (phase_increment_ > max_expo_phase_increment) {
+    // Fall back on linear slope
+    std::fill(
+      &expo_slope_[0],
+      &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+      linear_slope
+    );
+  } else {
+    const uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
+    const uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1;
+    for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
+      int8_t shift = lut_expo_slope_shift[i];
+      expo_slope_[i] = shift >= 0
+        ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
+        : linear_slope >> static_cast<uint8_t>(-shift);
+    }
+  }
+
+  target_overshoot_threshold_ = target_ - expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE - 1];
   phase_ = 0;
 }
 
@@ -161,7 +173,8 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   positive_segment_slope = positive_segment_slope_; \
   phase = phase_; \
   phase_increment = phase_increment_; \
-  segment = segment_;
+  segment = segment_; \
+  std::copy(&expo_slope_[0], &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE], &expo_slope[0]); \
 
 void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
   // This is unaffected by segment change, thus has distinct lifecycle from other locals
@@ -174,9 +187,9 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
   uint32_t phase;
   uint32_t phase_increment;
   EnvelopeSegment segment;
+  int32_t expo_slope[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
   FETCH_LOCALS;
-
   for (size_t size = kAudioBlockSize; size--; ) {
     // Early-release segment stays at max slope until it reaches target
     if (segment != ENV_SEGMENT_EARLY_RELEASE) {
@@ -198,6 +211,7 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
       // Tick() again
       value_ = value = target_;
       OUTPUT;
+
       Trigger(static_cast<EnvelopeSegment>(segment + 1));
       FETCH_LOCALS;
       continue;
