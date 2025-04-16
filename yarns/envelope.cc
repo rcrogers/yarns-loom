@@ -27,8 +27,10 @@
 
 #include "stmlib/stmlib.h"
 #include "stmlib/utils/dsp.h"
+#include "stmlib/dsp/dsp.h"
 
 #include "yarns/drivers/dac.h"
+#include "yarns/multi.h"
 
 namespace yarns {
 
@@ -99,14 +101,25 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   // In case the segment is not starting from its nominal value (e.g. an
   // attack that interrupts a still-high release), adjust its timing and slope
   // to try to match the nominal sound and feel
-  int32_t actual_delta = target_ - value_;
+  int32_t actual_delta = SatSub(target_, value_);
   int32_t nominal_start_value = segment_target_[
     stmlib::modulo(static_cast<int8_t>(segment) - 1, static_cast<int8_t>(ENV_SEGMENT_DEAD))
   ];
-  int32_t nominal_delta = target_ - nominal_start_value;
-  positive_segment_slope_ = nominal_delta >= 0;
-  if (positive_segment_slope_ != (actual_delta >= 0)) {
-    // If deltas differ in sign, the direction is wrong -- skip segment
+  int32_t nominal_delta = SatSub(target_, nominal_start_value);
+  const bool movement_expected = nominal_delta != 0;
+  // Skip stage if there is a direction disagreement or nowhere to go
+  if (
+    // Already at target (important to skip because 0 disrupts direction checks)
+    !actual_delta || (
+      // The stage is supposed to have a direction
+      movement_expected && (
+        // It doesn't agree with the actual direction
+        (nominal_delta > 0) != (actual_delta > 0)
+      )
+      // Cases: NoteOn during release from above peak level
+      // TODO are direction skips good in case of polarity reversals? only if there are non-attack cases
+    )
+  ) {
     next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
     return;
   }
@@ -115,12 +128,16 @@ void Envelope::Trigger(EnvelopeSegment segment) {
   // re-attacks that begin high), use nominal's steeper slope (e.g. so the
   // attack sounds like a quick catch-up vs a flat, blaring hold stage). If
   // actual is greater (rare in practice), use that
+  positive_segment_slope_ = actual_delta >= 0;
   int32_t delta = positive_segment_slope_
     ? std::max(nominal_delta, actual_delta)
     : std::min(nominal_delta, actual_delta);
 
   int32_t linear_slope = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
-  if (!linear_slope) linear_slope = positive_segment_slope_ ? 1 : -1;
+  if (!linear_slope) {
+    next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
+    return;
+  }
   const uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
   const uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1;
   for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
