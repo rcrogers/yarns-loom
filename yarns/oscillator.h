@@ -95,8 +95,7 @@ class Oscillator {
 
   inline void Init(uint16_t scale) {
     scale_ = scale;
-    gain_.Init();
-    timbre_.Init();
+    gain_bias_ = timbre_bias_ = 0;
     gain_envelope_.Init();
     timbre_envelope_.Init();
     svf_.Init();
@@ -162,7 +161,8 @@ class Oscillator {
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;
-  Interpolator<kAudioBlockSizeBits> timbre_, gain_;
+  // Interpolator<kAudioBlockSizeBits> timbre_, gain_;
+  int16_t gain_bias_, timbre_bias_;
   int16_t pitch_;
 
   uint32_t phase_;

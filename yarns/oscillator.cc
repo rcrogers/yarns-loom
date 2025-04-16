@@ -103,7 +103,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
     // if (shape_ >= OSC_SHAPE_FM) {
     //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
     // }
-    gain_.SetTarget(gain_envelope_.tremolo(tremolo));
+    gain_bias_ = gain_envelope_.tremolo(tremolo);
 
     int32_t strength = 0x7fff - (pitch << 1);
     CONSTRAIN(strength, 0, 0x7fff);
@@ -114,7 +114,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
     ) {
       timbre = timbre * strength >> 15;
     }
-    timbre_.SetTarget(timbre);
+    timbre_bias_ = timbre;
   }
 
 uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
@@ -151,46 +151,19 @@ void Oscillator::Render(int16_t* audio_mix) {
   phase_increment_ = ComputePhaseIncrement(pitch_);
   
   int16_t timbre_samples[kAudioBlockSize] = {0};
-  // int16_t* timbre_ptr = timbre_samples;
-  // timbre_.ComputeSlope();
-  // for (size_t size = kAudioBlockSize; size--;) {
-  //   timbre_envelope_.Tick();
-  //   timbre_.Tick();
-  //   int32_t timbre = (timbre_.value() + timbre_envelope_.value()) << 1;
-  //   timbre = stmlib::ClipU16(timbre);
-  //   *timbre_ptr++ = timbre >> 1;
-  // }
-  timbre_envelope_.RenderSamples(timbre_samples);
+  timbre_envelope_.RenderSamples(timbre_samples, timbre_bias_ << 16);
+  // TODO bounds wrong
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
   int16_t audio_samples[kAudioBlockSize] = {0};
   (this->*fn)(timbre_samples, audio_samples);
-  
-  // This experiment shows major clipping
-  // (this->*fn)(timbre_samples, audio_mix);
-  // return;
 
   int16_t gain_samples[kAudioBlockSize] = {0};
-  // int16_t* gain_ptr = gain_samples;
-  // gain_.ComputeSlope();
-  // for (size_t size = kAudioBlockSize; size--;) {
-  //   gain_envelope_.Tick();
-  //   gain_.Tick();
-  //   int32_t gain = (gain_.value() + gain_envelope_.value()) << 1;
-  //   gain = stmlib::ClipU16(gain);
-  //   *gain_ptr++ = gain;
-  // }
-  gain_envelope_.RenderSamples(gain_samples);
+  gain_envelope_.RenderSamples(gain_samples, gain_bias_ << 16);
   
   q15_multiply_accumulate<kAudioBlockSize>(gain_samples, audio_samples, audio_mix);
-  // for (size_t i = 0; i < kAudioBlockSize; ++i) {
-  //   int32_t gain = gain_samples[i];
-  //   int32_t sample = audio_samples[i];
-  //   int32_t result = (gain * sample) >> 15;
-  //   audio_mix[i] += result;
-  // }
 }
 
 #define SET_TIMBRE \

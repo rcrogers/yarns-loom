@@ -155,7 +155,8 @@ class Envelope {
 
     int32_t linear_slope = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
     if (!linear_slope) linear_slope = positive_segment_slope_ ? 1 : -1;
-    uint8_t max_shift = __builtin_clzl(abs(linear_slope));
+    const uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
+    const uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1;
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
       int8_t shift = lut_expo_slope_shift[i];
       expo_slope_[i] = shift >= 0
@@ -167,11 +168,21 @@ class Envelope {
     phase_ = 0;
   }
 
-  inline void RenderSamples(int16_t* samples) {
+  #define OUTPUT \
+    bias += bias_slope; \
+    int32_t biased_value = (value_ >> 16) + (bias >> 16); \
+    CONSTRAIN(biased_value, 0, 0x7fff); \
+    *samples++ = biased_value;
+
+  inline void RenderSamples(int16_t* samples, int32_t new_bias) {
     // int32_t value = value_;
     // int32_t target_overshoot_threshold = target_overshoot_threshold_;
+    // int32_t positive_segment_slope = positive_segment_slope_;
     // int32_t phase = phase_;
     // int32_t phase_increment = phase_increment_;
+
+    int32_t bias = bias_;
+    const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
 
     for (size_t size = kAudioBlockSize; size--; ) {
       while (segment_ != next_tick_segment_) { // Event loop
@@ -181,7 +192,7 @@ class Envelope {
       // Early-release segment stays at max slope until it reaches target
       if (segment_ != ENV_SEGMENT_EARLY_RELEASE) {
         if (!phase_increment_) {
-          *samples++ = value_ >> 16;
+          OUTPUT;
           continue;
         }
         phase_ += phase_increment_;
@@ -197,14 +208,16 @@ class Envelope {
         // nominal.  The alternative would be to, instead of jumping, immediately
         // Tick() again
         value_ = target_;
-        *samples++ = value_ >> 16;
+        OUTPUT;
         next_tick_segment_ = static_cast<EnvelopeSegment>(segment_ + 1);
         continue;
       }
 
       value_ += expo_slope_[phase_ >> (32 - kLutExpoSlopeShiftSizeBits)];
-      *samples++ = value_ >> 16;
+      OUTPUT;
     }
+
+    bias_ = bias;
   }
 
   inline int16_t value() const { return value_ >> 16; }
@@ -224,6 +237,8 @@ class Envelope {
   // Target and current value of the current segment.
   int32_t target_;
   int32_t value_;
+
+  int32_t bias_;
 
   int32_t target_overshoot_threshold_;
   // Maps slices of the phase to slopes, approximating an exponential curve

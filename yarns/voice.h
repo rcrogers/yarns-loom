@@ -342,12 +342,11 @@ class CVOutput {
   inline void NoteOff() { envelope_.NoteOff(); }
 
   uint16_t RefreshEnvelope(uint16_t tremolo) {
-    tremolo_.SetTarget(envelope_.tremolo(tremolo));
-    tremolo_.ComputeSlope();
+    envelope_bias_ = envelope_.tremolo(tremolo);
     return volts_dac_code(0) - envelope_value();
   }
   inline uint16_t envelope_value() {
-    int32_t value = (tremolo_.value() + envelope_.value()) << 1;
+    int32_t value = (envelope_bias_ + envelope_.value()) << 1;
     CONSTRAIN(value, 0, UINT16_MAX);
     return value;
    }
@@ -419,7 +418,7 @@ class CVOutput {
   uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
   Envelope envelope_;
-  Interpolator<kAudioBlockSizeBits> tremolo_; // 2^4 = 16 approximates the ratio between 4 kHz Refresh and 40 kHz GetEnvelopeSample
+  int16_t envelope_bias_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };

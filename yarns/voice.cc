@@ -99,7 +99,7 @@ void CVOutput::Init(bool reset_calibration) {
   dirty_ = false;
   dc_role_ = DC_PITCH;
   envelope_.Init();
-  tremolo_.Init();
+  envelope_bias_ = 0;
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
@@ -261,10 +261,9 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
   // TODO count envelope renders
   int16_t samples[kAudioBlockSize] = {0};
   if (is_envelope()) {
-    envelope_.RenderSamples(samples);
+    envelope_.RenderSamples(samples, envelope_bias_ << 16);
     for (size_t i = 0; i < kAudioBlockSize; ++i) {
-      tremolo_.Tick();
-      samples[i] = stmlib::ClipU16((tremolo_.value() + samples[i]) << 1);
+      samples[i] <<= 1;
     }
     dac.BufferSamples(block, channel, samples);
   } else if (is_audio()) {
