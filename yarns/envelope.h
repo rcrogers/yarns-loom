@@ -58,7 +58,7 @@ class Envelope {
   Envelope() { }
   ~Envelope() { }
 
-  void Init();
+  void Init(int16_t zero_value);
   void NoteOff();
   void NoteOn(
     ADSR& adsr,

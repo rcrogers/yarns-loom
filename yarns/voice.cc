@@ -98,7 +98,7 @@ void CVOutput::Init(bool reset_calibration) {
   }
   dirty_ = false;
   dc_role_ = DC_PITCH;
-  envelope_.Init();
+  envelope_.Init(0);
   envelope_bias_ = 0;
 }
 

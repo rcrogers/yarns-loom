@@ -36,9 +36,9 @@ namespace yarns {
 
 using namespace stmlib;
 
-void Envelope::Init() {
+void Envelope::Init(int16_t zero_value) {
   gate_ = false;
-  value_ = segment_target_[ENV_SEGMENT_RELEASE] = 0;
+  value_ = segment_target_[ENV_SEGMENT_RELEASE] = zero_value << 16;
   Trigger(ENV_SEGMENT_DEAD);
   std::fill(
     &expo_slope_[0],

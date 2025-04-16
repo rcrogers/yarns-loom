@@ -95,8 +95,8 @@ class Oscillator {
   inline void Init(uint16_t scale) {
     scale_ = scale;
     gain_bias_ = timbre_bias_ = 0;
-    gain_envelope_.Init();
-    timbre_envelope_.Init();
+    gain_envelope_.Init(0);
+    timbre_envelope_.Init(0);
     svf_.Init();
     pitch_ = 60 << 7;
     phase_ = 0;
