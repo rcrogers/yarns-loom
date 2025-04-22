@@ -32,14 +32,14 @@ namespace yarns {
 
 using namespace stmlib;
 
-enum EnvelopeSegment {
-  ENV_SEGMENT_ATTACK,
-  ENV_SEGMENT_DECAY,
-  ENV_SEGMENT_EARLY_RELEASE, // Gate ended before sustain, so skip sustain
-  ENV_SEGMENT_SUSTAIN,
-  ENV_SEGMENT_RELEASE,
-  ENV_SEGMENT_DEAD,
-  ENV_NUM_SEGMENTS,
+enum EnvelopeStage {
+  ENV_STAGE_ATTACK,
+  ENV_STAGE_DECAY,
+  ENV_STAGE_EARLY_RELEASE, // Gate ended before sustain, so skip sustain
+  ENV_STAGE_SUSTAIN,
+  ENV_STAGE_RELEASE,
+  ENV_STAGE_DEAD,
+  ENV_NUM_STAGES,
 };
 
 struct ADSR {
@@ -64,11 +64,11 @@ class Envelope {
     ADSR& adsr,
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   );
-  void Trigger(EnvelopeSegment segment);
+  void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* samples, int32_t new_bias);
 
   inline int16_t tremolo(uint16_t strength) const {
-    int32_t relative_value = (value_ - segment_target_[ENV_SEGMENT_RELEASE]) >> 16;
+    int32_t relative_value = (value_ - stage_target_[ENV_STAGE_RELEASE]) >> 16;
     return relative_value * -strength >> 16;
   }
 
@@ -78,14 +78,14 @@ class Envelope {
   bool gate_;
   ADSR* adsr_;
   
-  // Value that needs to be reached at the end of each segment.
-  int32_t segment_target_[ENV_SEGMENT_DEAD];
-  bool positive_scale_, positive_segment_slope_;
+  // Value that needs to be reached at the end of each stage.
+  int32_t stage_target_[ENV_STAGE_DEAD];
+  bool positive_scale_, positive_stage_slope_;
   
-  // Current segment.
-  EnvelopeSegment segment_;
+  // Current stage.
+  EnvelopeStage stage_;
   
-  // Target and current value of the current segment.
+  // Target and current value of the current stage.
   int32_t target_;
   int32_t value_;
 

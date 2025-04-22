@@ -38,8 +38,8 @@ using namespace stmlib;
 
 void Envelope::Init(int16_t zero_value) {
   gate_ = false;
-  value_ = segment_target_[ENV_SEGMENT_RELEASE] = zero_value << 16;
-  Trigger(ENV_SEGMENT_DEAD);
+  value_ = stage_target_[ENV_STAGE_RELEASE] = zero_value << 16;
+  Trigger(ENV_STAGE_DEAD);
   std::fill(
     &expo_slope_[0],
     &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
@@ -49,12 +49,12 @@ void Envelope::Init(int16_t zero_value) {
 
 void Envelope::NoteOff() {
   gate_ = false;
-  switch (segment_) {
-    case ENV_SEGMENT_ATTACK:
-    case ENV_SEGMENT_DECAY:
-      Trigger(ENV_SEGMENT_EARLY_RELEASE); break;
-    case ENV_SEGMENT_SUSTAIN:
-      Trigger(ENV_SEGMENT_EARLY_RELEASE); break;
+  switch (stage_) {
+    case ENV_STAGE_ATTACK:
+    case ENV_STAGE_DECAY:
+      Trigger(ENV_STAGE_EARLY_RELEASE); break;
+    case ENV_STAGE_SUSTAIN:
+      Trigger(ENV_STAGE_EARLY_RELEASE); break;
     default: break;
   }
 }
@@ -68,42 +68,42 @@ void Envelope::NoteOn(
   positive_scale_ = scale >= 0;
   min_target <<= 16;
   // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
-  segment_target_[ENV_SEGMENT_ATTACK] = min_target + scale * adsr.peak;
-  segment_target_[ENV_SEGMENT_DECAY] =
-    segment_target_[ENV_SEGMENT_EARLY_RELEASE] =
-    segment_target_[ENV_SEGMENT_SUSTAIN] =
+  stage_target_[ENV_STAGE_ATTACK] = min_target + scale * adsr.peak;
+  stage_target_[ENV_STAGE_DECAY] =
+    stage_target_[ENV_STAGE_EARLY_RELEASE] =
+    stage_target_[ENV_STAGE_SUSTAIN] =
     min_target + scale * adsr.sustain;
-  segment_target_[ENV_SEGMENT_RELEASE] = min_target;
+  stage_target_[ENV_STAGE_RELEASE] = min_target;
 
   if (!gate_) {
     gate_ = true;
-    Trigger(ENV_SEGMENT_ATTACK);
+    Trigger(ENV_STAGE_ATTACK);
   }
 }
 
-void Envelope::Trigger(EnvelopeSegment segment) {
-  if (gate_ && segment == ENV_SEGMENT_EARLY_RELEASE) {
-    segment = ENV_SEGMENT_SUSTAIN; // Skip early-release when gate is high
+void Envelope::Trigger(EnvelopeStage stage) {
+  if (gate_ && stage == ENV_STAGE_EARLY_RELEASE) {
+    stage = ENV_STAGE_SUSTAIN; // Skip early-release when gate is high
   }
-  if (!gate_ && segment == ENV_SEGMENT_SUSTAIN) {
-    segment = ENV_SEGMENT_RELEASE; // Skip sustain when gate is low
+  if (!gate_ && stage == ENV_STAGE_SUSTAIN) {
+    stage = ENV_STAGE_RELEASE; // Skip sustain when gate is low
   }
-  segment_ = segment;
-  switch (segment) {
-    case ENV_SEGMENT_ATTACK : phase_increment_ = adsr_->attack  ; break;
-    case ENV_SEGMENT_DECAY  : phase_increment_ = adsr_->decay   ; break;
-    case ENV_SEGMENT_EARLY_RELEASE : phase_increment_ = adsr_->release ; break;
-    case ENV_SEGMENT_RELEASE: phase_increment_ = adsr_->release ; break;
+  stage_ = stage;
+  switch (stage) {
+    case ENV_STAGE_ATTACK : phase_increment_ = adsr_->attack  ; break;
+    case ENV_STAGE_DECAY  : phase_increment_ = adsr_->decay   ; break;
+    case ENV_STAGE_EARLY_RELEASE : phase_increment_ = adsr_->release ; break;
+    case ENV_STAGE_RELEASE: phase_increment_ = adsr_->release ; break;
     default: phase_increment_ = 0; return;
   }
-  target_ = segment_target_[segment];
+  target_ = stage_target_[stage];
 
-  // In case the segment is not starting from its nominal value (e.g. an
+  // In case the stage is not starting from its nominal value (e.g. an
   // attack that interrupts a still-high release), adjust its timing and slope
   // to try to match the nominal sound and feel
   int32_t actual_delta = SatSub(target_, value_);
-  int32_t nominal_start_value = segment_target_[
-    stmlib::modulo(static_cast<int8_t>(segment) - 1, static_cast<int8_t>(ENV_SEGMENT_DEAD))
+  int32_t nominal_start_value = stage_target_[
+    stmlib::modulo(static_cast<int8_t>(stage) - 1, static_cast<int8_t>(ENV_STAGE_DEAD))
   ];
   int32_t nominal_delta = SatSub(target_, nominal_start_value);
   const bool movement_expected = nominal_delta != 0;
@@ -120,21 +120,21 @@ void Envelope::Trigger(EnvelopeSegment segment) {
       // TODO are direction skips good in case of polarity reversals? only if there are non-attack cases
     )
   ) {
-    return Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
+    return Trigger(static_cast<EnvelopeStage>(stage_ + 1));
   }
   // Pick the larger delta, and thus the steeper slope that reaches the target
   // more quickly.  If actual delta is smaller than nominal (e.g. from
   // re-attacks that begin high), use nominal's steeper slope (e.g. so the
   // attack sounds like a quick catch-up vs a flat, blaring hold stage). If
   // actual is greater (rare in practice), use that
-  positive_segment_slope_ = actual_delta >= 0;
-  int32_t delta = positive_segment_slope_
+  positive_stage_slope_ = actual_delta >= 0;
+  int32_t delta = positive_stage_slope_
     ? std::max(nominal_delta, actual_delta)
     : std::min(nominal_delta, actual_delta);
 
   int32_t linear_slope = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
   if (!linear_slope) {
-    return Trigger(static_cast<EnvelopeSegment>(segment_ + 1));
+    return Trigger(static_cast<EnvelopeStage>(stage_ + 1));
   }
 
   // Must get at least two samples per tick for expo slope to be accurate
@@ -170,29 +170,29 @@ void Envelope::Trigger(EnvelopeSegment segment) {
 #define FETCH_LOCALS \
   value = value_; \
   target_overshoot_threshold = target_overshoot_threshold_; \
-  positive_segment_slope = positive_segment_slope_; \
+  positive_stage_slope = positive_stage_slope_; \
   phase = phase_; \
   phase_increment = phase_increment_; \
-  segment = segment_; \
+  stage = stage_; \
   std::copy(&expo_slope_[0], &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE], &expo_slope[0]); \
 
 void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
-  // This is unaffected by segment change, thus has distinct lifecycle from other locals
+  // This is unaffected by stage change, thus has distinct lifecycle from other locals
   int32_t bias = bias_;
   const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
 
   int32_t value;
   int32_t target_overshoot_threshold;
-  bool positive_segment_slope;
+  bool positive_stage_slope;
   uint32_t phase;
   uint32_t phase_increment;
-  EnvelopeSegment segment;
+  EnvelopeStage stage;
   int32_t expo_slope[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
   FETCH_LOCALS;
   for (size_t size = kAudioBlockSize; size--; ) {
-    // Early-release segment stays at max slope until it reaches target
-    if (segment != ENV_SEGMENT_EARLY_RELEASE) {
+    // Early-release stage stays at max slope until it reaches target
+    if (stage != ENV_STAGE_EARLY_RELEASE) {
       if (!phase_increment) {
         OUTPUT;
         continue;
@@ -201,7 +201,7 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
       if (phase < phase_increment) phase = UINT32_MAX;
     }
 
-    if (positive_segment_slope // The slope is about to overshoot the target
+    if (positive_stage_slope // The slope is about to overshoot the target
       ? value > target_overshoot_threshold
       : value < target_overshoot_threshold
     ) {
@@ -212,7 +212,7 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
       value_ = value = target_;
       OUTPUT;
 
-      Trigger(static_cast<EnvelopeSegment>(segment + 1));
+      Trigger(static_cast<EnvelopeStage>(stage + 1));
       FETCH_LOCALS;
       continue;
     }
