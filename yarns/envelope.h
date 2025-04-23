@@ -80,7 +80,6 @@ class Envelope {
   
   // Value that needs to be reached at the end of each stage.
   int32_t stage_target_[ENV_STAGE_DEAD];
-  bool positive_scale_, positive_stage_slope_;
   
   // Current stage.
   EnvelopeStage stage_;

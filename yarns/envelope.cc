@@ -65,7 +65,6 @@ void Envelope::NoteOn(
 ) {
   adsr_ = &adsr;
   int16_t scale = max_target - min_target;
-  positive_scale_ = scale >= 0;
   min_target <<= 16;
   // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
   stage_target_[ENV_STAGE_ATTACK] = min_target + scale * adsr.peak;
@@ -127,8 +126,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // re-attacks that begin high), use nominal's steeper slope (e.g. so the
   // attack sounds like a quick catch-up vs a flat, blaring hold stage). If
   // actual is greater (rare in practice), use that
-  positive_stage_slope_ = actual_delta >= 0;
-  int32_t delta = positive_stage_slope_
+  int32_t delta = actual_delta >= 0
     ? std::max(nominal_delta, actual_delta)
     : std::min(nominal_delta, actual_delta);
 
@@ -154,6 +152,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
       expo_slope_[i] = shift >= 0
         ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
         : linear_slope >> static_cast<uint8_t>(-shift);
+      if (!expo_slope_[i]) {
+        expo_slope_[i] = linear_slope > 0 ? 1 : -1;
+      }
     }
   }
 
@@ -170,7 +171,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
 #define FETCH_LOCALS \
   value = value_; \
   target_overshoot_threshold = target_overshoot_threshold_; \
-  positive_stage_slope = positive_stage_slope_; \
   phase = phase_; \
   phase_increment = phase_increment_; \
   stage = stage_; \
@@ -183,7 +183,6 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
 
   int32_t value;
   int32_t target_overshoot_threshold;
-  bool positive_stage_slope;
   uint32_t phase;
   uint32_t phase_increment;
   EnvelopeStage stage;
@@ -201,7 +200,8 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
       if (phase < phase_increment) phase = UINT32_MAX;
     }
 
-    if (positive_stage_slope // The slope is about to overshoot the target
+    int32_t slope = expo_slope[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
+    if (slope > 0 // The slope is about to overshoot the target
       ? value > target_overshoot_threshold
       : value < target_overshoot_threshold
     ) {
@@ -215,10 +215,10 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
       Trigger(static_cast<EnvelopeStage>(stage + 1));
       FETCH_LOCALS;
       continue;
+    } else {
+      value += slope;
+      OUTPUT;
     }
-
-    value += expo_slope_[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
-    OUTPUT;
   }
 
   value_ = value;
