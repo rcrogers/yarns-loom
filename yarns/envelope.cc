@@ -38,7 +38,7 @@ using namespace stmlib;
 
 void Envelope::Init(int16_t zero_value) {
   gate_ = false;
-  value_ = stage_target_[ENV_STAGE_RELEASE] = zero_value << 16;
+  value_ = stage_target_[ENV_STAGE_RELEASE] = zero_value << (31 - 16);
   Trigger(ENV_STAGE_DEAD);
   std::fill(
     &expo_slope_[0],
@@ -67,12 +67,12 @@ void Envelope::NoteOn(
   int16_t scale = max_target - min_target;
   min_target <<= 16;
   // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
-  stage_target_[ENV_STAGE_ATTACK] = min_target + scale * adsr.peak;
+  stage_target_[ENV_STAGE_ATTACK] = (min_target + scale * adsr.peak) >> 1;
   stage_target_[ENV_STAGE_DECAY] =
     stage_target_[ENV_STAGE_EARLY_RELEASE] =
     stage_target_[ENV_STAGE_SUSTAIN] =
-    min_target + scale * adsr.sustain;
-  stage_target_[ENV_STAGE_RELEASE] = min_target;
+    (min_target + scale * adsr.sustain) >> 1;
+  stage_target_[ENV_STAGE_RELEASE] = min_target >> 1;
 
   if (!gate_) {
     gate_ = true;
@@ -88,6 +88,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
     stage = ENV_STAGE_RELEASE; // Skip sustain when gate is low
   }
   stage_ = stage;
+  phase_ = 0;
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_ = adsr_->attack  ; break;
     case ENV_STAGE_DECAY  : phase_increment_ = adsr_->decay   ; break;
@@ -95,16 +96,16 @@ void Envelope::Trigger(EnvelopeStage stage) {
     case ENV_STAGE_RELEASE: phase_increment_ = adsr_->release ; break;
     default: phase_increment_ = 0; return;
   }
-  target_ = stage_target_[stage];
+  int32_t target = stage_target_[stage];
 
   // In case the stage is not starting from its nominal value (e.g. an
   // attack that interrupts a still-high release), adjust its timing and slope
   // to try to match the nominal sound and feel
-  int32_t actual_delta = SatSub(target_, value_);
+  int32_t actual_delta = SatSub(target, value_, 31);
   int32_t nominal_start_value = stage_target_[
     stmlib::modulo(static_cast<int8_t>(stage) - 1, static_cast<int8_t>(ENV_STAGE_DEAD))
   ];
-  int32_t nominal_delta = SatSub(target_, nominal_start_value);
+  int32_t nominal_delta = SatSub(target, nominal_start_value, 31);
   const bool movement_expected = nominal_delta != 0;
   // Skip stage if there is a direction disagreement or nowhere to go
   if (
@@ -146,7 +147,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
     );
   } else {
     const uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
-    const uint8_t max_shift = __builtin_clzl(slope_for_clz) - 1;
+    const uint8_t max_shift = __builtin_clzl(slope_for_clz) - (32 - 30);
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
       int8_t shift = lut_expo_slope_shift[i];
       expo_slope_[i] = shift >= 0
@@ -157,23 +158,20 @@ void Envelope::Trigger(EnvelopeStage stage) {
       }
     }
   }
-
-  target_overshoot_threshold_ = target_ - expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE - 1];
-  phase_ = 0;
 }
 
 #define OUTPUT \
   bias += bias_slope; \
-  int32_t overflowing_16 = (value >> 15) + (bias >> 15); \
-  uint16_t clipped_16 = ClipU16(overflowing_16); \
-  *samples++ = clipped_16 >> 1; // 0..INT16_MAX
+  int32_t overflowing_u16 = (value >> (30 - 16)) + (bias >> (31 - 16)); \
+  uint16_t clipped_u16 = ClipU16(overflowing_u16); \
+  *samples++ = clipped_u16 >> 1; // 0..INT16_MAX
 
 #define FETCH_LOCALS \
+  stage = stage_; \
   value = value_; \
-  target_overshoot_threshold = target_overshoot_threshold_; \
+  target = stage_target_[stage]; \
   phase = phase_; \
   phase_increment = phase_increment_; \
-  stage = stage_; \
   std::copy(&expo_slope_[0], &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE], &expo_slope[0]); \
 
 void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
@@ -182,7 +180,7 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
   const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
 
   int32_t value;
-  int32_t target_overshoot_threshold;
+  int32_t target;
   uint32_t phase;
   uint32_t phase_increment;
   EnvelopeStage stage;
@@ -201,20 +199,17 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
     }
 
     int32_t slope = expo_slope[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
-    if (slope > 0 // The slope is about to overshoot the target
-      ? value > target_overshoot_threshold
-      : value < target_overshoot_threshold
+    value += slope;
+    if (
+      (slope > 0 && value >= target) ||
+      (slope < 0 && value <= target)
     ) {
-      // Because the target is closer than the expo slope would have taken us,
-      // this tick, which we spend on jumping to the target, is flatter than
-      // nominal.  The alternative would be to, instead of jumping, immediately
-      // Tick() again
-      value_ = value = target_;
+      value = stage_target_[stage]; // Don't go past target
       OUTPUT;
 
+      value_ = value; // So Trigger knows actual start value
       Trigger(static_cast<EnvelopeStage>(stage + 1));
       FETCH_LOCALS;
-      continue;
     } else {
       value += slope;
       OUTPUT;

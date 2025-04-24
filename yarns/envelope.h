@@ -68,31 +68,26 @@ class Envelope {
   void RenderSamples(int16_t* samples, int32_t new_bias);
 
   inline int16_t tremolo(uint16_t strength) const {
-    int32_t relative_value = (value_ - stage_target_[ENV_STAGE_RELEASE]) >> 16;
+    int32_t relative_value = (value_ - stage_target_[ENV_STAGE_RELEASE]) >> (31 - 16);
     return relative_value * -strength >> 16;
   }
 
-  inline int16_t value() const { return value_ >> 16; }
+  inline int16_t value() const { return value_ >> (31 - 16); }
 
  private:
   bool gate_;
   ADSR* adsr_;
   
-  // Value that needs to be reached at the end of each stage.
+  // 31-bit, so slope increment can skip overflow checks
   int32_t stage_target_[ENV_STAGE_DEAD];
-  
-  // Current stage.
-  EnvelopeStage stage_;
-  
-  // Target and current value of the current stage.
-  int32_t target_;
   int32_t value_;
+  int32_t expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
+  // 32-bit
   int32_t bias_;
 
-  int32_t target_overshoot_threshold_;
-  // Maps slices of the phase to slopes, approximating an exponential curve
-  int32_t expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  // Current stage.
+  EnvelopeStage stage_;
 
   uint32_t phase_, phase_increment_;
 
