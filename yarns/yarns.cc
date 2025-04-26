@@ -63,7 +63,6 @@ extern "C" {
 
 uint16_t cv[4];
 bool gate[4];
-bool is_high_freq[4];
 uint16_t factory_testing_counter;
 
 uint32_t err_count = 0;
@@ -115,11 +114,6 @@ void SysTick_Handler() {
     multi.RefreshInternalClock();
     multi.Refresh();
     multi.GetCvGate(cv, gate);
-
-    is_high_freq[0] = multi.cv_output(0).is_high_freq();
-    is_high_freq[1] = multi.cv_output(1).is_high_freq();
-    is_high_freq[2] = multi.cv_output(2).is_high_freq();
-    is_high_freq[3] = multi.cv_output(3).is_high_freq();
     
     // In calibration mode, overrides the DAC outputs with the raw calibration
     // table values.
