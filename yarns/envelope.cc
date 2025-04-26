@@ -38,7 +38,7 @@ using namespace stmlib;
 
 void Envelope::Init(int16_t zero_value) {
   gate_ = false;
-  value_ = stage_target_[ENV_STAGE_RELEASE] = zero_value << (31 - 16);
+  value_ = target_ = stage_target_[ENV_STAGE_RELEASE] = zero_value << (31 - 16);
   Trigger(ENV_STAGE_DEAD);
   std::fill(
     &expo_slope_[0],
@@ -73,29 +73,30 @@ void Envelope::NoteOn(
   }
 }
 
+// Update state of current stage
 void Envelope::Trigger(EnvelopeStage stage) {
   if (!gate_ && stage == ENV_STAGE_SUSTAIN) {
     stage = ENV_STAGE_RELEASE; // Skip sustain when gate is low
   }
   stage_ = stage;
   phase_ = 0;
+  target_ = stage_target_[stage];
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_ = adsr_->attack  ; break;
     case ENV_STAGE_DECAY  : phase_increment_ = adsr_->decay   ; break;
     case ENV_STAGE_RELEASE: phase_increment_ = adsr_->release ; break;
     default: phase_increment_ = 0; return;
   }
-  int32_t target = stage_target_[stage];
 
   // In case the stage is not starting from its nominal value (e.g. an
   // attack that interrupts a still-high release), adjust its timing and slope
   // to try to match the nominal sound and feel
-  int32_t actual_delta = SatSub(target, value_, 31);
+  int32_t actual_delta = SatSub(target_, value_, 31);
   nominal_start_ = stage_target_[stmlib::modulo(
       static_cast<int8_t>(stage) - 1,
       static_cast<int8_t>(ENV_NUM_STAGES)
   )];
-  int32_t nominal_delta = SatSub(target, nominal_start_, 31);
+  int32_t nominal_delta = SatSub(target_, nominal_start_, 31);
 
   const bool movement_expected = nominal_delta != 0;
   // Skip stage if there is a direction disagreement or nowhere to go
@@ -144,7 +145,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
       linear_slope
     );
   } else {
-    const uint8_t max_shift = signed_clz(linear_slope) - 1; // Maintain half-scaling
+    const uint8_t max_shift = signed_clz(linear_slope) - 1; // Maintain 31-bit scaling
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
       int8_t shift = lut_expo_slope_shift[i];
       expo_slope_[i] = shift >= 0
@@ -166,7 +167,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
 #define FETCH_LOCALS \
   stage = stage_; \
   value = value_; \
-  target = stage_target_[stage]; \
+  target = target_; \
   nominal_start = nominal_start_; \
   nominal_start_reached = false; \
   phase = phase_; \

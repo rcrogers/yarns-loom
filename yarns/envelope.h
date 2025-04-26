@@ -81,10 +81,10 @@ class Envelope {
  private:
   bool gate_;
   ADSR* adsr_;
-  
+
   // 31-bit, so slope increment can skip overflow checks
   int32_t stage_target_[ENV_NUM_STAGES];
-  int32_t value_;
+  int32_t target_, value_;
   int32_t expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE];
   int32_t nominal_start_;
 
