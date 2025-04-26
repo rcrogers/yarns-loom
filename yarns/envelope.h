@@ -64,7 +64,14 @@ class Envelope {
     int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
   );
   void Trigger(EnvelopeStage stage);
-  void RenderSamples(int16_t* samples, int32_t new_bias);
+  void RenderSamples(int16_t* sample_buffer, int32_t bias_target);
+  void RenderStageDispatch(
+    int16_t* sample_buffer, size_t samples_left, int32_t bias, int32_t bias_slope
+  );
+  template<bool MOVING, bool POSITIVE_SLOPE>
+  void RenderStage(
+    int16_t* sample_buffer, size_t samples_left, int32_t bias, int32_t bias_slope
+  );
 
   inline int16_t tremolo(uint16_t strength) const {
     int32_t relative_value = (value_ - stage_target_[ENV_STAGE_RELEASE]) >> (31 - 16);

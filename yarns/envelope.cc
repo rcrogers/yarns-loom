@@ -173,46 +173,56 @@ void Envelope::Trigger(EnvelopeStage stage) {
   }
 }
 
+void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target) {
+  // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
+  const int32_t bias_slope = ((bias_target >> 1) - (bias_ >> 1)) >> (kAudioBlockSizeBits - 1);
+  size_t samples_left = kAudioBlockSize;
+  RenderStageDispatch(sample_buffer, samples_left, bias_, bias_slope);
+}
+
+void Envelope::RenderStageDispatch(
+  int16_t* sample_buffer, size_t samples_left, int32_t bias, int32_t bias_slope
+) {
+  if (phase_increment_ == 0) {
+    RenderStage<false, false >(sample_buffer, samples_left, bias, bias_slope);
+  } else if (expo_slope_[0] > 0) {
+    RenderStage<true, true   >(sample_buffer, samples_left, bias, bias_slope);
+  } else {
+    RenderStage<true, false  >(sample_buffer, samples_left, bias, bias_slope);
+  }
+}
+
+#define VALUE_PASSED(x) ( \
+  ( POSITIVE_SLOPE && value >= x) || \
+  (!POSITIVE_SLOPE && value <= x) \
+)
+
 #define OUTPUT \
   bias += bias_slope; \
   int32_t overflowing_u16 = (value >> (30 - 16)) + (bias >> (31 - 16)); \
   uint16_t clipped_u16 = ClipU16(overflowing_u16); \
-  *samples++ = clipped_u16 >> 1; // 0..INT16_MAX
+  *sample_buffer++ = clipped_u16 >> 1; // 0..INT16_MAX
 
-#define CACHE_STAGE_DATA \
-  stage = stage_; \
-  value = value_; \
-  target = target_; \
-  nominal_start = nominal_start_; \
-  nominal_start_reached = false; \
-  phase = phase_; \
-  phase_increment = phase_increment_; \
-  std::copy(&expo_slope_[0], &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE], &expo_slope[0]); \
-  positive_slope = expo_slope[0] > 0; \
-
-#define VALUE_PASSED(x) ( \
-  ( positive_slope && value >= x) || \
-  (!positive_slope && value <= x) \
-)
-
-void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
-  // This is unaffected by stage change, thus has distinct lifecycle from other locals
-  int32_t bias = bias_;
-  const int32_t bias_slope = ((new_bias >> 1) - (bias >> 1)) >> (kAudioBlockSizeBits - 1);
-
-  int32_t value;
-  int32_t target;
-  uint32_t phase;
-  uint32_t phase_increment;
-  EnvelopeStage stage;
+template<bool MOVING, bool POSITIVE_SLOPE>
+void Envelope::RenderStage(
+  int16_t* sample_buffer, size_t samples_left, int32_t bias, int32_t bias_slope
+) {
+  int32_t value = value_;
+  int32_t target = target_;
+  uint32_t phase = phase_;
+  uint32_t phase_increment = phase_increment_;
+  EnvelopeStage stage = stage_;
   int32_t expo_slope[LUT_EXPO_SLOPE_SHIFT_SIZE];
-  int32_t nominal_start;
-  bool nominal_start_reached;
-  bool positive_slope;
+  std::copy(
+    &expo_slope_[0],
+    &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+    &expo_slope[0]
+  );
+  int32_t nominal_start = nominal_start_;
+  bool nominal_start_reached = false;
 
-  CACHE_STAGE_DATA;
-  for (size_t size = kAudioBlockSize; size--; ) {
-    if (!phase_increment) { // No motion
+  while (samples_left--) {
+    if (!MOVING) {
       value = target; // In case delta was nonzero but too small for a slope
       OUTPUT;
       continue;
@@ -233,12 +243,15 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
 
       value_ = value; // So Trigger knows actual start value
       Trigger(static_cast<EnvelopeStage>(stage + 1));
-      CACHE_STAGE_DATA;
+
+      // Even if there no samples left, our local state is now stale, and this will save it correctly
+      return RenderStageDispatch(sample_buffer, samples_left, bias, bias_slope);
     } else {
       OUTPUT;
     }
   }
 
+  // This stage is holding the bag at end of render -- save state
   value_ = value;
   phase_ = phase;
   phase_increment_ = phase_increment;
