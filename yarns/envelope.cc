@@ -37,7 +37,7 @@ namespace yarns {
 using namespace stmlib;
 
 void Envelope::Init(int16_t zero_value) {
-  value_ = target_ = stage_target_[ENV_STAGE_RELEASE] = zero_value << (31 - 16);
+  value_ = target_ = stage_target_[ENV_STAGE_DEAD] = zero_value << (31 - 16);
   Trigger(ENV_STAGE_DEAD);
   std::fill(
     &expo_slope_[0],
@@ -67,11 +67,11 @@ void Envelope::NoteOn(
 
   switch (stage_) {
     case ENV_STAGE_ATTACK:
-      // Legato: ignore the updated peak target
+      // Legato: ignore changes to peak target
       break;
     case ENV_STAGE_DECAY:
     case ENV_STAGE_SUSTAIN:
-      // Legato: respect the updated sustain target
+      // Legato: respect changes to sustain target
       Trigger(ENV_STAGE_DECAY);
       break;
     case ENV_STAGE_RELEASE:
@@ -86,9 +86,8 @@ void Envelope::NoteOn(
 #define TRIGGER_NEXT_STAGE \
   return Trigger(static_cast<EnvelopeStage>(stage + 1));
 
-// Update state of current stage
+// Update current stage and its state
 void Envelope::Trigger(EnvelopeStage stage) {
-  multi.PrintDebugByte(0xA0 + stage);
   stage_ = stage;
   phase_ = 0;
   target_ = stage_target_[stage];
@@ -99,9 +98,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
     default: phase_increment_ = 0; return;
   }
 
-  // In case the stage is not starting from its nominal value (e.g. an
-  // attack that interrupts a still-high release), adjust its timing and slope
-  // to try to match the nominal sound and feel
   int32_t actual_delta = SatSub(target_, value_, 31);
   if (!actual_delta) TRIGGER_NEXT_STAGE; // Already at target
 
@@ -118,11 +114,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
     )];
   int32_t nominal_delta = SatSub(target_, nominal_start_, 31);
 
-  // Skip attack if there is a direction disagreement or nowhere to go
+  // Skip stage if there is a direction disagreement or nowhere to go
   // Cases: NoteOn during release from above peak level
-  // We don't want to skip decay even if it looks like wrong direction, because it's the only way to transition to the (possibly updated) sustain level.  OTOH, this transition may be indefinitely far in the wrong direction
   if (
-    stage == ENV_STAGE_ATTACK &&
     // The stage is supposed to have a direction
     nominal_delta != 0 &&
     // It doesn't agree with the actual direction
@@ -132,11 +126,13 @@ void Envelope::Trigger(EnvelopeStage stage) {
     TRIGGER_NEXT_STAGE;
   }
 
-  // If closer to target than expected:
-  // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
+  // In case the stage is not starting from its nominal value (e.g. an
+  // attack that interrupts a still-high release), adjust its timing and slope
+  // to try to match the nominal sound and feel
   int32_t final_delta;
   if (abs(actual_delta) < abs(nominal_delta)) {
-    // Shorten the stage duration
+    // If closer to target than expected, shorten the stage duration
+    // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
     phase_increment_ = static_cast<uint32_t>(
       static_cast<float>(phase_increment_) * abs(
         static_cast<float>(nominal_delta) /
@@ -154,9 +150,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
   int32_t linear_slope = MulS32(final_delta, phase_increment_);
   if (!linear_slope) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
 
-  // If we won't get 2+ samples per expo shift, fall back on linear slope
+  // Populate dynamic LUT for phase-dependent slope
   const uint32_t max_expo_phase_increment = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
   if (phase_increment_ > max_expo_phase_increment) {
+    // If we won't get 2+ samples per expo shift, fall back on linear slope
     std::fill(
       &expo_slope_[0],
       &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
@@ -216,6 +213,7 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
   CACHE_STAGE_DATA;
   for (size_t size = kAudioBlockSize; size--; ) {
     if (!phase_increment) { // No motion
+      value = target; // In case delta was nonzero but too small for a slope
       OUTPUT;
       continue;
     }

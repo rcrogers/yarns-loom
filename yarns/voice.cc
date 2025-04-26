@@ -285,18 +285,19 @@ void Voice::NoteOn(
   int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
   ADSR& adsr, int16_t timbre_envelope_target
 ) {
-  if (gate_ && trigger) {
-    retrigger_delay_ = 3;
-  }
   if (trigger) {
+    if (gate_) {
+      retrigger_delay_ = 3;
+      NoteOff();
+    }
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
     trigger_phase_increment_ = lut_portamento_increments[trigger_duration_ >> 1];
-    NoteOff();
   }
   gate_ = true;
   adsr_ = adsr;
-  oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
+
+  if (uses_audio()) oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 
@@ -326,7 +327,7 @@ void Voice::NoteOn(
 
 void Voice::NoteOff() {
   gate_ = false;
-  oscillator_.NoteOff();
+  if (uses_audio()) oscillator_.NoteOff();
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
 }
