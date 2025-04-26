@@ -37,7 +37,6 @@ namespace yarns {
 using namespace stmlib;
 
 void Envelope::Init(int16_t zero_value) {
-  gate_ = false;
   value_ = target_ = stage_target_[ENV_STAGE_RELEASE] = zero_value << (31 - 16);
   Trigger(ENV_STAGE_DEAD);
   std::fill(
@@ -48,7 +47,6 @@ void Envelope::Init(int16_t zero_value) {
 }
 
 void Envelope::NoteOff() {
-  gate_ = false;
   Trigger(ENV_STAGE_RELEASE);
 }
 
@@ -67,17 +65,30 @@ void Envelope::NoteOn(
   stage_target_[ENV_STAGE_RELEASE] = stage_target_[ENV_STAGE_DEAD] =
     min_target >> 1;
 
-  if (!gate_) {
-    gate_ = true;
-    Trigger(ENV_STAGE_ATTACK);
+  switch (stage_) {
+    case ENV_STAGE_ATTACK:
+      // Legato: ignore the updated peak target
+      break;
+    case ENV_STAGE_DECAY:
+    case ENV_STAGE_SUSTAIN:
+      // Legato: respect the updated sustain target
+      Trigger(ENV_STAGE_DECAY);
+      break;
+    case ENV_STAGE_RELEASE:
+    case ENV_STAGE_DEAD:
+    case ENV_NUM_STAGES:
+      // Start new attack
+      Trigger(ENV_STAGE_ATTACK);
+      break;
   }
 }
 
+#define TRIGGER_NEXT_STAGE \
+  return Trigger(static_cast<EnvelopeStage>(stage + 1));
+
 // Update state of current stage
 void Envelope::Trigger(EnvelopeStage stage) {
-  if (!gate_ && stage == ENV_STAGE_SUSTAIN) {
-    stage = ENV_STAGE_RELEASE; // Skip sustain when gate is low
-  }
+  multi.PrintDebugByte(0xA0 + stage);
   stage_ = stage;
   phase_ = 0;
   target_ = stage_target_[stage];
@@ -92,51 +103,58 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // attack that interrupts a still-high release), adjust its timing and slope
   // to try to match the nominal sound and feel
   int32_t actual_delta = SatSub(target_, value_, 31);
-  nominal_start_ = stage_target_[stmlib::modulo(
-      static_cast<int8_t>(stage) - 1,
-      static_cast<int8_t>(ENV_NUM_STAGES)
-  )];
+  if (!actual_delta) TRIGGER_NEXT_STAGE; // Already at target
+
+  // Decay always treats the current value as nominal start, because in all
+  // scenarios, the peak level doesn't give us useful information:
+  // 1. Automatic transition from attack: we know value reached peak level
+  // 2. Legato NoteOn: peak level is meaningless, actual delta is all we have
+  // 3. Skipped attack: ^
+  nominal_start_ = stage == ENV_STAGE_DECAY
+    ? value_
+    : stage_target_[stmlib::modulo(
+        static_cast<int8_t>(stage) - 1,
+        static_cast<int8_t>(ENV_NUM_STAGES)
+    )];
   int32_t nominal_delta = SatSub(target_, nominal_start_, 31);
 
-  const bool movement_expected = nominal_delta != 0;
-  // Skip stage if there is a direction disagreement or nowhere to go
+  // Skip attack if there is a direction disagreement or nowhere to go
+  // Cases: NoteOn during release from above peak level
+  // We don't want to skip decay even if it looks like wrong direction, because it's the only way to transition to the (possibly updated) sustain level.  OTOH, this transition may be indefinitely far in the wrong direction
   if (
-    // Already at target (important to skip because 0 disrupts direction checks)
-    !actual_delta || (
-      // The stage is supposed to have a direction
-      movement_expected && (
-        // It doesn't agree with the actual direction
-        (nominal_delta > 0) != (actual_delta > 0)
-      )
-      // Cases: NoteOn during release from above peak level
-      // TODO are direction skips good in case of polarity reversals? only if there are non-attack cases
-    )
+    stage == ENV_STAGE_ATTACK &&
+    // The stage is supposed to have a direction
+    nominal_delta != 0 &&
+    // It doesn't agree with the actual direction
+    (nominal_delta > 0) != (actual_delta > 0)
+    // TODO are direction skips good in case of polarity reversals? only if there are non-attack cases
   ) {
-    return Trigger(static_cast<EnvelopeStage>(stage + 1));
+    TRIGGER_NEXT_STAGE;
   }
 
   // If closer to target than expected:
   // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
+  int32_t final_delta;
   if (abs(actual_delta) < abs(nominal_delta)) {
     // Shorten the stage duration
     phase_increment_ = static_cast<uint32_t>(
-      static_cast<float>(phase_increment_) *
-      static_cast<float>(nominal_delta) /
-      static_cast<float>(actual_delta)
+      static_cast<float>(phase_increment_) * abs(
+        static_cast<float>(nominal_delta) /
+        static_cast<float>(actual_delta)
+      )
     );
+    final_delta = actual_delta;
   } else {
     // We're at least as far as expected (possibly farther).
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
     // NB: we don't lengthen stage time.  See nominal_start_reached
+    final_delta = nominal_delta;
   }
 
-  // int32_t linear_slope = (static_cast<int64_t>(actual_delta) * phase_increment_) >> 32;
-  int32_t linear_slope = MulS32(actual_delta, phase_increment_);
-  if (!linear_slope) {
-    return Trigger(static_cast<EnvelopeStage>(stage + 1));
-  }
+  int32_t linear_slope = MulS32(final_delta, phase_increment_);
+  if (!linear_slope) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
 
-  // If we won't get at least two samples per expo shift, fall back on linear slope
+  // If we won't get 2+ samples per expo shift, fall back on linear slope
   const uint32_t max_expo_phase_increment = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
   if (phase_increment_ > max_expo_phase_increment) {
     std::fill(
@@ -164,7 +182,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   uint16_t clipped_u16 = ClipU16(overflowing_u16); \
   *samples++ = clipped_u16 >> 1; // 0..INT16_MAX
 
-#define FETCH_LOCALS \
+#define CACHE_STAGE_DATA \
   stage = stage_; \
   value = value_; \
   target = target_; \
@@ -195,7 +213,7 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
   bool nominal_start_reached;
   bool positive_slope;
 
-  FETCH_LOCALS;
+  CACHE_STAGE_DATA;
   for (size_t size = kAudioBlockSize; size--; ) {
     if (!phase_increment) { // No motion
       OUTPUT;
@@ -217,7 +235,7 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
 
       value_ = value; // So Trigger knows actual start value
       Trigger(static_cast<EnvelopeStage>(stage + 1));
-      FETCH_LOCALS;
+      CACHE_STAGE_DATA;
     } else {
       OUTPUT;
     }

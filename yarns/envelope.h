@@ -79,7 +79,6 @@ class Envelope {
   }
 
  private:
-  bool gate_;
   ADSR* adsr_;
 
   // 31-bit, so slope increment can skip overflow checks
