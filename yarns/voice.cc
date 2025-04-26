@@ -194,6 +194,7 @@ void Voice::Refresh() {
 
   if (refresh_counter_ == 0) {
     uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
+    // Fraction by which gain envelope should be damped
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
     amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
