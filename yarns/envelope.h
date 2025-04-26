@@ -35,7 +35,6 @@ using namespace stmlib;
 enum EnvelopeStage {
   ENV_STAGE_ATTACK,
   ENV_STAGE_DECAY,
-  ENV_STAGE_EARLY_RELEASE, // Gate ended before sustain, so skip sustain
   ENV_STAGE_SUSTAIN,
   ENV_STAGE_RELEASE,
   ENV_STAGE_DEAD,
@@ -74,14 +73,20 @@ class Envelope {
 
   inline int16_t value() const { return value_ >> (31 - 16); }
 
+  static inline uint8_t signed_clz(int32_t x) {
+    const uint32_t x_for_clz = static_cast<uint32_t>(abs(x >= 0 ? x : x + 1));
+    return __builtin_clzl(x_for_clz) - 1;
+  }
+
  private:
   bool gate_;
   ADSR* adsr_;
   
   // 31-bit, so slope increment can skip overflow checks
-  int32_t stage_target_[ENV_STAGE_DEAD];
+  int32_t stage_target_[ENV_NUM_STAGES];
   int32_t value_;
   int32_t expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  int32_t nominal_start_;
 
   // 32-bit
   int32_t bias_;

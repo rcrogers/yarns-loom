@@ -49,14 +49,7 @@ void Envelope::Init(int16_t zero_value) {
 
 void Envelope::NoteOff() {
   gate_ = false;
-  switch (stage_) {
-    case ENV_STAGE_ATTACK:
-    case ENV_STAGE_DECAY:
-      Trigger(ENV_STAGE_EARLY_RELEASE); break;
-    case ENV_STAGE_SUSTAIN:
-      Trigger(ENV_STAGE_EARLY_RELEASE); break;
-    default: break;
-  }
+  Trigger(ENV_STAGE_RELEASE);
 }
 
 void Envelope::NoteOn(
@@ -67,12 +60,12 @@ void Envelope::NoteOn(
   int16_t scale = max_target - min_target;
   min_target <<= 16;
   // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
-  stage_target_[ENV_STAGE_ATTACK] = (min_target + scale * adsr.peak) >> 1;
-  stage_target_[ENV_STAGE_DECAY] =
-    stage_target_[ENV_STAGE_EARLY_RELEASE] =
-    stage_target_[ENV_STAGE_SUSTAIN] =
+  stage_target_[ENV_STAGE_ATTACK] =
+    (min_target + scale * adsr.peak) >> 1;
+  stage_target_[ENV_STAGE_DECAY] = stage_target_[ENV_STAGE_SUSTAIN] =
     (min_target + scale * adsr.sustain) >> 1;
-  stage_target_[ENV_STAGE_RELEASE] = min_target >> 1;
+  stage_target_[ENV_STAGE_RELEASE] = stage_target_[ENV_STAGE_DEAD] =
+    min_target >> 1;
 
   if (!gate_) {
     gate_ = true;
@@ -81,9 +74,6 @@ void Envelope::NoteOn(
 }
 
 void Envelope::Trigger(EnvelopeStage stage) {
-  if (gate_ && stage == ENV_STAGE_EARLY_RELEASE) {
-    stage = ENV_STAGE_SUSTAIN; // Skip early-release when gate is high
-  }
   if (!gate_ && stage == ENV_STAGE_SUSTAIN) {
     stage = ENV_STAGE_RELEASE; // Skip sustain when gate is low
   }
@@ -92,7 +82,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_ = adsr_->attack  ; break;
     case ENV_STAGE_DECAY  : phase_increment_ = adsr_->decay   ; break;
-    case ENV_STAGE_EARLY_RELEASE : phase_increment_ = adsr_->release ; break;
     case ENV_STAGE_RELEASE: phase_increment_ = adsr_->release ; break;
     default: phase_increment_ = 0; return;
   }
@@ -102,10 +91,12 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // attack that interrupts a still-high release), adjust its timing and slope
   // to try to match the nominal sound and feel
   int32_t actual_delta = SatSub(target, value_, 31);
-  int32_t nominal_start_value = stage_target_[
-    stmlib::modulo(static_cast<int8_t>(stage) - 1, static_cast<int8_t>(ENV_STAGE_DEAD))
-  ];
-  int32_t nominal_delta = SatSub(target, nominal_start_value, 31);
+  nominal_start_ = stage_target_[stmlib::modulo(
+      static_cast<int8_t>(stage) - 1,
+      static_cast<int8_t>(ENV_NUM_STAGES)
+  )];
+  int32_t nominal_delta = SatSub(target, nominal_start_, 31);
+
   const bool movement_expected = nominal_delta != 0;
   // Skip stage if there is a direction disagreement or nowhere to go
   if (
@@ -120,34 +111,40 @@ void Envelope::Trigger(EnvelopeStage stage) {
       // TODO are direction skips good in case of polarity reversals? only if there are non-attack cases
     )
   ) {
-    return Trigger(static_cast<EnvelopeStage>(stage_ + 1));
+    return Trigger(static_cast<EnvelopeStage>(stage + 1));
   }
-  // Pick the larger delta, and thus the steeper slope that reaches the target
-  // more quickly.  If actual delta is smaller than nominal (e.g. from
-  // re-attacks that begin high), use nominal's steeper slope (e.g. so the
-  // attack sounds like a quick catch-up vs a flat, blaring hold stage). If
-  // actual is greater (rare in practice), use that
-  int32_t delta = actual_delta >= 0
-    ? std::max(nominal_delta, actual_delta)
-    : std::min(nominal_delta, actual_delta);
 
-  int32_t linear_slope = (static_cast<int64_t>(delta) * phase_increment_) >> 32;
+  // If closer to target than expected:
+  // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
+  if (abs(actual_delta) < abs(nominal_delta)) {
+    // Shorten the stage duration
+    phase_increment_ = static_cast<uint32_t>(
+      static_cast<float>(phase_increment_) *
+      static_cast<float>(nominal_delta) /
+      static_cast<float>(actual_delta)
+    );
+  } else {
+    // We're at least as far as expected (possibly farther).
+    // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
+    // NB: we don't lengthen stage time.  See nominal_start_reached
+  }
+
+  // int32_t linear_slope = (static_cast<int64_t>(actual_delta) * phase_increment_) >> 32;
+  int32_t linear_slope = MulS32(actual_delta, phase_increment_);
   if (!linear_slope) {
-    return Trigger(static_cast<EnvelopeStage>(stage_ + 1));
+    return Trigger(static_cast<EnvelopeStage>(stage + 1));
   }
 
-  // Must get at least two samples per tick for expo slope to be accurate
+  // If we won't get at least two samples per expo shift, fall back on linear slope
   const uint32_t max_expo_phase_increment = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
   if (phase_increment_ > max_expo_phase_increment) {
-    // Fall back on linear slope
     std::fill(
       &expo_slope_[0],
       &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
       linear_slope
     );
   } else {
-    const uint32_t slope_for_clz = static_cast<uint32_t>(abs(linear_slope >= 0 ? linear_slope : linear_slope + 1));
-    const uint8_t max_shift = __builtin_clzl(slope_for_clz) - (32 - 30);
+    const uint8_t max_shift = signed_clz(linear_slope) - 1; // Maintain half-scaling
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
       int8_t shift = lut_expo_slope_shift[i];
       expo_slope_[i] = shift >= 0
@@ -170,9 +167,17 @@ void Envelope::Trigger(EnvelopeStage stage) {
   stage = stage_; \
   value = value_; \
   target = stage_target_[stage]; \
+  nominal_start = nominal_start_; \
+  nominal_start_reached = false; \
   phase = phase_; \
   phase_increment = phase_increment_; \
   std::copy(&expo_slope_[0], &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE], &expo_slope[0]); \
+  positive_slope = expo_slope[0] > 0; \
+
+#define VALUE_PASSED(x) ( \
+  ( positive_slope && value >= x) || \
+  (!positive_slope && value <= x) \
+)
 
 void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
   // This is unaffected by stage change, thus has distinct lifecycle from other locals
@@ -185,33 +190,34 @@ void Envelope::RenderSamples(int16_t* samples, int32_t new_bias) {
   uint32_t phase_increment;
   EnvelopeStage stage;
   int32_t expo_slope[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  int32_t nominal_start;
+  bool nominal_start_reached;
+  bool positive_slope;
 
   FETCH_LOCALS;
   for (size_t size = kAudioBlockSize; size--; ) {
-    // Early-release stage stays at max slope until it reaches target
-    if (stage != ENV_STAGE_EARLY_RELEASE) {
-      if (!phase_increment) {
-        OUTPUT;
-        continue;
-      }
+    if (!phase_increment) { // No motion
+      OUTPUT;
+      continue;
+    }
+
+    // Stay at initial (steepest) slope until we reach the nominal start
+    nominal_start_reached = nominal_start_reached || VALUE_PASSED(nominal_start);
+    if (nominal_start_reached) {
       phase += phase_increment;
       if (phase < phase_increment) phase = UINT32_MAX;
     }
 
     int32_t slope = expo_slope[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
     value += slope;
-    if (
-      (slope > 0 && value >= target) ||
-      (slope < 0 && value <= target)
-    ) {
-      value = stage_target_[stage]; // Don't go past target
+    if (VALUE_PASSED(target)) {
+      value = target; // Don't overshoot target
       OUTPUT;
 
       value_ = value; // So Trigger knows actual start value
       Trigger(static_cast<EnvelopeStage>(stage + 1));
       FETCH_LOCALS;
     } else {
-      value += slope;
       OUTPUT;
     }
   }
