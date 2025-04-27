@@ -43,7 +43,7 @@ LFO and portamento increments.
 ----------------------------------------------------------------------------"""
 
 refresh_rate = 8000
-audio_rate = 50000
+audio_rate = 45000
 excursion = 1 << 32
 
 
