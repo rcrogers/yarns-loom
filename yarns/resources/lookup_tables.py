@@ -42,7 +42,7 @@ lookup_tables_8 = []
 LFO and portamento increments.
 ----------------------------------------------------------------------------"""
 
-refresh_rate = 4000
+refresh_rate = 8000
 audio_rate = 50000
 excursion = 1 << 32
 
