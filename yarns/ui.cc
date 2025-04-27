@@ -933,15 +933,7 @@ void Ui::DoEvents() {
     refresh_was_automatic_ = true;
   }
 
-  bool print_command = mode_ == UI_MODE_LOAD_SELECT_PROGRAM || mode_ == UI_MODE_SAVE_SELECT_PROGRAM;
-  bool print_latch =
-    (mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT) &&
-    active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
-    ActivePartHeldKeys().stack.most_recent_note_index();
-  bool print_active_part = (mode_ == UI_MODE_PARAMETER_SELECT && multi.num_active_parts() > 1) || mode_ == UI_MODE_SWAP_SELECT_PART;
-  bool print_any = print_command || print_latch || print_active_part;
-
-  if (print_any && !display_.scrolling() && queue_.idle_time() > kRefreshMsec) {
+  if (!display_.scrolling() && queue_.idle_time() > kRefreshMsec) {
     factory_testing_display_ = UI_FACTORY_TESTING_DISPLAY_EMPTY;
     refresh_display = true;
   }
@@ -968,7 +960,15 @@ void Ui::DoEvents() {
   }
   if (display_.scrolling()) { return; }
 
+  bool print_command = mode_ == UI_MODE_LOAD_SELECT_PROGRAM || mode_ == UI_MODE_SAVE_SELECT_PROGRAM;
+  bool print_latch =
+    (mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT) &&
+    active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
+    ActivePartHeldKeys().stack.most_recent_note_index();
+  bool print_active_part = (mode_ == UI_MODE_PARAMETER_SELECT && multi.num_active_parts() > 1) || mode_ == UI_MODE_SWAP_SELECT_PART;
+
   // If we're not scrolling and it's not yet time to refresh, print latch or part
+  bool print_any = print_command || print_latch || print_active_part;
   bool print_last_third = print_any;
   bool print_middle_third = print_latch && print_active_part;
   uint16_t begin_middle_third = kRefreshMsec / 3;
