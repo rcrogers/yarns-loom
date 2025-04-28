@@ -48,7 +48,7 @@ const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
 const uint8_t kMaxBarDuration = 32;
 
 // Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
-const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 8000) * 24 / 60;
+const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
 
 // Represents a controller number that has been routed to either remote control or a part, based on the channel the CC was received on
 class CCRouting {

@@ -42,8 +42,8 @@ namespace yarns {
 
 const uint16_t kNumOctaves = 11;
 
-// 8 kHz / 64 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
-const uint8_t kLowFreqRefreshBits = 6;
+// 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
+const uint8_t kLowFreqRefreshBits = 5;
 
 enum TriggerShape {
   TRIGGER_SHAPE_SQUARE,

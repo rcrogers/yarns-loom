@@ -71,6 +71,7 @@ uint32_t rxne_count = 0;
 uint32_t ovr_count = 0;
 
 void SysTick_Handler() {
+  // MIDI I/O, and CV/Gate refresh at 8kHz.
   // UI polling at 1kHz.
   static uint8_t counter;
   if ((++counter & 7) == 0) {
@@ -101,8 +102,7 @@ void SysTick_Handler() {
     }
   }
 
-  // MIDI I/O, and CV/Gate refresh at 8kHz.
-  bool refresh = true;
+  bool refresh = (counter & 1) == 0; // Sample rate = 4 kHz
   if (refresh) {
     // Observe that the gate output is written with a systick * 2 (0.25 ms) delay
     // compared to the CV output. This ensures that the CV output will have been
