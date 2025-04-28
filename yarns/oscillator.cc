@@ -88,14 +88,17 @@ void StateVariableFilter::RenderInit(int16_t frequency, int16_t resonance) {
   damp.ComputeSlope();
 }
 
-void StateVariableFilter::RenderSample(int16_t in) {
+void StateVariableFilter::RenderSample(int32_t in) {
   cutoff.Tick();
   damp.Tick();
-  notch = (in >> 1) - (bp * damp.value() >> 15);
-  lp += cutoff.value() * bp >> 15;
-  CONSTRAIN(lp, -16384, 16383);
+  notch = in - (bp * damp.value() >> 14);
+  CLIP(notch);
+  lp += cutoff.value() * bp >> 14;
+  CLIP(lp);
   hp = notch - lp;
-  bp += cutoff.value() * hp >> 15;
+  CLIP(hp);
+  bp += cutoff.value() * hp >> 14;
+  CLIP(bp);
 }
 
 void Oscillator::Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo) {
@@ -261,9 +264,8 @@ void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples) 
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
-    this_sample = (this_sample - 0x4000) << 1;
     svf.RenderSample(this_sample);
-    this_sample = svf.lp << 1;
+    this_sample = svf.lp;
   )
   svf_ = svf;
 }
@@ -276,9 +278,8 @@ void Oscillator::RenderLPSaw(int16_t* timbre_samples, int16_t* audio_samples) {
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_SAW(phase, phase_increment) }
     next_sample += phase >> 17;
-    this_sample = (this_sample - 0x4000) << 1;
     svf.RenderSample(this_sample);
-    this_sample = svf.lp << 1;
+    this_sample = svf.lp;
   )
   svf_ = svf;
 }
@@ -531,7 +532,6 @@ void Oscillator::RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_sam
       case OSC_SHAPE_NOISE_HP: this_sample = svf.hp; break;
       default: break;
     }
-    this_sample <<= 1;
     // CLIP(this_sample);
     // result = result * gain_correction >> 15;
     // result = Interpolate88(ws_moderate_overdrive, result + 32768);
