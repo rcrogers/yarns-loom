@@ -90,6 +90,8 @@ resources = [
    'lookup_table_32', 'LUT', 'uint32_t', int, False),
   (lookup_tables.lookup_tables_8,
    'lookup_table_8', 'LUT', 'int8_t', int, False),
+  (lookup_tables.lookup_tables_8_unsigned,
+    'lookup_table_8_unsigned', 'LUT', 'uint8_t', int, False),
   (characters.characters,
    'char', 'CHR', 'uint16_t', int, False),
 ]

@@ -44,11 +44,23 @@ namespace yarns {
 class StateVariableFilter {
  public:
   void Init();
-  void RenderInit(int16_t frequency, int16_t resonance);
-  void RenderSample(int32_t in);
+  void RenderInit(int16_t resonance);
+
+  inline void RenderSample(int32_t in, int16_t cutoff) {
+    damp.Tick();
+    notch = in - (bp * damp.value() >> 14);
+    CLIP(notch);
+    lp += cutoff * bp >> 14;
+    CLIP(lp);
+    hp = notch - lp;
+    CLIP(hp);
+    bp += cutoff * hp >> 14;
+    CLIP(bp);
+  }
+
   int32_t bp, lp, notch, hp;
  private:
-  Interpolator<kAudioBlockSizeBits> cutoff, damp;
+  Interpolator<kAudioBlockSizeBits> damp;
 };
 
 struct PhaseDistortionSquareModulator {
@@ -94,7 +106,7 @@ class Oscillator {
 
   inline void Init(uint16_t scale) {
     scale_ = scale;
-    gain_bias_ = timbre_bias_ = 0;
+    raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
     svf_.Init();
@@ -105,15 +117,16 @@ class Oscillator {
     next_sample_ = 0;
   }
 
-  void Refresh(int16_t pitch, int16_t timbre, uint16_t tremolo);
+  void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias);
+  int16_t WarpTimbre(int16_t timbre) const;
   
   inline void set_shape(OscillatorShape shape) {
     shape_ = shape;
   }
 
-  inline void NoteOn(ADSR& adsr, bool drone, int16_t timbre_envelope_target) {
+  inline void NoteOn(ADSR& adsr, bool drone, int16_t raw_max_timbre) {
     gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
-    timbre_envelope_.NoteOn(adsr, 0, timbre_envelope_target);
+    timbre_envelope_.NoteOn(adsr, 0, WarpTimbre(raw_max_timbre));
   }
   inline void NoteOff() {
     gain_envelope_.NoteOff();
@@ -160,8 +173,8 @@ class Oscillator {
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;
-  // Interpolator<kAudioBlockSizeBits> timbre_, gain_;
-  int16_t gain_bias_, timbre_bias_;
+  int16_t raw_timbre_bias_;
+  uint16_t raw_gain_bias_;
   int16_t pitch_;
 
   uint32_t phase_;
