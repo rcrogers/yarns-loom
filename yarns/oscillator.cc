@@ -132,15 +132,7 @@ int16_t Oscillator::WarpTimbre(int16_t timbre) const {
     // Additive synthesis reduces timbre as pitch increases
     int32_t lowness = 0x7fff - (pitch_ << 1);
     CONSTRAIN(lowness, 0, 0x7fff);
-    timbre = timbre * lowness >> 15;
-
-    // Compensate for higher FM ratios having sweet spot at lower index
-    if (shape_ >= OSC_SHAPE_FM) {
-      uint8_t index_scale_q4_4 = lut_fm_index_scales_q4_4[shape_ - OSC_SHAPE_FM];
-      timbre = timbre * index_scale_q4_4 >> 4;
-    }
-
-    return timbre;
+    return timbre * lowness >> 15;
   }
 
   return timbre;
@@ -423,11 +415,19 @@ void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {
   uint8_t fm_shape = shape_ - OSC_SHAPE_FM;
   int16_t interval = lut_fm_modulator_intervals[fm_shape];
   uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
+
+  // Compensate for higher FM ratios having sweet spot at lower index
+  uint8_t index_2x_upshift = lut_fm_index_2x_upshifts[fm_shape];
+  uint8_t index_shift = index_2x_upshift >> 1;
+  bool index_shift_halfbit = index_2x_upshift & 1;
   RENDER_MODULATED(
     modulator_phase += modulator_phase_increment;
     int16_t modulator = Interpolate824(wav_sine, modulator_phase);
     uint32_t phase_mod = modulator * timbre;
-    // TODO upshift phase_mod by 2?
+    phase_mod =
+      (phase_mod << index_shift) +
+      // Conditional multiplication by 1.5 to approximate sqrt(2)
+      (index_shift_halfbit ? (phase_mod << (index_shift - 1)) : 0);
     this_sample = Interpolate824(wav_sine, phase + phase_mod);
   )
 }

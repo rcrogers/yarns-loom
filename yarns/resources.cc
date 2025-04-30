@@ -2956,25 +2956,20 @@ const int8_t lut_expo_slope_shift[] = {
       -1,     -1,     -2,     -2,
       -3,     -3,     -3,     -3,
 };
+const int8_t lut_fm_index_2x_upshifts[] = {
+      11,      9,      7,      6,
+       5,      8,      7,      6,
+       8,      8,      8,      8,
+       8,      7,      8,      8,
+       7,      7,      8,     11,
+      11,      9,      7,      5,
+       4,      6,
+};
 
 
 const int8_t* const lookup_table_8_table[] = {
   lut_expo_slope_shift,
-};
-
-const uint8_t lut_fm_index_scales_q4_4[] = {
-     160,     80,     53,     32,
-      22,     64,     45,     35,
-      68,     60,     71,     69,
-      67,     48,     58,     66,
-      42,     46,     61,    203,
-     152,    101,     50,     25,
-      16,     33,
-};
-
-
-const uint8_t* const lookup_table_8_unsigned_table[] = {
-  lut_fm_index_scales_q4_4,
+  lut_fm_index_2x_upshifts,
 };
 
 const uint16_t chr_characters[] = {

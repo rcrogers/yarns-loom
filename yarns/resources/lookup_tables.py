@@ -37,7 +37,7 @@ lookup_tables_32 = []
 lookup_tables = []
 lookup_tables_signed = []
 lookup_tables_8 = []
-lookup_tables_8_unsigned = []
+# lookup_tables_8_unsigned = []
 
 """----------------------------------------------------------------------------
 LFO and portamento increments.
@@ -762,14 +762,15 @@ print('FM modulator intervals: ', fm_modulator_intervals)
 lookup_tables_signed.append(('fm_modulator_intervals', fm_modulator_intervals))
 
 FM_INDEX_SCALING_BASE = 40
-print('FM ratios: ', fm_ratios)
+# print('FM ratios: ', fm_ratios)
 fm_index_scales = numpy.array([FM_INDEX_SCALING_BASE / r for r in fm_ratios])
-print('FM index scale for ratios: ', fm_index_scales)
-# Convert to q4.4, downshifted by 2
-lookup_tables_8_unsigned.append(('fm_index_scales_q4_4', fm_index_scales * 16 / 4))
+# print('FM index scale for ratios: ', fm_index_scales)
 
-# fm_index_upshifts_f = numpy.log2(numpy.array(fm_index_scales))
-# lookup_tables_8.append(('fm_index_2x_upshifts', numpy.round(fm_index_upshifts_f * 2)))
+# Convert to q4.4, downshifted by 2
+# lookup_tables_8_unsigned.append(('fm_index_scales_q4_4', fm_index_scales * 16 / 4))
+
+fm_index_upshifts_f = numpy.log2(fm_index_scales)
+lookup_tables_8.append(('fm_index_2x_upshifts', numpy.round(fm_index_upshifts_f * 2)))
 
 
 clock_ratio_ticks = []
