@@ -25,10 +25,10 @@
 //
 // -----------------------------------------------------------------------------
 //
-// Oscillator - analog style waveforms.
+// Oscillator.
 
-#ifndef YARNS_ANALOG_OSCILLATOR_H_
-#define YARNS_ANALOG_OSCILLATOR_H_
+#ifndef YARNS_OSCILLATOR_H_
+#define YARNS_OSCILLATOR_H_
 
 #include "stmlib/stmlib.h"
 
@@ -195,4 +195,4 @@ class Oscillator {
 
 }  // namespace yarns
 
-#endif // YARNS_ANALOG_OSCILLATOR_H_
+#endif // YARNS_OSCILLATOR_H_
