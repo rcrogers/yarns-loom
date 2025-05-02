@@ -89,7 +89,7 @@ void Envelope::NoteOn(
 void Envelope::Trigger(EnvelopeStage stage) {
   stage_ = stage;
   phase_ = 0;
-  target_ = stage_target_[stage];
+  target_ = stage_target_[stage]; // Cache against new NoteOn
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_ = adsr_->attack  ; break;
     case ENV_STAGE_DECAY  : phase_increment_ = adsr_->decay   ; break;

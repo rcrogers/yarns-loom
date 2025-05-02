@@ -258,7 +258,6 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
-  // TODO count envelope renders
   int16_t samples[kAudioBlockSize] = {0};
   if (is_envelope()) {
     envelope_.RenderSamples(samples, envelope_bias_ << 16);

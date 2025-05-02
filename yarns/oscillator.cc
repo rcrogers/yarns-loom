@@ -97,7 +97,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
 int16_t Oscillator::WarpTimbre(int16_t timbre) const {
   // Limit cutoff range for filtered noise
   if (shape_ >= OSC_SHAPE_NOISE_NOTCH && shape_ <= OSC_SHAPE_NOISE_HP) {
-    int32_t cutoff_freq = 0x1000 + (timbre >> 1); // 1/4...1/2
+    int32_t cutoff_freq = 0x1000 + (timbre >> 1); // 1/8..5/8
     return Interpolate824(lut_svf_cutoff, cutoff_freq << 17) >> 1;
   }
 
