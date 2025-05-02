@@ -208,6 +208,7 @@ void Oscillator::Render(int16_t* audio_mix) {
   ) \
   phase_ = phase; \
 
+// NB: 'modulator' is the follower/output oscillator
 #define RENDER_MODULATED(body) \
   uint32_t modulator_phase = modulator_phase_; \
   RENDER_PERIODIC(body); \

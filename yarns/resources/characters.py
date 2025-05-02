@@ -116,7 +116,7 @@ characters = {
   'u': 'edc',
   'v': 'en',
   'w': 'enlc',
-  'x': 'gnjl',
+  'x': 'gjln',
   'y': 'gkbcd',
   'z': 'pnd',
   

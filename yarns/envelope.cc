@@ -30,7 +30,6 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/drivers/dac.h"
-#include "yarns/multi.h"
 
 namespace yarns {
 
@@ -40,8 +39,8 @@ void Envelope::Init(int16_t zero_value) {
   value_ = target_ = stage_target_[ENV_STAGE_DEAD] = zero_value << (31 - 16);
   Trigger(ENV_STAGE_DEAD);
   std::fill(
-    &expo_slope_[0],
-    &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+    &expo_slope_lut_[0],
+    &expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     0
   );
 }
@@ -57,7 +56,7 @@ void Envelope::NoteOn(
   adsr_ = &adsr;
   int16_t scale = max_target - min_target;
   min_target <<= 16;
-  // TODO if attack and decay are going same direction because sustain is higher than peak, merge them?
+  // NB: sustain level can be higher than peak
   stage_target_[ENV_STAGE_ATTACK] =
     (min_target + scale * adsr.peak) >> 1;
   stage_target_[ENV_STAGE_DECAY] = stage_target_[ENV_STAGE_SUSTAIN] =
@@ -104,7 +103,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // Decay always treats the current value as nominal start, because in all
   // scenarios, the peak level doesn't give us useful information:
   // 1. Automatic transition from attack: we know value reached peak level
-  // 2. Legato NoteOn: peak level is meaningless, actual delta is all we have
+  // 2. Legato NoteOn: peak level is irrelevant, actual delta is all we have
   // 3. Skipped attack: ^
   nominal_start_ = stage == ENV_STAGE_DECAY
     ? value_
@@ -121,7 +120,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
     nominal_delta != 0 &&
     // It doesn't agree with the actual direction
     (nominal_delta > 0) != (actual_delta > 0)
-    // TODO are direction skips good in case of polarity reversals? only if there are non-attack cases
   ) {
     TRIGGER_NEXT_STAGE;
   }
@@ -131,7 +129,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // to try to match the nominal sound and feel
   int32_t final_delta;
   if (abs(actual_delta) < abs(nominal_delta)) {
-    // If closer to target than expected, shorten the stage duration
+    // If stage starts closer to target than expected, shorten the stage duration
     // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
     phase_increment_ = static_cast<uint32_t>(
       static_cast<float>(phase_increment_) * abs(
@@ -141,7 +139,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
     );
     final_delta = actual_delta;
   } else {
-    // We're at least as far as expected (possibly farther).
+    // We're at least as far as expected (possibly farther). No direct adjustment to stage duration -- transition is handled by `nominal_start_reached`
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
     // NB: we don't lengthen stage time.  See nominal_start_reached
     final_delta = nominal_delta;
@@ -155,19 +153,19 @@ void Envelope::Trigger(EnvelopeStage stage) {
   if (phase_increment_ > max_expo_phase_increment) {
     // If we won't get 2+ samples per expo shift, fall back on linear slope
     std::fill(
-      &expo_slope_[0],
-      &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+      &expo_slope_lut_[0],
+      &expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
       linear_slope
     );
   } else {
     const uint8_t max_shift = signed_clz(linear_slope) - 1; // Maintain 31-bit scaling
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
       int8_t shift = lut_expo_slope_shift[i];
-      expo_slope_[i] = shift >= 0
+      expo_slope_lut_[i] = shift >= 0
         ? linear_slope << std::min(static_cast<uint8_t>(shift), max_shift)
         : linear_slope >> static_cast<uint8_t>(-shift);
-      if (!expo_slope_[i]) {
-        expo_slope_[i] = linear_slope > 0 ? 1 : -1;
+      if (!expo_slope_lut_[i]) {
+        expo_slope_lut_[i] = linear_slope > 0 ? 1 : -1;
       }
     }
   }
@@ -184,11 +182,11 @@ void Envelope::RenderStageDispatch(
   int16_t* sample_buffer, size_t samples_left, int32_t bias, int32_t bias_slope
 ) {
   if (phase_increment_ == 0) {
-    RenderStage<false, false >(sample_buffer, samples_left, bias, bias_slope);
-  } else if (expo_slope_[0] > 0) {
-    RenderStage<true, true   >(sample_buffer, samples_left, bias, bias_slope);
+    RenderStage<false , false >(sample_buffer, samples_left, bias, bias_slope);
+  } else if (expo_slope_lut_[0] > 0) {
+    RenderStage<true  , true  >(sample_buffer, samples_left, bias, bias_slope);
   } else {
-    RenderStage<true, false  >(sample_buffer, samples_left, bias, bias_slope);
+    RenderStage<true  , false >(sample_buffer, samples_left, bias, bias_slope);
   }
 }
 
@@ -214,8 +212,8 @@ void Envelope::RenderStage(
   EnvelopeStage stage = stage_;
   int32_t expo_slope[LUT_EXPO_SLOPE_SHIFT_SIZE];
   std::copy(
-    &expo_slope_[0],
-    &expo_slope_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+    &expo_slope_lut_[0],
+    &expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     &expo_slope[0]
   );
   int32_t nominal_start = nominal_start_;
@@ -223,7 +221,7 @@ void Envelope::RenderStage(
 
   while (samples_left--) {
     if (!MOVING) {
-      value = target; // In case delta was nonzero but too small for a slope
+      value = target; // In case we skipped a stage with a tiny but nonzero delta
       OUTPUT;
       continue;
     }
@@ -244,14 +242,14 @@ void Envelope::RenderStage(
       value_ = value; // So Trigger knows actual start value
       Trigger(static_cast<EnvelopeStage>(stage + 1));
 
-      // Even if there no samples left, our local state is now stale, and this will save it correctly
+      // Even if there are no samples left, this will save bias state for us
       return RenderStageDispatch(sample_buffer, samples_left, bias, bias_slope);
     } else {
       OUTPUT;
     }
   }
 
-  // This stage is holding the bag at end of render -- save state
+  // Render is complete, but stage is not -- save state for next render
   value_ = value;
   phase_ = phase;
   phase_increment_ = phase_increment;

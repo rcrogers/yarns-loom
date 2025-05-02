@@ -181,11 +181,6 @@ void Dac::BufferSamples(uint8_t block, uint8_t channel, int16_t* samples) {
   BUFFER_SAMPLES(channel, FormatCommandWords(channel, samples[i]))
 }
 
-// TODO this has ~1.6ms latency, ~13x direct SysTick write
-// consider dynamic injection into the DMA buffer being consumed?
-// low-freq channels could buffer NOOP words -- probably simpler than injecting
-// Are there low-freq CV for which this latency matters?  maybe at max LFO freq?
-// Pitch is probably the main one
 void Dac::BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample) {
   uint32_t static_words = FormatCommandWords(channel, sample);
   BUFFER_SAMPLES(channel, static_words)
