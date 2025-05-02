@@ -124,10 +124,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
     TRIGGER_NEXT_STAGE;
   }
 
-  // In case the stage is not starting from its nominal value (e.g. an
-  // attack that interrupts a still-high release), adjust its timing and slope
-  // to try to match the nominal sound and feel
-  int32_t final_delta;
+  // Always use the nominal slope to determine the stage steepness
+  int32_t linear_slope = MulS32(nominal_delta, phase_increment_);
+  if (!linear_slope) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
+
   if (abs(actual_delta) < abs(nominal_delta)) {
     // If stage starts closer to target than expected, shorten the stage duration
     // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
@@ -137,16 +137,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
         static_cast<float>(actual_delta)
       )
     );
-    final_delta = actual_delta;
   } else {
     // We're at least as far as expected (possibly farther). No direct adjustment to stage duration -- transition is handled by `nominal_start_reached`
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
-    // NB: we don't lengthen stage time.  See nominal_start_reached
-    final_delta = nominal_delta;
   }
-
-  int32_t linear_slope = MulS32(final_delta, phase_increment_);
-  if (!linear_slope) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
 
   // Populate dynamic LUT for phase-dependent slope
   const uint32_t max_expo_phase_increment = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
