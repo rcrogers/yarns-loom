@@ -180,11 +180,13 @@ int main(void) {
     uint8_t* block_num_ptr = dac.PtrToFillableBlockNum();
     if (block_num_ptr) {
       uint8_t block = *block_num_ptr;
+      envelope_render_count = 0;
       for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
         multi.mutable_cv_output(channel)->RenderSamples(
           block, channel, cv[channel]
         );
       }
+      multi.PrintDebugByte(envelope_render_count);
     }
     if (midi_handler.factory_testing_requested()) {
       midi_handler.AcknowledgeFactoryTestingRequest();

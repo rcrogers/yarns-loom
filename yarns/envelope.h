@@ -52,6 +52,8 @@ STATIC_ASSERT(
   expo_slope_shift_size
 );
 
+extern uint32_t envelope_render_count;
+
 class Envelope {
  public:
   Envelope() { }

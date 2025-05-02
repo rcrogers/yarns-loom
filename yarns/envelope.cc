@@ -170,6 +170,7 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target) {
   const int32_t bias_slope = ((bias_target >> 1) - (bias_ >> 1)) >> (kAudioBlockSizeBits - 1);
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_, bias_slope);
+  envelope_render_count++;
 }
 
 void Envelope::RenderStageDispatch(
@@ -250,5 +251,7 @@ void Envelope::RenderStage(
 
   bias_ = bias;
 }
+
+uint32_t envelope_render_count = 0;
 
 }  // namespace yarns
