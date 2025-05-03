@@ -35,14 +35,21 @@ namespace yarns {
 
 using namespace stmlib;
 
-void Envelope::Init(int16_t zero_value) {
-  value_ = target_ = stage_target_[ENV_STAGE_DEAD] = zero_value << (31 - 16);
-  Trigger(ENV_STAGE_DEAD);
+void Envelope::Init(int16_t raw_zero_value) {
+  phase_ = phase_increment_ = 0;
+  int32_t scaled_zero_value = raw_zero_value << (31 - 16);
+  value_ = nominal_start_ = scaled_zero_value;
+  std::fill(
+    &stage_target_[0],
+    &stage_target_[ENV_NUM_STAGES],
+    scaled_zero_value
+  );
   std::fill(
     &expo_slope_lut_[0],
     &expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     0
   );
+  Trigger(ENV_STAGE_DEAD);
 }
 
 void Envelope::NoteOff() {
