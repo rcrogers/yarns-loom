@@ -809,8 +809,6 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
 
 
 void Multi::UpdateTempo() {
-  // phase_increment = 178957UL * tempo / 10; // For 48kHz interrupt
-  // phase_increment = 128849UL * tempo / 6;  // For 40kHz interrupt
   uint32_t phase_increment = settings_.clock_tempo * kTempoToTickPhaseIncrement;
   internal_clock_.set_phase_increment(phase_increment);
   if (running_) return; // If running, backup LFO will get Tap
