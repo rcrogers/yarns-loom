@@ -56,7 +56,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - [Legato and portamento](#legato-and-portamento)
     - [LFOs](#lfos)
       - [Frequency](#frequency)
-      - [Vibrato shape](#vibrato-shape)
+      - [Vibrato LFO](#vibrato-lfo)
       - [Spread: detune or dephase a part's LFOs](#spread-detune-or-dephase-a-parts-lfos)
 
 # Panel controls and display
@@ -314,10 +314,12 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 #### Clock ratios
 - Clock divisions/multiplications are expressed as a ratio of the master clock
-- `CLOCK RATIO` sets the frequency of the part's clock relative to the master clock
-- `OUTPUT CLOCK RATIO` sets the frequency of the clock output gate relative to the master clock
-- Available ratios: 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9, 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
-- These ratios are also used for `LFO RATE` when the LFO is clock-synced
+- `CLOCK RATIO` sets the frequency of the part's sequencer clock, relative to the master clock
+- `OUTPUT CLOCK RATIO` sets the frequency of the clock gate output, relative to the master clock
+- When turned counter-clockwise from center, `LFO RATE` sets a part's LFO frequency, relative to the master clock
+- 32 ratios available:
+  - Slower: 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9
+  - Equal or faster: 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
 
 #### Clock offset
 - Setting `C+ CLOCK OFFSET` allows fine-tuning the master clock phase by ±63 ticks
@@ -416,17 +418,18 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` (are notes retriggered when played legato?) and `PORTAMENTO LEGATO ONLY` (is portamento applied on all notes, or only on notes played legato?)
   - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
 - `PORTAMENTO` setting has a shared zero at center
-  - Increases constant-time portamento when turning counter-clockwise of center, and increases constant-rate when turning clockwise
+  - Increases constant-time portamento when turning counter-clockwise from center, and increases constant-rate when turning clockwise
 - Broadened setting range from 51 to 64 values per curve shape
 
 ### LFOs
 
 #### Frequency
   - `LFO RATE` (formerly `VIBRATO SPEED`) has a shared zero at center
-  - Increases clock sync ratio when turning counter-clockwise of center
+  - Increases clock sync ratio when turning counter-clockwise from center
   - Increases frequency when turning clockwise
 
-#### Vibrato shape
+#### Vibrato LFO
+- `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`) manually sets vibrato, for keyboards that don't have a modulation wheel
 - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato LFO (triangle, down saw, up saw, square)
 
 #### Spread: detune or dephase a part's LFOs
