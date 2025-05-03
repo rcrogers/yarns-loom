@@ -100,6 +100,8 @@ enum UiFactoryTestingDisplay {
   UI_FACTORY_TESTING_DISPLAY_SW_3,
 };
 
+const char hexadecimal[17] = "0123456789ABCDEF";
+
 class Ui {
  public:
   typedef void (Ui::*CommandFn)();
@@ -130,16 +132,6 @@ class Ui {
       mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT
     );
   }
-
-  void PrintDebugByte(uint8_t byte) {
-    char buffer[3];
-    char hexadecimal[] = "0123456789ABCDEF";
-    buffer[2] = '\0';
-    buffer[0] = hexadecimal[byte >> 4];
-    buffer[1] = hexadecimal[byte & 0xf];
-    display_.Print(buffer);
-    queue_.Touch();
-  }
   
   inline const Setting& setting() {
     return current_menu_->setting();
@@ -157,6 +149,10 @@ class Ui {
   void StartFactoryTesting() {
     mode_ = UI_MODE_FACTORY_TESTING;
   }
+
+  void PrintDebugByte(uint8_t byte);
+  void PrintDebugInt32(int32_t value);
+  void PrintInt32E(int32_t value);
   
  private:
   void RefreshDisplay();
@@ -250,7 +246,6 @@ class Ui {
   
   stmlib::EventQueue<32> queue_;
   
-  ChannelLeds leds_;
   Display display_;
   Encoder encoder_;
   Switches switches_;

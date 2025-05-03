@@ -28,6 +28,7 @@
 // User interface.
 
 #include "stmlib/system/system_clock.h"
+#include "stmlib/utils/print.h"
 
 #include "yarns/multi.h"
 #include "yarns/ui.h"
@@ -44,8 +45,6 @@ const uint16_t kRefreshMsec = 900;
 const uint16_t kCrossfadeMsec = kRefreshMsec >> 3;
 const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
 const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
-
-const char* const kVersion = "Loom 2_8_0";
 
 /* static */
 const Ui::Command Ui::commands_[] = {
@@ -139,7 +138,6 @@ void Ui::Init() {
   display_.Init();
   switches_.Init();
   queue_.Init();
-  leds_.Init();
   
   mode_ = UI_MODE_PARAMETER_SELECT;
   active_part_ = 0;
@@ -168,9 +166,7 @@ void Ui::Init() {
   modes_[UI_MODE_FACTORY_TESTING].incremented_variable = \
       &factory_testing_number_;
 
-  SplashString(kVersion);
   refresh_was_automatic_ = true;
-  display_.Scroll();
 }
 
 void Ui::Poll() {
@@ -242,8 +238,7 @@ void Ui::Poll() {
     leds_brightness[3] = (((x + 000) & 511) < 128) ? 255 : 0;
   }
   
-  leds_.Write(leds_brightness);
-  leds_.Write();
+  channel_leds.SetBrightness(leds_brightness);
 }
 
 void Ui::PollSwitch(const UiSwitch ui_switch, uint32_t& press_time, bool& long_press_event_sent) {
@@ -460,6 +455,7 @@ void Ui::SplashOn(Splash splash) {
 void Ui::SplashString(const char* text) {
   display_.Print(text);
   SplashOn(SPLASH_STRING);
+  display_.Scroll();
 }
 
 void Ui::SplashPartString(const char* label, uint8_t part) {
@@ -937,15 +933,7 @@ void Ui::DoEvents() {
     refresh_was_automatic_ = true;
   }
 
-  bool print_command = mode_ == UI_MODE_LOAD_SELECT_PROGRAM || mode_ == UI_MODE_SAVE_SELECT_PROGRAM;
-  bool print_latch =
-    (mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT) &&
-    active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
-    ActivePartHeldKeys().stack.most_recent_note_index();
-  bool print_active_part = (mode_ == UI_MODE_PARAMETER_SELECT && multi.num_active_parts() > 1) || mode_ == UI_MODE_SWAP_SELECT_PART;
-  bool print_any = print_command || print_latch || print_active_part;
-
-  if (print_any && !display_.scrolling() && queue_.idle_time() > kRefreshMsec) {
+  if (!display_.scrolling() && queue_.idle_time() > kRefreshMsec) {
     factory_testing_display_ = UI_FACTORY_TESTING_DISPLAY_EMPTY;
     refresh_display = true;
   }
@@ -972,7 +960,15 @@ void Ui::DoEvents() {
   }
   if (display_.scrolling()) { return; }
 
+  bool print_command = mode_ == UI_MODE_LOAD_SELECT_PROGRAM || mode_ == UI_MODE_SAVE_SELECT_PROGRAM;
+  bool print_latch =
+    (mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT) &&
+    active_part().midi_settings().sustain_mode != SUSTAIN_MODE_OFF &&
+    ActivePartHeldKeys().stack.most_recent_note_index();
+  bool print_active_part = (mode_ == UI_MODE_PARAMETER_SELECT && multi.num_active_parts() > 1) || mode_ == UI_MODE_SWAP_SELECT_PART;
+
   // If we're not scrolling and it's not yet time to refresh, print latch or part
+  bool print_any = print_command || print_latch || print_active_part;
   bool print_last_third = print_any;
   bool print_middle_third = print_latch && print_active_part;
   uint16_t begin_middle_third = kRefreshMsec / 3;
@@ -1054,6 +1050,37 @@ void Ui::PrintLatch() {
     ++note_ordinal;
   }
   display_.PrintMasks(masks);
+}
+
+void Ui::PrintDebugByte(uint8_t byte) {
+  char buffer[3];
+  buffer[2] = '\0';
+  buffer[0] = hexadecimal[byte >> 4];
+  buffer[1] = hexadecimal[byte & 0xf];
+  display_.Print(buffer);
+  queue_.Touch();
+}
+
+void Ui::PrintDebugInt32(int32_t value) {
+  // Print a "+" or "-" followed by a hex representation value
+  char buffer[11];
+  buffer[10] = '\0';
+  buffer[0] = value < 0 ? '-' : '+';
+  value = value < 0 ? -value : value;
+  for (int i = 9; i > 0; --i) {
+    buffer[i] = hexadecimal[value & 0xf];
+    value >>= 4;
+  }
+  display_.Print(buffer);
+  display_.Scroll();
+  queue_.Touch();
+}
+
+void Ui::PrintInt32E(int32_t value) {
+  stmlib::int32E(value, buffer_, sizeof(buffer_));
+  display_.Print(buffer_);
+  display_.Scroll();
+  queue_.Touch();
 }
 
 /* extern */

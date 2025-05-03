@@ -34,8 +34,10 @@
 #include "stmlib/midi/midi.h"
 #include "stmlib/utils/dsp.h"
 #include "stmlib/utils/random.h"
+#include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
+#include "yarns/multi.h"
 
 namespace yarns {
   
@@ -45,8 +47,6 @@ using namespace stmlib_midi;
 const int32_t kOctave = 12 << 7;
 const int32_t kMaxNote = 120 << 7;
 const int32_t kQuadrature = 0x40000000;
-
-const uint8_t kLowFreqRefresh = 32; // 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
 
 void Voice::Init() {
   audio_output_ = NULL;
@@ -69,22 +69,21 @@ void Voice::Init() {
   timbre_init_current_ = 0;
 
   refresh_counter_ = 0;
-  pitch_lfo_interpolator_.Init(kLowFreqRefresh);
-  timbre_lfo_interpolator_.Init(kLowFreqRefresh);
-  amplitude_lfo_interpolator_.Init(kLowFreqRefresh);
-  scaled_vibrato_lfo_interpolator_.Init(kLowFreqRefresh);
+  pitch_lfo_interpolator_.Init();
+  timbre_lfo_interpolator_.Init();
+  amplitude_lfo_interpolator_.Init();
+  scaled_vibrato_lfo_interpolator_.Init();
   
-  envelope_.Init();
   portamento_phase_ = 0;
   portamento_phase_increment_ = 1U << 31;
   portamento_exponential_shape_ = false;
-  
+
   trigger_duration_ = 2;
 }
 
 /* static */
 CVOutput::DCFn CVOutput::dc_fn_table_[] = {
-  &CVOutput::note_dac_code,
+  &CVOutput::pitch_dac_code,
   &CVOutput::velocity_dac_code,
   &CVOutput::aux_cv_dac_code,
   &CVOutput::aux_cv_dac_code_2,
@@ -98,9 +97,9 @@ void CVOutput::Init(bool reset_calibration) {
     }
   }
   dirty_ = false;
-
-  dac_interpolator_.Init(10); // 40 kHz / 4 kHz
   dc_role_ = DC_PITCH;
+  envelope_.Init(0);
+  envelope_bias_ = 0;
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
@@ -108,6 +107,14 @@ void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
       &calibrated_dac_code[0],
       &calibrated_dac_code[kNumOctaves],
       &calibrated_dac_code_[0]);
+}
+
+uint16_t CVOutput::pitch_dac_code() {
+  int32_t note = dc_voice_->note();
+  if (dirty_ || note_ != note) dac_code_ = NoteToDacCode(note);
+  dirty_ = false;
+  note_ = note;
+  return dac_code_;
 }
 
 uint16_t CVOutput::NoteToDacCode(int32_t note) const {
@@ -180,7 +187,6 @@ void Voice::Refresh() {
   note += tuning_;
   
   // Render modulation sources
-  envelope_.ReadSample();
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
     lfos_[i].Refresh();
   }
@@ -188,8 +194,9 @@ void Voice::Refresh() {
 
   if (refresh_counter_ == 0) {
     uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
+    // Fraction by which gain envelope should be damped
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
-    amplitude_lfo_interpolator_.SetTarget((UINT16_MAX - scaled_tremolo_lfo) >> 1);
+    amplitude_lfo_interpolator_.SetTarget(scaled_tremolo_lfo >> 1);
     amplitude_lfo_interpolator_.ComputeSlope();
 
     int32_t timbre_lfo_15 = lfo_value(LFO_ROLE_TIMBRE) * timbre_mod_lfo_current_ >> (31 - 15);
@@ -202,7 +209,7 @@ void Voice::Refresh() {
     pitch_lfo_interpolator_.SetTarget(pitch_lfo_15);
     pitch_lfo_interpolator_.ComputeSlope();
   }
-  refresh_counter_ = (refresh_counter_ + 1) % kLowFreqRefresh;
+  refresh_counter_ = (refresh_counter_ + 1) % (1 << kLowFreqRefreshBits);
 
   pitch_lfo_interpolator_.Tick();
   timbre_lfo_interpolator_.Tick();
@@ -211,26 +218,28 @@ void Voice::Refresh() {
 
   note += pitch_lfo_interpolator_.value();
 
-  int32_t timbre_envelope_31 = envelope_.value() * timbre_mod_envelope_;
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
-    (timbre_envelope_31 >> (31 - 15)) +
     timbre_lfo_interpolator_.value();
   CONSTRAIN(timbre_15, 0, (1 << 15) - 1);
 
-  uint16_t tremolo_drone = amplitude_lfo_interpolator_.value() << 1;
-  uint16_t tremolo_envelope = envelope_.value() * tremolo_drone >> 16;
-  uint16_t gain = oscillator_mode_ == OSCILLATOR_MODE_ENVELOPED ?
-    tremolo_envelope : tremolo_drone;
+  uint16_t tremolo = amplitude_lfo_interpolator_.value() << 1;
 
-  oscillator_.Refresh(note, timbre_15, gain);
+  // Needed for LED display of envelope CV
+  if (aux_1_envelope()) {
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
+  }
+  if (aux_2_envelope()) {
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
+  }
+
+  oscillator_.Refresh(note, timbre_15, tremolo);
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
-  mod_aux_[MOD_AUX_ENVELOPE] = tremolo_envelope;
   
   if (trigger_phase_increment_) {
     trigger_phase_ += trigger_phase_increment_;
@@ -244,35 +253,52 @@ void Voice::Refresh() {
 }
 
 void CVOutput::Refresh() {
-  if (is_audio()) return;
-  if (dc_role_ == DC_PITCH) {
-    int32_t note = dc_voice_->note();
-    if (dirty_ || note_ != note) {
-      note_dac_code_ = NoteToDacCode(note);
+  if (is_audio() || is_envelope()) return;
+  dac_code_ = (this->*dc_fn_table_[dc_role_])();
+}
+
+void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
+  int16_t samples[kAudioBlockSize] = {0};
+  if (is_envelope()) {
+    envelope_.RenderSamples(samples, envelope_bias_ << 16);
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+      samples[i] <<= 1;
     }
-    dirty_ = false;
-    note_ = note;
+    dac.BufferSamples(block, channel, samples);
+  } else if (is_audio()) {
+    std::fill(
+        samples,
+        samples + kAudioBlockSize,
+        zero_dac_code_
+    );
+    for (uint8_t v = 0; v < num_audio_voices_; ++v) {
+      audio_voices_[v]->oscillator()->Render(samples);
+    }
+    dac.BufferSamples(block, channel, samples);
+  } else {
+    dac.BufferStaticSample(block, channel, default_low_freq_cv);
   }
-  dac_interpolator_.SetTarget((this->*dc_fn_table_[dc_role_])() >> 1);
-  if (is_envelope()) dac_interpolator_.ComputeSlope();
 }
 
 void Voice::NoteOn(
-    int16_t note,
-    uint8_t velocity,
-    uint8_t portamento,
-    bool trigger) {
-  if (gate_ && trigger) {
-    retrigger_delay_ = 3;
-  }
+  int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+  ADSR& adsr, int16_t timbre_envelope_target
+) {
   if (trigger) {
+    if (gate_) {
+      retrigger_delay_ = 3;
+      NoteOff();
+    }
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
-    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_];
-    envelope_.GateOff();
+    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_ >> 1];
   }
   gate_ = true;
-  envelope_.GateOn();
+  adsr_ = adsr;
+
+  if (uses_audio()) oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target);
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
 
   if (!has_cv_output()) return;
 
@@ -283,12 +309,12 @@ void Voice::NoteOn(
   }
 
   portamento_phase_ = 0;
-  uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE >> 1;
+  uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
   if (portamento < split_point) {
-    portamento_phase_increment_ = lut_portamento_increments[(split_point - portamento) << 1];
+    portamento_phase_increment_ = lut_portamento_increments[(split_point - portamento)];
     portamento_exponential_shape_ = true;
   } else {
-    uint32_t base_increment = lut_portamento_increments[(portamento - split_point) << 1];
+    uint32_t base_increment = lut_portamento_increments[(portamento - split_point)];
     uint32_t delta = abs(note_target_ - note_source_) + 1;
     portamento_phase_increment_ = (1536 * (base_increment >> 11) / delta) << 11;
     CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
@@ -300,7 +326,9 @@ void Voice::NoteOn(
 
 void Voice::NoteOff() {
   gate_ = false;
-  envelope_.GateOff();
+  if (uses_audio()) oscillator_.NoteOff();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
 }
 
 void Voice::ControlChange(uint8_t controller, uint8_t value) {

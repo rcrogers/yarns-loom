@@ -25,31 +25,42 @@
 //
 // -----------------------------------------------------------------------------
 //
-// Oscillator - analog style waveforms.
+// Oscillator.
 
-#ifndef YARNS_ANALOG_OSCILLATOR_H_
-#define YARNS_ANALOG_OSCILLATOR_H_
+#ifndef YARNS_OSCILLATOR_H_
+#define YARNS_OSCILLATOR_H_
 
 #include "stmlib/stmlib.h"
-#include "stmlib/utils/ring_buffer.h"
 
+#include "yarns/envelope.h"
 #include "yarns/interpolator.h"
+#include "yarns/drivers/dac.h"
 
 #include <cstring>
 #include <cstdio>
 
 namespace yarns {
 
-const size_t kAudioBlockSize = 64;
-
 class StateVariableFilter {
  public:
-  void Init(uint8_t interpolation_slope);
-  void RenderInit(int16_t frequency, int16_t resonance);
-  void RenderSample(int16_t in);
+  void Init();
+  void RenderInit(int16_t resonance);
+
+  inline void RenderSample(int32_t in, int16_t cutoff) {
+    damp.Tick();
+    notch = in - (bp * damp.value() >> 14);
+    CLIP(notch);
+    lp += cutoff * bp >> 14;
+    CLIP(lp);
+    hp = notch - lp;
+    CLIP(hp);
+    bp += cutoff * hp >> 14;
+    CLIP(bp);
+  }
+
   int32_t bp, lp, notch, hp;
  private:
-  Interpolator cutoff, damp;
+  Interpolator<kAudioBlockSizeBits> damp;
 };
 
 struct PhaseDistortionSquareModulator {
@@ -88,17 +99,17 @@ enum OscillatorShape {
 
 class Oscillator {
  public:
-  typedef void (Oscillator::*RenderFn)();
+  typedef void (Oscillator::*RenderFn)(int16_t* timbre_samples, int16_t* audio_samples);
 
   Oscillator() { }
   ~Oscillator() { }
 
   inline void Init(uint16_t scale) {
-    audio_buffer_.Init();
     scale_ = scale;
-    timbre_.Init(64);
-    gain_.Init(64);
-    svf_.Init(64);
+    raw_gain_bias_ = raw_timbre_bias_ = 0;
+    gain_envelope_.Init(0);
+    timbre_envelope_.Init(0);
+    svf_.Init();
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
@@ -106,36 +117,42 @@ class Oscillator {
     next_sample_ = 0;
   }
 
-  inline uint16_t ReadSample() {
-    return audio_buffer_.ImmediateRead();
-  }
-
-  void Refresh(int16_t pitch, int16_t timbre, uint16_t gain);
+  void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias);
+  int16_t WarpTimbre(int16_t timbre) const;
   
   inline void set_shape(OscillatorShape shape) {
     shape_ = shape;
   }
+
+  inline void NoteOn(ADSR& adsr, bool drone, int16_t raw_max_timbre) {
+    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
+    timbre_envelope_.NoteOn(adsr, 0, WarpTimbre(raw_max_timbre));
+  }
+  inline void NoteOff() {
+    gain_envelope_.NoteOff();
+    timbre_envelope_.NoteOff();
+  }
   
-  void Render();
+  void Render(int16_t* audio_mix);
   
  private:
-  void RenderFilteredNoise();
-  void RenderPhaseDistortionPulse();
-  void RenderPhaseDistortionSaw();
-  void RenderLPPulse();
-  void RenderLPSaw();
-  void RenderVariablePulse();
-  void RenderVariableSaw();
-  void RenderSawPulseMorph();
-  void RenderSyncSine();
-  void RenderSyncPulse();
-  void RenderSyncSaw();
-  void RenderFoldSine();
-  void RenderFoldTriangle();
-  void RenderDiracComb();
-  void RenderTanhSine();
-  void RenderExponentialSine();
-  void RenderFM();
+  void RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderLPSaw(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderFM(int16_t* timbre_samples, int16_t* audio_samples);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
@@ -155,13 +172,14 @@ class Oscillator {
   }
 
   OscillatorShape shape_;
-  Interpolator timbre_, gain_;
+  Envelope gain_envelope_, timbre_envelope_;
+  int16_t raw_timbre_bias_;
+  uint16_t raw_gain_bias_;
   int16_t pitch_;
 
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t modulator_phase_;
-  uint32_t modulator_phase_increment_;
   bool high_;
 
   StateVariableFilter svf_;
@@ -169,7 +187,6 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
-  stmlib::RingBuffer<uint16_t, kAudioBlockSize * 2> audio_buffer_;
   
   static RenderFn fn_table_[];
   
@@ -178,4 +195,4 @@ class Oscillator {
 
 }  // namespace yarns
 
-#endif // YARNS_ANALOG_OSCILLATOR_H_
+#endif // YARNS_OSCILLATOR_H_

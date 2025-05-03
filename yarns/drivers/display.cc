@@ -40,7 +40,7 @@ const uint16_t kPinClk = GPIO_Pin_7; // DISP_SCK, SHCP, shift register clock inp
 const uint16_t kPinEnable = GPIO_Pin_8; // DISP_EN, STCP, storage register clock input
 const uint16_t kPinData = GPIO_Pin_9; // DISP_SER, DS, serial data input
 
-const uint16_t kScrollingDelay = 180;
+const uint16_t kScrollingDelay = 260;
 const uint16_t kScrollingPreDelay = 600;
 const uint16_t kBlinkMask = 128;
 
@@ -54,7 +54,7 @@ const uint16_t kCharacterEnablePins[] = {
 };
 
 void Display::Init() {
-  GPIO_InitTypeDef gpio_init;
+  GPIO_InitTypeDef gpio_init = {0};
   gpio_init.GPIO_Pin = kPinClk;
   gpio_init.GPIO_Pin |= kPinEnable;
   gpio_init.GPIO_Pin |= kPinData;
@@ -183,12 +183,9 @@ void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t 
 }
 
 # define SHIFT_BIT \
-  GPIOB->BRR = kPinClk; \
-  if (data & 1) { \
-    GPIOB->BSRR = kPinData; \
-  } else { \
-    GPIOB->BRR = kPinData; \
-  } \
+  GPIOB->BSRR = \
+    kPinClk << 16 | \
+    ((data & 1) ? kPinData : kPinData << 16); \
   data >>= 1; \
   /* Data is shifted on the LOW-to-HIGH transitions of the SHCP input. */ \
   GPIOB->BSRR = kPinClk;

@@ -37,6 +37,7 @@
 #include "stmlib/algorithms/note_stack.h"
 
 #include "yarns/resources.h"
+#include "yarns/drivers/dac.h"
 #include "yarns/looper.h"
 #include "yarns/sequencer_step.h"
 #include "yarns/arpeggiator.h"
@@ -46,8 +47,12 @@ namespace yarns {
 class Voice;
 
 const uint8_t kNumSteps = 30;
-const uint8_t kNumMaxVoicesPerPart = 4;
-const uint8_t kNumParaphonicVoices = 3;
+
+const uint8_t kNumParaphonicVoices = 4;
+const uint8_t kNumMaxVoicesPerPart =
+  kNumParaphonicVoices > kNumCVOutputs
+  ? kNumParaphonicVoices : kNumCVOutputs;
+
 const uint8_t kNoteStackSize = 12;
 const uint8_t kNoteStackMapping = kNoteStackSize + 1; // 1-based
 

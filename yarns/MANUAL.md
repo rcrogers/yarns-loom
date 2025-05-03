@@ -125,10 +125,10 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - ADSR envelope with velocity modulation
   - Envelope controls voice amplitude when the `OSCILLATOR MODE` is `ENVELOPED`
   - Envelope is available as an aux CV output (`ENVELOPE`) in all layouts
-  - `ATTACK INIT`, `DECAY INIT`, `SUSTAIN INIT`, `RELEASE INIT`: initial settings for ADSR segments
-    - Segment times range from 1 ms (2 ticks) to 5 seconds
-  - `ATTACK MOD VEL`, `DECAY MOD VEL`, `SUSTAIN MOD VEL`, `RELEASE MOD VEL`: attenuverter for velocity's modulation of the segment
-  - The envelope's segments and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
+  - `ATTACK INIT`, `DECAY INIT`, `SUSTAIN INIT`, `RELEASE INIT`: initial settings for ADSR stages
+    - Stage times range from 1 ms (2 ticks) to 5 seconds
+  - `ATTACK MOD VEL`, `DECAY MOD VEL`, `SUSTAIN MOD VEL`, `RELEASE MOD VEL`: attenuverter for velocity's modulation of the stage
+  - The envelope's stages and their sensitivity to velocity are set by `ATTACK TIME INIT`, `ATTACK TIME MOD`, etc.
   - Peak attack amplitude can be velocity-scaled via `PV (PEAK VEL MOD)`
     - Positive values: peak attack amplitude is lower when velocity is lower
     - Negative values: peak attack amplitude is lower when velocity is higher

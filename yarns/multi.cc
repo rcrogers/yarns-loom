@@ -64,9 +64,11 @@ enum MacroPlayMode {
 
 const uint8_t kBackupClockLFOPeriodTicksBits = 4;
 
-void Multi::PrintDebugByte(uint8_t byte) {
-  ui.PrintDebugByte(byte);
-}
+// Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
+const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
+
+void Multi::PrintDebugByte(uint8_t byte) { ui.PrintDebugByte(byte); }
+void Multi::PrintInt32E(int32_t value) { ui.PrintInt32E(value); }
 
 void Multi::Init(bool reset_calibration) {
   just_intonation_processor.Init();
@@ -220,7 +222,7 @@ void Multi::Start(bool started_by_keyboard) {
   }
   if (internal_clock()) {
     internal_clock_ticks_ = 0;
-    internal_clock_.Start(settings_.clock_tempo, settings_.clock_swing);
+    internal_clock_.Start(settings_.clock_tempo * kTempoToTickPhaseIncrement);
   }
   midi_handler.OnStart();
 
@@ -807,12 +809,12 @@ void Multi::ChangeLayout(Layout old_layout, Layout new_layout) {
 
 
 void Multi::UpdateTempo() {
-  internal_clock_.set_tempo(settings_.clock_tempo);
+  uint32_t phase_increment = settings_.clock_tempo * kTempoToTickPhaseIncrement;
+  internal_clock_.set_phase_increment(phase_increment);
   if (running_) return; // If running, backup LFO will get Tap
   if (!multi.internal_clock()) return; // We don't know the new tempo
 
   // If we're on a stopped internal clock, calculate an updated clock speed
-  uint32_t phase_increment = settings_.clock_tempo * kTempoToTickPhaseIncrement;
   phase_increment /= settings_.clock_input_division;
   phase_increment >>= kBackupClockLFOPeriodTicksBits;
   backup_clock_lfo_.SetPhaseIncrement(phase_increment);

@@ -37,60 +37,48 @@ lookup_tables_32 = []
 lookup_tables = []
 lookup_tables_signed = []
 lookup_tables_8 = []
+# lookup_tables_8_unsigned = []
 
 """----------------------------------------------------------------------------
 LFO and portamento increments.
 ----------------------------------------------------------------------------"""
 
 refresh_rate = 4000
-audio_rate = 40000
-
-
-min_frequency = 1.0 / 8.0  # Hertz
-max_frequency = 16.0  # Hertz
+audio_rate = 45000
 excursion = 1 << 32
-num_values = 64
-min_increment = excursion * min_frequency / refresh_rate
-max_increment = excursion * max_frequency / refresh_rate
 
-rates = numpy.linspace(numpy.log(min_increment),
-                       numpy.log(max_increment), num_values)
-lookup_tables_32.append(
-    ('lfo_increments', numpy.exp(rates).astype(int))
-)
+
+def lfo():
+  min_frequency = 1.0 / 8.0  # Hertz
+  max_frequency = 16.0  # Hertz
+  
+  num_values = 64
+  min_increment = excursion * min_frequency / refresh_rate
+  max_increment = excursion * max_frequency / refresh_rate
+
+  rates = numpy.linspace(numpy.log(min_increment), numpy.log(max_increment), num_values)
+  lookup_tables_32.append(
+      ('lfo_increments', numpy.exp(rates).astype(int))
+  )
+lfo()
 
 
 
 # Create lookup table for portamento.
-num_values = 128
-max_time = 5.0  # seconds
+def portamento():
+  num_values = 64
+  max_time = 5.0  # seconds
 
-gamma = 0.25
-min_time = 1.001 / refresh_rate
-min_increment = excursion / (max_time * refresh_rate)
-max_increment = excursion / (min_time * refresh_rate)
-rates = numpy.linspace(numpy.power(max_increment, -gamma),
-                       numpy.power(min_increment, -gamma), num_values)
-values = numpy.power(rates, -1/gamma).astype(int)
-lookup_tables_32.append(
-    ('portamento_increments', values)
-)
-
-
-
-# Create table for pitch.
-a4_midi = 69
-a4_pitch = 440.0
-highest_octave = 116
-notes = numpy.arange(
-    highest_octave * 128.0,
-    (highest_octave + 12) * 128.0 + 16,
-    16)
-pitches = a4_pitch * 2 ** ((notes - a4_midi * 128) / (128 * 12))
-increments = excursion / audio_rate * pitches
-
-lookup_tables_32.append(
-    ('oscillator_increments', increments.astype(int)))
+  gamma = 0.25
+  min_time = 1.001 / refresh_rate
+  min_increment = excursion / (max_time * refresh_rate)
+  max_increment = excursion / (min_time * refresh_rate)
+  rates = numpy.linspace(numpy.power(max_increment, -gamma), numpy.power(min_increment, -gamma), num_values)
+  values = numpy.power(rates, -1/gamma).astype(int)
+  lookup_tables_32.append(
+      ('portamento_increments', values)
+  )
+portamento()
 
 
 
@@ -98,13 +86,160 @@ lookup_tables_32.append(
 Envelope curves
 -----------------------------------------------------------------------------"""
 
-env_samples = 256.0
+def envelope():
+  # p = 1.83 is good, 2.5 also good, 2.7 gets a uniform spread of shifts
+  def make_expo(linear, p = 1.95):
+    return 1.0 - numpy.exp(-4 * linear)
+    # # Alternate curve shape: quarter circle
+    # return (1 - (1 - linear) ** p) ** (1 / p)
 
-env_linear = numpy.arange(0, env_samples + 1) / env_samples
-env_linear[-1] = env_linear[-2]
-env_expo = 1.0 - numpy.exp(-4 * env_linear)
-lookup_tables.append(('env_expo', env_expo / env_expo.max() * 65535.0))
+  def expo():
+    # Map a phase to an exponential value
+    num_expo_values = 256.0
+    env_linear = numpy.arange(0, num_expo_values + 1) / num_expo_values
+    env_linear[-1] = env_linear[-2]
+    env_expo = make_expo(env_linear)
+    lookup_tables.append(('env_expo', env_expo / env_expo.max() * 65535.0))
 
+    # def make_expo_inverse(expo_value):
+    #     return -numpy.log(1.0 - expo_value) / 4.0
+
+    # env_inverse_expo = make_expo_inverse(env_expo)
+    # lookup_tables.append(('env_inverse_expo', env_inverse_expo / env_inverse_expo.max() * 65535.0))
+  expo()
+
+  # Like the above, but with 7-bit phase and 7-bit value instead of 8-bit phase and 16-bit value
+  # env_linear = numpy.arange(0, 128.0 + 1) / 128
+  # env_expo_7bit = make_expo(env_linear)
+  # lookup_tables_8.append(('env_expo_7bit', env_expo_7bit / env_expo_7bit.max() * 127.0))
+
+
+  # # Array of length 128 that maps a 7-bit exponential value to a 16-bit phase
+  # env_expo_to_phase = numpy.interp(
+  #     numpy.arange(0, 128),
+  #     numpy.linspace(0, 127, len(env_expo)),
+  #     env_expo * 65535.0
+  # )
+  # lookup_tables_16.append(('env_expo_to_phase', env_expo_to_phase.astype(int)))
+
+  env_shift_samples = 16.0
+
+  def shifts():
+
+    # For a linear slope y = x, with each shift representing an equal slice of time between x = 1 and x = 1, what is the cumulative value from the piecewise shifted slope?
+    def get_cumulative_value_from_slope_shifts(x): # x between 0 and 1
+      y = 0
+      for i, shift in enumerate(expo_slope_shift):
+        shifted_slope = 1 * 2 ** shift
+        shift_x_start = i / len(expo_slope_shift)
+        shift_x_end = (i + 1) / len(expo_slope_shift)
+        if x < shift_x_start:
+          break
+        if x < shift_x_end:
+          y += shifted_slope * (x - shift_x_start)
+          break
+        y += shifted_slope * (shift_x_end - shift_x_start)
+      return y
+
+    env_shift_linear = numpy.arange(1, env_shift_samples + 1) / env_shift_samples
+    env_shift_expo = make_expo(env_shift_linear)
+    env_shift_expo /= env_shift_expo.max()
+    dx = 1 / env_shift_samples
+    y_actual = 0
+    shift = None
+    errors = []
+    expo_slope_shift = []
+    # expo_slope_shift = [2, 1, 0, -1, -2, -3, -4, -5]
+    assert(len(env_shift_expo) == env_shift_samples)
+    for idx, y_ideal in enumerate(env_shift_expo):
+      dy_ideal = y_ideal - (0 if idx == 0 else env_shift_expo[idx - 1])
+      dy_actual = y_ideal - y_actual
+      dy_weighted = (dy_ideal + dy_actual) / 2
+      slope = dy_weighted / dx
+      # slope = dy_actual / dx
+
+      # slope **= 0.915 # avg -1.22%, final 0.05%
+      # slope = (slope ** 0.98) * 0.97 # avg 0.66%, final 0.000%
+      # print(slope)
+      ideal_slope_power = math.log(slope, 2) if slope else -float('inf')
+      # ideal_slope_power -= 0.05 # avg 1.38%, final 0.17%
+      # ideal_slope_power *= 0.91 # avg -1.21%, final 0.1%
+      shift = round(ideal_slope_power)
+      shift = -32 if shift < -32 else shift
+      # shift = expo_slope_shift[idx]
+      y_actual += 2 ** shift * dx
+      print('y_actual', y_actual, 'y_ideal', y_ideal)
+      error = 100 * (y_actual - y_ideal) / y_ideal
+      errors.append(error)
+      print(
+        'idx',
+        str.rjust(str(idx), 4),
+        # 'ideal slope power',
+        # str.rjust(format(
+        #   round(ideal_slope_power, 3)
+        # , '.3f'), 6),
+        'slope power',
+        str.rjust(str(shift), 3),
+        'error %',
+        str.rjust(format(
+          round(error, 3)
+        , '.3f'), 6)
+      )
+
+      # Slope shift should be monotonically decreasing
+      if idx > 0:
+        assert(shift <= expo_slope_shift[idx-1])
+      expo_slope_shift.append(shift)
+
+    print('\navg abs error pct', sum(abs(e) for e in errors) / len(errors))
+
+    lookup_tables_8.append(
+        ('expo_slope_shift', expo_slope_shift)
+    )
+  shifts()
+  
+  # raise Exception('stop here')
+
+  max_time = 5.0  # seconds
+  num_duration_values = 128
+  gamma = 0.25
+  envelope_rate = audio_rate
+  # min_time = env_shift_samples / envelope_rate
+  min_time = 4.0 / envelope_rate
+  # print('min_time', min_time)
+  min_samples = min_time * envelope_rate
+  max_samples = max_time * envelope_rate
+
+  min_increment = excursion / max_samples
+  max_increment = excursion / min_samples
+  rates = numpy.linspace(numpy.power(max_increment, -gamma), numpy.power(min_increment, -gamma), num_duration_values)
+  values = list(numpy.power(rates, -1/gamma).astype(int))
+  values.append(values[-1])
+  lookup_tables_32.append(
+      ('envelope_phase_increments', values)
+  )
+
+  # sample_counts = excursion / numpy.array(values)
+  # lookup_tables_32.append(
+  #   ('envelope_sample_counts', sample_counts)
+  # )
+envelope()
+
+# Create table for pitch.
+def pitch():
+  a4_midi = 69
+  a4_pitch = 440.0
+  highest_octave = 116
+  notes = numpy.arange(
+      highest_octave * 128.0,
+      (highest_octave + 12) * 128.0 + 16,
+      16)
+  pitches = a4_pitch * 2 ** ((notes - a4_midi * 128) / (128 * 12))
+  increments = excursion / audio_rate * pitches
+
+  lookup_tables_32.append(
+      ('oscillator_increments', increments.astype(int)))
+pitch()
 
 """----------------------------------------------------------------------------
 Arpeggiator patterns
@@ -623,10 +758,18 @@ lookup_tables_string.append(('fm_ratio_names', fm_ratio_names))
 # lookup_tables_signed.append(('fm_carrier_corrections', fm_carrier_corrections))
 
 fm_modulator_intervals = [128 * 12 * numpy.log2(r) for r in fm_ratios]
+print('FM modulator intervals: ', fm_modulator_intervals)
 lookup_tables_signed.append(('fm_modulator_intervals', fm_modulator_intervals))
 
 FM_INDEX_SCALING_BASE = 40
-fm_index_upshifts_f = numpy.log2(FM_INDEX_SCALING_BASE / numpy.array(fm_ratios))
+# print('FM ratios: ', fm_ratios)
+fm_index_scales = numpy.array([FM_INDEX_SCALING_BASE / r for r in fm_ratios])
+# print('FM index scale for ratios: ', fm_index_scales)
+
+# Convert to q4.4, downshifted by 2
+# lookup_tables_8_unsigned.append(('fm_index_scales_q4_4', fm_index_scales * 16 / 4))
+
+fm_index_upshifts_f = numpy.log2(fm_index_scales)
 lookup_tables_8.append(('fm_index_2x_upshifts', numpy.round(fm_index_upshifts_f * 2)))
 
 
