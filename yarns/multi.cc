@@ -64,6 +64,9 @@ enum MacroPlayMode {
 
 const uint8_t kBackupClockLFOPeriodTicksBits = 4;
 
+// Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
+const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
+
 void Multi::PrintDebugByte(uint8_t byte) { ui.PrintDebugByte(byte); }
 void Multi::PrintInt32E(int32_t value) { ui.PrintInt32E(value); }
 

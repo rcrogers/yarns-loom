@@ -65,11 +65,6 @@ uint16_t cv[4];
 bool gate[4];
 uint16_t factory_testing_counter;
 
-uint32_t err_count = 0;
-uint32_t txe_count = 0;
-uint32_t rxne_count = 0;
-uint32_t ovr_count = 0;
-
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
   // UI polling at 1kHz.
