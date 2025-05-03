@@ -53,15 +53,8 @@ class InternalClock {
   }
   
   inline bool Process() {
-    uint32_t half_cycle = 0x80000000;
-    
-    bool tick = false;
-    if (phase_ >= half_cycle) {
-      tick = true;
-      phase_ -= half_cycle;
-    }
     phase_ += phase_increment_;
-    return tick;
+    return phase_ < phase_increment_;
   }
   
  private:
