@@ -1,5 +1,5 @@
 # Loom
-An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), with an emphasis on dynamic voicing, flexible composition, and expressive control.
+An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), designed for dynamic voicing, flexible composition, and expressive control.
 
 ### Features
 - [Cue playback with MIDI Song Position](yarns/MANUAL.md#song-position)
