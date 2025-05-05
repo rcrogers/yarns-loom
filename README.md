@@ -5,7 +5,7 @@ An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](ht
 - [Cue playback with MIDI Song Position](yarns/MANUAL.md#song-position)
 - [Looper-style sequencer with real-time MIDI recording](yarns/MANUAL.md#loop-sequencer-mode-with-real-time-recording)
 - [Arpeggiator movement can be programmed via sequencer](yarns/MANUAL.md#sequencer-driven-arpeggiator)
-- [Braids-inspired oscillators with gain/timbre mod matrix](yarns/MANUAL.md#oscillator-controls)
+- [Braids-inspired oscillators with timbre/amplitude mod matrix](yarns/MANUAL.md#oscillator-controls)
 - [ADSR envelopes with velocity control](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
 - [Deeper support for MIDI CCs](yarns/MANUAL.md#midi-control-change-messages)
 - [New layouts with 4-voice paraphonic part and 6 overall voices](yarns/MANUAL.md#layouts)
