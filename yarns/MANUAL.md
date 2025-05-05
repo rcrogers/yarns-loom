@@ -93,28 +93,41 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - `TV (TIMBRE VEL MOD)` attenuverter for velocity's modulation of the timbre envelope (velocity can polarize the timbre envelope)
 
 ### Oscillator synthesis models
-- Filtered noise: `TIMBRE` sets filter cutoff, voice pitch sets filter resonance
-  - Low-pass, notch, band-pass, high-pass
-- Phase distortion, resonant pulse: `TIMBRE` sets filter cutoff
-  - Low-pass, peaking, band-pass, high-pass
-- Phase distortion, resonant saw: `TIMBRE` sets filter cutoff
-  - Low-pass, peaking, band-pass, high-pass
-- State-variable filter, low-pass: `TIMBRE` sets filter cutoff (resonance is fixed)
-  - Pulse, saw
-- Pulse-width modulation: `TIMBRE` sets pulse width
-  - Pulse, saw
-- Saw-pulse morph: `TIMBRE` morphs toward pulse
-- Hard sync: `TIMBRE` sets detuning of the secondary oscillator
-  - Sine, pulse, saw
-- Wavefolder: `TIMBRE` sets fold gain
-  - Sine, triangle
-- Dirac comb: `TIMBRE` sets harmonic content
-- Compressed sine (`tanh`): `TIMBRE` sets compression amount
-- Exponential sine: `TIMBRE` sets exponentiation amount
-- Frequency modulation: `TIMBRE` sets modulation index
-  - 11 integer ratios (ordered from harmonic to inharmonic)
-  - 8 ratios based on the inverse Minkowski question-mark function
-  - 7 ratios that are integer divisions/multiples of pi
+- `*-` Filtered noise
+  - Timbre: filter cutoff (voice pitch sets filter resonance)
+  - Shapes: low-pass, notch, band-pass, high-pass
+- `CZ` Phase distortion, resonant pulse
+  - Timbre: filter cutoff
+  - Shapes: low-pass, peaking, band-pass, high-pass
+- `CZ` Phase distortion, resonant saw
+  - Timbre: filter cutoff
+  - Shapes: low-pass, peaking, band-pass, high-pass
+- `-╰` state-variable filter, low-pass
+  - Timbre: filter cutoff (resonance is fixed)
+  - Shapes: pulse, saw
+- `-W` Pulse-width modulation
+  - Timbre: pulse width
+  - Shapes: pulse, saw
+- `|⟍┌┐` Saw-pulse morph
+  - Timbre: morph from saw to pulse
+- `-$` Hard sync
+  - Timbre: detunes the synced oscillator
+  - Shapes: sine, pulse, saw
+- `-F` Wavefolder
+  - Timbre: folding amount
+  - Shapes: sine, triangle
+- `┴┴` Dirac comb
+  - Timbre: harmonic content
+- `ST` Compressed sine (`tanh`)
+  - Timbre: compression amount
+- `SX` Exponential sine
+  - Timbre: exponentiation amount
+- `FM` Frequency modulation
+  - Timbre: modulation index
+  - Shapes: 26 preset modulator ratios
+    - 11 integer ratios, ordered from harmonic to inharmonic
+    - 8 irrational numbers based on the inverse Minkowski question-mark function
+    - 7 irrational divisions/multiples of pi
 
 ### Amplitude dynamics: envelope and tremolo
 - Configured via the `▽A (AMPLITUDE MENU)`
