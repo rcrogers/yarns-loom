@@ -5,7 +5,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 #### Table of contents
 - [Panel controls and display](#panel-controls-and-display)
     - [Global control and display of the active part](#global-control-and-display-of-the-active-part)
-    - [Tap tempo changes](#tap-tempo-changes)
+    - [Tap tempo changes](#tap-tempo)
     - [Other changes](#other-changes)
 - [Synth voice](#synth-voice)
     - [Oscillator controls](#oscillator-controls)
@@ -69,15 +69,24 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
   - Front-panel latching (hold `REC`)
   - Editing part-specific settings
 
-### Tap tempo changes
+### Tap tempo
 - If a single tap is received without follow-up, the tempo is set to use external clocking
 - After setting a tempo, the result flashes on the screen
+
+### Part swap command
+- `*P PART SWAP SETTINGS` in main menu
+- Allows using an inactive part to store an alternate configuration
+
+### Save/load commands
+- Print command name when picking a preset
+- Splash a summary after executing command
+- Can exit menu with long press on encoder
 
 ### Other changes
 - Moved configuration-type settings into a submenu, accessed by opening `▽S (SETUP MENU)`
 - Print flat notes as lowercase character (instead of denoting flatness with `b`) so that octave can always be displayed
 - Improved clock-sync of display fade for the `TE(MPO)` setting
-- Splash on save/load
+- LEDs have 64 brightness levels instead of 16
 
 # Synth voice
 
@@ -146,7 +155,11 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - Positive values: peak attack amplitude is lower when velocity is lower
     - Negative values: peak attack amplitude is lower when velocity is higher
     - Zero: peak attack amplitude is always maximum
-  
+  - Envelope adapts to interrupted/overlapping notes
+    - If attack/release is closer to target than expected: shorten stage duration in proportion to remaining distance, maintaining nominal curve shape
+    - If attack/release is farther from target than expected: curve stays at maximum steepness until it catches up to the expected start value
+    - If sustain level changes without a note release (i.e. during legato play): use a decay stage to transition to new sustain level 
+    - If attack is going downward (e.g. toward low peak after an early release from a high peak): skip to decay
 # Sequencer
 
 ### General recording controls
