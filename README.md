@@ -8,8 +8,8 @@ An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](ht
 - [Braids-inspired oscillator waveforms with timbre shaping](yarns/MANUAL.md#oscillator-controls)
 - [ADSR envelopes with velocity control](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
 - [Deeper support for MIDI CCs](yarns/MANUAL.md#midi-control-change-messages)
-- [New layouts, including a layout with a 3-voice paraphonic part](yarns/MANUAL.md#layouts)
-- [More options for polyphonic voicing](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
+- [New layouts with 4-voice paraphonic part and 6 overall voices](yarns/MANUAL.md#layouts)
+- [New algorithms for polyphonic voice allocation](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
 - [Hold pedal can be used for sostenuto, latching, and more](yarns/MANUAL.md#hold-pedal)
   - **[Check the manual for more! →](yarns/MANUAL.md)**
 
