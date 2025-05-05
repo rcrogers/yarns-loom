@@ -83,7 +83,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 ### Oscillator controls
 - Configured via the `▽O (OSCILLATOR MENU)`
-- `OM (OSCILLATOR MODE)` switches the oscillator between `OFF`, `DRONE`, and `ENVELOPED`
+- `OM (OSCILLATOR MODE)` switches the oscillator between `OFF`, `DRONE` (unity amplitude), and `ENVELOPED` (envelope-controlled amplitude)
 - `OS (OSCILLATOR SHAPE)` sets the waveform (see below)
 - Each wave shape has a timbral parameter that can be modulated by several sources
   - `TI (TIMBRE INITIAL)` sets initial timbre
