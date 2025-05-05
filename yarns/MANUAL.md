@@ -395,8 +395,8 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
     - Does not reassign voices to unvoiced notes on release
 - `PRIORITY ORDER` (previously `SORTED`)
     - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
-- `UNISON RELEASE REASSIGN` (previously `U1`)
-- `UNISON RELEASE MUTE` (previously `U2`)
+- `UR UNISON RELEASE REASSIGN` (previously `U1`)
+- `UM UNISON RELEASE MUTE` (previously `U2`)
 - `SM STEAL HIGHEST PRIORITY RELEASE MUTE` (previously `STEAL MOST RECENT`)
     - Steal from the highest-priority existing note IFF the incoming note has higher priority
     - Does not reassign on release
@@ -409,13 +409,15 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 
 #### Other changes
 - Notes that steal a voice are considered legato
-- Fixed unison to allocate notes without gaps
-- Improve unison etc. to avoid unnecessary reassignment/retrigger of voices during a partial chord change
-- Unison etc. reassign voices on `NoteOff` if there are held notes that don't yet have a voice
+- Fixed `UNISON` to allocate notes without gaps
+- Improve `PRIORITY`/`UNISON` to avoid unnecessary reassignment/retrigger of voices during a partial chord change
+- `PRIORITY` and `UNISON RELEASE REASSIGN` reassign voices on `NoteOff` if there are unvoiced notes
 - Allow monophonic parts to use all voicing modes
 
 ### Legato and portamento
-- Replaced `LEGATO MODE` setting (three values) with two on/off settings, `LEGATO RETRIGGER` (are notes retriggered when played legato?) and `PORTAMENTO LEGATO ONLY` (is portamento applied on all notes, or only on notes played legato?)
+- Replaced stock `LEGATO MODE` setting (three values) with two on/off settings:
+  - `LEGATO RETRIGGER`: are notes retriggered when played legato?
+  - `PORTAMENTO LEGATO ONLY`: is portamento applied on all notes, or only on notes played legato?
   - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
 - `PORTAMENTO` setting has a shared zero at center
   - Increases constant-time portamento when turning counter-clockwise from center, and increases constant-rate when turning clockwise
