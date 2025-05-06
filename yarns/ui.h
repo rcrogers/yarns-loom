@@ -125,7 +125,7 @@ class Ui {
   void SplashString(const char* text);
   void SplashPartString(const char* label, uint8_t part);
   void SplashSetting(const Setting& s, uint8_t part);
-  void CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time, bool fade_in);
+  void CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time);
 
   inline bool in_recording_mode() const {
     return multi.recording() && (

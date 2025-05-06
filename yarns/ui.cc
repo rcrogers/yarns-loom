@@ -474,11 +474,11 @@ void Ui::SplashSetting(const Setting& s, uint8_t part) {
   SplashOn(SPLASH_SETTING_VALUE, part);
 }
 
-void Ui::CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time, bool fade_in) {
+void Ui::CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time) {
   uint16_t brightness = UINT16_MAX;
   uint32_t fade_in_elapsed = queue_.idle_time() - fade_in_start_time;
   uint32_t fade_out_remaining = fade_out_end_time - queue_.idle_time();
-  if (fade_in_elapsed < kCrossfadeMsec && fade_in) {
+  if (fade_in_elapsed < kCrossfadeMsec && refresh_was_automatic_) {
     brightness = UINT16_MAX * fade_in_elapsed / kCrossfadeMsec;
   } else if (fade_out_remaining < kCrossfadeMsec) {
     brightness = UINT16_MAX * fade_out_remaining / kCrossfadeMsec;
@@ -908,7 +908,7 @@ void Ui::DoEvents() {
   if (splash_) { // Check whether to end this splash (and maybe chain another)
     if (display_.scrolling() || queue_.idle_time() < kRefreshMsec) {
       // If scrolling, fade-out never begins, we will just exit splash after scrolling
-      CrossfadeBrightness(0, display_.scrolling() ? -1 : kRefreshMsec, refresh_was_automatic_);
+      CrossfadeBrightness(0, display_.scrolling() ? -1 : kRefreshMsec);
       return; // Splash isn't over yet
     }
 
@@ -974,6 +974,7 @@ void Ui::DoEvents() {
   uint16_t begin_middle_third = kRefreshMsec / 3;
   uint16_t begin_last_third = kRefreshMsec * 2 / 3;
   if (print_last_third && queue_.idle_time() >= begin_last_third) {
+    refresh_was_automatic_ = true;
     if (print_active_part) {
       PrintPartAndPlayMode(active_part_);
       display_.Print(buffer_, buffer_);
@@ -982,16 +983,17 @@ void Ui::DoEvents() {
     } else if (print_command) {
       PrintCommandName();
     }
-    CrossfadeBrightness(begin_last_third, kRefreshMsec, true);
+    CrossfadeBrightness(begin_last_third, kRefreshMsec);
   } else if (print_middle_third && queue_.idle_time() >= begin_middle_third) {
+    refresh_was_automatic_ = true;
     PrintLatch();
-    CrossfadeBrightness(begin_middle_third, begin_last_third, true);
+    CrossfadeBrightness(begin_middle_third, begin_last_third);
   } else {
-    if (print_middle_third) CrossfadeBrightness(0, begin_middle_third, true);
-    else if (print_last_third) CrossfadeBrightness(0, begin_last_third, true);
+    if (print_middle_third) CrossfadeBrightness(0, begin_middle_third);
+    else if (print_last_third) CrossfadeBrightness(0, begin_last_third);
     // TODO if we just finished scrolling, ideally we would fade-in here, but
     // finishing scroll doesn't reset the idle time
-    else CrossfadeBrightness(0, -1, refresh_was_automatic_);
+    else CrossfadeBrightness(0, -1);
   }
 }
 
