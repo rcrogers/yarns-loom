@@ -111,7 +111,7 @@ This manual explains how Loom differs from a stock Yarns.  For documentation abo
 - `CZ` Phase distortion, resonant saw
   - Timbre: filter cutoff
   - Shapes: low-pass, peaking, band-pass, high-pass
-- `-╰` state-variable filter, low-pass
+- `-◝` state-variable filter, low-pass
   - Timbre: filter cutoff (resonance is fixed)
   - Shapes: pulse, saw
 - `-W` Pulse-width modulation
