@@ -692,7 +692,10 @@ fm_carrier_corrections = []
 fm_ratios = []
 
 fms = map(build_harmonic_fm, numpy.unique([Fraction(*x) for x in itertools.product(range(1, 10), range(1, 10))]))
-fms = sorted(fms, key=lambda (family, cm_ratio, carrier_correction): (family.numerator, family.denominator, cm_ratio))
+def sorter(fm_tuple):
+  family, cm_ratio, _carrier_correction = fm_tuple
+  return (family.numerator, family.denominator, cm_ratio)
+fms = sorted(fms, key=sorter)
 seen_family = {}
 used_ratios = []
 for (family, cm_ratio, carrier_correction) in fms:
