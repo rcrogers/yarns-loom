@@ -40,7 +40,7 @@
 using namespace yarns;
 using namespace stmlib;
 
-const char* const kVersion = "Loom 2_8_0";
+const char* const kVersion = "Loom 3_0_0";
 
 GateOutput gate_output;
 MidiIO midi_io;
