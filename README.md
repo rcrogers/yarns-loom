@@ -1,22 +1,21 @@
 # Loom
-An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), with an emphasis on dynamic voicing, flexible composition, and expressive control.
+An alternate firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), designed to make Yarns more powerful and user-friendly.
 
 ### Features
 - [Cue playback with MIDI Song Position](yarns/MANUAL.md#song-position)
-- [Looper-style sequencer with real-time MIDI recording](yarns/MANUAL.md#loop-sequencer-mode-with-real-time-recording)
-- [Arpeggiator movement can be programmed via sequencer](yarns/MANUAL.md#sequencer-driven-arpeggiator)
-- [Braids-inspired oscillator waveforms with timbre shaping](yarns/MANUAL.md#oscillator-controls)
+- [Looper-style sequencer with real-time polyphonic recording](yarns/MANUAL.md#loop-sequencer-mode-with-real-time-recording)
+- [Arpeggiator movement can be programmed by sequencer](yarns/MANUAL.md#sequencer-driven-arpeggiator)
+- [26 oscillator shapes with timbre/amplitude mod matrix](yarns/MANUAL.md#oscillator-controls)
 - [ADSR envelopes with velocity control](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
-- [Deeper support for MIDI CCs](yarns/MANUAL.md#midi-control-change-messages)
-- [New layouts, including a layout with a 3-voice paraphonic part](yarns/MANUAL.md#layouts)
-- [More options for polyphonic voicing](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
+- [Full support for MIDI CCs](yarns/MANUAL.md#midi-control-change-messages)
+- [New layouts with 4-voice paraphonic part and 6 overall voices](yarns/MANUAL.md#layouts)
+- [New algorithms for polyphonic voice allocation](yarns/MANUAL.md#polyphonic-voice-allocation-note-priority-and-voicing)
 - [Hold pedal can be used for sostenuto, latching, and more](yarns/MANUAL.md#hold-pedal)
   - **[Check the manual for more! →](yarns/MANUAL.md)**
 
 ### Caveats
 - Installation of this firmware is at your own risk
 - Presets saved in this firmware will not load with the manufacturer's firmware, and vice versa.  Users are advised to run `INIT` from the main menu after switching firmware
-- Some changes are not documented
 - Some of Yarns' stock capabilities have been downgraded to accommodate new features (e.g. the sequencer holds 30 notes instead of the original 64)
 
 ### Installation
@@ -25,11 +24,11 @@ An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](ht
 
 ### Community
 - [Discussion thread on ModWiggler](https://www.modwiggler.com/forum/viewtopic.php?t=255378)
-- Forks, pull requests, feature ideas, and bug reports are welcome (responses subject to my availability)
+- Pull requests, feature ideas, and bug reports are welcome (responses subject to my availability)
 - License: MIT License
 
 ### Acknowledgements
 - Thanks to Dylan Bolink for beta testing, bug reports, support, and countless great ideas
 - Thanks to Mutable forum user Airell for the idea of per-part latching
 - Thanks to Mutable forum user sdejesus13 for encouraging the exploration of clock-based recording
-- And above all, thanks to Émilie Gillet for making a great open-source module!
+- And above all, thanks to Émilie Gillet for making incredible open-source modules!
