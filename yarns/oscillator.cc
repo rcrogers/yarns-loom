@@ -252,9 +252,10 @@ void Oscillator::Render(int16_t* audio_mix) {
     sync_reset = true; \
     uint8_t master_sync_time = phase / (phase_increment >> 7); \
     reset_time = static_cast<uint32_t>(master_sync_time) << 9; \
-    uint32_t reset_modulator_phase = modulator_phase + \
+    uint32_t modulator_phase_at_reset = modulator_phase + \
       (65535 - reset_time) * (modulator_phase_increment >> 16); \
-    if (reset_modulator_phase < modulator_phase) { \
+    if (modulator_phase_at_reset < modulator_phase) { \
+      /* TODO need to handle both pulse edges here? */ \
       transition_during_reset = true; \
     } \
     int32_t discontinuity = discontinuity_code; \
@@ -263,6 +264,9 @@ void Oscillator::Render(int16_t* audio_mix) {
   } \
   modulator_phase += modulator_phase_increment; \
   self_reset = modulator_phase < modulator_phase_increment; \
+  /* TODO why do we skip if (sync_reset && !transition_during_reset) ? */ \
+  /* i.e., skip if there was a master reset but the slave didn't self-reset during it */ \
+  /* what is bad about doing blep checks if master reset but slave did not self-reset? */ \
   while (transition_during_reset || !sync_reset) { \
     edges; \
   } \
@@ -348,7 +352,7 @@ void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_sam
 void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_MODULATED(
     SYNC(
-      wav_sine[0] - Interpolate824(wav_sine, reset_modulator_phase),
+      wav_sine[0] - Interpolate824(wav_sine, modulator_phase_at_reset),
       break
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
@@ -360,7 +364,7 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples
   uint32_t pw = 0x80000000;
   RENDER_MODULATED(
     SYNC(
-      0 - reset_modulator_phase < pw ? 0 : 32767,
+      0 - (modulator_phase_at_reset < pw ? 0 : 32767),
       EDGES_PULSE(modulator_phase, modulator_phase_increment)
     );
     next_sample += modulator_phase < pw ? 0 : 32767;
@@ -371,7 +375,7 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples
 void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_MODULATED(
     SYNC(
-      0 - (reset_modulator_phase >> 17),
+      0 - (modulator_phase_at_reset >> 17),
       EDGES_SAW(modulator_phase, modulator_phase_increment)
     );
     next_sample += modulator_phase >> 17;
@@ -379,6 +383,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
   )
 }
 
+// TODO try 32-bit phase
 void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     uint16_t phase_16 = phase >> 16;
