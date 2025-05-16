@@ -44,7 +44,8 @@ const uint16_t kScrollingDelay = 260;
 const uint16_t kScrollingPreDelay = 600;
 const uint16_t kBlinkMask = 128;
 
-// PWM >6 bits causes visible flickering due to over-long PWM cycle at 8kHz
+// 8000/2^(6+1) = 62.5 Hz refresh rate
+// Add 1 for kDisplayWidth = 2
 const uint8_t kDisplayBrightnessPWMBits = 6;
 const uint8_t kDisplayBrightnessPWMMax = 1 << kDisplayBrightnessPWMBits;
 

@@ -208,7 +208,8 @@ void Oscillator::Render(int16_t* audio_mix) {
   ) \
   phase_ = phase; \
 
-// NB: 'modulator' is the follower/output oscillator
+// NB: 'modulator' is detuned from canonical pitch. In sync, it's the
+// follower/output oscillator
 #define RENDER_MODULATED(body) \
   uint32_t modulator_phase = modulator_phase_; \
   RENDER_PERIODIC(body); \
@@ -320,7 +321,9 @@ void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_sampl
   )
 }
 
-// Rotates the rising edge's slope from saw to pulse
+// Shape: low flat + up-ramp + high flat + fall.  Timbre increases width of
+// flats + slope of up-ramp
+//
 // ⟋|⟋| -> _/‾|_/‾| -> _|‾|_|‾|
 void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
@@ -329,8 +332,8 @@ void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_sam
     timbre = timbre + (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + (timbre >> 4); // 31/32
 
     // Exponential timbre curve, biased high
-    uint32_t pw = Interpolate88(lut_env_expo, timbre) << 15; // 0-50%
-    uint32_t saw_width = UINT32_MAX - (pw << 1); // 0-100%
+    uint32_t pw = Interpolate88(lut_env_expo, timbre) << 15; // 0-50% width of each flat part
+    uint32_t saw_width = UINT32_MAX - (pw << 1); // 0-100% width of up-ramp
 
     bool self_reset = phase < phase_increment;
     // BLEP falling pulse edge only
