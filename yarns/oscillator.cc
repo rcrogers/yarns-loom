@@ -65,6 +65,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderVariableSaw,
   &Oscillator::RenderSawPulseMorph,
   &Oscillator::RenderSyncSine,
+  &Oscillator::RenderSyncTriangle,
   &Oscillator::RenderSyncPulse,
   &Oscillator::RenderSyncSaw,
   &Oscillator::RenderFoldSine,
@@ -242,7 +243,7 @@ void Oscillator::Render(int16_t* audio_mix) {
 #define SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE \
   uint32_t modulator_phase_increment = timbre << (32 - 15);
 
-#define SYNC(discontinuity_code, edges) \
+#define SYNC(discontinuity_code, edges_code, extra_transition_code) \
   bool sync_reset = false; \
   bool self_reset = false; \
   bool transition_during_reset = false; \
@@ -250,26 +251,33 @@ void Oscillator::Render(int16_t* audio_mix) {
   SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE; \
   if (phase < phase_increment) { \
     sync_reset = true; \
-    uint8_t master_sync_time = phase / (phase_increment >> 7); \
-    reset_time = static_cast<uint32_t>(master_sync_time) << 9; \
-    uint32_t reset_modulator_phase = modulator_phase + \
+    reset_time = FractionU32(phase, phase_increment) >> 16; \
+    uint32_t modulator_phase_at_reset = modulator_phase + \
       (65535 - reset_time) * (modulator_phase_increment >> 16); \
-    if (reset_modulator_phase < modulator_phase) { \
+    if (modulator_phase_at_reset < modulator_phase || (extra_transition_code)) { \
       transition_during_reset = true; \
     } \
-    int32_t discontinuity = discontinuity_code; \
+    int32_t discontinuity = (discontinuity_code); \
     this_sample += discontinuity * ThisBlepSample(reset_time) >> 15; \
     next_sample += discontinuity * NextBlepSample(reset_time) >> 15; \
   } \
   modulator_phase += modulator_phase_increment; \
   self_reset = modulator_phase < modulator_phase_increment; \
-  while (transition_during_reset || !sync_reset) { \
-    edges; \
+  /* Block additional BLEP if modulator was reset by master alone */ \
+  bool reset_by_master_only = sync_reset && !transition_during_reset; \
+  while (!reset_by_master_only) { \
+    edges_code; \
   } \
   if (sync_reset) { \
     modulator_phase = reset_time * (modulator_phase_increment >> 16); \
     high_ = false; \
   } \
+
+#define TRIANGLE_UNIPOLAR(phase) \
+  (((phase >> 16) << 1) ^ ((phase >> 16) & 0x8000 ? 0xffff : 0x0000))
+
+#define TRIANGLE_BIPOLAR(phase) \
+  TRIANGLE_UNIPOLAR(phase) - 0x8000
 
 void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples) {
   StateVariableFilter svf = svf_;
@@ -348,11 +356,12 @@ void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_sam
 void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_MODULATED(
     SYNC(
-      wav_sine[0] - Interpolate824(wav_sine, reset_modulator_phase),
-      break
+      wav_sine[0] - Interpolate824(wav_sine, modulator_phase_at_reset),
+      break, // No edges
+      false // No extra transition
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
-    next_sample += Interpolate824(wav_sine, modulator_phase);
+    this_sample = Interpolate824(wav_sine, modulator_phase);
   )
 }
 
@@ -360,19 +369,33 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples
   uint32_t pw = 0x80000000;
   RENDER_MODULATED(
     SYNC(
-      0 - reset_modulator_phase < pw ? 0 : 32767,
-      EDGES_PULSE(modulator_phase, modulator_phase_increment)
+      0 - (modulator_phase_at_reset < pw ? 0 : 32767),
+      EDGES_PULSE(modulator_phase, modulator_phase_increment),
+      !high_ && modulator_phase_at_reset >= pw
     );
     next_sample += modulator_phase < pw ? 0 : 32767;
     this_sample = (this_sample - 16384) << 1;
   )
 }
 
+void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_MODULATED(
+    SYNC(
+      TRIANGLE_BIPOLAR(0) - TRIANGLE_BIPOLAR(modulator_phase_at_reset),
+      break, // No edges
+      false // No extra transition
+    );
+    (void) transition_during_reset; (void) sync_reset; (void) self_reset;
+    this_sample = TRIANGLE_BIPOLAR(modulator_phase);
+  )
+}
+
 void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_MODULATED(
     SYNC(
-      0 - (reset_modulator_phase >> 17),
-      EDGES_SAW(modulator_phase, modulator_phase_increment)
+      0 - (modulator_phase_at_reset >> 17),
+      EDGES_SAW(modulator_phase, modulator_phase_increment),
+      false // No extra transition
     );
     next_sample += modulator_phase >> 17;
     this_sample = (this_sample - 16384) << 1;
@@ -381,8 +404,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
 
 void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
-    uint16_t phase_16 = phase >> 16;
-    this_sample = (phase_16 << 1) ^ (phase_16 & 0x8000 ? 0xffff : 0x0000);
+    this_sample = TRIANGLE_UNIPOLAR(phase);
     this_sample += 32768;
     this_sample = this_sample * timbre >> 15;
     this_sample = Interpolate88(ws_tri_fold, this_sample + 32768);
