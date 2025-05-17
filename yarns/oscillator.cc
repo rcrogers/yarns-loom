@@ -65,6 +65,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderVariableSaw,
   &Oscillator::RenderSawPulseMorph,
   &Oscillator::RenderSyncSine,
+  &Oscillator::RenderSyncTriangle,
   &Oscillator::RenderSyncPulse,
   &Oscillator::RenderSyncSaw,
   &Oscillator::RenderFoldSine,
@@ -374,6 +375,18 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples
     );
     next_sample += modulator_phase < pw ? 0 : 32767;
     this_sample = (this_sample - 16384) << 1;
+  )
+}
+
+void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_MODULATED(
+    SYNC(
+      TRIANGLE_BIPOLAR(0) - TRIANGLE_BIPOLAR(modulator_phase_at_reset),
+      break, // No edges
+      false // No extra transition
+    );
+    (void) transition_during_reset; (void) sync_reset; (void) self_reset;
+    this_sample = TRIANGLE_BIPOLAR(modulator_phase);
   )
 }
 

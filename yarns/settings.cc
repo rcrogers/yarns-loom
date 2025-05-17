@@ -134,6 +134,7 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "\x88W SAW WIDTH MOD",
   "\x88\x8C SAW-PULSE MORPH",
   "S$ SINE SYNC",
+  "^$ TRIANGLE SYNC",
   "\x8C$ PULSE SYNC",
   "\x88$ SAW SYNC",
   "SF SINE FOLD",
