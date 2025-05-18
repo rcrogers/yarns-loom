@@ -749,108 +749,93 @@ void Settings::Init() {
   }
 }
 
-void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const {
+// Return prefix character for display
+char Settings::Print(const Setting& setting, uint8_t value, char* buffer) const {
   switch (setting.unit) {
     case SETTING_UNIT_UINT8:
-      PrintInteger(buffer, value);
-      break;
+      return PrintInteger(buffer, value);
       
     case SETTING_UNIT_INT8:
       if (&setting == &setting_defs.get(SETTING_CLOCK_SWING)) {
         int8_t swing = static_cast<int8_t>(value);
-        PrintInteger(buffer, abs(swing));
-        if (swing && buffer[0] == ' ') {
-          buffer[0] = swing < 0 ? 'o' : 'e';
-        }
+        return PrintInteger(buffer, abs(swing), swing ? (swing < 0 ? 'o' : 'e') : '\0');
       } else {
-        PrintSignedInteger(buffer, value);
+        return PrintSignedInteger(buffer, value);
       }
-      break;
     
     case SETTING_UNIT_INDEX:
-      PrintInteger(buffer, value + 1);
-      break;
+      return PrintInteger(buffer, value + 1);
       
     case SETTING_UNIT_BAR_DURATION:
       if (value <= kMaxBarDuration) {
-        PrintInteger(buffer, value);
+        return PrintInteger(buffer, value);
       } else {
         strcpy(buffer, "oo");
+        return '\0';
       }
-      break;
 
     case SETTING_UNIT_TEMPO:
       if (value == TEMPO_EXTERNAL) {
         strcpy(buffer, "EXTERNAL");
+        return '\0';
       } else {
-        PrintInteger(buffer, value);
+        return PrintInteger(buffer, value);
       }
-      break;
 
     case SETTING_UNIT_MIDI_CHANNEL_LAST_OMNI:
       if (value == kMidiChannelOmni) {
         strcpy(buffer, "ALL");
+        return '\0';
       } else {
-        PrintInteger(buffer, value + 1);
+        return PrintInteger(buffer, value + 1);
       }
-      break;
 
     case SETTING_UNIT_MIDI_CHANNEL_FIRST_OFF:
       if (value == 0x00) {
         strcpy(buffer, "OFF");
+        return '\0';
       } else {
-        PrintInteger(buffer, value);
+        return PrintInteger(buffer, value);
       }
-      break;
 
     case SETTING_UNIT_CLOCK_DIV:
       strcpy(buffer, lut_clock_ratio_names[value]);
-      break;
+      return '\0';
     
     case SETTING_UNIT_LFO_RATE:
       if (value < 64) {
         STATIC_ASSERT(LUT_CLOCK_RATIO_NAMES_SIZE == 32, ratios); // Allows an easy bit shift
-        Print(settings_[SETTING_SEQUENCER_CLOCK_DIVISION], (64 - value - 1) >> 1, buffer);
+        return Print(settings_[SETTING_SEQUENCER_CLOCK_DIVISION], (64 - value - 1) >> 1, buffer);
       } else {
-        PrintInteger(buffer, value + 1 - 64);
-        if (buffer[0] == ' ') buffer[0] = 'F';
+        return PrintInteger(buffer, value + 1 - 64, 'F');
       }
-      break;
       
     case SETTING_UNIT_PORTAMENTO:
     {
       uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
       if (value < split_point) {
-        PrintInteger(buffer, split_point - value);
+        return PrintInteger(buffer, split_point - value, 'T');
       } else {
-        PrintInteger(buffer, value - split_point);
+        return PrintInteger(buffer, value - split_point, 'R');
       }
-      if (buffer[0] == ' ') {
-        buffer[0] = value < split_point ? 'T' : 'R';
-      }
-      break;
     }
       
     case SETTING_UNIT_ENUMERATION:
       strcpy(buffer, setting.values[value]);
-      break;
+      return '\0';
 
     case SETTING_UNIT_ARP_PATTERN:
       {
         int8_t pattern = LUT_ARPEGGIATOR_PATTERNS_SIZE - value;
         if (pattern > 0) { // Pattern-driven, left side
-          PrintInteger(buffer, pattern);
-          if (buffer[0] == ' ') buffer[0] = 'P';
+          return PrintInteger(buffer, pattern, 'P');
         } else { // Sequencer-driven, right side
-          PrintInteger(buffer, abs(pattern));
-          if (buffer[0] == ' ') buffer[0] = 'S';
+          return PrintInteger(buffer, abs(pattern), 'S');
         }
       }
-      break;
 
     case SETTING_UNIT_LOOP_LENGTH:
-      PrintInteger(buffer, 1 << value);
-      break;
+      return PrintInteger(buffer, 1 << value);
 
     case SETTING_UNIT_OSCILLATOR_SHAPE:
       if (value >= OSC_SHAPE_FM) {
@@ -858,49 +843,34 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       } else {
         strcpy(buffer, voicing_oscillator_shape_values[value]);
       }
-      break;
+      return '\0';
 
     case SETTING_UNIT_LFO_SPREAD: {
       int8_t spread = value;
       bool dephase = spread < 0;
       if (dephase) spread++;
-      PrintInteger(buffer, abs(spread));
-      if (buffer[0] == ' ') buffer[0] = dephase ? 'P' : 'F';
-      break;
+      return PrintInteger(buffer, abs(spread), dephase ? 'P' : 'F');
     }
       
     default:
       strcpy(buffer, "??");
+      return '\0';
   }
 }
 
 /* static */
-void Settings::PrintInteger(char* buffer, uint8_t number) {
+char Settings::PrintInteger(char* buffer, uint8_t number, char prefix) {
   buffer[1] = '0' + (number % 10);
   number /= 10;
   buffer[0] = number ? '0' + (number % 10) : ' ';
   number /= 10;
   buffer[2] = '\0';
+  return number ? '0' + (number % 10) : prefix;
 }
 
 /* static */
-void Settings::PrintSignedInteger(char* buffer, int8_t number) {
-  if (number >= 0) {
-    PrintInteger(buffer, number);
-    if (buffer[0] == ' ') {
-      buffer[0] = '+';
-    }
-  } else if (number > -10){
-    PrintInteger(buffer, -number);
-    buffer[0] = '-';
-  } else {
-    PrintInteger(buffer, -number);
-    buffer[2] = ' ';
-    buffer[3] = '-';
-    buffer[4] = buffer[0];
-    buffer[5] = buffer[1];
-    buffer[6] = '\0';
-  }
+char Settings::PrintSignedInteger(char* buffer, int8_t number) {
+  return PrintInteger(buffer, abs(number), number < 0 ? '-' : '+');
 }
 
 /* extern */

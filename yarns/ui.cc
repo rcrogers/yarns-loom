@@ -279,8 +279,7 @@ void Ui::PrintParameterName() {
 }
 
 void Ui::PrintParameterValue() {
-  setting_defs.Print(setting(), multi.GetSettingValue(setting(), active_part_), buffer_);
-  display_.Print(buffer_, buffer_, UINT16_MAX, GetFadeForSetting(setting()));
+  PrintSettingValue(setting(), active_part_);
 }
 
 void Ui::PrintCommandName() {
@@ -465,11 +464,20 @@ void Ui::SplashPartString(const char* label, uint8_t part) {
   SplashOn(SPLASH_PART_STRING, part);
 }
 
+void Ui::PrintSettingValue(const Setting& s, uint8_t part) {
+  char prefix = setting_defs.Print(
+    s, multi.GetSettingValue(s, part), buffer_
+  );
+  display_.Print(
+    buffer_, buffer_,
+    UINT16_MAX, GetFadeForSetting(s), prefix
+  );
+}
+
 void Ui::SplashSetting(const Setting& s, uint8_t part) {
   splash_setting_def_ = &s;
 
-  setting_defs.Print(s, multi.GetSettingValue(s, splash_part_), buffer_);
-  display_.Print(buffer_, buffer_, UINT16_MAX, GetFadeForSetting(s));
+  PrintSettingValue(s, part);
   display_.Scroll();
   SplashOn(SPLASH_SETTING_VALUE, part);
 }
@@ -988,7 +996,7 @@ void Ui::DoEvents() {
     refresh_was_automatic_ = true;
     PrintLatch();
     CrossfadeBrightness(begin_middle_third, begin_last_third);
-  } else {
+  } else { // Fade out for next print if needed
     if (print_middle_third) CrossfadeBrightness(0, begin_middle_third);
     else if (print_last_third) CrossfadeBrightness(0, begin_last_third);
     // TODO if we just finished scrolling, ideally we would fade-in here, but

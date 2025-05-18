@@ -198,6 +198,7 @@ class Ui {
   // Print functions.
   void PrintParameterName();
   void PrintParameterValue();
+  void PrintSettingValue(const Setting& s, uint8_t part);
   void PrintCommandName();
   void PrintProgramNumber();
   void PrintCalibrationVoiceNumber();

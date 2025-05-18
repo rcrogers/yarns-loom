@@ -42,7 +42,6 @@ const uint16_t kPinData = GPIO_Pin_9; // DISP_SER, DS, serial data input
 
 const uint16_t kScrollingDelay = 260;
 const uint16_t kScrollingPreDelay = 600;
-const uint16_t kBlinkMask = 128;
 
 // 8000/2^(6+1) = 62.5 Hz refresh rate
 // Add 1 for kDisplayWidth = 2
@@ -118,7 +117,7 @@ void Display::RefreshSlow() {
 
   displayed_buffer_ = (scrolling_ && !scrolling_pre_delay_timer_)
       ? long_buffer_ + scrolling_step_
-      : short_buffer_;
+      : (blink_high() ? prefixed_buffer_ : short_buffer_);
 
   if (fading_increment_) {
     fading_counter_ += fading_increment_;
@@ -153,7 +152,7 @@ void Display::RefreshFast() {
   if (redraw_[active_position_]) {
     redraw_[active_position_] = false;
     if (brightness_pwm_cycle_ <= actual_brightness_
-        && (!blinking_ || blink_counter_ < kBlinkMask)) {
+        && (!blinking_ || blink_high())) {
       if (use_mask_) {
         Shift14SegmentsWord(mask_[active_position_]);
       } else {
@@ -168,7 +167,10 @@ void Display::RefreshFast() {
   brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
 }
 
-void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t brightness, uint16_t fade) {
+void Display::Print(
+  const char* short_buffer, const char* long_buffer,
+  uint16_t brightness, uint16_t fade, char prefix
+) {
   strncpy(short_buffer_, short_buffer, kDisplayWidth);
 
 #ifdef APPLICATION
@@ -181,6 +183,14 @@ void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t 
 
   set_brightness(brightness, true);
   fading_increment_ = fade * brightness_ >> 16;
+
+  strncpy(prefixed_buffer_, short_buffer, kDisplayWidth);
+  if (prefix != '\0') {
+    prefixed_buffer_[0] = prefix;
+  }
+  if (short_buffer_[0] == ' ' || short_buffer_[0] == '0') {
+    strncpy(short_buffer_, prefixed_buffer_, kDisplayWidth);
+  }
 }
 
 # define SHIFT_BIT \
