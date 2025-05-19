@@ -482,6 +482,8 @@ void Ui::SplashSetting(const Setting& s, uint8_t part) {
   SplashOn(SPLASH_SETTING_VALUE, part);
 }
 
+// NB: The transition duration is solely based on kCrossfadeMsec, not on the
+// difference between the start/end times
 void Ui::CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time) {
   uint16_t brightness = UINT16_MAX;
   uint32_t fade_in_elapsed = queue_.idle_time() - fade_in_start_time;
@@ -976,9 +978,9 @@ void Ui::DoEvents() {
   bool print_active_part = (mode_ == UI_MODE_PARAMETER_SELECT && multi.num_active_parts() > 1) || mode_ == UI_MODE_SWAP_SELECT_PART;
 
   // If we're not scrolling and it's not yet time to refresh, print latch or part
-  bool print_any = print_command || print_latch || print_active_part;
-  bool print_last_third = print_any;
-  bool print_middle_third = print_latch && print_active_part;
+  uint8_t print_count = print_command + print_latch + print_active_part;
+  bool print_last_third = print_count > 0;
+  bool print_middle_third = print_count > 1;
   uint16_t begin_middle_third = kRefreshMsec / 3;
   uint16_t begin_last_third = kRefreshMsec * 2 / 3;
   if (print_last_third && queue_.idle_time() >= begin_last_third) {

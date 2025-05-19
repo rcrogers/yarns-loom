@@ -37,7 +37,7 @@ namespace yarns {
 
 const uint8_t kDisplayWidth = 2;
 const uint8_t kScrollBufferSize = 64;
-const uint16_t kBlinkMask = 256;
+const uint16_t kBlinkMask = 512;
 
 class Display {
  public:
@@ -71,13 +71,14 @@ class Display {
   inline bool scrolling() const { return scrolling_; }
   inline void set_blink(bool blinking) { blinking_ = blinking; }
 
-  inline bool blink_high() const { return blink_counter_ < kBlinkMask; }
+  inline bool blink_high() const { return blink_counter_ < (kBlinkMask >> 1); }
  
  private:
   void Shift14SegmentsWord(uint16_t data);
 
   char short_buffer_[kDisplayWidth];
-  char prefixed_buffer_[kDisplayWidth];
+  char prefix_show_buffer_[kDisplayWidth];
+  char prefix_blank_buffer_[kDisplayWidth];
   char long_buffer_[kScrollBufferSize];
   char* displayed_buffer_;
   uint16_t mask_[kDisplayWidth];

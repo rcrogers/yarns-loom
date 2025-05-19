@@ -117,7 +117,21 @@ void Display::RefreshSlow() {
 
   displayed_buffer_ = (scrolling_ && !scrolling_pre_delay_timer_)
       ? long_buffer_ + scrolling_step_
-      : (blink_high() ? prefixed_buffer_ : short_buffer_);
+      : (
+        // 0...12/16
+        blink_counter_ < ((kBlinkMask >> 1) + (kBlinkMask >> 2))
+        ? short_buffer_
+        : (
+          (
+            // 12/16...13/16
+            (blink_counter_ < (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 4)) ||
+            // 15/16...16/16
+            (blink_counter_ > (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 4) + (kBlinkMask >> 3))
+          )
+          ? prefix_blank_buffer_
+          : prefix_show_buffer_
+        )
+      );
 
   if (fading_increment_) {
     fading_counter_ += fading_increment_;
@@ -126,7 +140,7 @@ void Display::RefreshSlow() {
   } else {
     actual_brightness_ = brightness_;
   }
-  blink_counter_ = (blink_counter_ + 1) % (kBlinkMask << 1);
+  blink_counter_ = (blink_counter_ + 1) % kBlinkMask;
   std::fill(&redraw_[0], &redraw_[kDisplayWidth], true); // Force redraw
 
 #else
@@ -184,12 +198,17 @@ void Display::Print(
   set_brightness(brightness, true);
   fading_increment_ = fade * brightness_ >> 16;
 
-  strncpy(prefixed_buffer_, short_buffer, kDisplayWidth);
+  strncpy(prefix_show_buffer_, short_buffer, kDisplayWidth);
+  strncpy(prefix_blank_buffer_, short_buffer, kDisplayWidth);
   if (prefix != '\0') {
-    prefixed_buffer_[0] = prefix;
-  }
-  if (short_buffer_[0] == ' ' || short_buffer_[0] == '0') {
-    strncpy(short_buffer_, prefixed_buffer_, kDisplayWidth);
+    if (short_buffer_[0] == ' ') { // All buffers show prefix
+      short_buffer_[0] = prefix;
+      prefix_show_buffer_[0] = prefix;
+      prefix_blank_buffer_[0] = prefix;
+    } else { // Only one buffer shows prefix
+      prefix_show_buffer_[0] = prefix;
+      prefix_blank_buffer_[0] = ' ';
+    }
   }
 }
 
