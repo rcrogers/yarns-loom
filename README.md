@@ -16,7 +16,7 @@ An alternate firmware for the [Yarns MIDI interface by Mutable Instruments](http
 ### Caveats
 - Installation of this firmware is at your own risk
 - Presets saved in this firmware will not load with the manufacturer's firmware, and vice versa.  Users are advised to run `INIT` from the main menu after switching firmware
-- Some of Yarns' stock capabilities have been downgraded to accommodate new features (e.g. the sequencer holds 30 notes instead of the original 64)
+- Some of Yarns' original capabilities have been downgraded to make room for new features (e.g. the sequencer holds 30 notes instead of the original 64)
 
 ### Installation
 1. Download `yarns.syx` from the [latest release's assets](https://github.com/rcrogers/yarns-loom/releases/latest)
