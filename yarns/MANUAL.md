@@ -12,13 +12,14 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - [Tap tempo](#tap-tempo)
     - [Part swap command](#part-swap-command)
     - [Save/load commands](#saveload-commands)
+    - [Full display of integer setting values](#full-display-of-integer-setting-values)
     - [Other UI changes](#other-ui-changes)
-- [MIDI controller support](#midi-controller-support)
+- [MIDI controller input](#midi-controller-input)
     - [Layouts](#layouts)
     - [Note filtering](#note-filtering)
-      - [Sequencer input response: `SI (SEQ INPUT RESPONSE)`](#sequencer-input-response-si-seq-input-response)
       - [Input transpose: `IT (INPUT TRANSPOSE OCTAVES)`](#input-transpose-it-input-transpose-octaves)
       - [Velocity filtering](#velocity-filtering)
+      - [Sequencer input response: `SI (SEQ INPUT RESPONSE)`](#sequencer-input-response-si-seq-input-response)
       - [Recording behavior](#recording-behavior)
     - [Hold pedal](#hold-pedal)
       - [Display of pressed/sustained keys](#display-of-pressedsustained-keys)
@@ -37,15 +38,15 @@ This manual assumes that the reader is familiar with the original firmware, and 
       - [Macro CCs that control combinations of settings](#macro-ccs-that-control-combinations-of-settings)
       - [Other CC improvements](#other-cc-improvements)
 - [Clock system](#clock-system)
-    - [Clock processing](#clock-processing)
+    - [Clock offset and scaling](#clock-offset-and-scaling)
       - [Master clock offset](#master-clock-offset)
-      - [Scaling ratios for derived clocks](#scaling-ratios-for-derived-clocks)
-    - [Transport controls](#transport-controls)
+      - [Scaling ratios for synced clocks](#scaling-ratios-for-synced-clocks)
+    - [Master clock controls](#master-clock-controls)
       - [Basic transport controls](#basic-transport-controls)
-      - [Advanced transport controls](#advanced-transport-controls)
-    - [Clocked events](#clocked-events)
-      - [Deterministic clock phase](#deterministic-clock-phase)
-      - [What the song position controls](#what-the-song-position-controls)
+      - [Song position controls](#song-position-controls)
+    - [Using song position to control clocked events](#using-song-position-to-control-clocked-events)
+      - [Clocked events respond to song position changes](#clocked-events-respond-to-song-position-changes)
+      - [Deterministic clocking ensures consistent and predictable timing](#deterministic-clocking-ensures-consistent-and-predictable-timing)
 - [Sequencer](#sequencer)
     - [Special controls while recording](#special-controls-while-recording)
     - [Play mode](#play-mode)
@@ -75,15 +76,14 @@ This manual assumes that the reader is familiar with the original firmware, and 
       - [How the envelope adapts to interruptions](#how-the-envelope-adapts-to-interruptions)
     - [LFO](#lfo)
       - [LFO modulation destinations](#lfo-modulation-destinations)
-      - [LFO shapes](#lfo-shapes)
-      - [LFO rate: `LF (LFO RATE)`](#lfo-rate-lf-lfo-rate)
+      - [LFO speed and sync: `LF (LFO RATE)`](#lfo-speed-and-sync-lf-lfo-rate)
       - [LFO spread: dephase or detune](#lfo-spread-dephase-or-detune)
-      - [Vibrato LFO control](#vibrato-lfo-control)
 - [Audio oscillator](#audio-oscillator)
     - [Oscillator mode setting: `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)`](#oscillator-mode-setting-om-oscillator-mode-in-o-oscillator-menu)
     - [Oscillator timbre settings](#oscillator-timbre-settings)
     - [Oscillator wave shape: `OS (OSCILLATOR SHAPE)`](#oscillator-wave-shape-os-oscillator-shape)
-    - [Amplitude dynamics: `▽A (AMPLITUDE MENU)`](#amplitude-dynamics-a-amplitude-menu)
+
+
 
 # Panel UI
 
@@ -109,6 +109,12 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Display splashes the result after a save/load is executed
 - Long press on encoder exits preset selection
 
+### Full display of integer setting values
+- When display shows an integer setting value that has three characters, blink a prefix character over the left displayed digit
+- Three-digit unsigned integer `127` blinks `1` over `27`
+- Two-digit signed integer `-42` blinks `-` over `42`
+- Two-digit labeled integer `T23` blinks `T` over `23`
+
 ### Other UI changes
 - Moved configuration-type settings into a submenu, accessed by opening `▽S (SETUP MENU)`
 - Print flat notes as lowercase character (instead of denoting flatness with `b`) so that octave can always be displayed
@@ -117,35 +123,29 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Display has 64 brightness levels instead of 4
 
 
-# MIDI controller support
+
+# MIDI controller input
 
 ### Layouts
 - `2+2` 3-part layout: 2-voice polyphonic part + two monophonic parts
 - `2+1` 2-part layout: 2-voice polyphonic part + monophonic part with aux CV
 - `*2` 3-part layout: 4-voice paraphonic part + monophonic part with aux CV + monophonic part without aux CV
-  - Paraphonic part can use the new [envelopes](#amplitude-dynamics-envelope-and-tremolo)
+  - Paraphonic part has 4x audio oscillators
   - Audio mode is always on for the paraphonic part
   - Output channels:
-    1. CV: Part 1's 3 voices mixed to 1 audio output, Gate: Part 4's gate
+    1. CV: Part 1's 4x oscillators mixed to 1 audio output, Gate: Part 4's gate
     2. Part 2, monophonic CV/gate
     3. Part 2, modulation configurable via `3>`
     4. Part 3, monophonic CV/gate
 - `3M` 3-part layout: 3 monophonic parts, plus clock on gate 4 and bar/reset on CV 4
 - `*1` 2-part layout: 4-voice paraphonic part + monophonic part with aux CV
   - Output channels:
-    1. CV: Part 1's 3 voices mixed to 1 audio output, Gate: Part 1's gate
+    1. CV: Part 1's 4x oscillators mixed to 1 audio output, Gate: Part 1's gate
     2. Part 2, monophonic CV/gate
     3. Part 1's aux CV, configurable via `CV`
     4. Part 2's aux CV, configurable via `CV`
 
 ### Note filtering
-
-#### Sequencer input response: `SI (SEQ INPUT RESPONSE)`
-- Changes how a playing sequence responds to manual input
-- `OFF`: ignores keyboard input
-- `TRANSPOSE`: original firmware behavior
-- `REPLACE`: retains the sequence's rhythm, but overrides its pitch
-- `DIRECT`: gives full use of the keyboard, allowing accompaniment of a sequence, etc.
 
 #### Input transpose: `IT (INPUT TRANSPOSE OCTAVES)`
 - Applies octave transposition to notes received by a part
@@ -155,6 +155,13 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Part ignores notes with a velocity not between  `V> (VELOCITY MIN)` and `V< (VELOCITY MAX)`
 - Present for all layouts except 4V
 - Output velocity range is scaled to compxensate for the restricted range imposed by input filtering
+
+#### Sequencer input response: `SI (SEQ INPUT RESPONSE)`
+- Changes how a playing sequence responds to manual input
+- `OFF`: ignores keyboard input
+- `TRANSPOSE`: original firmware behavior
+- `REPLACE`: retains the sequence's rhythm, but overrides its pitch
+- `DIRECT`: gives full use of the keyboard, allowing accompaniment of a sequence, etc.
 
 #### Recording behavior
 - Any MIDI notes ignored by the recording part can be received by other parts
@@ -245,6 +252,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
       - MIDI value 127 => setting - 1 (decrement)
     - Settings will increase or decrease by one value for each click of the encoder
     - Depending on how many values the setting has, the encoder may take anywhere from 1 to 127 clicks to scan the range of setting values
+    - Send 0 to display current value without change
 - `RELATIVE SCALED`: the setting is incremented by 0-100% of the CC value
     - Similar to `RELATIVE DIRECT`, but always takes 127 encoder clicks to scan the range of setting values, no matter how many setting values there are
     - Effectively gives all controllers the same travel distance from minimum to maximum
@@ -266,7 +274,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 # Clock system
 
-### Clock processing
+### Clock offset and scaling
 
 #### Master clock offset
 - Setting `C+ CLOCK OFFSET` allows fine-tuning the master clock phase by ±63 ticks
@@ -275,7 +283,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Arithmetically, offset is applied **after** `INPUT CLK DIV`
 - If offset is negative, the sequencer will not play any notes until tick 0 is reached
 
-#### Scaling ratios for derived clocks
+#### Scaling ratios for synced clocks
 - Clock divisions/multiplications are expressed as an integer ratio of the master clock
 - Part clock: `C/ CLOCK RATIO` sets the frequency of the part's sequencer clock, relative to the master clock
 - Output clock: `O/ OUTPUT CLOCK RATIO` sets the frequency of the clock gate output, relative to the master clock
@@ -285,46 +293,42 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - Equal or faster (12): 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
 
 
-### Transport controls
+### Master clock controls
 
 #### Basic transport controls
-- Clock start
+- Start master clock
   - How: press `START/STOP` while not running, or send MIDI Continue, or send MIDI Note On (if `CLOCK MANUAL START` disabled)
   - Display splashes `|>`
   - Starts from current song position
   - Bug fix: a "manual" clock start (panel button or MIDI Start/Continue) can supersede an "automatic" clock start (MIDI Note On), preventing the clock from stopping after all notes are releases
   - Bug fix: recording part responds to MIDI Start
-- Clock stop
+- Stop master clock
   - How: press `START/STOP` while running, or send MIDI Stop
   - Display splashes `||`
   - Preserves song position
   - Bug fix: stopping the clock no longer stops manually held keys, though it still stops notes generated by the sequencer/arpeggiator
-- Clock reset
+- Reset master clock
   - How: long press `START/STOP`, or send MIDI Start
   - Updates song position to 0 (see below)
 
-#### Advanced transport controls
+#### Song position controls
 - Cueing: the song position can be updated by MIDI Song Position Pointer
 - Display splashes `<<` (rewind), `>>` (fast-forward), or `[]` (reset/stop) depending on the new song position
 - Note: this was tested with a Tascam Model 12 as a MIDI source, which implements cueing by sending MIDI Song Position Pointer followed by a MIDI Continue.  If this doesn't work with your MIDI source, let me know!
 
-### Clocked events
+### Using song position to control clocked events
 
-#### Deterministic clock phase
-- All derived clocks continuously recalculate their phase to reflect changes to clock settings and the song position
-- All derived clocks recalculate phase on clock start and continuously while running
-- Phase reflect real-time changes in offset/scaling settings and song position
-- Temporary changes to clock settings do not cause a persistent offset between running clocks
-
-- Beginning/end of notes originating from the step and loop sequencers
-- Clock-synced LFO phase
-
-#### What the song position controls
-- All clock-based events are synchronized to the song position
-- Step sequencer will begin on the target step
-- The loop sequencer and synced LFOs will advance to the correct phase of their loops
+#### Clocked events respond to song position changes
+- Sequencers advance to a phase (sequence position) calculated from the song position
+- Synced LFOs slew to the calculated phase
 - Arpeggiator state is updated (based on any currently held arp chord) to the same state as if the song had played from the beginning
 
+#### Deterministic clocking ensures consistent and predictable timing
+- Each synced clock continuously recalculates what its phase should be
+- Target phase is based on sync ratio and song position
+- Past clock state is ignored
+- Prevents temporary setting changes from causing permanent phase drift
+- Allows clocks to automatically lock on after changes to song position and sync ratio
 
 
 
@@ -388,6 +392,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Hold `REC` to erase the loop
 
 
+
 # Arpeggiator
 
 ### Using `NOTE PRIORITY` to order `ARP DIRECTION`
@@ -449,35 +454,37 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - Black keys advance by 1 along the Y-axis, moving top-to-bottom and wrapping back to the top
 
 
+
 # Modulation generators
 
 ### Envelope
 
 #### Envelope modulation destinations
-- Oscillator gain (when `OSCILLATOR MODE` is `ENVELOPED`)
-- Oscillator timbre
-- Aux CV output: `ENVELOPE`
-  - TODO also affected by tremolo
+- [Oscillator gain](#oscillator-mode-setting-om-oscillator-mode-in-o-oscillator-menu) (when `OSCILLATOR MODE` is `ENVELOPED`)
+- [Oscillator timbre](#oscillator-timbre-settings)
+  - `TE (TIMBRE ENV MOD)`: attenuverter for the envelope's modulation of timbre
+  - `TV (TIMBRE VEL MOD)` attenuverter for velocity's modulation of the timbre envelope (velocity can polarize the timbre envelope)
+- Aux CV output: `ENVELOPE` (itself modulated by [tremolo LFO](#lfo-modulation-destinations))
 
 #### Envelope ADSR settings
-- ADSR settings (attack time, decay time, sustain level, and release time) can be set manually and modulated by note velocity
-- Stage times range from 0.09 ms (4 ticks) to 5 seconds
+- ADSR parameters: attack time, decay time, sustain level, and release time 
+- ADSR parameters can be set manually and modulated by note velocity
 - `ATTACK INIT`, `DECAY INIT`, `SUSTAIN INIT`, `RELEASE INIT`: initial settings for ADSR stages
 - `ATTACK MOD VEL`, `DECAY MOD VEL`, `SUSTAIN MOD VEL`, `RELEASE MOD VEL`: attenuverter for velocity's modulation of the stage
 - All curves are exponential
+- Stage times range from 0.09 ms (4 ticks) to 5 seconds
 
 #### Envelope peak level
-- Peak is the point where attack ends and decay begins
+- Peak is the instantaneous point where attack ends and decay begins
 - `PV (PEAK VEL MOD)` sets the velocity-sensitivity of the level of the peak
 - Zero: peak level is maximum (unity)
 - Positive values (clockwise of center): peak level is increasingly damped by low note velocity
 - Negative values (counter-clockwise): peak level is increasingly damped by high note velocity
 
-
 #### How the envelope adapts to interruptions
 - Envelope adjusts to notes that start/end before the expected completion of a stage
 - Problem: attack/release is closer to target than expected
-  - Cause: note begins during release; note ends while attack is rising toward sustain
+  - Cause: note begins during release, or note ends while attack is rising toward sustain
   - Solution: shorten stage duration in proportion to remaining distance, maintaining nominal curve shape
 - Problem: attack/release is farther from target than expected
   - Cause: note ends while decay is falling toward sustain
@@ -493,18 +500,19 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 #### LFO modulation destinations
 - Vibrato: oscillator pitch, pitch CV
-- Tremolo: oscillator amplitude, `ENVELOPE` aux CV
-- Timbre: oscillator timbre (TODO link)
-- Aux CV outputs: `LFO`, `VIBRATO LFO`
-
-#### LFO shapes
-- Each LFO destination (vibrato, tremolo, timbre) has its own shape setting
+  - `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`): attenuator for bipolar vibrato LFO
+    - Allows vibrato control via panel UI if your keyboard doesn't have a modulation wheel
+  - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`): shape of the vibrato LFO
+- Tremolo: [oscillator amplitude](#oscillator-mode-setting-om-oscillator-mode-in-o-oscillator-menu), [`ENVELOPE` aux CV](#envelope-modulation-destinations)
+  - `TR (TREMOLO DEPTH)` (in `▽A (AMPLITUDE MENU)`): attenuator for the unipolar tremolo LFO's reduction of gain
+  - `TS (TREMOLO SHAPE)` (in `▽A (AMPLITUDE MENU)`): shape of the tremolo LFO
+- Timbre: [oscillator timbre](#oscillator-timbre-settings)
+  - `TL (TIMBRE LFO MOD)` (in `▽O (OSCILLATOR MENU)`): attenuator for the bipolar timbre LFO
+  - `LS (TIMBRE LFO SHAPE)` (in `▽O (OSCILLATOR MENU)`): shape of the timbre LFO
+- Aux CV outputs: `LFO`, `VIBRATO LFO` (unattenuated and attenuated versions of vibrato LFO)
 - Shape options: triangle, down saw, up saw, square
-- `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`) sets the shape of the vibrato (pitch) LFO
-- `TS (TREMOLO SHAPE)` (in `▽A (AMPLITUDE MENU)`) sets the shape of the tremolo (amplitude) LFO
-- `LS (TIMBRE LFO SHAPE)` (in `▽O (OSCILLATOR MENU)`) sets the shape of the timbre LFO
 
-#### LFO rate: `LF (LFO RATE)`
+#### LFO speed and sync: `LF (LFO RATE)`
 - Sets the base LFO rate for a part
 - Increases clock sync ratio when turning counter-clockwise from center
 - Increases frequency when turning clockwise
@@ -524,9 +532,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - Facilitates unstable, meandering modulation
 - In polyphonic/paraphonic layouts, `LFO SPREAD TYPES` and `LFO SPREAD VOICES` can be used simultaneously, for up to 12 distinct LFOs
 
-#### Vibrato LFO control
-- `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`) manually sets vibrato amount, for keyboards that don't have a modulation wheel
-
 
 
 # Audio oscillator
@@ -534,26 +539,22 @@ This manual assumes that the reader is familiar with the original firmware, and 
 ### Oscillator mode setting: `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)`
 - `OFF`: no oscillator output
 - `DRONE`: oscillator gain is modulated by tremolo LFO, but not by envelope
-  - `TR (TREMOLO DEPTH)`: attenuator for the unipolar tremolo LFO's reduction of gain
-  - `TS (TREMOLO SHAPE)`: the shape of the tremolo LFO (triangle, down saw, up saw, square)
-- `ENVELOPED`: oscillator gain is modulated by both tremolo LFO and envelope
+- `ENVELOPED`: oscillator gain is modulated by both [tremolo LFO](#lfo-modulation-destinations) and [envelope](#envelope-modulation-destinations)
 
 ### Oscillator timbre settings
-- Each oscillator shape has a timbre parameter, controlled by a manual setting and envelope/LFO modulators
+- Each oscillator shape has a timbre parameter
 - `TI (TIMBRE INITIAL)`: manually sets initial timbre
-- `TL (TIMBRE LFO MOD)`: attenuator for the bipolar timbre LFO
-- `LS (TIMBRE LFO SHAPE)`: shape of the timbre LFO (triangle, down saw, up saw, square)
-- `TE (TIMBRE ENV MOD)`: attenuverter for the envelope's modulation of timbre
-- `TV (TIMBRE VEL MOD)` attenuverter for velocity's modulation of the timbre envelope (velocity can polarize the timbre envelope)
+- [Modulation by envelope](#envelope-modulation-destinations)
+- [Modulation by LFO](#lfo-modulation-destinations)
 
 ### Oscillator wave shape: `OS (OSCILLATOR SHAPE)`
 - `*-` Filtered noise
   - Timbre: filter cutoff (resonance is set by note pitch)
   - Shapes: low-pass, notch, band-pass, high-pass
-- `CZ` Phase distortion, resonant pulse
+- `┌┐CZ` Phase distortion, resonant pulse
   - Timbre: filter cutoff
   - Shapes: low-pass, peaking, band-pass, high-pass
-- `CZ` Phase distortion, resonant saw
+- `|⟍CZ` Phase distortion, resonant saw
   - Timbre: filter cutoff
   - Shapes: low-pass, peaking, band-pass, high-pass
 - `-◝` state-variable filter, low-pass
@@ -582,8 +583,3 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - 11 integer ratios, ordered from harmonic to inharmonic
     - 8 irrational numbers based on the inverse Minkowski question-mark function
     - 7 irrational divisions/multiples of pi
-
-### Amplitude dynamics: `▽A (AMPLITUDE MENU)`
-- Tremolo can be applied to envelope and oscillator
-- Tremolo uses the same LFO frequency as vibrato
-
