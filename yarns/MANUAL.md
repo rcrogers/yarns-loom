@@ -3,7 +3,7 @@
 
 Loom is an alternate firmware for the [Yarns MIDI interface by Mutable Instruments](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/original_blurb/).  This firmware is designed to make Yarns more powerful and user-friendly.
 
-This manual assumes that the reader is familiar with the original firmware, and explains how Loom is different.  For documentation of the original behavior, [see the Mutable manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/).
+This manual assumes that the reader is familiar with the original firmware, and explains how Loom is different.  For documentation of the original behavior, [see the Mutable Instruments manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/).
 
 <!-- omit from toc -->
 # Table of contents
