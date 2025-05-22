@@ -118,18 +118,20 @@ void Display::RefreshSlow() {
   displayed_buffer_ = (scrolling_ && !scrolling_pre_delay_timer_)
       ? long_buffer_ + scrolling_step_
       : (
-        // 0...12/16
+        // 0...24/32: show normal short buffer
         blink_counter_ < ((kBlinkMask >> 1) + (kBlinkMask >> 2))
         ? short_buffer_
         : (
-          (
-            // 12/16...13/16
-            (blink_counter_ < (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 4)) ||
-            // 15/16...16/16
-            (blink_counter_ > (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 4) + (kBlinkMask >> 3))
+          ( // Show brief blank before/after prefix, so there's an obvious transition even when prefix == left char, e.g. "113")
+            blink_counter_ < ( // 24/32...25/32: blank
+              (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 5)
+            ) ||
+            blink_counter_ > ( // 31/32...32/32: blank
+              (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 3) + (kBlinkMask >> 4) + (kBlinkMask >> 5)
+            )
           )
           ? prefix_blank_buffer_
-          : prefix_show_buffer_
+          : prefix_show_buffer_ // 25/32...31/32: prefix
         )
       );
 
@@ -201,7 +203,7 @@ void Display::Print(
   strncpy(prefix_show_buffer_, short_buffer, kDisplayWidth);
   strncpy(prefix_blank_buffer_, short_buffer, kDisplayWidth);
   if (prefix != '\0') {
-    if (short_buffer_[0] == ' ') { // All buffers show prefix
+    if (short_buffer_[0] == ' ') { // All buffers show prefix, no transitions
       short_buffer_[0] = prefix;
       prefix_show_buffer_[0] = prefix;
       prefix_blank_buffer_[0] = prefix;
