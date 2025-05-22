@@ -28,10 +28,11 @@
 #
 # Lookup table definitions.
 
-import numpy
+import itertools
 import math
 from fractions import Fraction
-import itertools
+
+import numpy
 
 lookup_tables_32 = []
 lookup_tables = []
@@ -780,7 +781,11 @@ clock_ratio_ticks = []
 clock_ratio_names = []
 for ratio in numpy.unique([Fraction(*x) for x in itertools.product(range(1, 10), range(1, 10))]):
   ticks = (24.0 / ratio)
-  if ticks % 1 != 0 or ratio < 1.0 / 8:
+  if ticks % 1 != 0:
+    print('Skipping non-integer clock ratio', ratio, 'ticks', ticks)
+    continue
+  if ratio < 1.0 / 8:
+    print('Skipping very slow clock ratio', ratio, 'ticks', ticks)
     continue
   clock_ratio_ticks.append(float(ticks))
   clock_ratio_names.append(
