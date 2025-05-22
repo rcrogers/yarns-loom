@@ -200,7 +200,7 @@ def envelope():
   
   # raise Exception('stop here')
 
-  max_time = 5.0  # seconds
+  max_time = 10.0  # seconds
   num_duration_values = 128
   gamma = 0.25
   envelope_rate = audio_rate
