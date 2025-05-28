@@ -559,7 +559,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Oscillator timbre settings
 - Each oscillator shape has a timbre parameter
-- `TI (TIMBRE INITIAL)`: manually sets initial timbre
+- `TI (TIMBRE INITIAL)`: manually sets timbre offset
 - [Modulation by envelope](#modulation-destinations-for-envelope-output)
 - [Modulation by LFO](#modulation-destinations-for-lfo-output)
 
