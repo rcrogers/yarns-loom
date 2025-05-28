@@ -2,15 +2,15 @@
 An alternate firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), designed to make Yarns more powerful and user-friendly.
 
 ### Features
-- [Cue sequencer with MIDI Song Position](yarns/MANUAL.md#set-song-position-for-master-clock)
-- [Looper-style sequencer with real-time polyphonic recording](yarns/MANUAL.md#loop-sequencer)
-- [Sequencer-programmed arpeggiator movement](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
-- [26 oscillator shapes with timbre/amplitude mod matrix](yarns/MANUAL.md#oscillator-timbre-settings)
-- [ADSR envelopes with velocity control](yarns/MANUAL.md#envelope)
-- [Expanded support for MIDI CCs](yarns/MANUAL.md#midi-control-change-cc)
-- [New paraphonic layouts with 4-voice paraphonic part and 6 overall voices](yarns/MANUAL.md#layouts)
-- [New polyphonic voicing algorithms](yarns/MANUAL.md#polyphonic-voice-allocation)
-- [Hold pedal can be used for latching, sostenuto, and more](yarns/MANUAL.md#hold-pedal)
+- Cue sequencer with MIDI Song Position [→](yarns/MANUAL.md#controls-for-master-clock)
+- Looper-style sequencer with real-time polyphonic recording [→](yarns/MANUAL.md#loop-sequencer)
+- Sequencer-programmed arpeggiator movement [→](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
+- 26 oscillator shapes with timbre/amplitude mod matrix [→](yarns/MANUAL.md#oscillator-timbre-settings)
+- ADSR envelopes with velocity shaping [→](yarns/MANUAL.md#envelope)
+- Expanded support for MIDI CCs [→](yarns/MANUAL.md#midi-control-change-cc)
+- New paraphonic layouts with 4-voice paraphonic part and 6 overall voices [→](yarns/MANUAL.md#new-layouts)
+- New polyphonic voicing algorithms [→](yarns/MANUAL.md#polyphonic-voice-allocation)
+- Hold pedal can be used for latching, sostenuto, and more [→](yarns/MANUAL.md#hold-pedal)
   - **[Check the manual for more! →](yarns/MANUAL.md)**
 
 ### Caveats
