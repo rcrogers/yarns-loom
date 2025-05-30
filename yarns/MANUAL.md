@@ -489,19 +489,19 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### How the envelope adapts to interruptions
-- Envelope adjusts to notes that start/end before the expected completion of a stage
-- Problem: attack/release is closer to target than expected
-  - Cause: note begins during release, or note ends while attack is rising toward sustain
-  - Solution: shorten stage duration in proportion to remaining distance, maintaining nominal curve shape
-- Problem: attack/release is farther from target than expected
-  - Cause: note ends while decay is falling toward sustain
+- Envelope adjusts to notes that begin/end while a stage or another note is in progress
+- Problem: release/attack is farther from target than expected
+  - Cause: note ends while decay is falling toward sustain; timbre envelope reverses polarity
   - Solution: curve stays at maximum steepness until it catches up to the expected start value
-- Problem: sustain level changes without a note release
-  - Cause: legato play
-  - Solution: use a decay stage to transition to new sustain level
-- Problem: attack is going downward
-  - Cause: after an early release from a high peak, new note begins with a low peak
+- Problem: attack/release is closer to target than expected
+  - Cause: note begins during release; note ends while attack is rising toward sustain
+  - Solution: shorten stage duration in proportion to remaining distance, maintaining nominal curve shape
+- Problem: attack starts above the peak level
+  - Cause: after an early release from a high peak level, new note begins with a low peak level
   - Solution: skip to decay
+- Problem: new note begins with an updated sustain level, without a release from the previous note
+  - Cause: legato play
+  - Solution: use a decay stage to transition to updated sustain level
 
 <!-- omit from toc -->
 #### Modulation destinations for envelope output
