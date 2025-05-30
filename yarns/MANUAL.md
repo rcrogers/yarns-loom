@@ -596,6 +596,9 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - `FM` Frequency modulation
   - Timbre: modulation index
   - Shapes: 26 preset modulator ratios
-    - 11 integer ratios, ordered from harmonic to inharmonic
+    - 11 harmonic ratios, ordered from most harmonic to least harmonic
+        - 1/1, 2/1, 3/1, 5/1, 7/1, 5/2, 7/2, 9/2, 7/3, 8/3, 9/4
     - 8 irrational numbers based on the inverse Minkowski question-mark function
+        - 1/?⁻¹(4/9), 1/?⁻¹(3/7), 1/?⁻¹(2/9), 1/?⁻¹(2/7), 1/?⁻¹(2/5), 1/?⁻¹(1/7), 1/?⁻¹(1/5), 1/?⁻¹(1/3)
     - 7 irrational divisions/multiples of pi
+        - π/4, π/3, π/2, π, π*2, π*3, π*3/2
