@@ -564,41 +564,65 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - [Modulation by LFO](#modulation-destinations-for-lfo-output)
 
 ### Oscillator wave shape: `OS (OSCILLATOR SHAPE)`
-- `*-` Filtered noise
-  - Timbre: filter cutoff (resonance is set by note pitch)
-  - Shapes: low-pass, notch, band-pass, high-pass
-- `┌┐CZ` Phase distortion, resonant pulse
-  - Timbre: filter cutoff
-  - Shapes: low-pass, peaking, band-pass, high-pass
-- `|⟍CZ` Phase distortion, resonant saw
-  - Timbre: filter cutoff
-  - Shapes: low-pass, peaking, band-pass, high-pass
-- `-◝` state-variable filter, low-pass
-  - Timbre: filter cutoff (resonance is constant)
-  - Shapes: pulse, saw
-- `-W` Pulse-width modulation
-  - Timbre: pulse width
-  - Shapes: pulse, saw
-- `|⟍┌┐` Saw-pulse morph
-  - Timbre: morph from saw to pulse
-- `-$` Hard sync
-  - Timbre: detunes the synced oscillator
-  - Shapes: sine, pulse, saw
-- `-F` Wavefolder
-  - Timbre: folding amount
-  - Shapes: sine, triangle
-- `┴┴` Dirac comb
-  - Timbre: harmonic content
-- `ST` Compressed sine (`tanh`)
-  - Timbre: compression amount
-- `SX` Exponential sine
-  - Timbre: exponentiation amount
-- `FM` Frequency modulation
-  - Timbre: modulation index
-  - Shapes: 26 preset modulator ratios
-    - 11 harmonic ratios, ordered from most harmonic to least harmonic
-        - 1/1, 2/1, 3/1, 5/1, 7/1, 5/2, 7/2, 9/2, 7/3, 8/3, 9/4
-    - 8 irrational numbers based on the inverse of [Minkowski's question-mark function](https://en.wikipedia.org/wiki/Minkowski%27s_question-mark_function)
-        - 1/?⁻¹(4/9), 1/?⁻¹(3/7), 1/?⁻¹(2/9), 1/?⁻¹(2/7), 1/?⁻¹(2/5), 1/?⁻¹(1/7), 1/?⁻¹(1/5), 1/?⁻¹(1/3)
-    - 7 irrational divisions/multiples of pi
-        - π/4, π/3, π/2, π, π\*2, π\*3, π\*3/2
+
+<!-- omit from toc -->
+#### `*-` Filtered noise
+- Timbre: filter cutoff (resonance is set by note pitch)
+- Shapes: low-pass, notch, band-pass, high-pass
+
+<!-- omit from toc -->
+#### `┌┐CZ` Phase distortion, resonant pulse
+- Timbre: filter cutoff
+- Shapes: low-pass, peaking, band-pass, high-pass
+
+<!-- omit from toc -->
+#### `|⟍CZ` Phase distortion, resonant saw
+- Timbre: filter cutoff
+- Shapes: low-pass, peaking, band-pass, high-pass
+
+<!-- omit from toc -->
+#### `-◝` state-variable filter, low-pass
+- Timbre: filter cutoff (resonance is constant)
+- Shapes: pulse, saw
+
+<!-- omit from toc -->
+#### `-W` Pulse-width modulation
+- Timbre: pulse width
+- Shapes: pulse, saw
+
+<!-- omit from toc -->
+#### `|⟍┌┐` Saw-pulse morph
+- Timbre: morph from saw to pulse
+
+<!-- omit from toc -->
+#### `-$` Hard sync
+- Timbre: detunes the synced oscillator
+- Shapes: sine, pulse, saw
+
+<!-- omit from toc -->
+#### `-F` Wavefolder
+- Timbre: folding amount
+- Shapes: sine, triangle
+
+<!-- omit from toc -->
+#### `┴┴` Dirac comb
+- Timbre: harmonic content
+
+<!-- omit from toc -->
+#### `ST` Compressed sine (`tanh`)
+- Timbre: compression amount
+
+<!-- omit from toc -->
+#### `SX` Exponential sine
+- Timbre: exponentiation amount
+
+<!-- omit from toc -->
+#### `FM` Frequency modulation
+- Timbre: modulation index
+- Shapes: 26 preset modulator ratios
+  - 11 harmonic ratios, ordered from most harmonic to least harmonic
+      - 1/1, 2/1, 3/1, 5/1, 7/1, 5/2, 7/2, 9/2, 7/3, 8/3, 9/4
+  - 8 irrational numbers based on the inverse of [Minkowski's question-mark function](https://en.wikipedia.org/wiki/Minkowski%27s_question-mark_function)
+      - 1/?⁻¹(4/9), 1/?⁻¹(3/7), 1/?⁻¹(2/9), 1/?⁻¹(2/7), 1/?⁻¹(2/5), 1/?⁻¹(1/7), 1/?⁻¹(1/5), 1/?⁻¹(1/3)
+  - 7 irrational divisions/multiples of pi
+      - π/4, π/3, π/2, π, π\*2, π\*3, π\*3/2
