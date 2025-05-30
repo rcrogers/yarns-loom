@@ -95,22 +95,22 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
   raw_timbre_bias_ = timbre_bias;
 }
 
-int16_t Oscillator::WarpTimbre(int16_t timbre) const {
+int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
   // Limit cutoff range for filtered noise
-  if (shape_ >= OSC_SHAPE_NOISE_NOTCH && shape_ <= OSC_SHAPE_NOISE_HP) {
+  if (shape >= OSC_SHAPE_NOISE_NOTCH && shape <= OSC_SHAPE_NOISE_HP) {
     int32_t cutoff_freq = 0x1000 + (timbre >> 1); // 1/8..5/8
     return Interpolate824(lut_svf_cutoff, cutoff_freq << 17) >> 1;
   }
 
   // LP filter cutoff tracks pitch
-  if (shape_ >= OSC_SHAPE_LP_PULSE && shape_ <= OSC_SHAPE_LP_SAW) {
-    int32_t cutoff_freq = (pitch_ >> 1) + (timbre >> 1); \
+  if (shape >= OSC_SHAPE_LP_PULSE && shape <= OSC_SHAPE_LP_SAW) {
+    int32_t cutoff_freq = (pitch_ >> 1) + (timbre >> 1);
     CONSTRAIN(cutoff_freq, 0, 0x7fff);
     return Interpolate824(lut_svf_cutoff, cutoff_freq << 17) >> 1;
   }
 
   // Phase distortion modulator tracks pitch
-  if (shape_ >= OSC_SHAPE_CZ_PULSE_LP && shape_ <= OSC_SHAPE_CZ_SAW_HP) {
+  if (shape >= OSC_SHAPE_CZ_PULSE_LP && shape <= OSC_SHAPE_CZ_SAW_HP) {
     int16_t timbre_offset = timbre - 2048;
     int32_t shifted_pitch = pitch_ + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8);
     if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1;
@@ -118,17 +118,17 @@ int16_t Oscillator::WarpTimbre(int16_t timbre) const {
   }
 
   // Sync modulator tracks pitch
-  if (shape_ >= OSC_SHAPE_SYNC_SINE && shape_ <= OSC_SHAPE_SYNC_SAW) {
-    int32_t modulator_pitch = pitch_ + (timbre >> 3); \
-    CONSTRAIN(modulator_pitch, 0, kHighestNote - 1); \
+  if (shape >= OSC_SHAPE_SYNC_SINE && shape <= OSC_SHAPE_SYNC_SAW) {
+    int32_t modulator_pitch = pitch_ + (timbre >> 3);
+    CONSTRAIN(modulator_pitch, 0, kHighestNote - 1);
     return ComputePhaseIncrement(modulator_pitch) >> (32 - 15);
   }
 
   if (
-    shape_ == OSC_SHAPE_FOLD_SINE ||
-    shape_ == OSC_SHAPE_FOLD_TRIANGLE ||
-    shape_ == OSC_SHAPE_EXP_SINE ||
-    shape_ >= OSC_SHAPE_FM
+    shape == OSC_SHAPE_FOLD_SINE ||
+    shape == OSC_SHAPE_FOLD_TRIANGLE ||
+    shape == OSC_SHAPE_EXP_SINE ||
+    shape >= OSC_SHAPE_FM
   ) {
     // Additive synthesis reduces timbre as pitch increases
     int32_t lowness = 0x7fff - (pitch_ << 1);
@@ -137,6 +137,19 @@ int16_t Oscillator::WarpTimbre(int16_t timbre) const {
   }
 
   return timbre;
+}
+
+void Oscillator::set_shape(OscillatorShape new_shape) {
+  if (shape_ == new_shape) return;
+
+  // Remap timbre envelope on the fly so held notes keep an ~equivalent timbre
+  int16_t midpoint_timbre = 1 << 14;
+  float old_scale = static_cast<float>(WarpTimbre(midpoint_timbre, shape_));
+  float new_scale = static_cast<float>(WarpTimbre(midpoint_timbre, new_shape));
+  float scaling_factor = new_scale / old_scale;
+  timbre_envelope_.Rescale(scaling_factor);
+
+  shape_ = new_shape;
 }
 
 uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
