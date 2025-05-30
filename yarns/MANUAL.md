@@ -287,8 +287,8 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Output clock: `O/ OUTPUT CLOCK RATIO` sets the tempo of the clock gate output, relative to the master clock tempo
 - LFO sync: [`LF LFO RATE`](#lfo-speed-and-sync-lf-lfo-rate) sets the part's base LFO tempo, relative to the master clock tempo
 - 32 clock ratios available:
-  - Slower than master clock: 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9 (20 total)
-  - Faster than (or equal to) master clock: 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1 (12 total)
+  - Slower than master clock (20 total): 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9
+  - Equal or faster (12 total): 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
 
 
 ### Controls for master clock
