@@ -747,16 +747,16 @@ for (name, mc_ratio) in ([
   ('2\\xC1"" FM \\xC1""*2', numpy.pi * 2), # 1 : 2pi
   ('3\\xC1"" FM \\xC1""*3', numpy.pi * 3), # 1 : 3pi
   ('3\\xC1"" FM \\xC1""*3/2', numpy.pi * 3 / 2), # 2 : 3pi
-  ('\\xC0""2 FM', numpy.sqrt(2) / 2),
-  ('1\\xC0"" FM', numpy.sqrt(2) * 1), # Great bell
-  ('2\\xC0"" FM', numpy.sqrt(2) * 2),
-  ('3\\xC0"" FM', numpy.sqrt(2) * 3),
-  ('4\\xC0"" FM', numpy.sqrt(2) * 4),
-  ('1\\xC0"" FM', numpy.sqrt(3)),
-  ('2\\xC0"" FM', numpy.sqrt(3) * 2), # Even better bell
+  # ('\\xC0""2 FM', numpy.sqrt(2) / 2),
+  # ('1\\xC0"" FM', numpy.sqrt(2) * 1), # Great bell
+  # ('2\\xC0"" FM', numpy.sqrt(2) * 2),
+  # ('3\\xC0"" FM', numpy.sqrt(2) * 3),
+  # ('4\\xC0"" FM', numpy.sqrt(2) * 4),
+  # ('1\\xC0"" FM', numpy.sqrt(3)),
+  # ('2\\xC0"" FM', numpy.sqrt(3) * 2), # Even better bell
 ] + [
   # Metallic means
-  ('M' + str(n) + ' FM METALLICMEAN(' + str(n) + ')', (n + numpy.sqrt(n ** 2 + 4)) / 2) for n in range(1, 10)
+  # ('M' + str(n) + ' FM METALLICMEAN(' + str(n) + ')', (n + numpy.sqrt(n ** 2 + 4)) / 2) for n in range(1, 10)
 ]):
   fm_mc_ratios.append(mc_ratio)
   fm_mc_ratio_names.append(name)
