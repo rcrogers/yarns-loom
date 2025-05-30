@@ -39,7 +39,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - [Envelope](#envelope)
     - [Low-frequency oscillator (LFO)](#low-frequency-oscillator-lfo)
 - [Audio oscillator](#audio-oscillator)
-    - [Oscillator mode setting: `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)`](#oscillator-mode-setting-om-oscillator-mode-in-o-oscillator-menu)
+    - [Oscillator mode setting](#oscillator-mode-setting)
     - [Oscillator timbre settings](#oscillator-timbre-settings)
     - [Oscillator wave shape: `OS (OSCILLATOR SHAPE)`](#oscillator-wave-shape-os-oscillator-shape)
 
