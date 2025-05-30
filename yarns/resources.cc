@@ -877,7 +877,11 @@ const int16_t lut_fm_modulator_intervals[] = {
     1908,   2647,   2227,   1953,
     2918,   2721,   2132,   -535,
      102,   1000,   2536,   4072,
-    4971,   3435,
+    4971,   3435,   -767,    768,
+    2304,   3202,   3840,   1217,
+    2753,   1066,   1953,   2647,
+    3199,   3650,   4029,   4355,
+    4641,   4895,
 };
 
 
@@ -917,13 +921,17 @@ const int16_t* const lookup_table_signed_table[] = {
 };
 
 const char* const lut_fm_ratio_names[] = {
-  "11 FM 1/1", "12 FM 1/2", "13 FM 1/3", "15 FM 1/5",
-  "17 FM 1/7", "25 FM 2/5", "27 FM 2/7", "29 FM 2/9",
-  "37 FM 3/7", "38 FM 3/8", "49 FM 4/9", "?1 FM ?^-1(4/9)",
-  "?2 FM ?^-1(3/7)", "?3 FM ?^-1(2/9)", "?4 FM ?^-1(2/7)", "?5 FM ?^-1(2/5)",
-  "?6 FM ?^-1(1/7)", "?7 FM ?^-1(1/5)", "?8 FM ?^-1(1/3)", "\xC1""4 FM",
-  "\xC1""3 FM", "\xC1""2 FM", " \xC1"" FM", "2\xC1"" FM",
-  "3\xC1"" FM", "3\xC1"" FM",
+  "11 FM 1/1", "21 FM 2/1", "31 FM 3/1", "51 FM 5/1",
+  "71 FM 7/1", "52 FM 5/2", "72 FM 7/2", "92 FM 9/2",
+  "73 FM 7/3", "83 FM 8/3", "94 FM 9/4", "?1 FM 1/?-1(4/9)",
+  "?2 FM 1/?-1(3/7)", "?3 FM 1/?-1(2/9)", "?4 FM 1/?-1(2/7)", "?5 FM 1/?-1(2/5)",
+  "?6 FM 1/?-1(1/7)", "?7 FM 1/?-1(1/5)", "?8 FM 1/?-1(1/3)", "\xC1""4 FM \xC1""/4",
+  "\xC1""3 FM \xC1""/3", "\xC1""2 FM \xC1""/2", " \xC1"" FM \xC1""*1", "2\xC1"" FM \xC1""*2",
+  "3\xC1"" FM \xC1""*3", "3\xC1"" FM \xC1""*3/2", "\xC0""2 FM", "1\xC0"" FM",
+  "2\xC0"" FM", "3\xC0"" FM", "4\xC0"" FM", "1\xC0"" FM",
+  "2\xC0"" FM", "M1 FM METALLICMEAN(1)", "M2 FM METALLICMEAN(2)", "M3 FM METALLICMEAN(3)",
+  "M4 FM METALLICMEAN(4)", "M5 FM METALLICMEAN(5)", "M6 FM METALLICMEAN(6)", "M7 FM METALLICMEAN(7)",
+  "M8 FM METALLICMEAN(8)", "M9 FM METALLICMEAN(9)",
 };
 const char* const lut_clock_ratio_names[] = {
   "18 1/8", "17 1/7", "16 1/6", "15 1/5",
@@ -2963,7 +2971,11 @@ const int8_t lut_fm_index_2x_upshifts[] = {
        8,      7,      8,      8,
        7,      7,      8,     11,
       11,      9,      7,      5,
-       4,      6,
+       4,      6,     12,     10,
+       8,      6,      6,      9,
+       7,      9,      8,      7,
+       6,      6,      5,      5,
+       5,      4,
 };
 
 

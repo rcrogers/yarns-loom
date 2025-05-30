@@ -107,8 +107,8 @@ const char* const voicing_aux_cv_values[MOD_AUX_LAST] = {
   // lut_fm_ratio_names[4],
   // lut_fm_ratio_names[5],
   // lut_fm_ratio_names[6],
-  "11 FM 1/1", "12 FM 1/2", "13 FM 1/3", "15 FM 1/5",
-  "17 FM 1/7", "25 FM 2/5", "27 FM 2/7"
+  "11 FM 1/1", "21 FM 2/1", "31 FM 3/1", "51 FM 5/1",
+  "71 FM 7/1", "52 FM 5/2", "72 FM 7/2"
 };
 
 const char* const voicing_oscillator_mode_values[OSCILLATOR_MODE_LAST] = {
