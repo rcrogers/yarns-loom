@@ -65,7 +65,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 ### Part swap command
 - `*P PART SWAP SETTINGS` in main menu
 - The selected part (selected by turning encoder) swaps its settings with the [active part](#active-part-control)
-- Allows an unused part to store an alternate configuration
+- Allows storing an alternate configuration in an inactive part
 
 ### Save/load commands
 - Display blinks command name when picking a preset
