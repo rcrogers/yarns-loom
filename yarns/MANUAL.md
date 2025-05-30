@@ -477,7 +477,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Manual offset for ADSR parameters: `ATTACK INIT`, etc.
 - Bipolar modulation of ADSR parameters by note velocity: `ATTACK MOD VEL`, etc.
 - All curves are exponential
-- Stage times range from 0.089 ms (4 samples) to 5 seconds
+- Stage times range from 0.089 ms (4 samples) to 10 seconds
 
 <!-- omit from toc -->
 #### Modulating envelope's peak level
