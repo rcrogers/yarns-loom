@@ -552,7 +552,8 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 # Audio oscillator
 
-### Oscillator mode setting: `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)`
+### Oscillator mode setting
+- `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)`
 - `OFF`: no oscillator output
 - `DRONE`: oscillator gain is modulated by tremolo LFO, but not by envelope
 - `ENVELOPED`: oscillator gain is modulated by both [tremolo LFO](#modulation-destinations-for-lfo-output) and [envelope](#modulation-destinations-for-envelope-output)
