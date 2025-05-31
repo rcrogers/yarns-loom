@@ -87,7 +87,7 @@ enum OscillatorShape {
   OSC_SHAPE_VARIABLE_SAW,
   OSC_SHAPE_SAW_PULSE_MORPH,
   OSC_SHAPE_SYNC_SINE,
-  OSC_SHAPE_SYNC_TRIANGLE,
+  // OSC_SHAPE_SYNC_TRIANGLE,
   OSC_SHAPE_SYNC_PULSE,
   OSC_SHAPE_SYNC_SAW,
   OSC_SHAPE_FOLD_SINE,
@@ -135,6 +135,8 @@ class Oscillator {
   }
   
   void Render(int16_t* audio_mix);
+
+  static RenderFn fn_table_[];
   
  private:
   void RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_samples);
@@ -189,9 +191,8 @@ class Oscillator {
   
   int32_t next_sample_;
   uint16_t scale_;
-  
-  static RenderFn fn_table_[];
-  
+
+ private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);
 };
 

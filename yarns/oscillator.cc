@@ -65,7 +65,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderVariableSaw,
   &Oscillator::RenderSawPulseMorph,
   &Oscillator::RenderSyncSine,
-  &Oscillator::RenderSyncTriangle,
+  // &Oscillator::RenderSyncTriangle,
   &Oscillator::RenderSyncPulse,
   &Oscillator::RenderSyncSaw,
   &Oscillator::RenderFoldSine,
@@ -75,6 +75,11 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderExponentialSine,
   &Oscillator::RenderFM,
 };
+
+STATIC_ASSERT(
+  sizeof(Oscillator::fn_table_) / sizeof(Oscillator::RenderFn) == OSC_SHAPE_FM + 1,
+  oscillator_fn_table_size_mismatch
+);
 
 void StateVariableFilter::Init() {
   damp.Init();

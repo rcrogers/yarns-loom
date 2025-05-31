@@ -115,7 +115,7 @@ const char* const voicing_oscillator_mode_values[OSCILLATOR_MODE_LAST] = {
   "OFF", "DRONE", "ENVELOPED"
 };
 
-const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
+const char* const voicing_oscillator_shape_values[] = {
   "*\xA2 NOISE NOTCH SVF",
   "*\xA0 NOISE LOW-PASS SVF",
   "*^ NOISE BAND-PASS SVF",
@@ -134,7 +134,7 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "\x88W SAW WIDTH MOD",
   "\x88\x8C SAW-PULSE MORPH",
   "S$ SINE SYNC",
-  "^$ TRIANGLE SYNC",
+  // "^$ TRIANGLE SYNC",
   "\x8C$ PULSE SYNC",
   "\x88$ SAW SYNC",
   "SF SINE FOLD",
@@ -143,6 +143,10 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "ST SINE TANH",
   "SX SINE EXPONENTIAL",
 };
+STATIC_ASSERT(
+  OSC_SHAPE_FM == sizeof(voicing_oscillator_shape_values) / sizeof(const char*),
+  osc
+);
 
 const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
   "/\\",
