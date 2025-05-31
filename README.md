@@ -4,7 +4,7 @@ An alternate firmware for the [Yarns MIDI interface by Mutable Instruments](http
 ### Features
 - Cue sequencer with MIDI Song Position [→](yarns/MANUAL.md#controls-for-master-clock)
 - Looper-style sequencer with real-time polyphonic recording [→](yarns/MANUAL.md#loop-sequencer)
-- Sequencer-programmed arpeggiator movement [→](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
+- Sequencer-programmed arpeggiator movement [→](yarns/MANUAL.md#sequencer-programmed-arpeggiator-movement)
 - 26 oscillator shapes with timbre/amplitude mod matrix [→](yarns/MANUAL.md#oscillator-timbre-settings)
 - ADSR envelopes with velocity shaping [→](yarns/MANUAL.md#envelope)
 - Expanded support for MIDI CCs [→](yarns/MANUAL.md#midi-control-change-cc)
