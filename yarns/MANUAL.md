@@ -1,9 +1,9 @@
 <!-- omit from toc -->
 # Introduction
 
-Loom is an alternate firmware for the [Yarns MIDI interface by Mutable Instruments ↗️](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/original_blurb/).  This firmware is designed to make Yarns more powerful and user-friendly.
+Loom is an alternate firmware for the [Yarns MIDI interface by Mutable Instruments ↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/original_blurb/).  This firmware is designed to make Yarns more powerful and user-friendly.
 
-This manual assumes that the reader is familiar with the original firmware, and explains how Loom is different.  For documentation of the original behavior, see the [Mutable Instruments manual ↗️](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/) and [firmware changelog ↗️](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/firmware/).
+This manual assumes that the reader is familiar with the original firmware, and explains how Loom is different.  For documentation of the original behavior, see the [Mutable Instruments manual ↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/) and [firmware changelog ↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/firmware/).
 
 <!-- omit from toc -->
 # Contents
@@ -115,7 +115,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### Added CC types
-- CC support for all new settings: see [Loom CC Implementation Chart ↗️](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
+- CC support for all new settings: see [Loom CC Implementation Chart ↗](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 - Recording controls
   - Start recording
   - Stop recording
@@ -207,7 +207,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - New part setting `HP (HOLD PEDAL POLARITY)` inverts a part's up/down pedal behavior
 - Allows compatibility with any manufacturer's hold pedals
 - Allows reversing up/down semantics for the selected `HOLD PEDAL MODE`
-- [More information on negative (default) and positive pedal polarity ↗️](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html)
+- [More information on negative (default) and positive pedal polarity ↗](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html)
 
 ### Polyphonic voice allocation
 
@@ -626,7 +626,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Shapes: 26 preset modulator ratios
   - 11 harmonic ratios, ordered from most harmonic to least harmonic
       - 1/1, 2/1, 3/1, 5/1, 7/1, 5/2, 7/2, 9/2, 7/3, 8/3, 9/4
-  - 8 irrational numbers based on the inverse of [Minkowski's question-mark function ↗️](https://en.wikipedia.org/wiki/Minkowski%27s_question-mark_function)
+  - 8 irrational numbers based on the inverse of [Minkowski's question-mark function ↗](https://en.wikipedia.org/wiki/Minkowski%27s_question-mark_function)
       - 1/?⁻¹(4/9), 1/?⁻¹(3/7), 1/?⁻¹(2/9), 1/?⁻¹(2/7), 1/?⁻¹(2/5), 1/?⁻¹(1/7), 1/?⁻¹(1/5), 1/?⁻¹(1/3)
   - 7 irrational divisions/multiples of pi
       - π/4, π/3, π/2, π, π\*2, π\*3, π\*3/2
