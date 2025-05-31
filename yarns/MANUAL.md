@@ -234,7 +234,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 #### `NP (NOTE PRIORITY)` changes
 - Added new `FIRST` (oldest) setting to `NOTE PRIORITY`
 - Polyphonic voicing respects note priority where applicable
-- [Arpeggiator respects note priority](#using-note-priority-to-order-arp-direction)
+- [Arpeggiator respects note priority](#arpeggiator-basics)
 
 <!-- omit from toc -->
 #### Other polyphony changes
