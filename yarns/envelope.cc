@@ -258,4 +258,13 @@ void Envelope::RenderStage(
   bias_ = bias;
 }
 
+void Envelope::Rescale(float factor) {
+  bias_ = static_cast<int32_t>(bias_ * factor);
+  value_ = static_cast<int32_t>(value_ * factor);
+  target_ = static_cast<int32_t>(target_ * factor);
+  for (int i = 0; i < ENV_NUM_STAGES; ++i) {
+    stage_target_[i] = static_cast<int32_t>(stage_target_[i] * factor);
+  }
+}
+
 }  // namespace yarns

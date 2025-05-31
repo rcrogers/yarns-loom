@@ -39,7 +39,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - [Envelope](#envelope)
     - [Low-frequency oscillator (LFO)](#low-frequency-oscillator-lfo)
 - [Audio oscillator](#audio-oscillator)
-    - [Oscillator mode setting: `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)`](#oscillator-mode-setting-om-oscillator-mode-in-o-oscillator-menu)
+    - [Oscillator mode setting](#oscillator-mode-setting)
     - [Oscillator timbre settings](#oscillator-timbre-settings)
     - [Oscillator wave shape: `OS (OSCILLATOR SHAPE)`](#oscillator-wave-shape-os-oscillator-shape)
 
@@ -477,7 +477,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Manual offset for ADSR parameters: `ATTACK INIT`, etc.
 - Bipolar modulation of ADSR parameters by note velocity: `ATTACK MOD VEL`, etc.
 - All curves are exponential
-- Stage times range from 0.089 ms (4 samples) to 5 seconds
+- Stage times range from 0.089 ms (4 samples) to 10 seconds
 
 <!-- omit from toc -->
 #### Modulating envelope's peak level
@@ -489,19 +489,19 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### How the envelope adapts to interruptions
-- Envelope adjusts to notes that start/end before the expected completion of a stage
-- Problem: attack/release is closer to target than expected
-  - Cause: note begins during release, or note ends while attack is rising toward sustain
-  - Solution: shorten stage duration in proportion to remaining distance, maintaining nominal curve shape
-- Problem: attack/release is farther from target than expected
-  - Cause: note ends while decay is falling toward sustain
+- Envelope adjusts to notes that begin/end while a stage or another note is in progress
+- Problem: release/attack is farther from target than expected
+  - Cause: note ends while decay is falling toward sustain; new note reverses the polarity of the timbre envelope
   - Solution: curve stays at maximum steepness until it catches up to the expected start value
-- Problem: sustain level changes without a note release
-  - Cause: legato play
-  - Solution: use a decay stage to transition to new sustain level
-- Problem: attack is going downward
-  - Cause: after an early release from a high peak, new note begins with a low peak
+- Problem: attack/release is closer to target than expected
+  - Cause: note begins during release; note ends while attack is rising toward sustain
+  - Solution: shorten stage duration in proportion to remaining distance, maintaining nominal curve shape
+- Problem: attack starts above the peak level
+  - Cause: after an early release from a high peak level, new note begins with a low peak level
   - Solution: skip to decay
+- Problem: new note begins with an updated sustain level, without a release from the previous note
+  - Cause: legato play
+  - Solution: use a decay stage to transition to updated sustain level
 
 <!-- omit from toc -->
 #### Modulation destinations for envelope output
@@ -552,7 +552,8 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 # Audio oscillator
 
-### Oscillator mode setting: `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)`
+### Oscillator mode setting
+- `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)`
 - `OFF`: no oscillator output
 - `DRONE`: oscillator gain is modulated by tremolo LFO, but not by envelope
 - `ENVELOPED`: oscillator gain is modulated by both [tremolo LFO](#modulation-destinations-for-lfo-output) and [envelope](#modulation-destinations-for-envelope-output)

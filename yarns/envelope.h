@@ -73,6 +73,8 @@ class Envelope {
     int16_t* sample_buffer, size_t samples_left, int32_t bias, int32_t bias_slope
   );
 
+  void Rescale(float scaling_factor);
+
   inline int16_t tremolo(uint16_t strength) const {
     int32_t relative_value = (value_ - stage_target_[ENV_STAGE_RELEASE]) >> (31 - 16);
     return relative_value * -strength >> 16;

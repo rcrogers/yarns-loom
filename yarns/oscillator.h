@@ -119,11 +119,12 @@ class Oscillator {
   }
 
   void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias);
-  int16_t WarpTimbre(int16_t timbre) const;
-  
-  inline void set_shape(OscillatorShape shape) {
-    shape_ = shape;
+  int16_t WarpTimbre(int16_t timbre, OscillatorShape shape) const;
+  int16_t WarpTimbre(int16_t timbre) const {
+    return WarpTimbre(timbre, shape_);
   }
+
+  void set_shape(OscillatorShape shape);
 
   inline void NoteOn(ADSR& adsr, bool drone, int16_t raw_max_timbre) {
     gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
