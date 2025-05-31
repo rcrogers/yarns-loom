@@ -7,7 +7,7 @@ An alternate firmware for the [Yarns MIDI interface by Mutable Instruments](http
 - Sequencer-programmed arpeggiator movement [→](yarns/MANUAL.md#sequencer-programmed-arpeggiator-movement)
 - 26 oscillator shapes with timbre/amplitude mod matrix [→](yarns/MANUAL.md#oscillator-timbre-settings)
 - ADSR envelopes with velocity shaping [→](yarns/MANUAL.md#envelope)
-- Expanded support for MIDI CCs [→](yarns/MANUAL.md#midi-control-change-cc)
+- Expanded support for MIDI CCs [→](yarns/MANUAL.md#control-change-cc)
 - New paraphonic layouts with 4-voice paraphonic part and 6 overall voices [→](yarns/MANUAL.md#new-layouts)
 - New polyphonic voicing algorithms [→](yarns/MANUAL.md#polyphonic-voice-allocation)
 - Hold pedal can be used for latching, sostenuto, and more [→](yarns/MANUAL.md#hold-pedal)
@@ -19,7 +19,7 @@ An alternate firmware for the [Yarns MIDI interface by Mutable Instruments](http
 - Some of Yarns' original features have been downgraded to make room for new features (e.g. the sequencer holds 30 notes instead of the original 64)
 
 ### Installing
-1. Download `yarns.syx` from the [latest release's assets](https://github.com/rcrogers/yarns-loom/releases/latest)
+1. Download `yarns-loom.syx` from the [latest release's assets](https://github.com/rcrogers/yarns-loom/releases/latest)
 2. [Follow the manufacturer's instructions for installing new firmware](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/#firmware)
 
 ### Community
