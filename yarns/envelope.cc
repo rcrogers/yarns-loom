@@ -131,12 +131,8 @@ void Envelope::Trigger(EnvelopeStage stage) {
     TRIGGER_NEXT_STAGE;
   }
 
-  // Always use the nominal slope to determine the stage steepness
-  int32_t linear_slope = MulS32(nominal_delta, phase_increment_);
-  if (!linear_slope) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
-
   if (abs(actual_delta) < abs(nominal_delta)) {
-    // If stage starts closer to target than expected, shorten the stage duration
+    // If stage starts closer to target than expected, shorten the stage proportionally
     // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
     phase_increment_ = static_cast<uint32_t>(
       static_cast<float>(phase_increment_) * abs(
@@ -148,6 +144,12 @@ void Envelope::Trigger(EnvelopeStage stage) {
     // We're at least as far as expected (possibly farther). No direct adjustment to stage duration -- transition is handled by `nominal_start_reached`
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
   }
+
+  // NB: if we adjusted phase increment, this is equal to nominal slope
+  int32_t linear_slope = MulS32(actual_delta, phase_increment_);
+  if (!linear_slope) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
+
+  // TODO disable nominal_start_reached?  Does it make sense to do this if also increasing steepness?
 
   // Populate dynamic LUT for phase-dependent slope
   const uint32_t max_expo_phase_increment = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
@@ -264,6 +266,9 @@ void Envelope::Rescale(float factor) {
   target_ = static_cast<int32_t>(target_ * factor);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
     stage_target_[i] = static_cast<int32_t>(stage_target_[i] * factor);
+  }
+  for (int i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
+    expo_slope_lut_[i] = static_cast<int32_t>(expo_slope_lut_[i] * factor);
   }
 }
 
