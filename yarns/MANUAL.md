@@ -49,7 +49,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Submenus for settings
 - `▽S (SETUP MENU)`: configuration, MIDI input/output
-- `▽O (OSCILLATOR MENU)`: [oscillator mode](#oscillator-mode-setting-om-oscillator-mode-in-o-oscillator-menu) and [timbre](#oscillator-timbre-settings)
+- `▽O (OSCILLATOR MENU)`: [oscillator mode](#oscillator-mode-setting) and [timbre](#oscillator-timbre-settings)
 - `▽A (AMPLITUDE MENU)`: [envelope](#envelope-adsr-settings) and [tremolo](#modulation-destinations-for-lfo-output)
 
 ### Active part control
@@ -508,7 +508,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### Modulation destinations for envelope output
-- [Oscillator gain](#oscillator-mode-setting-om-oscillator-mode-in-o-oscillator-menu), when `OSCILLATOR MODE` is `ENVELOPED`
+- [Oscillator gain](#oscillator-mode-setting), when `OSCILLATOR MODE` is `ENVELOPED`
 - [Oscillator timbre](#oscillator-timbre-settings), when oscillator is enabled
   - `TE (TIMBRE ENV MOD)`: attenuverter for the envelope's modulation of timbre
   - `TV (TIMBRE VEL MOD)` attenuverter for velocity's modulation of the timbre envelope (velocity can polarize the timbre envelope)
