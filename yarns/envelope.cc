@@ -38,7 +38,7 @@ using namespace stmlib;
 void Envelope::Init(int16_t raw_zero_value) {
   phase_ = phase_increment_ = 0;
   int32_t scaled_zero_value = raw_zero_value << (31 - 16);
-  value_ = nominal_start_ = scaled_zero_value;
+  value_ = scaled_zero_value;
   std::fill(
     &stage_target_[0],
     &stage_target_[ENV_NUM_STAGES],
@@ -112,13 +112,13 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // 1. Automatic transition from attack: we know value reached peak level
   // 2. Legato NoteOn: peak level is irrelevant, actual delta is all we have
   // 3. Skipped attack: ^
-  nominal_start_ = stage == ENV_STAGE_DECAY
+  int32_t nominal_start = stage == ENV_STAGE_DECAY
     ? value_
     : stage_target_[stmlib::modulo(
         static_cast<int8_t>(stage) - 1,
         static_cast<int8_t>(ENV_NUM_STAGES)
     )];
-  int32_t nominal_delta = SatSub(target_, nominal_start_, 31);
+  int32_t nominal_delta = SatSub(target_, nominal_start, 31);
 
   // Skip stage if there is a direction disagreement or nowhere to go
   // Cases: NoteOn during release from above peak level
@@ -131,9 +131,11 @@ void Envelope::Trigger(EnvelopeStage stage) {
     TRIGGER_NEXT_STAGE;
   }
 
+  int32_t linear_slope;
   if (abs(actual_delta) < abs(nominal_delta)) {
-    // If stage starts closer to target than expected, shorten the stage proportionally
+    // Closer to target than expected -- shorten stage duration proportionally, keeping nominal slope
     // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
+    linear_slope = MulS32(nominal_delta, phase_increment_);
     phase_increment_ = static_cast<uint32_t>(
       static_cast<float>(phase_increment_) * abs(
         static_cast<float>(nominal_delta) /
@@ -141,15 +143,11 @@ void Envelope::Trigger(EnvelopeStage stage) {
       )
     );
   } else {
-    // We're at least as far as expected (possibly farther). No direct adjustment to stage duration -- transition is handled by `nominal_start_reached`
+    // Distance is GTE expected -- keep nominal stage duration, but steepen the slope
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
+    linear_slope = MulS32(actual_delta, phase_increment_);
   }
-
-  // NB: if we adjusted phase increment, this is equal to nominal slope
-  int32_t linear_slope = MulS32(actual_delta, phase_increment_);
   if (!linear_slope) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
-
-  // TODO disable nominal_start_reached?  Does it make sense to do this if also increasing steepness?
 
   // Populate dynamic LUT for phase-dependent slope
   const uint32_t max_expo_phase_increment = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
@@ -219,8 +217,8 @@ void Envelope::RenderStage(
     &expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     &expo_slope[0]
   );
-  int32_t nominal_start = nominal_start_;
-  bool nominal_start_reached = false;
+  // int32_t nominal_start = nominal_start_;
+  // bool nominal_start_reached = false;
 
   while (samples_left--) {
     if (!MOVING) {
@@ -230,11 +228,11 @@ void Envelope::RenderStage(
     }
 
     // Stay at initial (steepest) slope until we reach the nominal start
-    nominal_start_reached = nominal_start_reached || VALUE_PASSED(nominal_start);
-    if (nominal_start_reached) {
-      phase += phase_increment;
-      if (phase < phase_increment) phase = UINT32_MAX;
-    }
+    // nominal_start_reached = nominal_start_reached || VALUE_PASSED(nominal_start);
+    // if (nominal_start_reached) {
+    phase += phase_increment;
+    if (phase < phase_increment) phase = UINT32_MAX;
+    // }
 
     int32_t slope = expo_slope[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
     value += slope;

@@ -92,7 +92,7 @@ class Envelope {
 
   // 31-bit, so slope increment can skip overflow checks
   int32_t stage_target_[ENV_NUM_STAGES];
-  int32_t target_, value_, nominal_start_;
+  int32_t target_, value_;
   int32_t expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
   // 32-bit
