@@ -762,7 +762,12 @@ char Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
     case SETTING_UNIT_INT8:
       if (&setting == &setting_defs.get(SETTING_CLOCK_SWING)) {
         int8_t swing = static_cast<int8_t>(value);
-        return PrintInteger(buffer, abs(swing), swing ? (swing < 0 ? 'o' : 'e') : '\0');
+        if (value == 0) {
+          strcpy(buffer, "OFF");
+          return '\0';
+        } else {
+          return PrintInteger(buffer, abs(swing), swing ? (swing < 0 ? 'o' : 'e') : '\0');
+        }
       } else {
         return PrintSignedInteger(buffer, value);
       }
@@ -817,7 +822,10 @@ char Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
     case SETTING_UNIT_PORTAMENTO:
     {
       uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
-      if (value < split_point) {
+      if (value == split_point) {
+        strcpy(buffer, "OFF");
+        return '\0';
+      } else if (value < split_point) {
         return PrintInteger(buffer, split_point - value, 'T');
       } else {
         return PrintInteger(buffer, value - split_point, 'R');
