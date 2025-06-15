@@ -198,7 +198,7 @@ struct PackedPart {
     pitch_bend_range : 5, // values free: 8
     vibrato_range : 4, // values free: 3
     vibrato_mod : 7,
-    lfo_rate : 7, // values free: 32
+    lfo_rate : 7, // values free: 0
     tuning_root : 4, // values free: 4
     tuning_system : 6, // values free: 30
     trigger_duration : 7, // Breaking: probably excessive
