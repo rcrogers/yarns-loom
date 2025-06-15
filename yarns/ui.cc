@@ -155,6 +155,7 @@ void Ui::Init() {
   start_stop_press_time_ = 0;
   
   push_it_note_ = kC4;
+  command_index_ = 0;
   modes_[UI_MODE_MAIN_MENU].incremented_variable = &command_index_;
   modes_[UI_MODE_LOAD_SELECT_PROGRAM].incremented_variable = &program_index_;
   modes_[UI_MODE_SAVE_SELECT_PROGRAM].incremented_variable = &program_index_;
@@ -509,7 +510,6 @@ void Ui::OnLongClick(const Event& e) {
     default:
       previous_mode_ = mode_;
       mode_ = UI_MODE_MAIN_MENU;
-      command_index_ = 0;
       break;
   }
 }
