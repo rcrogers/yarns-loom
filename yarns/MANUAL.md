@@ -495,7 +495,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Envelope adjusts to notes that begin/end while a stage or another note is in progress
 - Problem: release/attack is farther from target than expected
   - Cause: note ends while decay is falling toward sustain; new note reverses the polarity of the timbre envelope
-  - Solution: curve stays at maximum steepness until it catches up to the expected start value
+  - Solution: steepen stage curve to cover more distance in the same time
 - Problem: attack/release is closer to target than expected
   - Cause: note begins during release; note ends while attack is rising toward sustain
   - Solution: shorten stage duration in proportion to remaining distance, maintaining nominal curve shape
