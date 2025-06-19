@@ -563,7 +563,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`): attenuator for bipolar vibrato LFO
     - Allows vibrato control via panel interface if your MIDI controller doesn't have a modulation wheel
   - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`): shape of the vibrato LFO
-- Tremolo: [oscillator amplitude](#oscillator-mode-setting), [`ENVELOPE` aux CV](#modulation-destinations-for-envelope-output)
+- Tremolo: [oscillator gain](#oscillator-mode-setting), [`ENVELOPE` aux CV](#modulation-destinations-for-envelope-output)
   - `TR (TREMOLO DEPTH)` (in `▽A (AMPLITUDE MENU)`): attenuator for the unipolar tremolo LFO's reduction of gain
   - `TS (TREMOLO SHAPE)` (in `▽A (AMPLITUDE MENU)`): shape of the tremolo LFO
 - Timbre: [oscillator timbre](#oscillator-timbre-settings)
