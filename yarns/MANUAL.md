@@ -101,6 +101,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - `ABSOLUTE`: the CC's value becomes the new setting value
   - CC's value is down-scaled to match the setting's range
   - For use with traditional potentiometers
+  - Original firmware behavior
 - `RELATIVE DIRECT`: the CC's value is added to (or subtracted from) the setting's current value
     - For use with endless encoders
     - Uses the "twos complement" standard for translating the CC's value into an increment
@@ -213,16 +214,21 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### Polyphonic `VOICING` options
-- `sM STEAL LOWEST PRIORITY RELEASE MUTE` (`POLY` in original firmware)
+- `sM STEAL LOWEST PRIORITY RELEASE MUTE`
     - Steal from the lowest-priority existing note IFF the incoming note has higher priority
     - Does not reassign voices to unvoiced notes on release
-- `PRIORITY ORDER` (`SORTED` in original firmware)
+    - F.k.a. `POLY` in original firmware
+- `PRIORITY ORDER`
     - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
-- `UR UNISON RELEASE REASSIGN` (`U1` in original firmware)
-- `UM UNISON RELEASE MUTE` (`U2` in original firmware)
-- `SM STEAL HIGHEST PRIORITY RELEASE MUTE` (`STEAL MOST RECENT` in original firmware)
+    - F.k.a. `SORTED` in original firmware
+- `UR UNISON RELEASE REASSIGN`
+    - F.k.a. `U1` in original firmware
+- `UM UNISON RELEASE MUTE`
+    - F.k.a. `U2` in original firmware
+- `SM STEAL HIGHEST PRIORITY RELEASE MUTE`
     - Steal from the highest-priority existing note IFF the incoming note has higher priority
     - Does not reassign voices to unvoiced notes on release
+    - F.k.a. `STEAL MOST RECENT` in original firmware
 - `sR STEAL LOWEST PRIORITY RELEASE REASSIGN`
     - Steal from the lowest-priority existing note IFF the incoming note has higher priority
     - Reassigns voices to unvoiced notes on release
@@ -352,7 +358,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 <!-- omit from toc -->
 #### Step swing
 - `SWING` setting works with all clock ratios
-  - Swing is hardcoded for ratio 4:1 (f.k.a. sixteenth notes) in original firmware
+  - Swing was hardcoded for ratio 4:1 (f.k.a. sixteenth notes) in original firmware
 - Swing can be applied to either even or odd steps
   - When `SWING` is counter-clockwise, odd steps (1, 3, 5...) are swung by the selected amount
   - When `SWING` is clockwise, even steps (2, 4, 6...) are swung (original firmware behavior)
