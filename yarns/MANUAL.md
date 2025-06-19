@@ -526,11 +526,11 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### Modulation destinations for envelope output
+- Aux CV output: `ENVELOPE` (itself modulated by [tremolo LFO](#modulation-destinations-for-lfo-output))
 - [Oscillator gain](#oscillator-mode-setting), when `OSCILLATOR MODE` is `ENVELOPED`
 - [Oscillator timbre](#oscillator-timbre-settings), when oscillator is enabled
   - `TE (TIMBRE ENV MOD)`: attenuverter for the envelope's modulation of timbre
   - `TV (TIMBRE VEL MOD)` attenuverter for velocity's modulation of the timbre envelope (velocity can polarize the timbre envelope)
-- Aux CV output: `ENVELOPE` (itself modulated by [tremolo LFO](#modulation-destinations-for-lfo-output))
 
 ### Low-frequency oscillator (LFO)
 
@@ -558,6 +558,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### Modulation destinations for LFO output
+- Aux CV outputs: `LFO`, `VIBRATO LFO` (unattenuated and attenuated versions of vibrato LFO)
 - Vibrato: oscillator pitch, pitch CV
   - `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`): attenuator for bipolar vibrato LFO
     - Allows vibrato control via panel interface if your MIDI controller doesn't have a modulation wheel
@@ -568,7 +569,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Timbre: [oscillator timbre](#oscillator-timbre-settings)
   - `TL (TIMBRE LFO MOD)` (in `▽O (OSCILLATOR MENU)`): attenuator for the bipolar timbre LFO
   - `LS (TIMBRE LFO SHAPE)` (in `▽O (OSCILLATOR MENU)`): shape of the timbre LFO
-- Aux CV outputs: `LFO`, `VIBRATO LFO` (unattenuated and attenuated versions of vibrato LFO)
 - Shape options: triangle, down saw, up saw, square
 
 # Audio oscillator
