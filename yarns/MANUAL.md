@@ -539,7 +539,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - `LF (LFO RATE)` sets the base LFO rate for a part
 - Counter-clockwise: increases [sync ratio](#settings-for-synced-events) relative to master clock
 - Clockwise: increases free-running frequency from 0.125 Hz to 16 Hz
-  - NB: free-running LFOs are not [`synced events`](#synced-events-have-deterministic-clocking)
+  - NB: free-running LFOs are not [synced events](#synced-events-have-deterministic-clocking)
 - F.k.a. `VIBRATO SPEED` in original firmware
 
 <!-- omit from toc -->
@@ -556,7 +556,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Clockwise from center: detune LFOs
     - Each LFO's frequency is a multiple of the last, ranging from 1x to 2x
     - Good for chorus/supersaw effects
-    - Detuned LFOs are free-running and are therefore not [`synced events`](#synced-events-have-deterministic-clocking)
+    - Detuned LFOs are free-running and are therefore not [synced events](#synced-events-have-deterministic-clocking)
 - In polyphonic/paraphonic layouts, `LFO SPREAD TYPES` and `LFO SPREAD VOICES` can be used simultaneously
   - E.g. a 4-voice paraphonic part can have a distinct phase or frequency for each of its 12 LFOs (3 per voice)
 
