@@ -28,7 +28,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - [Master clock controls](#master-clock-controls)
     - [Using master song position to cue synced events](#using-master-song-position-to-cue-synced-events)
 - [Sequencer](#sequencer)
-    - [Special controls while recording](#special-controls-while-recording)
+    - [Controls for recording a sequence](#controls-for-recording-a-sequence)
     - [Step sequencer](#step-sequencer)
     - [Loop sequencer](#loop-sequencer)
 - [Arpeggiator](#arpeggiator)
@@ -342,7 +342,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 # Sequencer
 
-### Special controls while recording
+### Controls for recording a sequence
 - Hold `REC` button to clear sequence
 - Hold `TAP` button to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
 - First press of `REC` button switches the display to show the pitch (or `RS`/`TI`) instead of the step number.  Press `REC` button a second time to exit recording
