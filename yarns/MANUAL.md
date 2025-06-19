@@ -285,7 +285,8 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Clock divisions/multiplications are expressed as a ratio of the synced event tempo to the master clock tempo
   - E.g. 2/1 means the synced event runs at twice the master clock tempo
 - Part sequencer: `C/ CLOCK RATIO` sets the tempo of a part's sequencer, relative to the master clock tempo
-  - Phase may be offset by [`SO STEP OFFSET`](#step-offset) or [looper phase offset](#editing-a-recorded-loop)
+  - Phase may be offset by [`SO STEP OFFSET`](#step-offset) or [loop phase offset](#loop-phase-offset)
+  - Phase is also affected by number of steps or [loop length](#how-the-loop-sequencer-works)
 - Output clock: `O/ OUTPUT CLOCK RATIO` sets the tempo of the clock gate output, relative to the master clock tempo
 - LFO sync: [`LFO RATE`](#lfo-speed-and-sync) sets the part's base LFO tempo, relative to the master clock tempo
   - Phase may be offset by [LFO spread](#lfo-spread-dephase-or-detune)
@@ -372,7 +373,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - General `SO STEP OFFSET` replaces the `EUCLIDEAN ROTATE` from the original firmware
 - Allows starting the step sequencer on any step
   - If using arpeggiator, arp state is pre-advanced to match
-- dynamic also
+- If updated while the sequencer is running, affects the next step played
 
 <!-- omit from toc -->
 #### Other step sequencer changes
@@ -383,7 +384,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 ### Loop sequencer
 
 <!-- omit from toc -->
-#### How it works
+#### How the loop sequencer works
 - Real-time recording captures the start and end of notes as you play them
 - Chords and overlapping notes are played back according to the part's polyphony settings
 - Start/end times are recorded at 13-bit resolution (1/8192 of the loop length)
@@ -402,12 +403,13 @@ This manual assumes that the reader is familiar with the original firmware, and 
 #### Editing a recorded loop
 - Play more notes to overdub
 - Press `START/STOP` button to erase the oldest note, or `TAP` button to erase the newest note
-- Scroll the encoder to change the loop phase offset
-  - Clockwise shifts notes earlier by 1/128
-  - Counter-clockwise shifts notes later
 - Hold `REC` to erase the loop
 
-
+<!-- omit from toc -->
+#### Loop phase offset
+- Scroll the encoder to change the loop phase offset
+- Clockwise shifts notes earlier by 1/128
+- Counter-clockwise shifts notes later
 
 # Arpeggiator
 
