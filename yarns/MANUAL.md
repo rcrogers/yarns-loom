@@ -104,16 +104,16 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - For use with traditional potentiometers
   - Original firmware behavior
 - `RELATIVE DIRECT`: the CC's value is added to (or subtracted from) the setting's current value
-    - For use with endless encoders
-    - Uses the "twos complement" standard for translating the CC's value into an increment
-      - MIDI value 1 => setting + 1 (increment)
-      - MIDI value 127 => setting - 1 (decrement)
-    - Settings will increase or decrease by one value for each click of the encoder
-    - Depending on how many values the setting has, the encoder may take anywhere from 2 to 128 clicks to scan the range of setting values
-    - Send 0 to display current value without change
+  - For use with endless encoders
+  - Uses the "twos complement" standard for translating the CC's value into an increment
+    - MIDI value 1 => setting + 1 (increment)
+    - MIDI value 127 => setting - 1 (decrement)
+  - Settings will increase or decrease by one value for each click of the encoder
+  - Depending on how many values the setting has, the encoder may take anywhere from 2 to 128 clicks to scan the range of setting values
+  - Send 0 to display current value without change
 - `RELATIVE SCALED`: the CC's value is added to (or subtracted from) the value of a "virtual potentiometer"
-    - Similar to `RELATIVE DIRECT`, but always takes 128 encoder clicks to scan the range of setting values, no matter how many setting values there are
-    - Gives all encoders the same travel distance from minimum to maximum
+  - Similar to `RELATIVE DIRECT`, but always takes 128 encoder clicks to scan the range of setting values, no matter how many setting values there are
+  - Gives all encoders the same travel distance from minimum to maximum
 
 <!-- omit from toc -->
 #### Added CC types
@@ -198,18 +198,18 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### Hold pedal mode per part
-  - New part setting `HM (HOLD PEDAL MODE` sets each part's response to the hold pedal
-  - `OFF`: pedal has no effect
-  - `SUSTAIN`: sustains key-releases while pedal is down, and stops sustained notes on pedal-up
-    - Original firmware behavior
-  - `SOSTENUTO`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down; stops sustained notes on pedal-up
-  - `LATCH`: sustains key-releases while pedal is down; stops sustained notes on key-press regardless of pedal state
-    - Identical to button-controlled latching (triggered by holding `REC`)
-  - `MOMENTARY LATCH`: like `LATCH`, but stop sustained notes on pedal-up, instead of on key-press
-  - `CLUTCH`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down (like `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (like `LATCH`)
-    - Notes triggered while the pedal is down are not sustained and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
-  - `FILTER`: while pedal is down, ignores key-presses and sustains key-releases; while pedal is up, stops sustained notes on key-press
-    - Allows using the pedal to alternately play/latch two different parts, by setting opposite `HOLD PEDAL POLARITY` on two parts
+- New part setting `HM (HOLD PEDAL MODE` sets each part's response to the hold pedal
+- `OFF`: pedal has no effect
+- `SUSTAIN`: sustains key-releases while pedal is down, and stops sustained notes on pedal-up
+  - Original firmware behavior
+- `SOSTENUTO`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down; stops sustained notes on pedal-up
+- `LATCH`: sustains key-releases while pedal is down; stops sustained notes on key-press regardless of pedal state
+  - Identical to button-controlled latching (triggered by holding `REC`)
+- `MOMENTARY LATCH`: like `LATCH`, but stop sustained notes on pedal-up, instead of on key-press
+- `CLUTCH`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down (like `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (like `LATCH`)
+  - Notes triggered while the pedal is down are not sustained and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
+- `FILTER`: while pedal is down, ignores key-presses and sustains key-releases; while pedal is up, stops sustained notes on key-press
+  - Allows using the pedal to alternately play/latch two different parts, by setting opposite `HOLD PEDAL POLARITY` on two parts
 
 <!-- omit from toc -->
 #### Pedal polarity
@@ -225,26 +225,26 @@ This manual assumes that the reader is familiar with the original firmware, and 
 <!-- omit from toc -->
 #### Polyphonic `VOICING` options
 - `sM STEAL LOWEST PRIORITY RELEASE MUTE`
-    - Steal from the lowest-priority existing note IFF the incoming note has higher priority
-    - Does not reassign voices to unvoiced notes on release
-    - F.k.a. `POLY` in original firmware
+  - Steal from the lowest-priority existing note IFF the incoming note has higher priority
+  - Does not reassign voices to unvoiced notes on release
+  - F.k.a. `POLY` in original firmware
 - `PRIORITY ORDER`
-    - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
-    - F.k.a. `SORTED` in original firmware
+  - Voice 1 always receives the note that has priority 1, voice 2 the note with priority 2, etc.
+  - F.k.a. `SORTED` in original firmware
 - `UR UNISON RELEASE REASSIGN`
-    - F.k.a. `U1` in original firmware
+  - F.k.a. `U1` in original firmware
 - `UM UNISON RELEASE MUTE`
-    - F.k.a. `U2` in original firmware
+  - F.k.a. `U2` in original firmware
 - `SM STEAL HIGHEST PRIORITY RELEASE MUTE`
-    - Steal from the highest-priority existing note IFF the incoming note has higher priority
-    - Does not reassign voices to unvoiced notes on release
-    - F.k.a. `STEAL MOST RECENT` in original firmware
+  - Steal from the highest-priority existing note IFF the incoming note has higher priority
+  - Does not reassign voices to unvoiced notes on release
+  - F.k.a. `STEAL MOST RECENT` in original firmware
 - `sR STEAL LOWEST PRIORITY RELEASE REASSIGN`
-    - Steal from the lowest-priority existing note IFF the incoming note has higher priority
-    - Reassigns voices to unvoiced notes on release
+  - Steal from the lowest-priority existing note IFF the incoming note has higher priority
+  - Reassigns voices to unvoiced notes on release
 - `SR STEAL HIGHEST PRIORITY RELEASE REASSIGN`
-    - Steal from the highest-priority existing note IFF the incoming note has higher priority
-    - Reassigns voices to unvoiced notes on release
+  - Steal from the highest-priority existing note IFF the incoming note has higher priority
+  - Reassigns voices to unvoiced notes on release
 
 <!-- omit from toc -->
 #### Note priority changes
@@ -292,10 +292,10 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Clock divisions/multiplications are expressed as a ratio of the synced event tempo to the master clock tempo
   - E.g. 2/1 means the synced event runs at twice the master clock tempo
 - Part sequencer: `C/ CLOCK RATIO` sets the tempo of a part's sequencer, relative to the master clock tempo
-  - Phase may be offset by [`SO STEP OFFSET`](#step-offset) or [loop phase offset](#loop-phase-offset)
+  - Phase may be offset by [`step offset`](#step-offset) or [loop phase offset](#loop-phase-offset)
   - Phase is also affected by number of steps or [loop length](#how-the-loop-sequencer-works)
 - Output clock: `O/ OUTPUT CLOCK RATIO` sets the tempo of the clock gate output, relative to the master clock tempo
-- LFO sync: [`LFO RATE`](#lfo-speed-and-sync) sets the part's base LFO tempo, relative to the master clock tempo
+- LFO sync: [LFO rate](#lfo-speed-and-sync) sets the part's base LFO tempo, relative to the master clock tempo
   - Phase may be offset by [LFO spread](#lfo-spread-dephase-or-detune)
 - 32 clock ratios available:
   - 20 slower than master clock:
@@ -451,39 +451,39 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### Using sequencer notes to program the arpeggiator
-  - The `JUMP` and `GRID` `ARP DIRECTION`s can interpret the sequencer pitch as a movement instruction
-  - The arpeggiator always has some **active position** within the ordered arp chord, e.g. "the 3rd key of the chord"
-  - Changes in the active position ("**movement**") are determined by the pitch of notes emitted by the sequencer 
-    - If `ARP PATTERN` is not sequencer-based, the sequencer pitch data is replaced by the position in the 16-step pattern cycle
-  - Sequencer pitch is interpreted based on its:
-    - Key **color** (is the key black or white?)
-    - Shown **octave number** (with C as the first note of the octave)
-    - **Pitch ordinal** within octave and color, e.g.
-      - When the sequencer pitch is the 2nd white note of octave 5, the pitch ordinal is 2
-      - When the sequencer pitch is the 4th black note of octave 2, the pitch ordinal is 4
-  - The octave and color are used for different purposes by `JUMP` vs `GRID` (see below)
-  - The pitch ordinal sets the minimum arp chord size for which the arpeggiator will emit a note
-    - For a sequencer pitch with pitch ordinal N, the arpeggiator emits a note only if there are N or more keys in the arp chord, e.g.:
-      - When the sequencer pitch is the 3rd white key of its octave, a note is emitted only if there are 3+ keys in the arp chord
-      - When the sequencer pitch is the 1st black key of its octave, a note is emitted only if there are 1+ keys in the arp chord
-    - Allows dynamic control of the arpeggiator's rhythmic pattern by varying the size of the arp chord
+- The `JUMP` and `GRID` `ARP DIRECTION`s can interpret the sequencer pitch as a movement instruction
+- The arpeggiator always has some **active position** within the ordered arp chord, e.g. "the 3rd key of the chord"
+- Changes in the active position ("**movement**") are determined by the pitch of notes emitted by the sequencer
+  - If `ARP PATTERN` is not sequencer-based, the sequencer pitch data is replaced by the position in the 16-step pattern cycle
+- Sequencer pitch is interpreted based on its:
+  - Key **color** (is the key black or white?)
+  - Shown **octave number** (with C as the first note of the octave)
+  - **Pitch ordinal** within octave and color, e.g.
+    - When the sequencer pitch is the 2nd white note of octave 5, the pitch ordinal is 2
+    - When the sequencer pitch is the 4th black note of octave 2, the pitch ordinal is 4
+- The octave and color are used for different purposes by `JUMP` vs `GRID` (see below)
+- The pitch ordinal sets the minimum arp chord size for which the arpeggiator will emit a note
+  - For a sequencer pitch with pitch ordinal N, the arpeggiator emits a note only if there are N or more keys in the arp chord, e.g.:
+    - When the sequencer pitch is the 3rd white key of its octave, a note is emitted only if there are 3+ keys in the arp chord
+    - When the sequencer pitch is the 1st black key of its octave, a note is emitted only if there are 1+ keys in the arp chord
+  - Allows dynamic control of the arpeggiator's rhythmic pattern by varying the size of the arp chord
 
 <!-- omit from toc -->
 #### `JUMP` direction
-  - Uses a combination of relative and absolute movement through the ordered arp chord
-  - Both colors advance the active position in the chord by octave-many places, wrapping around to the beginning of the chord
-  - White steps emit a note from the active position in the chord, e.g.:
-    - When the sequencer pitch is the 5th white note of octave 2, and the active position is 1 out of the chord's 6 notes, the active position is first incremented by 2 to become 3, and then the 3rd note of the chord is emitted
-  - Black steps ignore the active position, instead treating the pitch ordinal as an absolute position in the chord, e.g.:
-    - When the sequencer pitch is the 3rd black note of octave 5, the emitted note is the 3rd note of the chord, while the active position is incremented by 5
+- Uses a combination of relative and absolute movement through the ordered arp chord
+- Both colors advance the active position in the chord by octave-many places, wrapping around to the beginning of the chord
+- White steps emit a note from the active position in the chord, e.g.:
+  - When the sequencer pitch is the 5th white note of octave 2, and the active position is 1 out of the chord's 6 notes, the active position is first incremented by 2 to become 3, and then the 3rd note of the chord is emitted
+- Black steps ignore the active position, instead treating the pitch ordinal as an absolute position in the chord, e.g.:
+  - When the sequencer pitch is the 3rd black note of octave 5, the emitted note is the 3rd note of the chord, while the active position is incremented by 5
 
 <!-- omit from toc -->
 #### `GRID` direction
-  - Simulates an X-Y coordinate system
-  - The ordered arp chord is mapped onto the grid in linear fashion, repeated as necessary to fill the grid
-  - Octave sets the size of the grid: 4th octave => 4x4 grid (minimum 1x1)
-  - White keys advance by 1 along the X-axis, moving left-to-right and wrapping back to the left
-  - Black keys advance by 1 along the Y-axis, moving top-to-bottom and wrapping back to the top
+- Simulates an X-Y coordinate system
+- The ordered arp chord is mapped onto the grid in linear fashion, repeated as necessary to fill the grid
+- Octave sets the size of the grid: 4th octave => 4x4 grid (minimum 1x1)
+- White keys advance by 1 along the X-axis, moving left-to-right and wrapping back to the left
+- Black keys advance by 1 along the Y-axis, moving top-to-bottom and wrapping back to the top
 
 
 
@@ -548,15 +548,15 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Within a part, related LFOs can have a phase or frequency offset from each other
 - `LT (LFO SPREAD TYPES)`: for each voice in the part, dephase/detune between the voice's LFO destinations (vibrato, tremolo, timbre)
 - `LV (LFO SPREAD VOICES)`: dephase/detune LFOs between the part's voices
-    - Only available in polyphonic/paraphonic layouts
+  - Only available in polyphonic/paraphonic layouts
 - Counter-clockwise from center: dephase LFOs
-    - Each LFO's phase is progressively more offset, ranging from 0° to 360°
-    - Ideal for quadrature and three-phase modulation
-    - When dephasing, the LFOs always share a common frequency
+  - Each LFO's phase is progressively more offset, ranging from 0° to 360°
+  - Ideal for quadrature and three-phase modulation
+  - When dephasing, the LFOs always share a common frequency
 - Clockwise from center: detune LFOs
-    - Each LFO's frequency is a multiple of the last, ranging from 1x to 2x
-    - Good for chorus/supersaw effects
-    - Detuned LFOs are free-running and are therefore not [synced events](#synced-events-have-deterministic-clocking)
+  - Each LFO's frequency is a multiple of the last, ranging from 1x to 2x
+  - Good for chorus/supersaw effects
+  - Detuned LFOs are free-running and are therefore not [synced events](#synced-events-have-deterministic-clocking)
 - In polyphonic/paraphonic layouts, `LFO SPREAD TYPES` and `LFO SPREAD VOICES` can be used simultaneously
   - E.g. a 4-voice paraphonic part can have a distinct phase or frequency for each of its 12 LFOs (3 per voice)
 
@@ -567,7 +567,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`): attenuator for bipolar vibrato LFO
     - Allows vibrato control via panel interface if your MIDI controller doesn't have a modulation wheel
   - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`): shape of the vibrato LFO
-- Tremolo LFO: [oscillator gain](#oscillator-mode-setting), [`ENVELOPE` aux CV](#modulation-destinations-for-envelope-output)
+- Tremolo LFO: [oscillator gain](#oscillator-mode-setting), [`ENVELOPE` output for aux CV](#modulation-destinations-for-envelope-output)
   - `TR (TREMOLO DEPTH)` (in `▽A (AMPLITUDE MENU)`): attenuator for the unipolar tremolo LFO's reduction of gain
   - `TS (TREMOLO SHAPE)` (in `▽A (AMPLITUDE MENU)`): shape of the tremolo LFO
 - Timbre LFO: [oscillator timbre](#oscillator-timbre-settings)
