@@ -334,7 +334,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 ### Using master song position to cue synced events
 
 <!-- omit from toc -->
-#### Deterministic clocking ensures predictable timing
+#### Synced events have deterministic clocking
 - All synced events have [sync settings](#settings-for-synced-events) that establishes their relationship with the master clock
   - E.g.: given that an LFO has sync ratio 1/2 and phase offset 0, and the master song position is the 11th beat, the LFO knows that it should be halfway through its 6th cycle
 - Past clock state is ignored, preventing temporary setting changes from causing permanent phase drift
@@ -539,34 +539,38 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - `LF (LFO RATE)` sets the base LFO rate for a part
 - Counter-clockwise: increases [sync ratio](#settings-for-synced-events) relative to master clock
 - Clockwise: increases free-running frequency from 0.125 Hz to 16 Hz
+  - NB: free-running LFOs are not [`synced events`](#synced-events-have-deterministic-clocking)
 - F.k.a. `VIBRATO SPEED` in original firmware
 
 <!-- omit from toc -->
 #### LFO spread: dephase or detune
+- Each voice within a part has three LFOs: vibrato, tremolo, and timbre
 - Within a part, related LFOs can have a phase or frequency offset from each other
 - `LT (LFO SPREAD TYPES)`: for each voice in the part, dephase/detune between the voice's LFO destinations (vibrato, tremolo, timbre)
 - `LV (LFO SPREAD VOICES)`: dephase/detune LFOs between the part's voices
     - Only available in polyphonic/paraphonic layouts
 - Counter-clockwise from center: dephase LFOs
-    - Each LFO's phase is progressively more offset, by an amount ranging from 0° to 360° depending on the setting
+    - Each LFO's phase is progressively more offset, ranging from 0° to 360°
     - Ideal for quadrature and three-phase modulation
     - When dephasing, the LFOs always share a common frequency
 - Clockwise from center: detune LFOs
-    - Each LFO's frequency is a multiple of the last, with that multiple being between 1x and 2x depending on the setting
-    - Facilitates unstable, meandering modulation
-- In polyphonic/paraphonic layouts, `LFO SPREAD TYPES` and `LFO SPREAD VOICES` can be used simultaneously, for up to 12 distinct LFOs
+    - Each LFO's frequency is a multiple of the last, ranging from 1x to 2x
+    - Good for chorus/supersaw effects
+    - Detuned LFOs are free-running and are therefore not [`synced events`](#synced-events-have-deterministic-clocking)
+- In polyphonic/paraphonic layouts, `LFO SPREAD TYPES` and `LFO SPREAD VOICES` can be used simultaneously
+  - E.g. a 4-voice paraphonic part can have a distinct phase or frequency for each of its 12 LFOs (3 per voice)
 
 <!-- omit from toc -->
 #### Modulation destinations for LFO output
 - Aux CV outputs: `LFO`, `VIBRATO LFO` (unattenuated and attenuated versions of vibrato LFO)
-- Vibrato: oscillator pitch, pitch CV
+- Vibrato LFO: oscillator pitch, pitch CV
   - `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`): attenuator for bipolar vibrato LFO
     - Allows vibrato control via panel interface if your MIDI controller doesn't have a modulation wheel
   - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`): shape of the vibrato LFO
-- Tremolo: [oscillator gain](#oscillator-mode-setting), [`ENVELOPE` aux CV](#modulation-destinations-for-envelope-output)
+- Tremolo LFO: [oscillator gain](#oscillator-mode-setting), [`ENVELOPE` aux CV](#modulation-destinations-for-envelope-output)
   - `TR (TREMOLO DEPTH)` (in `▽A (AMPLITUDE MENU)`): attenuator for the unipolar tremolo LFO's reduction of gain
   - `TS (TREMOLO SHAPE)` (in `▽A (AMPLITUDE MENU)`): shape of the tremolo LFO
-- Timbre: [oscillator timbre](#oscillator-timbre-settings)
+- Timbre LFO: [oscillator timbre](#oscillator-timbre-settings)
   - `TL (TIMBRE LFO MOD)` (in `▽O (OSCILLATOR MENU)`): attenuator for the bipolar timbre LFO
   - `LS (TIMBRE LFO SHAPE)` (in `▽O (OSCILLATOR MENU)`): shape of the timbre LFO
 - Shape options: triangle, down saw, up saw, square
