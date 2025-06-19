@@ -290,8 +290,10 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - LFO sync: [`LFO RATE`](#lfo-speed-and-sync) sets the part's base LFO tempo, relative to the master clock tempo
   - Phase may be offset by [LFO spread](#lfo-spread-dephase-or-detune)
 - 32 clock ratios available:
-  - Slower than master clock (20 total): 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9
-  - Equal or faster (12 total): 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
+  - 20 slower than master clock:
+    - 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9
+  - 12 equal or faster:
+    - 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
 
 
 ### Master clock controls
@@ -632,9 +634,9 @@ This manual assumes that the reader is familiar with the original firmware, and 
 #### `FM` Frequency modulation
 - Timbre: modulation index
 - Shapes: 26 preset modulator ratios
-  - 11 harmonic ratios, ordered from most harmonic to least harmonic
+  - 11 harmonic ratios, ordered from most harmonic to least harmonic:
       - 1/1, 2/1, 3/1, 5/1, 7/1, 5/2, 7/2, 9/2, 7/3, 8/3, 9/4
-  - 8 irrational numbers based on the inverse of [Minkowski's question-mark function ↗](https://en.wikipedia.org/wiki/Minkowski%27s_question-mark_function)
+  - 8 irrational numbers based on the inverse of [Minkowski's question-mark function ↗](https://en.wikipedia.org/wiki/Minkowski%27s_question-mark_function):
       - 1/?⁻¹(4/9), 1/?⁻¹(3/7), 1/?⁻¹(2/9), 1/?⁻¹(2/7), 1/?⁻¹(2/5), 1/?⁻¹(1/7), 1/?⁻¹(1/5), 1/?⁻¹(1/3)
-  - 7 irrational divisions/multiples of pi
+  - 7 irrational divisions/multiples of pi:
       - π/4, π/3, π/2, π, π\*2, π\*3, π\*3/2
