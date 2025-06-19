@@ -24,8 +24,8 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - [Legato and portamento](#legato-and-portamento)
     - [Play mode](#play-mode)
 - [Clocking](#clocking)
-    - [Clock offset and scaling](#clock-offset-and-scaling)
-    - [Controls for master clock](#controls-for-master-clock)
+    - [Clock settings](#clock-settings)
+    - [Master clock controls](#master-clock-controls)
     - [Using master song position to cue synced events](#using-master-song-position-to-cue-synced-events)
 - [Sequencer](#sequencer)
     - [Special controls while recording](#special-controls-while-recording)
@@ -270,7 +270,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 # Clocking
 
-### Clock offset and scaling
+### Clock settings
 
 <!-- omit from toc -->
 #### Master clock offset
@@ -281,17 +281,20 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - If offset is negative, the sequencer will not play any notes until tick 0 is reached
 
 <!-- omit from toc -->
-#### Sync ratios for synced events
-- Clock divisions/multiplications are expressed as an integer ratio of the master clock tempo
+#### Settings for synced events
+- Clock divisions/multiplications are expressed as a ratio of the synced event tempo to the master clock tempo
+  - E.g. 2/1 means the synced event runs at twice the master clock tempo
 - Part sequencer: `C/ CLOCK RATIO` sets the tempo of a part's sequencer, relative to the master clock tempo
+  - Phase may be offset by [`SO STEP OFFSET`](#step-offset) or [looper phase offset](#editing-a-recorded-loop)
 - Output clock: `O/ OUTPUT CLOCK RATIO` sets the tempo of the clock gate output, relative to the master clock tempo
 - LFO sync: [`LFO RATE`](#lfo-speed-and-sync) sets the part's base LFO tempo, relative to the master clock tempo
+  - Phase may be offset by [LFO spread](#lfo-spread-dephase-or-detune)
 - 32 clock ratios available:
   - Slower than master clock (20 total): 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9
   - Equal or faster (12 total): 1/1, 8/7, 6/5, 4/3, 3/2, 8/5, 2/1, 8/3, 3/1, 4/1, 6/1, 8/1
 
 
-### Controls for master clock
+### Master clock controls
 
 <!-- omit from toc -->
 #### Start/stop master clock
@@ -322,14 +325,14 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 <!-- omit from toc -->
 #### Deterministic clocking ensures predictable timing
-- All synced events have a [sync ratio](#sync-ratios-for-synced-events) that establishes their relationship with the master clock
-  - E.g.: given that an LFO has sync ratio 1/2, and the master song position is the 11th beat, the LFO knows that it should be halfway through its 6th cycle
+- All synced events have [sync settings](#settings-for-synced-events) that establishes their relationship with the master clock
+  - E.g.: given that an LFO has sync ratio 1/2 and phase offset 0, and the master song position is the 11th beat, the LFO knows that it should be halfway through its 6th cycle
 - Past clock state is ignored, preventing temporary setting changes from causing permanent phase drift
 - Allows synced clocks to maintain a consistent response to a given song position and sync ratio
 
 <!-- omit from toc -->
 #### How synced events respond to song position
-- If you change the master song position (or a [sync ratio](#sync-ratios-for-synced-events)), synced events change phase accordingly
+- If you change the master song position (or a [sync setting](#settings-for-synced-events)), synced events change phase accordingly
 - Sequencers rewind or fast-forward to a recalculated position
 - Synced LFOs slew to a recalculated phase
 - Arpeggiator state is updated (based on any currently held arp chord) to the same state as if the song had played from the beginning
@@ -363,10 +366,14 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - When a `REST` or `TIE` is recorded, slide is removed from that step. If a real note is later overdubbed into this step, slide must be re-added manually
 
 <!-- omit from toc -->
-#### Other step sequencer changes
-- General `STEP OFFSET` replaces the `EUCLIDEAN ROTATE` from the original firmware
-  - Allows starting the step sequencer on any step
+#### Step offset
+- General `SO STEP OFFSET` replaces the `EUCLIDEAN ROTATE` from the original firmware
+- Allows starting the step sequencer on any step
   - If using arpeggiator, arp state is pre-advanced to match
+- dynamic also
+
+<!-- omit from toc -->
+#### Other step sequencer changes
 - Euclidean rhythms affect the step sequencer as well as the arpeggiator
   - Sequencer always advances, but euclidean rhythm will make some steps emit a rest instead of a note
 - Max sequence length reduced from 64 to 30 steps, to free up space in the preset storage
@@ -393,8 +400,8 @@ This manual assumes that the reader is familiar with the original firmware, and 
 #### Editing a recorded loop
 - Play more notes to overdub
 - Press `START/STOP` button to erase the oldest note, or `TAP` button to erase the newest note
-- Scroll the encoder to shift the loop phase by 1/128
-  - Clockwise shifts notes earlier
+- Scroll the encoder to change the loop phase offset
+  - Clockwise shifts notes earlier by 1/128
   - Counter-clockwise shifts notes later
 - Hold `REC` to erase the loop
 
@@ -519,7 +526,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 <!-- omit from toc -->
 #### LFO speed and sync
 - `LF (LFO RATE)` sets the base LFO rate for a part
-- Counter-clockwise: increases [sync ratio](#sync-ratios-for-synced-events) relative to master clock
+- Counter-clockwise: increases [sync ratio](#settings-for-synced-events) relative to master clock
 - Clockwise: increases free-running frequency from 0.125 Hz to 16 Hz
 - F.k.a. `VIBRATO SPEED` in original firmware
 
