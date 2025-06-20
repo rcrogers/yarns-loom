@@ -5,16 +5,14 @@ Loom is an alternate firmware for the [Yarns MIDI interface by Mutable Instrumen
 
 This manual assumes that the reader is familiar with the original firmware, and explains how Loom is different.  For documentation of the original behavior, see the [Mutable Instruments manual ↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/) and [firmware changelog ↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/firmware/).
 
+
+
 <!-- omit from toc -->
 # Contents
 - [Panel interface](#panel-interface)
-    - [Submenus for settings](#submenus-for-settings)
-    - [Active part control](#active-part-control)
-    - [Part swap command](#part-swap-command)
-    - [Save/load commands](#saveload-commands)
-    - [Full display of integer setting values](#full-display-of-integer-setting-values)
-    - [Tap tempo](#tap-tempo)
-    - [Other changes to panel interface](#other-changes-to-panel-interface)
+    - [Panel controls](#panel-controls)
+    - [Menus and commands](#menus-and-commands)
+    - [Display and LEDs](#display-and-leds)
 - [MIDI controller input](#midi-controller-input)
     - [Control Change (CC)](#control-change-cc)
     - [Play mode](#play-mode)
@@ -34,7 +32,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - [Loop sequencer](#loop-sequencer)
 - [Arpeggiator](#arpeggiator)
     - [Arpeggiator basics](#arpeggiator-basics)
-    - [Arpeggiator rhythm control](#arpeggiator-rhythm-control)
+    - [Arpeggiator rhythm settings](#arpeggiator-rhythm-settings)
     - [Sequencer-programmed arpeggiator movement](#sequencer-programmed-arpeggiator-movement)
 - [Modulation generators](#modulation-generators)
     - [Envelope](#envelope)
@@ -48,12 +46,9 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 # Panel interface
 
-### Submenus for settings
-- `▽S (SETUP MENU)`: configuration, MIDI input/output
-- `▽O (OSCILLATOR MENU)`: [oscillator mode](#oscillator-mode-setting) and [timbre](#oscillator-timbre-settings)
-- `▽A (AMPLITUDE MENU)`: [envelope](#envelope-adsr-settings) and [tremolo](#modulation-destinations-for-lfo-output)
+### Panel controls
 
-### Active part control
+#### Active part control
 - Used in multi-part layouts
 - Display blinks the active part number and its [play mode](#play-mode)
 - Hold `TAP` button to switch the active part
@@ -63,31 +58,41 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - When viewing or editing a setting, the active part's settings are used
 - Replaces the `PART` setting from the original firmware
 
-### Part swap command
+#### Tap tempo
+- If a single tap is received without follow-up, the tempo is set to use `EXTERNAL` clocking
+- After setting tap tempo, display splashes the result
+
+### Menus and commands
+
+#### Submenus for settings
+- `▽S (SETUP MENU)`: configuration, MIDI input/output
+- `▽O (OSCILLATOR MENU)`: [oscillator mode](#oscillator-mode-setting) and [timbre](#oscillator-timbre-settings)
+- `▽A (AMPLITUDE MENU)`: [envelope](#envelope-adsr-settings) and [tremolo](#modulation-destinations-for-lfo-output)
+
+#### Part swap command
 - `*P PART SWAP SETTINGS` in main menu
 - The selected part (selected by turning encoder) swaps its settings with the [active part](#active-part-control)
 - Allows storing an alternate configuration in an inactive part
 
-### Save/load commands
-- Display blinks command name when picking a preset
-- Display splashes the result after a save/load is executed
+#### Save/load commands
+- Display blinks command name when picking a preset to save/load
+- Display splashes the result after executing a save/load
 - Hold encoder to exit preset selection
 
-### Full display of integer setting values
+### Display and LEDs
+
+#### Full display of integer setting values
 - When display shows an integer setting value that has three characters, blink a prefix character over the left displayed digit
 - Three-digit unsigned integer `127` blinks `1` over `27`
 - Two-digit signed integer `-42` blinks `-` over `42`
 - Two-digit labeled integer `T23` blinks `T` over `23`
 
-### Tap tempo
-- If a single tap is received without follow-up, the tempo is set to use `EXTERNAL` clocking
-- After setting tap tempo, display splashes the result
-
-### Other changes to panel interface
-- Print flat notes as lowercase character (instead of denoting flatness with `b`) so that octave can always be displayed
+#### Other changes to display and LEDs
+- Display has 64 brightness levels (4 in original firmware)
+- Channel LEDs have 64 brightness levels (16 in original firmware)
+- When displaying sequencer note pitch, display prints flat notes as a lower-case letter next to the octave number
+  - Original firmware behavior: display prints flat notes as an upper-case letter next to `b`, with no octave number
 - Improved clock-sync of display fade for the `TE (TEMPO)` setting
-- Channel LEDs have 64 brightness levels instead of 16
-- Display has 64 brightness levels instead of 4
 
 
 
@@ -95,7 +100,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Control Change (CC)
 
-<!-- omit from toc -->
 #### CC mode
 - Global setting `CC (CONTROL CHANGE MODE)` sets how a CC's value is interpreted
 - `OFF`: CCs are ignored
@@ -103,7 +107,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - CC's value is down-scaled to match the setting's range
   - For use with traditional potentiometers
   - Original firmware behavior
-- `RELATIVE DIRECT`: the CC's value is added to (or subtracted from) the setting's current value
+- `RD RELATIVE DIRECT`: the CC's value is added to (or subtracted from) the setting's current value
   - For use with endless encoders
   - Uses the "twos complement" standard for translating the CC's value into an increment
     - MIDI value 1 => setting + 1 (increment)
@@ -111,11 +115,10 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - Settings will increase or decrease by one value for each click of the encoder
   - Depending on how many values the setting has, the encoder may take anywhere from 2 to 128 clicks to scan the range of setting values
   - Send 0 to display current value without change
-- `RELATIVE SCALED`: the CC's value is added to (or subtracted from) the value of a "virtual potentiometer"
+- `RS RELATIVE SCALED`: the CC's value is added to (or subtracted from) the value of a "virtual potentiometer"
   - Similar to `RELATIVE DIRECT`, but always takes 128 encoder clicks to scan the range of setting values, no matter how many setting values there are
   - Gives all encoders the same travel distance from minimum to maximum
 
-<!-- omit from toc -->
 #### Added CC types
 - CC support for all new settings: see [Loom CC Implementation Chart ↗](https://docs.google.com/spreadsheets/d/1V6CRqf_3FGTrNIjcU1ixBtzRRwqjIa1PaiqOFgf6olE/edit#gid=0)
 - Recording controls
@@ -123,12 +126,10 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - Stop recording
   - Erase recorded sequence
 
-<!-- omit from toc -->
 #### Macro CCs that control combinations of settings
 - Recording state and erase: off, on, triggered erase, immediate erase
 - Sequencer mode and play mode: step sequencer, step arpeggiator, manual, loop arpeggiator, loop sequencer
 
-<!-- omit from toc -->
 #### Other CC improvements
 - When CC is received, display splashes the result (value, setting abbreviation, and receiving part)
 - Bug fix: bipolar settings can receive a negative value via CC
@@ -163,18 +164,15 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Note processing
 
-<!-- omit from toc -->
 #### Input octave transpose
 - `IT (INPUT TRANSPOSE OCTAVES)` applies octave transposition to notes received by a part
 - Effectively an octave switch for the controller
 
-<!-- omit from toc -->
 #### Filtering by velocity
-- Part ignores notes with a velocity not between  `V> (VELOCITY MIN)` and `V< (VELOCITY MAX)`
-- Settings are present for all layouts except `4V`
-- Output velocity range is scaled to compensate for the restricted range imposed by input filtering
+- Part ignores notes with a velocity not between  `V> (VELOCITY MIN)` and `V< (VELOCITY MAX)` (inclusive)
+- Output velocity range is scaled up to compensate for the restricted range imposed by input filtering
+- Velocity filtering settings are hidden in `4V` layout
 
-<!-- omit from toc -->
 #### Sequencer input response
 - `SI (SEQ INPUT RESPONSE)` sets how a part's sequencer responds to MIDI input when not recording
 - `OFF`: ignores MIDI input
@@ -182,13 +180,11 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - `REPLACE`: sequencer controls note timing, but MIDI input overrides note pitch
 - `DIRECT`: MIDI input is directly voiced, allowing accompaniment of a sequence
 
-<!-- omit from toc -->
-#### Recording behavior
-- Any MIDI notes ignored by the recording part can be received by other parts
+#### Fix for playing on part A while recording part B
+- Any MIDI notes ignored by the recording part can still be received by other parts
 
 ### Hold pedal
 
-<!-- omit from toc -->
 #### Display of pressed/sustained keys
 - Display blinks tick marks to show the state of the [active part](#active-part-control)'s 6 most recently pressed keys, and how the hold pedal is affecting them
 - Bottom-half tick: key is manually held, and will stop when released
@@ -196,7 +192,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Steady top-half tick: key is sustained, and will continue after the next key-press
 - Flickering top-half tick: key is sustained, and will be stopped by the next key-press
 
-<!-- omit from toc -->
 #### Hold pedal mode per part
 - New part setting `HM (HOLD PEDAL MODE` sets each part's response to the hold pedal
 - `OFF`: pedal has no effect
@@ -207,22 +202,22 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - Identical to button-controlled latching (triggered by holding `REC`)
 - `MOMENTARY LATCH`: like `LATCH`, but stop sustained notes on pedal-up, instead of on key-press
 - `CLUTCH`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down (like `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (like `LATCH`)
-  - Notes triggered while the pedal is down are not sustained and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
+  - Notes triggered while the pedal is down are not sustained, and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
 - `FILTER`: while pedal is down, ignores key-presses and sustains key-releases; while pedal is up, stops sustained notes on key-press
   - Allows using the pedal to alternately play/latch two different parts, by setting opposite `HOLD PEDAL POLARITY` on two parts
 
-<!-- omit from toc -->
 #### Pedal polarity
 - New part setting `HP (HOLD PEDAL POLARITY)` inverts a part's up/down pedal behavior
 - Allows compatibility with any manufacturer's hold pedals
 - Allows reversing up/down semantics for the selected `HOLD PEDAL MODE`
 - [More information on negative (default) and positive pedal polarity ↗](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html)
 
+
+
 # Voicing
 
 ### Polyphonic voice allocation
 
-<!-- omit from toc -->
 #### Polyphonic `VOICING` options
 - `sM STEAL LOWEST PRIORITY RELEASE MUTE`
   - Steal from the lowest-priority existing note IFF the incoming note has higher priority
@@ -246,13 +241,11 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - Steal from the highest-priority existing note IFF the incoming note has higher priority
   - Reassigns voices to unvoiced notes on release
 
-<!-- omit from toc -->
 #### Note priority changes
 - Added new `FIRST` (oldest) setting to `NP NOTE PRIORITY`
 - Polyphonic voicing respects note priority where applicable
 - [Arpeggiator respects note priority](#arpeggiator-basics)
 
-<!-- omit from toc -->
 #### Other polyphony changes
 - Notes that steal a voice are considered legato
 - Bug fix: `UNISON` allocates notes without gaps
@@ -262,24 +255,23 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Legato and portamento
 
-<!-- omit from toc -->
 #### Legato settings
 - Replaced original `LEGATO MODE` setting (three values) with two on/off settings
 - `LEGATO RETRIGGER`: are notes retriggered when played legato?
 - `PORTAMENTO LEGATO ONLY`: is portamento applied on all notes, or only on notes played legato?
 - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
 
-<!-- omit from toc -->
-#### Portamento setting range
-- `PORTAMENTO` increases constant-time portamento when turning counter-clockwise from center, and increases constant-rate when turning clockwise
-- Broadened setting range from 51 to 64 values per curve shape
+#### Portamento setting
+- `PORTAMENTO` setting remapped and extended from 51 to 64 values per side
+- Turning counter-clockwise: increases constant-time portamento from `T1` to `T63`
+- Turning clockwise: increases constant-rate portamento from `R1` to `R63`
+
 
 
 # Clocking
 
 ### Clock settings
 
-<!-- omit from toc -->
 #### Master clock offset
 - Setting `C+ CLOCK OFFSET` allows fine-tuning the master clock phase by ±63 ticks
 - Applied in real time if the clock is running
@@ -287,16 +279,15 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Arithmetically, offset is applied **after** `INPUT CLK DIV`
 - If offset is negative, the sequencer will not play any notes until tick 0 is reached
 
-<!-- omit from toc -->
 #### Settings for synced events
 - Clock divisions/multiplications are expressed as a ratio of the synced event tempo to the master clock tempo
-  - E.g. 2/1 means the synced event runs at twice the master clock tempo
-- Part sequencer: `C/ CLOCK RATIO` sets the tempo of a part's sequencer, relative to the master clock tempo
-  - Phase may be offset by [`step offset`](#step-offset) or [loop phase offset](#loop-phase-offset)
-  - Phase is also affected by number of steps or [loop length](#how-the-loop-sequencer-works)
+  - E.g. 2/1 means that the synced event runs at twice the master clock tempo
+- Part sequencer: `C/ CLOCK RATIO` sets the base tempo of a part's sequencer, relative to the master clock tempo
+  - Sequence phase may be offset by [step offset](#step-offset) or [loop phase offset](#loop-phase-offset)
+  - Sequencer phase is also affected by number of steps or [loop length](#how-the-loop-sequencer-works)
 - Output clock: `O/ OUTPUT CLOCK RATIO` sets the tempo of the clock gate output, relative to the master clock tempo
 - LFO sync: [LFO rate](#lfo-speed-and-sync) sets the part's base LFO tempo, relative to the master clock tempo
-  - Phase may be offset by [LFO spread](#lfo-spread-dephase-or-detune)
+  - LFO phase may be offset by [LFO spread](#lfo-spread-dephase-or-detune)
 - 32 clock ratios available:
   - 20 slower than master clock:
     - 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9
@@ -306,46 +297,46 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Master clock controls
 
-<!-- omit from toc -->
 #### Start/stop master clock
 - Start master clock
-  - Press `START/STOP` button while not running, or send MIDI Continue, or send MIDI Note On (if `CLOCK MANUAL START` disabled)
+  - Press `START/STOP` button while not running, or send MIDI Continue, or send MIDI Note On
+    - NB: starting via MIDI Note On requires `MS (CLOCK MANUAL START)` be disabled, i.e. note-based starts are not blocked.  Original firmware terminology: button or MIDI Start is "manual" start, MIDI Note On is "automatic" start.
   - Display splashes `|>`
-  - Starts from current song position
+  - Starts from master song position
   - Bug fix: a "manual" clock start (`START/STOP` button or MIDI Start/Continue) supersedes an "automatic" clock start (MIDI Note On), preventing the clock from stopping after all notes are released
   - Bug fix: recording part responds to MIDI Start
 - Stop master clock
   - Press `START/STOP` button while running, or send MIDI Stop
   - Display splashes `||`
-  - Preserves song position
+  - Preserves master song position at the time of stopping
   - Bug fix: stopping the clock no longer stops manually held keys, though it still stops notes generated by the sequencer/arpeggiator
 
-<!-- omit from toc -->
-#### Set master clock's song position
-- Reset song position
+#### Set master song position
+- Reset master song position
   - Hold `START/STOP` button, or start via MIDI Start
   - Display splashes `[]`
   - Updates song position to 0
-- Cue to arbitrary song position
+- Cue to an arbitrary master song position
   - Send MIDI Song Position Pointer with the desired song position
   - Display splashes `<<` if moving earlier, `>>` if moving later, or `[]` if moving to 0
   - Note: this was tested with a Tascam Model 12 as a MIDI clock source.  If this doesn't work with your MIDI clock source, let me know!
 
 ### Using master song position to cue synced events
 
-<!-- omit from toc -->
 #### Synced events have deterministic clocking
 - All synced events have [sync settings](#settings-for-synced-events) that establishes their relationship with the master clock
   - E.g.: given that an LFO has sync ratio 1/2 and phase offset 0, and the master song position is the 11th beat, the LFO knows that it should be halfway through its 6th cycle
 - Past clock state is ignored, preventing temporary setting changes from causing permanent phase drift
 - Allows synced clocks to maintain a consistent response to a given song position and sync ratio
 
-<!-- omit from toc -->
-#### How synced events respond to song position
-- If you change the master song position (or a [sync setting](#settings-for-synced-events)), synced events change phase accordingly
+#### How synced events respond to master song position
+- If you change the song position (or a [sync setting](#settings-for-synced-events)), synced events change phase accordingly
 - Sequencers rewind or fast-forward to a recalculated position
 - Synced LFOs slew to a recalculated phase
-- Arpeggiator state is updated (based on any currently held arp chord) to the same state as if the song had played from the beginning
+  - NB: song position is ignored by free-running LFOs, i.e. if part's [base LFO rate](#lfo-speed-and-sync) is free-running and/or [spread is detuning LFOs](#lfo-spread-dephase-or-detune)
+- Arpeggiator uses the held arp chord (if any) to fast-forward to the arp chord position corresponding to the new song position
+
+
 
 # Sequencer
 
@@ -356,33 +347,28 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Step sequencer
 
-<!-- omit from toc -->
 #### Step swing
 - `SWING` setting works with all clock ratios
   - Swing was hardcoded for ratio 4:1 (f.k.a. sixteenth notes) in original firmware
 - Swing can be applied to either even or odd steps
-  - When `SWING` is counter-clockwise, odd steps (1, 3, 5...) are swung by the selected amount
-  - When `SWING` is clockwise, even steps (2, 4, 6...) are swung (original firmware behavior)
+  - Turning counter-clockwise: odd steps (1, 3, 5...) are swung by the selected amount
+  - Turning clockwise: even steps (2, 4, 6...) are swung (original firmware behavior)
 
-<!-- omit from toc -->
 #### Step selection interface
 - Display brightens while the selected step is being played
 - When using encoder to scroll through steps, wraps around if the end is reached
 
-<!-- omit from toc -->
 #### Step slide interface
 - While recording, hold `START/STOP` button to toggle slide on the selected step
 - If the selected step has slide, the display will show a fade effect
 - When a `REST` or `TIE` is recorded, slide is removed from that step. If a real note is later overdubbed into this step, slide must be re-added manually
 
-<!-- omit from toc -->
 #### Step offset
 - General `SO STEP OFFSET` replaces the `EUCLIDEAN ROTATE` from the original firmware
 - Allows starting the step sequencer on any step
   - If using arpeggiator, arp state is pre-advanced to match
 - If updated while the sequencer is running, affects the next step played
 
-<!-- omit from toc -->
 #### Other step sequencer changes
 - Euclidean rhythms affect the step sequencer as well as the arpeggiator
   - Sequencer always advances, but euclidean rhythm will make some steps emit a rest instead of a note
@@ -390,7 +376,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Loop sequencer
 
-<!-- omit from toc -->
 #### How the loop sequencer works
 - Real-time recording captures the start and end of notes as you play them
 - Chords and overlapping notes are played back according to the part's polyphony settings
@@ -398,7 +383,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Loop length is set by `L- (LOOP LENGTH)` in quarter notes, combined with the part's `C/ CLOCK RATIO`
 - Holds 30 notes max -- past this limit, overwrites oldest note
 
-<!-- omit from toc -->
 #### Recording a new loop
 - Set `SM (SEQ MODE)` to `LOOP`
 - Press `REC` to begin recording
@@ -406,17 +390,17 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Display brightness fades to show loop progress (if not playing a note), or the progress of the currently playing note
 - Channel LEDs show the quarter-phase of the loop
 
-<!-- omit from toc -->
 #### Editing a recorded loop
 - Play more notes to overdub
 - Press `START/STOP` button to erase the oldest note, or `TAP` button to erase the newest note
 - Hold `REC` to erase the loop
 
-<!-- omit from toc -->
 #### Loop phase offset
 - Scroll the encoder to change the loop phase offset
-- Clockwise shifts notes earlier by 1/128
-- Counter-clockwise shifts notes later
+- Turning counter-clockwise: shifts notes later
+- Turning clockwise: shifts notes earlier by 1/128
+
+
 
 # Arpeggiator
 
@@ -428,18 +412,16 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - "Up-down": set `NOTE PRIORITY` to `LOW` and `ARP DIRECTION` to `BOUNCE`
   - "Played order": set `NOTE PRIORITY` to `FIRST` and `ARP DIRECTION` to `LINEAR`
 
-### Arpeggiator rhythm control
+### Arpeggiator rhythm settings
 
-<!-- omit from toc -->
 #### Selecting an arpeggiator rhythm basis
-- `ARP PATTERN` sets whether the arp rhythm is pattern-based or sequencer-based
-- Clockwise: rhythm is one of 23 static patterns (original firmware behavior)
-- Counter-clockwise: sequencer-based arp rhythm
+- `AP (ARP PATTERN)` sets whether the arp rhythm is pattern-based or sequencer-based
+- Turning counter-clockwise: sequencer-based arp rhythm
   - `S1`-`S8` will reset the arp state after every 1-8 plays of the entire sequence (step or loop)
     - Reset helps generate more predictable arp output
   - `S0` never resets the arp state
+- Turning clockwise: rhythm is selected from [23 hardcoded rhythms](./resources/lookup_tables.py#L267) (original firmware behavior)
 
-<!-- omit from toc -->
 #### Using sequencer-based arpeggiator rhythm
 - Like with pattern-based rhythms, the arp chord is set by holding keys on the MIDI controller
 - Unlike pattern-based rhythms, the sequencer-based arp rhythm moves through the arp chord only when the loop/step sequencer encounters a new note, instead of advancing on every clock pulse
@@ -449,7 +431,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Sequencer-programmed arpeggiator movement
 
-<!-- omit from toc -->
 #### Using sequencer notes to program the arpeggiator
 - The `JUMP` and `GRID` `ARP DIRECTION`s can interpret the sequencer pitch as a movement instruction
 - The arpeggiator always has some **active position** within the ordered arp chord, e.g. "the 3rd key of the chord"
@@ -468,7 +449,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
     - When the sequencer pitch is the 1st black key of its octave, a note is emitted only if there are 1+ keys in the arp chord
   - Allows dynamic control of the arpeggiator's rhythmic pattern by varying the size of the arp chord
 
-<!-- omit from toc -->
 #### `JUMP` direction
 - Uses a combination of relative and absolute movement through the ordered arp chord
 - Both colors advance the active position in the chord by octave-many places, wrapping around to the beginning of the chord
@@ -477,7 +457,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Black steps ignore the active position, instead treating the pitch ordinal as an absolute position in the chord, e.g.:
   - When the sequencer pitch is the 3rd black note of octave 5, the emitted note is the 3rd note of the chord, while the active position is incremented by 5
 
-<!-- omit from toc -->
 #### `GRID` direction
 - Simulates an X-Y coordinate system
 - The ordered arp chord is mapped onto the grid in linear fashion, repeated as necessary to fill the grid
@@ -491,7 +470,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Envelope
 
-<!-- omit from toc -->
 #### Envelope ADSR settings
 - Configured in `▽A (AMPLITUDE MENU)`
 - ADSR parameters: attack time, decay time, sustain level, and release time 
@@ -500,15 +478,13 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - All curves are exponential
 - Stage times range from 0.089 ms (4 samples) to 10 seconds
 
-<!-- omit from toc -->
 #### Modulating envelope's peak level
 - "Peak" is the instantaneous point where attack ends and decay begins
 - `PV (PEAK VEL MOD)` sets the velocity-sensitivity of the level of the peak
 - Zero: peak level is always maximum (unity, i.e. the maximum sustain level)
-- Positive values (clockwise of center): peak level is increasingly damped by low note velocity
-- Negative values (counter-clockwise): peak level is increasingly damped by high note velocity
+- Turning clockwise (positive): peak level is increasingly damped by low note velocity
+- Turning counter-clockwise (negative): peak level is increasingly damped by high note velocity
 
-<!-- omit from toc -->
 #### How the envelope adapts to interruptions
 - Envelope adjusts to notes that begin/end while a stage or another note is in progress
 - Problem: release/attack is farther from target than expected
@@ -524,7 +500,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - Cause: legato play
   - Solution: use a decay stage to transition to updated sustain level
 
-<!-- omit from toc -->
 #### Modulation destinations for envelope output
 - Aux CV output: `ENVELOPE` (itself modulated by [tremolo LFO](#modulation-destinations-for-lfo-output))
 - [Oscillator gain](#oscillator-mode-setting), when `OSCILLATOR MODE` is `ENVELOPED`
@@ -534,33 +509,31 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 ### Low-frequency oscillator (LFO)
 
-<!-- omit from toc -->
 #### LFO speed and sync
-- `LF (LFO RATE)` sets the base LFO rate for a part
-- Counter-clockwise: increases [sync ratio](#settings-for-synced-events) relative to master clock
-- Clockwise: increases free-running frequency from 0.125 Hz to 16 Hz
-  - NB: free-running LFOs are not [synced events](#synced-events-have-deterministic-clocking)
+- `LF (LFO RATE)` sets a part's base LFO speed, and whether it's synced or free-running
+- Turning counter-clockwise: LFO is [synced to master clock](#settings-for-synced-events), with sync ratio increasing from 1/8 to 8/1
+- Turning clockwise: LFO is free-running, with frequency increasing from 0.125 Hz to 16 Hz
+  - NB: free-running LFOs ignore [master song position](#synced-events-have-deterministic-clocking)
 - F.k.a. `VIBRATO SPEED` in original firmware
 
-<!-- omit from toc -->
 #### LFO spread: dephase or detune
 - Each voice within a part has three LFOs: vibrato, tremolo, and timbre
 - Within a part, related LFOs can have a phase or frequency offset from each other
 - `LT (LFO SPREAD TYPES)`: for each voice in the part, dephase/detune between the voice's LFO destinations (vibrato, tremolo, timbre)
 - `LV (LFO SPREAD VOICES)`: dephase/detune LFOs between the part's voices
   - Only available in polyphonic/paraphonic layouts
-- Counter-clockwise from center: dephase LFOs
+- Turning counter-clockwise: dephase LFOs
   - Each LFO's phase is progressively more offset, ranging from 0° to 360°
   - Ideal for quadrature and three-phase modulation
-  - When dephasing, the LFOs always share a common frequency
-- Clockwise from center: detune LFOs
+  - When dephasing, the LFOs have the same frequency but different phases
+- Turning clockwise: detune LFOs
   - Each LFO's frequency is a multiple of the last, ranging from 1x to 2x
   - Good for chorus/supersaw effects
-  - Detuned LFOs are free-running and are therefore not [synced events](#synced-events-have-deterministic-clocking)
+  - NB: detuned LFOs are free-running and ignore [master song position](#synced-events-have-deterministic-clocking)
 - In polyphonic/paraphonic layouts, `LFO SPREAD TYPES` and `LFO SPREAD VOICES` can be used simultaneously
   - E.g. a 4-voice paraphonic part can have a distinct phase or frequency for each of its 12 LFOs (3 per voice)
+  - Spread is additive, e.g. if `LFO SPREAD VOICES` is set to dephase and `LFO SPREAD TYPES` is set to detune, all LFOs will be dephased by voice and then additionally detuned by type
 
-<!-- omit from toc -->
 #### Modulation destinations for LFO output
 - Aux CV outputs: `LFO`, `VIBRATO LFO` (unattenuated and attenuated versions of vibrato LFO)
 - Vibrato LFO: oscillator pitch, pitch CV
@@ -574,6 +547,8 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - `TL (TIMBRE LFO MOD)` (in `▽O (OSCILLATOR MENU)`): attenuator for the bipolar timbre LFO
   - `LS (TIMBRE LFO SHAPE)` (in `▽O (OSCILLATOR MENU)`): shape of the timbre LFO
 - Shape options: triangle, down saw, up saw, square
+
+
 
 # Audio oscillator
 
@@ -592,58 +567,46 @@ This manual assumes that the reader is familiar with the original firmware, and 
 ### Oscillator wave shape
 - `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)`
 
-<!-- omit from toc -->
 #### `*-` Filtered noise
 - Timbre: filter cutoff (resonance is set by note pitch)
 - Shapes: low-pass, notch, band-pass, high-pass
 
-<!-- omit from toc -->
 #### `┌┐CZ` Phase distortion, resonant pulse
 - Timbre: filter cutoff
 - Shapes: low-pass, peaking, band-pass, high-pass
 
-<!-- omit from toc -->
 #### `|⟍CZ` Phase distortion, resonant saw
 - Timbre: filter cutoff
 - Shapes: low-pass, peaking, band-pass, high-pass
 
-<!-- omit from toc -->
 #### `-◝` state-variable filter, low-pass
 - Timbre: filter cutoff (resonance is constant)
 - Shapes: pulse, saw
 
-<!-- omit from toc -->
 #### `-W` Pulse-width modulation
 - Timbre: pulse width
 - Shapes: pulse, saw
 
-<!-- omit from toc -->
 #### `|⟍┌┐` Saw-pulse morph
 - Timbre: morph from saw to pulse
 
-<!-- omit from toc -->
 #### `-$` Hard sync
 - Timbre: detunes the synced oscillator
 - Shapes: sine, pulse, saw
 
-<!-- omit from toc -->
 #### `-F` Wavefolder
 - Timbre: folding amount
 - Shapes: sine, triangle
 
-<!-- omit from toc -->
 #### `┴┴` Dirac comb
 - Timbre: harmonic content
 
-<!-- omit from toc -->
 #### `ST` Compressed sine: hyperbolic tangent (tanh) function
 - Timbre: compression amount
 
-<!-- omit from toc -->
 #### `SX` Exponential sine
 - Timbre: exponentiation amount
 
-<!-- omit from toc -->
 #### `FM` Frequency modulation
 - Timbre: modulation index
 - Shapes: 26 preset modulator ratios
