@@ -25,15 +25,15 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - [Clocking](#clocking)
     - [Clock settings](#clock-settings)
     - [Master clock controls](#master-clock-controls)
-    - [Using master song position to cue synced events](#using-master-song-position-to-cue-synced-events)
+    - [Cueing synced events from master song position](#cueing-synced-events-from-master-song-position)
 - [Sequencer](#sequencer)
-    - [Controls for recording a sequence](#controls-for-recording-a-sequence)
+    - [Recording controls](#recording-controls)
     - [Step sequencer](#step-sequencer)
     - [Loop sequencer](#loop-sequencer)
 - [Arpeggiator](#arpeggiator)
     - [Arpeggiator basics](#arpeggiator-basics)
     - [Arpeggiator rhythm settings](#arpeggiator-rhythm-settings)
-    - [Sequencer-programmed arpeggiator movement](#sequencer-programmed-arpeggiator-movement)
+    - [Sequencer-programmed arpeggiator](#sequencer-programmed-arpeggiator)
 - [Modulation generators](#modulation-generators)
     - [Envelope](#envelope)
     - [Low-frequency oscillator (LFO)](#low-frequency-oscillator-lfo)
@@ -321,7 +321,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
   - Display splashes `<<` if moving earlier, `>>` if moving later, or `[]` if moving to 0
   - Note: this was tested with a Tascam Model 12 as a MIDI clock source.  If this doesn't work with your MIDI clock source, let me know!
 
-### Using master song position to cue synced events
+### Cueing synced events from master song position
 
 #### Synced events have deterministic clocking
 - All synced events have [sync settings](#settings-for-synced-events) that establishes their relationship with the master clock
@@ -340,7 +340,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 # Sequencer
 
-### Controls for recording a sequence
+### Recording controls
 - Hold `REC` button to clear sequence
 - Hold `TAP` button to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
 - First press of `REC` button switches the display to show the pitch (or `RS`/`TI`) instead of the step number.  Press `REC` button a second time to exit recording
@@ -429,7 +429,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - If using a step sequence that contains `REST` or `TIE` steps, the arpeggiator will also emit rests and ties
 - The velocity of an arpeggiator output note is calculated by multiplying the velocities of the sequencer note and the held key
 
-### Sequencer-programmed arpeggiator movement
+### Sequencer-programmed arpeggiator
 
 #### Using sequencer notes to program the arpeggiator
 - The `JUMP` and `GRID` `ARP DIRECTION`s can interpret the sequencer pitch as a movement instruction
@@ -472,9 +472,9 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 #### Envelope ADSR settings
 - Configured in `▽A (AMPLITUDE MENU)`
-- ADSR parameters: attack time, decay time, sustain level, and release time 
-- Manual offset for ADSR parameters: `ATTACK INIT`, etc.
-- Bipolar modulation of ADSR parameters by note velocity: `ATTACK MOD VEL`, etc.
+- ADSR parameters: attack time, decay time, sustain level, release time
+- Manual offset for ADSR parameters: `ATTACK INIT`, `DECAY INIT`, `SUSTAIN INIT`, `RELEASE INIT`
+- Bipolar modulation of ADSR parameters by note velocity: `ATTACK MOD VEL`, `DECAY MOD VEL`, `SUSTAIN MOD VEL`, `RELEASE MOD VEL`
 - All curves are exponential
 - Stage times range from 0.089 ms (4 samples) to 10 seconds
 
