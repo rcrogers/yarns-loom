@@ -333,7 +333,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - If you change the song position (or a [sync setting](#settings-for-synced-events)), synced events change phase accordingly
 - Sequencers rewind or fast-forward to a recalculated position
 - Synced LFOs slew to a recalculated phase
-  - NB: song position is ignored by free-running LFOs, i.e. if part's [base LFO rate](#lfo-speed-and-sync) is free-running and/or [spread is detuning LFOs](#lfo-spread-dephase-or-detune)
+  - NB: free-running LFOs ignore song position, i.e. if part's [base LFO rate](#lfo-speed-and-sync) is free-running and/or [spread is detuning LFOs](#lfo-spread-dephase-or-detune)
 - Arpeggiator uses the held arp chord (if any) to fast-forward to the arp chord position corresponding to the new song position
 
 
