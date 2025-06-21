@@ -288,7 +288,7 @@ This manual explains how Loom is different from the original Yarns firmware.  Fo
   - Sequencer phase is also affected by number of steps or [loop length](#how-the-loop-sequencer-works)
 - Output clock: `O/ OUTPUT CLOCK RATIO` sets the tempo of the clock gate output, relative to the master clock tempo
 - LFO sync: [LFO rate](#lfo-speed-and-sync) sets the part's base LFO tempo, relative to the master clock tempo
-  - LFOs may be dephased or detuned by [LFO spread](#lfo-spread-dephase-or-detune)
+  - Individual LFOs may be dephased or detuned by [LFO spread](#lfo-spread-dephase-or-detune)
 - 32 clock ratios available:
   - 20 slower than master clock:
     - 1/8, 1/7, 1/6, 1/5, 2/9, 1/4, 2/7, 1/3, 3/8, 2/5, 3/7, 4/9, 1/2, 4/7, 3/5, 2/3, 3/4, 4/5, 6/7, 8/9
