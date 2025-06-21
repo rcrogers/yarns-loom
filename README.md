@@ -1,5 +1,5 @@
 # Loom
-An alternate firmware for the [Yarns MIDI interface by Mutable Instruments ↗](https://mutable-instruments.net/modules/yarns/), designed to make Yarns more powerful and user-friendly.
+An alternate firmware for the [Yarns synthesizer module ↗](https://mutable-instruments.net/modules/yarns/), designed to make Yarns more powerful and user-friendly.
 
 ### Features
 - Cue sequencer with MIDI Song Position [→](yarns/MANUAL.md#controls-for-master-clock)
@@ -11,7 +11,7 @@ An alternate firmware for the [Yarns MIDI interface by Mutable Instruments ↗](
 - New paraphonic layouts with 4-voice paraphonic part and 6 overall voices [→](yarns/MANUAL.md#new-layouts)
 - New polyphonic voicing algorithms [→](yarns/MANUAL.md#polyphonic-voice-allocation)
 - Hold pedal can be used for latching, sostenuto, and more [→](yarns/MANUAL.md#hold-pedal)
-  - **[Check the manual for more! →](yarns/MANUAL.md)**
+  - **[Check the manual for more!](yarns/MANUAL.md)**
 
 ### Caveats
 - Installation of this firmware is at your own risk
@@ -22,7 +22,7 @@ An alternate firmware for the [Yarns MIDI interface by Mutable Instruments ↗](
 
 ### Installation
 1. Download `yarns-loom.syx` from the [latest release's assets](https://github.com/rcrogers/yarns-loom/releases/latest)
-2. [Follow the manufacturer's instructions for installing new firmware ↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/#firmware)
+2. Follow the [instructions for installing Yarns firmware ↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/#firmware)
 
 ### Community
 - [Discussion thread on ModWiggler ↗](https://www.modwiggler.com/forum/viewtopic.php?t=255378)
@@ -33,4 +33,4 @@ An alternate firmware for the [Yarns MIDI interface by Mutable Instruments ↗](
 - Thanks to Dylan Bolink for beta testing, bug reports, support, and countless great ideas
 - Thanks to Mutable forum user Airell for the idea of per-part latching
 - Thanks to Mutable forum user sdejesus13 for encouraging the exploration of clock-based recording
-- And above all, thanks to Émilie Gillet for making incredible open-source modules!
+- And above all, thanks to Mutable Instruments for making incredible open-source modules!
