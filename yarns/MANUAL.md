@@ -10,8 +10,8 @@ This manual assumes that the reader is familiar with the original firmware, and 
 <!-- omit from toc -->
 # Contents
 - [Panel interface](#panel-interface)
-    - [Panel controls](#panel-controls)
     - [Menus and commands](#menus-and-commands)
+    - [Panel controls](#panel-controls)
     - [Display and LEDs](#display-and-leds)
 - [MIDI controller input](#midi-controller-input)
     - [Control Change (CC)](#control-change-cc)
@@ -46,22 +46,6 @@ This manual assumes that the reader is familiar with the original firmware, and 
 
 # Panel interface
 
-### Panel controls
-
-#### Active part control
-- Used in multi-part layouts
-- Display blinks the active part number and its [play mode](#play-mode)
-- Hold `TAP` button to switch the active part
-- The active part is used to route part-specific panel controls:
-  - When `REC` button is pressed, the active part begins recording
-  - When `REC` button is held, the active part latches its keys
-  - When viewing or editing a setting, the active part's settings are used
-- Replaces the `PART` setting from the original firmware
-
-#### Tap tempo
-- If a single tap is received without follow-up, the tempo is set to use `EXTERNAL` clocking
-- After setting tap tempo, display splashes the result
-
 ### Menus and commands
 
 #### Submenus for settings
@@ -78,6 +62,22 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Display blinks command name when picking a preset to save/load
 - Display splashes the result after executing a save/load
 - Hold encoder to exit preset selection
+
+### Panel controls
+
+#### Active part control
+- Used in multi-part layouts
+- Display blinks the active part number and its [play mode](#play-mode)
+- Hold `TAP` button to switch the active part
+- The active part is used to route part-specific panel controls:
+  - When `REC` button is pressed, the active part begins recording
+  - When `REC` button is held, the active part latches its keys
+  - When viewing or editing a setting, the active part's settings are used
+- Replaces the `PART` setting from the original firmware
+
+#### Tap tempo
+- If a single tap is received without follow-up, the tempo is set to use `EXTERNAL` clocking
+- After setting tap tempo, display splashes the result
 
 ### Display and LEDs
 
@@ -513,7 +513,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - `LF (LFO RATE)` sets a part's base LFO speed, and whether it's synced or free-running
 - Turning counter-clockwise: LFO is [synced to master clock](#settings-for-synced-events), with sync ratio increasing from 1/8 to 8/1
 - Turning clockwise: LFO is free-running, with frequency increasing from 0.125 Hz to 16 Hz
-  - NB: free-running LFOs ignore [master song position](#synced-events-have-deterministic-clocking)
+  - NB: free-running LFOs ignore [master song position](#set-master-song-position)
 - F.k.a. `VIBRATO SPEED` in original firmware
 
 #### LFO spread: dephase or detune
@@ -529,7 +529,7 @@ This manual assumes that the reader is familiar with the original firmware, and 
 - Turning clockwise: detune LFOs
   - Each LFO's frequency is a multiple of the last, ranging from 1x to 2x
   - Good for chorus/supersaw effects
-  - NB: detuned LFOs are free-running and ignore [master song position](#synced-events-have-deterministic-clocking)
+  - NB: detuned LFOs are free-running and ignore [master song position](#set-master-song-position)
 - In polyphonic/paraphonic layouts, `LFO SPREAD TYPES` and `LFO SPREAD VOICES` can be used simultaneously
   - E.g. a 4-voice paraphonic part can have a distinct phase or frequency for each of its 12 LFOs (3 per voice)
   - Spread is additive, e.g. if `LFO SPREAD VOICES` is set to dephase and `LFO SPREAD TYPES` is set to detune, all LFOs will be dephased by voice and then additionally detuned by type
