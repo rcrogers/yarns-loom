@@ -1,5 +1,5 @@
 # Loom
-An alternate firmware for the [Yarns synthesizer module ↗](https://mutable-instruments.net/modules/yarns/), designed to make Yarns more powerful and user-friendly.
+An alternate firmware for the [Yarns synthesizer module ↗](https://mutable-instruments.net/modules/yarns/), aimed at making Yarns more powerful and user-friendly.
 
 ### Features
 - Cue sequencer with MIDI Song Position [→](yarns/MANUAL.md#controls-for-master-clock)
