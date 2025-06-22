@@ -35,7 +35,20 @@
 
 namespace yarns {
 
-const uint8_t kNumChannels = 4;
+const size_t kAudioBlockSizeBits = 6;
+const size_t kAudioBlockSize = 1 << kAudioBlockSizeBits;
+
+const uint8_t kNumCVOutputs = 4;
+const uint8_t kDacWordsPerSampleBits = 1;
+const uint8_t kDacWordsPerSample = 1 << kDacWordsPerSampleBits;
+const uint8_t kNumBlocks = 2;
+
+const uint32_t kDacWordsPerFrame = kNumCVOutputs * kDacWordsPerSample;
+const uint32_t kDacWordsPerBlock = kAudioBlockSize * kDacWordsPerFrame;
+const uint32_t kBufferSize = kNumBlocks * kDacWordsPerBlock;
+
+const uint32_t kFrameHz = 45000;
+const uint32_t kDacWordsHz = kFrameHz * kDacWordsPerFrame;
 
 class Dac {
  public:
@@ -44,50 +57,42 @@ class Dac {
   
   void Init();
   
-  inline void set_channel(uint8_t channel, uint16_t value) {
-    if (value_[channel] != value) {
-      value_[channel] = value;
-      update_[channel] = true;
-    }
+  uint8_t* PtrToFillableBlockNum() {
+    uint8_t* res = can_fill_ ? &fillable_block_ : NULL;
+    can_fill_ = false;
+    return res;
   }
-  
-  inline void Write(const uint16_t* values) {
-    set_channel(0, values[0]);
-    set_channel(1, values[1]);
-    set_channel(2, values[2]);
-    set_channel(3, values[3]);
+
+  void OnBlockConsumed(bool first_block_consumed) {
+    can_fill_ = true;
+    fillable_block_ = first_block_consumed ? 0 : 1;
   }
-  
-  inline void Cycle() {
-    active_channel_ = (active_channel_ + 1) % kNumChannels;
+
+  // Bits: 8 command | 16 data | 8 padding
+  inline uint32_t FormatCommandWords(uint8_t channel, uint16_t value) const {
+    uint16_t dac_channel = kNumCVOutputs - 1 - channel;
+    uint16_t high = 0x1000 | (dac_channel << 9) | (value >> 8);
+    uint16_t low = value << 8;
+    return (high << 16) | low;
   }
-  
-  inline void Write() {
-    if (update_[active_channel_]) {
-      Write(value_[active_channel_]);
-      update_[active_channel_] = false;
-    }
-  }
-  
-  inline void Write(uint16_t value) {
-    GPIOB->BSRR = GPIO_Pin_12;
-    GPIOB->BRR = GPIO_Pin_12;
-    uint16_t word = value;
-    uint16_t dac_channel = kNumChannels - 1 - active_channel_;
-    SPI_I2S_SendData(SPI2, 0x1000 | (dac_channel << 9) | (word >> 8));
-    SPI_I2S_SendData(SPI2, word << 8);
-  }
-  
-  inline uint8_t channel() { return active_channel_; }
+
+  void BufferSamples(uint8_t block, uint8_t channel, int16_t* samples);
+  void BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample);
+
+  uint32_t timer_base_freq(uint8_t apb) const;
+  uint32_t timer_period() const;
+
+  // Multipliers express the time-ordering of the buffer: block, frame, channel, word
+  // Channels must be interleaved so they output at a consistent phase of each 40kHz tick
+  volatile uint16_t spi_tx_buffer_[kBufferSize] __attribute__((aligned(4)));
+  uint8_t fillable_block_;
+  bool can_fill_;
  
  private:
-  bool update_[kNumChannels];
-  uint16_t value_[kNumChannels];
-  
-  uint8_t active_channel_;
-  
   DISALLOW_COPY_AND_ASSIGN(Dac);
 };
+
+extern Dac dac;
 
 }  // namespace yarns
 

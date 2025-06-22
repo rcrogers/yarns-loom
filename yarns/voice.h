@@ -31,7 +31,6 @@
 #define YARNS_VOICE_H_
 
 #include "stmlib/stmlib.h"
-#include "stmlib/utils/ring_buffer.h"
 
 #include "yarns/envelope.h"
 #include "yarns/oscillator.h"
@@ -42,6 +41,9 @@
 namespace yarns {
 
 const uint16_t kNumOctaves = 11;
+
+// 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
+const uint8_t kLowFreqRefreshBits = 5;
 
 enum TriggerShape {
   TRIGGER_SHAPE_SQUARE,
@@ -111,7 +113,10 @@ class Voice {
   void ResetAllControllers();
 
   void Refresh();
-  void NoteOn(int16_t note, uint8_t velocity, uint8_t portamento, bool trigger);
+  void NoteOn(
+    int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+    ADSR& adsr, int16_t timbre_envelope_target
+  );
   void NoteOff();
   void ControlChange(uint8_t controller, uint8_t value);
   void PitchBend(uint16_t pitch_bend) {
@@ -179,9 +184,6 @@ class Voice {
   inline void set_timbre_mod_lfo(uint8_t n) {
     timbre_mod_lfo_target_ = UINT16_MAX - lut_env_expo[((127 - n) << 1)];
   }
-  inline void set_timbre_mod_envelope(int16_t n) {
-    timbre_mod_envelope_ = n;
-  }
   
   inline void set_tuning(int8_t coarse, int8_t fine) {
     tuning_ = (static_cast<int32_t>(coarse) << 7) + fine;
@@ -206,6 +208,7 @@ class Voice {
   inline bool uses_audio() const {
     return audio_output_ && oscillator_mode_ != OSCILLATOR_MODE_OFF;
   }
+  // Is this a gate-only part?
   inline bool has_cv_output() const {
     if (uses_audio()) return true;
     for (uint8_t i = 0; i < DC_LAST; ++i) {
@@ -218,22 +221,11 @@ class Voice {
     return &oscillator_;
   }
   inline FastSyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
-  inline Envelope* envelope() {
-    return &envelope_;
-  }
-
-  inline void RenderSamples() {
-    envelope_.RenderSamples();
-    if (uses_audio()) oscillator_.Render();
-  }
-  inline uint16_t ReadSample() {
-    return oscillator_.ReadSample();
-  }
   
  private:
   FastSyncedLFO lfos_[LFO_ROLE_LAST];
-  Envelope envelope_;
   Oscillator oscillator_;
+  ADSR adsr_;
 
   int32_t note_source_;
   int32_t note_target_;
@@ -274,7 +266,7 @@ class Voice {
   uint32_t trigger_phase_;
 
   uint8_t refresh_counter_;
-  Interpolator pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
+  Interpolator<kLowFreqRefreshBits> pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
 
   uint16_t tremolo_mod_target_;
   uint16_t tremolo_mod_current_;
@@ -283,7 +275,6 @@ class Voice {
   uint16_t timbre_mod_lfo_current_;
   uint16_t timbre_init_target_;
   uint16_t timbre_init_current_;
-  int16_t timbre_mod_envelope_;
 
   CVOutput* audio_output_;
   CVOutput* dc_outputs_[DC_LAST];
@@ -296,7 +287,7 @@ class CVOutput {
   CVOutput() { }
   ~CVOutput() { }
 
-  typedef uint16_t (CVOutput::*DCFn)() const;
+  typedef uint16_t (CVOutput::*DCFn)();
   static DCFn dc_fn_table_[];
 
   void Init(bool reset_calibration);
@@ -311,6 +302,7 @@ class CVOutput {
 
     num_audio_voices_ = num_audio;
     zero_dac_code_ = volts_dac_code(0);
+    envelope_.Init(zero_dac_code_ >> 1);
     uint16_t scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
     scale /= num_audio_voices_;
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
@@ -335,33 +327,36 @@ class CVOutput {
     return false;
   }
 
+  inline bool is_high_freq() const { return is_audio() || is_envelope(); }
   inline bool is_audio() const {
     return num_audio_voices_ > 0 && audio_voices_[0]->uses_audio();
   }
   inline bool is_envelope() const {
-    return
+    return !is_audio() && (
       (dc_role_ == DC_AUX_1 && dc_voice_->aux_1_envelope()) ||
-      (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope());
+      (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope())
+    );
   }
+  inline void NoteOn(ADSR& adsr) {
+    envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
+  }
+  inline void NoteOff() { envelope_.NoteOff(); }
 
-  inline uint16_t GetAudioSample() {
-    uint16_t mix = zero_dac_code_;
-    for (uint8_t i = 0; i < num_audio_voices_; ++i) {
-      mix -= audio_voices_[i]->ReadSample();
-    }
-    return mix;
+  uint16_t RefreshEnvelope(uint16_t tremolo) {
+    envelope_bias_ = envelope_.tremolo(tremolo);
+    return volts_dac_code(0) - envelope_value();
   }
+  inline uint16_t envelope_value() {
+    int32_t value = (envelope_bias_ + envelope_.value()) << 1;
+    CONSTRAIN(value, 0, UINT16_MAX);
+    return value;
+   }
 
-  inline uint16_t GetEnvelopeSample() {
-    dac_interpolator_.Tick();
-    return dac_interpolator_.value() << 1;
-  }
+  void RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv);
 
   void Refresh();
 
-  inline uint16_t dc_dac_code() const {
-    return dac_interpolator_.target() << 1;
-  }
+  inline uint16_t dc_dac_code() const { return dac_code_; }
 
   inline uint16_t DacCodeFrom16BitValue(uint16_t value) const {
     uint32_t v = static_cast<uint32_t>(value);
@@ -369,14 +364,11 @@ class CVOutput {
     return static_cast<uint16_t>(volts_dac_code(0) - (scale * v >> 16));
   }
 
-  inline uint16_t note_dac_code() const {
-    return note_dac_code_;
-  }
-
-  inline uint16_t velocity_dac_code() const {
+  uint16_t pitch_dac_code();
+  inline uint16_t velocity_dac_code() {
     return DacCodeFrom16BitValue(dc_voice_->velocity() << 9);
   }
-  inline uint16_t aux_cv_dac_code() const {
+  inline uint16_t aux_cv_dac_code() {
     if (dc_voice_->aux_1_source() >= MOD_AUX_PITCH_1) {
       return NoteToDacCode(
         dc_voice_->note() +
@@ -385,7 +377,7 @@ class CVOutput {
     }
     return DacCodeFrom16BitValue(dc_voice_->aux_cv_16bit());
   }
-  inline uint16_t aux_cv_dac_code_2() const {
+  inline uint16_t aux_cv_dac_code_2() {
     if (dc_voice_->aux_2_source() >= MOD_AUX_PITCH_1) {
       return NoteToDacCode(
         dc_voice_->note() +
@@ -394,7 +386,7 @@ class CVOutput {
     }
     return DacCodeFrom16BitValue(dc_voice_->aux_cv_2_16bit());
   }
-  inline uint16_t trigger_dac_code() const {
+  inline uint16_t trigger_dac_code() {
     int32_t max = volts_dac_code(5);
     int32_t min = volts_dac_code(0);
     return min + ((max - min) * dc_voice_->trigger_value() >> 15);
@@ -422,11 +414,12 @@ class CVOutput {
   DCRole dc_role_;
 
   int32_t note_;
-  uint16_t note_dac_code_;
+  uint16_t dac_code_;
   bool dirty_;  // Set to true when the calibration settings have changed.
   uint16_t zero_dac_code_;
   uint16_t calibrated_dac_code_[kNumOctaves];
-  Interpolator dac_interpolator_;
+  Envelope envelope_;
+  int16_t envelope_bias_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };

@@ -37,6 +37,7 @@
 #include "stmlib/algorithms/note_stack.h"
 
 #include "yarns/resources.h"
+#include "yarns/drivers/dac.h"
 #include "yarns/looper.h"
 #include "yarns/sequencer_step.h"
 #include "yarns/arpeggiator.h"
@@ -46,8 +47,12 @@ namespace yarns {
 class Voice;
 
 const uint8_t kNumSteps = 30;
-const uint8_t kNumMaxVoicesPerPart = 4;
-const uint8_t kNumParaphonicVoices = 3;
+
+const uint8_t kNumParaphonicVoices = 4;
+const uint8_t kNumMaxVoicesPerPart =
+  kNumParaphonicVoices > kNumCVOutputs
+  ? kNumParaphonicVoices : kNumCVOutputs;
+
 const uint8_t kNoteStackSize = 12;
 const uint8_t kNoteStackMapping = kNoteStackSize + 1; // 1-based
 
@@ -193,7 +198,7 @@ struct PackedPart {
     pitch_bend_range : 5, // values free: 8
     vibrato_range : 4, // values free: 3
     vibrato_mod : 7,
-    lfo_rate : 7, // values free: 32
+    lfo_rate : 7, // values free: 0
     tuning_root : 4, // values free: 4
     tuning_system : 6, // values free: 30
     trigger_duration : 7, // Breaking: probably excessive
@@ -891,31 +896,9 @@ class Part {
     seq_rec_step_ = stmlib::modulo(seq_rec_step_, overdubbing() ? seq_.num_steps : kNumSteps);
   }
 
-  void Pack(PackedPart& packed) const {
-    looper_.Pack(packed);
-    midi_.Pack(packed);
-    voicing_.Pack(packed);
-    seq_.Pack(packed);
-  }
-
-  void Unpack(PackedPart& packed) {
-    looper_.Unpack(packed);
-    midi_.Unpack(packed);
-    voicing_.Unpack(packed);
-    seq_.Unpack(packed);
-  }
-  
-  void AfterDeserialize() {
-    CONSTRAIN(midi_.play_mode, 0, PLAY_MODE_LAST - 1);
-    CONSTRAIN(seq_.clock_quantization, 0, 1);
-    CONSTRAIN(seq_.loop_length, 0, 7);
-    CONSTRAIN(seq_.arp_range, 0, 3);
-    CONSTRAIN(seq_.arp_direction, 0, ARPEGGIATOR_DIRECTION_LAST - 1);
-    AllNotesOff();
-    TouchVoices();
-    TouchVoiceAllocation();
-    ResetAllKeys();
-  }
+  void Pack(PackedPart& packed) const;
+  void Unpack(PackedPart& packed);
+  void AfterDeserialize();
 
   void set_siblings(bool has_siblings) {
     has_siblings_ = has_siblings;

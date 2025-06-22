@@ -59,7 +59,7 @@ const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
   Arpeggiator& next = result.arpeggiator;
 
   if (part.seq_driven_arp()) {
-    if (!seq_step.has_note()) { // Here, the output step can also be a TIE
+    if (!seq_step.has_note()) { // Here, the arp result can also be a TIE
       result.note.data[0] = seq_step.data[0];
       return result;
     }

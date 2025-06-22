@@ -34,6 +34,7 @@
 
 #include "stmlib/midi/midi.h"
 #include "stmlib/utils/random.h"
+#include "stmlib/utils/dsp.h"
 
 #include "yarns/just_intonation_processor.h"
 #include "yarns/midi_handler.h"
@@ -804,7 +805,6 @@ void Part::VoiceNoteOn(
 
   int32_t timbre_14 = (voicing_.timbre_mod_envelope << 7) + vel * voicing_.timbre_mod_velocity;
   CONSTRAIN(timbre_14, -1 << 13, (1 << 13) - 1)
-  voice->set_timbre_mod_envelope(timbre_14 << 2);
 
   uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
   int32_t damping_22 = -voicing_.amplitude_mod_velocity * vel_concave_up;
@@ -812,15 +812,24 @@ void Part::VoiceNoteOn(
     damping_22 += voicing_.amplitude_mod_velocity << 16;
   }
 
-  voice->envelope()->SetADSR(
-    UINT16_MAX - (damping_22 >> (22 - 16)),
-    modulate_7bit(voicing_.env_init_attack, voicing_.env_mod_attack, vel),
-    modulate_7bit(voicing_.env_init_decay, voicing_.env_mod_decay, vel),
-    modulate_7bit(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel),
-    modulate_7bit(voicing_.env_init_release, voicing_.env_mod_release, vel)
+  ADSR adsr;
+  adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));
+  adsr.sustain = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
+  // NB: this LUT only has 128 values, so we use a 15-bit index
+  adsr.attack   = Interpolate88(
+    lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << (15 - 13)
+  );
+  adsr.decay    = Interpolate88(
+    lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << (15 - 13)
+  );
+  adsr.release  = Interpolate88(
+    lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
 
-  voice->NoteOn(Tune(pitch), vel, portamento, trigger);
+  voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {
@@ -1085,6 +1094,32 @@ bool Part::Set(uint8_t address, uint8_t value) {
       break;
   }
   return true;
+}
+
+void Part::Pack(PackedPart& packed) const {
+  looper_.Pack(packed);
+  midi_.Pack(packed);
+  voicing_.Pack(packed);
+  seq_.Pack(packed);
+}
+
+void Part::Unpack(PackedPart& packed) {
+  looper_.Unpack(packed);
+  midi_.Unpack(packed);
+  voicing_.Unpack(packed);
+  seq_.Unpack(packed);
+}
+
+void Part::AfterDeserialize() {
+  CONSTRAIN(midi_.play_mode, 0, PLAY_MODE_LAST - 1);
+  CONSTRAIN(seq_.clock_quantization, 0, 1);
+  CONSTRAIN(seq_.loop_length, 0, 7);
+  CONSTRAIN(seq_.arp_range, 0, 3);
+  CONSTRAIN(seq_.arp_direction, 0, ARPEGGIATOR_DIRECTION_LAST - 1);
+  AllNotesOff();
+  TouchVoices();
+  TouchVoiceAllocation();
+  ResetAllKeys();
 }
 
 struct Ratio { int p; int q; };

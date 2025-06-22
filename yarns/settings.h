@@ -167,14 +167,14 @@ class Settings {
   
   void Init();
   
-  void Print(const Setting& setting, uint8_t value, char* buffer) const;
+  char Print(const Setting& setting, uint8_t value, char* buffer) const;
   
   inline const Setting& get(uint8_t index) const {
     return settings_[index];
   }
   
-  static void PrintInteger(char* buffer, uint8_t number);
-  static void PrintSignedInteger(char* buffer, int8_t number);
+  static char PrintInteger(char* buffer, uint8_t number, char prefix = '\0');
+  static char PrintSignedInteger(char* buffer, int8_t number);
   
  private:
    

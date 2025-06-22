@@ -40,11 +40,11 @@ const uint16_t kPinClk = GPIO_Pin_7; // DISP_SCK, SHCP, shift register clock inp
 const uint16_t kPinEnable = GPIO_Pin_8; // DISP_EN, STCP, storage register clock input
 const uint16_t kPinData = GPIO_Pin_9; // DISP_SER, DS, serial data input
 
-const uint16_t kScrollingDelay = 180;
+const uint16_t kScrollingDelay = 260;
 const uint16_t kScrollingPreDelay = 600;
-const uint16_t kBlinkMask = 128;
 
-// PWM >6 bits causes visible flickering due to over-long PWM cycle at 8kHz
+// 8000/2^(6+1) = 62.5 Hz refresh rate
+// Add 1 for kDisplayWidth = 2
 const uint8_t kDisplayBrightnessPWMBits = 6;
 const uint8_t kDisplayBrightnessPWMMax = 1 << kDisplayBrightnessPWMBits;
 
@@ -54,7 +54,7 @@ const uint16_t kCharacterEnablePins[] = {
 };
 
 void Display::Init() {
-  GPIO_InitTypeDef gpio_init;
+  GPIO_InitTypeDef gpio_init = {0};
   gpio_init.GPIO_Pin = kPinClk;
   gpio_init.GPIO_Pin |= kPinEnable;
   gpio_init.GPIO_Pin |= kPinData;
@@ -117,7 +117,23 @@ void Display::RefreshSlow() {
 
   displayed_buffer_ = (scrolling_ && !scrolling_pre_delay_timer_)
       ? long_buffer_ + scrolling_step_
-      : short_buffer_;
+      : (
+        // 0...24/32: show normal short buffer
+        blink_counter_ < ((kBlinkMask >> 1) + (kBlinkMask >> 2))
+        ? short_buffer_
+        : (
+          ( // Show brief blank before/after prefix, so there's an obvious transition even when prefix == left char, e.g. "113")
+            blink_counter_ < ( // 24/32...25/32: blank
+              (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 5)
+            ) ||
+            blink_counter_ > ( // 31/32...32/32: blank
+              (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 3) + (kBlinkMask >> 4) + (kBlinkMask >> 5)
+            )
+          )
+          ? prefix_blank_buffer_
+          : prefix_show_buffer_ // 25/32...31/32: prefix
+        )
+      );
 
   if (fading_increment_) {
     fading_counter_ += fading_increment_;
@@ -126,7 +142,7 @@ void Display::RefreshSlow() {
   } else {
     actual_brightness_ = brightness_;
   }
-  blink_counter_ = (blink_counter_ + 1) % (kBlinkMask << 1);
+  blink_counter_ = (blink_counter_ + 1) % kBlinkMask;
   std::fill(&redraw_[0], &redraw_[kDisplayWidth], true); // Force redraw
 
 #else
@@ -152,7 +168,7 @@ void Display::RefreshFast() {
   if (redraw_[active_position_]) {
     redraw_[active_position_] = false;
     if (brightness_pwm_cycle_ <= actual_brightness_
-        && (!blinking_ || blink_counter_ < kBlinkMask)) {
+        && (!blinking_ || blink_high())) {
       if (use_mask_) {
         Shift14SegmentsWord(mask_[active_position_]);
       } else {
@@ -167,7 +183,10 @@ void Display::RefreshFast() {
   brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
 }
 
-void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t brightness, uint16_t fade) {
+void Display::Print(
+  const char* short_buffer, const char* long_buffer,
+  uint16_t brightness, uint16_t fade, char prefix
+) {
   strncpy(short_buffer_, short_buffer, kDisplayWidth);
 
 #ifdef APPLICATION
@@ -180,15 +199,25 @@ void Display::Print(const char* short_buffer, const char* long_buffer, uint16_t 
 
   set_brightness(brightness, true);
   fading_increment_ = fade * brightness_ >> 16;
+
+  strncpy(prefix_show_buffer_, short_buffer, kDisplayWidth);
+  strncpy(prefix_blank_buffer_, short_buffer, kDisplayWidth);
+  if (prefix != '\0') {
+    if (short_buffer_[0] == ' ') { // All buffers show prefix, no transitions
+      short_buffer_[0] = prefix;
+      prefix_show_buffer_[0] = prefix;
+      prefix_blank_buffer_[0] = prefix;
+    } else { // Only one buffer shows prefix
+      prefix_show_buffer_[0] = prefix;
+      prefix_blank_buffer_[0] = ' ';
+    }
+  }
 }
 
 # define SHIFT_BIT \
-  GPIOB->BRR = kPinClk; \
-  if (data & 1) { \
-    GPIOB->BSRR = kPinData; \
-  } else { \
-    GPIOB->BRR = kPinData; \
-  } \
+  GPIOB->BSRR = \
+    kPinClk << 16 | \
+    ((data & 1) ? kPinData : kPinData << 16); \
   data >>= 1; \
   /* Data is shifted on the LOW-to-HIGH transitions of the SHCP input. */ \
   GPIOB->BSRR = kPinClk;

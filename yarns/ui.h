@@ -53,6 +53,7 @@ enum UiMode {
   UI_MODE_MAIN_MENU,
   UI_MODE_LOAD_SELECT_PROGRAM,
   UI_MODE_SAVE_SELECT_PROGRAM,
+  UI_MODE_SWAP_SELECT_PART,
   UI_MODE_CALIBRATION_SELECT_VOICE,
   UI_MODE_CALIBRATION_SELECT_NOTE,
   UI_MODE_CALIBRATION_ADJUST_LEVEL,
@@ -75,6 +76,7 @@ enum Splash {
 enum MainMenuEntry {
   MAIN_MENU_LOAD,
   MAIN_MENU_SAVE,
+  MAIN_MENU_SWAP_PART,
   MAIN_MENU_INIT,
   MAIN_MENU_LEARN,
   MAIN_MENU_DUMP,
@@ -97,6 +99,8 @@ enum UiFactoryTestingDisplay {
   UI_FACTORY_TESTING_DISPLAY_SW_2,
   UI_FACTORY_TESTING_DISPLAY_SW_3,
 };
+
+const char hexadecimal[17] = "0123456789ABCDEF";
 
 class Ui {
  public:
@@ -121,22 +125,12 @@ class Ui {
   void SplashString(const char* text);
   void SplashPartString(const char* label, uint8_t part);
   void SplashSetting(const Setting& s, uint8_t part);
-  void CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time, bool fade_in);
+  void CrossfadeBrightness(uint32_t fade_in_start_time, uint32_t fade_out_end_time);
 
   inline bool in_recording_mode() const {
     return multi.recording() && (
       mode_ == UI_MODE_PARAMETER_SELECT || mode_ == UI_MODE_PARAMETER_EDIT
     );
-  }
-
-  void PrintDebugByte(uint8_t byte) {
-    char buffer[3];
-    char hexadecimal[] = "0123456789ABCDEF";
-    buffer[2] = '\0';
-    buffer[0] = hexadecimal[byte >> 4];
-    buffer[1] = hexadecimal[byte & 0xf];
-    display_.Print(buffer);
-    queue_.Touch();
   }
   
   inline const Setting& setting() {
@@ -155,6 +149,10 @@ class Ui {
   void StartFactoryTesting() {
     mode_ = UI_MODE_FACTORY_TESTING;
   }
+
+  void PrintDebugByte(uint8_t byte);
+  void PrintDebugInt32(int32_t value);
+  void PrintInt32E(int32_t value);
   
  private:
   void RefreshDisplay();
@@ -183,6 +181,7 @@ class Ui {
   // Specialized Handler.
   void OnClickMainMenu(const stmlib::Event& e);
   void OnClickLoadSave(const stmlib::Event& e);
+  void OnClickSwapPart(const stmlib::Event& e);
   void OnClickCalibrationSelectVoice(const stmlib::Event& e);
   void OnClickCalibrationSelectNote(const stmlib::Event& e);
   void OnClickRecording(const stmlib::Event& e);
@@ -199,7 +198,8 @@ class Ui {
   // Print functions.
   void PrintParameterName();
   void PrintParameterValue();
-  void PrintMenuName();
+  void PrintSettingValue(const Setting& s, uint8_t part);
+  void PrintCommandName();
   void PrintProgramNumber();
   void PrintCalibrationVoiceNumber();
   void PrintCalibrationNote();
@@ -212,6 +212,7 @@ class Ui {
   void PrintRecordingStep();
   void PrintArpeggiatorMovementStep(SequencerStep step);
   void PrintPartAndPlayMode(uint8_t part);
+  void PrintSwapPart() { PrintPartAndPlayMode(swap_part_index_); display_.Print(buffer_); }
   void PrintLatch();
 
   uint16_t GetBrightnessFromSequencerPhase(const Part& part);
@@ -246,7 +247,6 @@ class Ui {
   
   stmlib::EventQueue<32> queue_;
   
-  ChannelLeds leds_;
   Display display_;
   Encoder encoder_;
   Switches switches_;
@@ -267,7 +267,7 @@ class Ui {
   Splash splash_;
   Setting const* splash_setting_def_;
   uint8_t splash_part_;
-  bool splash_fade_in_;
+  bool refresh_was_automatic_;
   
   Menu setup_menu_;
   Menu oscillator_menu_;
@@ -280,6 +280,7 @@ class Ui {
   int8_t calibration_voice_;
   int8_t calibration_note_;
   int8_t program_index_;
+  int8_t swap_part_index_;
   int8_t active_program_;
   bool push_it_;
   int16_t push_it_note_;

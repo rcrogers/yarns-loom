@@ -32,6 +32,7 @@
 
 #include "stmlib/stmlib.h"
 
+#include "yarns/drivers/dac.h"
 #include "yarns/internal_clock.h"
 #include "yarns/layout_configurator.h"
 #include "yarns/part.h"
@@ -42,13 +43,9 @@
 namespace yarns {
 
 const uint8_t kNumParts = 4;
-const uint8_t kNumCVOutputs = 4;
 // One paraphonic part, one voice per remaining output
 const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
 const uint8_t kMaxBarDuration = 32;
-
-// Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
-const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
 
 // Represents a controller number that has been routed to either remote control or a part, based on the channel the CC was received on
 class CCRouting {
@@ -226,6 +223,7 @@ class Multi {
   ~Multi() { }
 
   void PrintDebugByte(uint8_t byte);
+  void PrintInt32E(int32_t value);
   
   void Init(bool reset_calibration);
 
@@ -457,9 +455,6 @@ class Multi {
           play ? &Part::LooperPlayNoteOff : NULL
         );
       }
-      for (uint8_t v = 0; v < part_[p].num_voices(); ++v) {
-        part_[p].voice(v)->RenderSamples();
-      }
     }
   }
   
@@ -553,6 +548,8 @@ class Multi {
     settings_.Unpack(packed);
     AfterDeserialize();
   };
+
+  void SwapParts(uint8_t x, uint8_t y);
   
   template<typename T>
   void SerializeCalibration(T* stream_buffer) {

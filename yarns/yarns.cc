@@ -25,10 +25,7 @@
 
 #include <stm32f10x_conf.h>
 
-#include "stmlib/utils/dsp.h"
-#include "stmlib/utils/ring_buffer.h"
 #include "stmlib/system/system_clock.h"
-#include "stmlib/system/uid.h"
 
 #include "yarns/drivers/dac.h"
 #include "yarns/drivers/gate_output.h"
@@ -43,7 +40,8 @@
 using namespace yarns;
 using namespace stmlib;
 
-Dac dac;
+const char* const kVersion = "Loom 3_0_0";
+
 GateOutput gate_output;
 MidiIO midi_io;
 System sys;
@@ -65,19 +63,20 @@ extern "C" {
 
 uint16_t cv[4];
 bool gate[4];
-bool has_audio_source[4];
-bool has_envelope[4];
 uint16_t factory_testing_counter;
 
 void SysTick_Handler() {
   // MIDI I/O, and CV/Gate refresh at 8kHz.
-  // UI polling and LED refresh at 1kHz.
+  // UI polling at 1kHz.
   static uint8_t counter;
   if ((++counter & 7) == 0) {
     ui.Poll();
     system_clock.Tick();
   }
-  ui.PollFast(); // Display refresh at 8kHz
+
+  // Display refresh at 8kHz
+  ui.PollFast();
+  channel_leds.Write();
   
   // Try to read some MIDI input if available.
   if (midi_io.readable()) {
@@ -107,17 +106,9 @@ void SysTick_Handler() {
   }
   multi.UpdateResetPulse();
   if (refresh) {
+    multi.RefreshInternalClock();
     multi.Refresh();
     multi.GetCvGate(cv, gate);
-
-    has_audio_source[0] = multi.cv_output(0).is_audio();
-    has_audio_source[1] = multi.cv_output(1).is_audio();
-    has_audio_source[2] = multi.cv_output(2).is_audio();
-    has_audio_source[3] = multi.cv_output(3).is_audio();
-    has_envelope[0] = multi.cv_output(0).is_envelope();
-    has_envelope[1] = multi.cv_output(1).is_envelope();
-    has_envelope[2] = multi.cv_output(2).is_envelope();
-    has_envelope[3] = multi.cv_output(3).is_envelope();
     
     // In calibration mode, overrides the DAC outputs with the raw calibration
     // table values.
@@ -139,31 +130,16 @@ void SysTick_Handler() {
       gate[3] = (factory_testing_counter % 200) < 100;
       ++factory_testing_counter;
     }
-    
-    dac.Write(cv);
   }
 }
 
-void TIM1_UP_IRQHandler(void) {
-  // DAC refresh at 4x 40kHz.
-  if (TIM_GetITStatus(TIM1, TIM_IT_Update) == RESET) {
-    return;
-  }
-  TIM_ClearITPendingBit(TIM1, TIM_IT_Update);
-
-  dac.Cycle();
-  if (has_audio_source[dac.channel()]) {
-    dac.Write(multi.mutable_cv_output(dac.channel())->GetAudioSample());
-  } else if (has_envelope[dac.channel()]) {
-    dac.Write(multi.mutable_cv_output(dac.channel())->GetEnvelopeSample());
-  } else {
-    // Use value written there during previous CV refresh.
-    dac.Write();
-  }
-  
-  if (dac.channel() == 0) {
-    // Internal clock refresh at 40kHz
-    multi.RefreshInternalClock();
+void DMA1_Channel6_IRQHandler(void) {
+  uint32_t flags = DMA1->ISR;
+  DMA1->IFCR = DMA1_FLAG_HT6 | DMA1_FLAG_TC6;
+  if (flags & DMA1_FLAG_HT6) {
+    dac.OnBlockConsumed(true);
+  } else if (flags & DMA1_FLAG_TC6) {
+    dac.OnBlockConsumed(false);
   }
 }
 
@@ -182,6 +158,7 @@ void Init() {
   
   system_clock.Init();
   gate_output.Init();
+  channel_leds.Init();
   dac.Init();
   midi_io.Init();
   midi_handler.Init();
@@ -190,10 +167,20 @@ void Init() {
 
 int main(void) {
   Init();
+  ui.SplashString(kVersion);
   while (1) {
     ui.DoEvents();
     midi_handler.ProcessInput();
     multi.LowPriority();
+    uint8_t* block_num_ptr = dac.PtrToFillableBlockNum();
+    if (block_num_ptr) {
+      uint8_t block = *block_num_ptr;
+      for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
+        multi.mutable_cv_output(channel)->RenderSamples(
+          block, channel, cv[channel]
+        );
+      }
+    }
     if (midi_handler.factory_testing_requested()) {
       midi_handler.AcknowledgeFactoryTestingRequest();
       ui.StartFactoryTesting();

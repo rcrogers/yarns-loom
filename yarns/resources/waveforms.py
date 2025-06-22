@@ -52,7 +52,8 @@ ring = numpy.exp(-3.0 * t) * numpy.cos(8.0 * t * numpy.pi)
 steps = numpy.sign(numpy.sin(4.0 * t * numpy.pi)) * (2 ** (-numpy.round(t * 2.0)))
 noise = numpy.random.randn(WAVETABLE_SIZE + 1, 1).ravel() * ((1 - t) ** 2)
 
-waveforms = [('exponential', trigger_scale(exponential))]
+waveforms = []
+waveforms += [('exponential', trigger_scale(exponential))]
 waveforms += [('ring', trigger_scale(ring))]
 waveforms += [('steps', trigger_scale(steps))]
 waveforms += [('noise', trigger_scale(noise))]
@@ -88,7 +89,7 @@ sine_input = numpy.arange(WAVETABLE_SIZE + 1) / float(WAVETABLE_SIZE)
 sine = -numpy.sin(2 * numpy.pi * sine_input) * 127.5 + 127.5
 
 # Band limited waveforms.
-SAMPLE_RATE=40000
+SAMPLE_RATE=45000
 num_zones = 15
 bl_pulse_tables = []
 
