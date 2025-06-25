@@ -36,7 +36,7 @@ This manual explains how Loom is different from the original Yarns firmware.  Fo
     - [Legato and portamento](#legato-and-portamento)
 - [Voice modulation](#voice-modulation)
     - [Envelope](#envelope)
-    - [Low-frequency oscillator (LFO)](#low-frequency-oscillator-lfo)
+    - [Low-frequency oscillator](#low-frequency-oscillator)
 - [Voice oscillator](#voice-oscillator)
     - [Oscillator audio mode](#oscillator-audio-mode)
     - [Oscillator timbre](#oscillator-timbre)
@@ -512,7 +512,7 @@ This manual explains how Loom is different from the original Yarns firmware.  Fo
   - `TE (TIMBRE ENV MOD)`: part setting that attenuverts envelope's modulation of timbre
   - `TV (TIMBRE VEL MOD)`: part setting that attenuverts velocity's modulation of the timbre envelope (i.e. velocity can polarize the timbre envelope)
 
-### Low-frequency oscillator (LFO)
+### Low-frequency oscillator
 
 #### LFO speed and sync
 - Part setting `LF (LFO RATE)` sets a part's base LFO speed, and whether it's synced or free-running
