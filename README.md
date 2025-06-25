@@ -2,12 +2,12 @@
 An alternate firmware for the [Yarns synthesizer module ↗](https://mutable-instruments.net/modules/yarns/), aimed at making Yarns more powerful and user-friendly.
 
 ### Features
-- Cue sequencer with MIDI Song Position [→](yarns/MANUAL.md#controls-for-master-clock)
+- Cue sequencer with MIDI Song Position [→](yarns/MANUAL.md#master-clock-controls)
 - Looper-style sequencer with real-time polyphonic recording [→](yarns/MANUAL.md#loop-sequencer)
-- Sequencer-programmed arpeggiator movement [→](yarns/MANUAL.md#sequencer-programmed-arpeggiator-movement)
-- 26 oscillator shapes with timbre/amplitude mod matrix [→](yarns/MANUAL.md#oscillator-timbre-settings)
+- Sequencer-programmed arpeggiator movement [→](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
+- 26 oscillator shapes with timbre/amplitude mod matrix [→](yarns/MANUAL.md#oscillator-timbre)
 - ADSR envelopes with velocity shaping [→](yarns/MANUAL.md#envelope)
-- Expanded support for MIDI CCs [→](yarns/MANUAL.md#control-change-cc)
+- Expanded support for MIDI CCs [→](yarns/MANUAL.md#control-change-messages)
 - New paraphonic layouts with 4-voice paraphonic part and 6 overall voices [→](yarns/MANUAL.md#new-layouts)
 - New polyphonic voicing algorithms [→](yarns/MANUAL.md#polyphonic-voice-allocation)
 - Hold pedal can be used for latching, sostenuto, and more [→](yarns/MANUAL.md#hold-pedal)
