@@ -246,11 +246,11 @@ This manual explains how Loom is different from the original Yarns firmware.  Fo
 
 #### Start/stop master clock
 - Start master clock
-  - Press `START/STOP` button while not running, or send MIDI Continue, or send MIDI Note On
-    - NB: starting via MIDI Note On requires `MS (CLOCK MANUAL START)` be disabled, i.e. note-based starts are not blocked.  Original firmware terminology: button or MIDI Start is "manual" start, MIDI Note On is "automatic" start.
+  - Press `START/STOP` button while not running, or send MIDI Start/Continue, or send MIDI Note On
+    - NB: starting via MIDI Note On requires `MS (CLOCK MANUAL START)` be disabled, i.e. note-based starts are not blocked.  Original firmware terminology: button or MIDI Start/Continue is "manual" start, MIDI Note On is "automatic" start
+    - Bug fix: a manual start supersedes an automatic" clock start, preventing the clock from stopping after all notes are released
   - Display splashes `|>`
   - Starts from master song position
-  - Bug fix: a "manual" clock start (`START/STOP` button or MIDI Start/Continue) supersedes an "automatic" clock start (MIDI Note On), preventing the clock from stopping after all notes are released
   - Bug fix: recording part responds to MIDI Start
 - Stop master clock
   - Press `START/STOP` button while running, or send MIDI Stop
@@ -583,7 +583,7 @@ This manual explains how Loom is different from the original Yarns firmware.  Fo
 - Timbre: filter cutoff
 - Shapes: low-pass, peaking, band-pass, high-pass
 
-#### `-◝` state-variable filter, low-pass
+#### `-◝` State-variable filter, low-pass
 - Timbre: filter cutoff (resonance is constant)
 - Shapes: pulse, saw
 
