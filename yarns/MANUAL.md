@@ -535,7 +535,7 @@ This manual explains how Loom is different from the original Yarns firmware.  Fo
   - Each LFO's frequency is a multiple of the last, ranging from 1x to 2x
   - Good for chorus/supersaw effects
   - NB: detuned LFOs are free-running and ignore [master song position](#set-master-song-position)
-- In polyphonic/paraphonic layouts, spread can apply to across types and voices simultaneously
+- In polyphonic/paraphonic layouts, spread can simultaneously apply across both types and voices
   - E.g. a 4-voice paraphonic part can have a distinct phase or frequency for each of its 12 LFOs (3 per voice)
   - Spread is additive, e.g. if `LFO SPREAD VOICES` is set to dephase and `LFO SPREAD TYPES` is set to detune, all LFOs will be dephased by voice and then additionally detuned by type
 
