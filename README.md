@@ -1,16 +1,16 @@
 # Loom
-An alternate firmware for the [Yarns synthesizer module ↗](https://mutable-instruments.net/modules/yarns/), aimed at making Yarns more powerful and user-friendly.
+An alternate firmware for the [Yarns synthesizer module&nbsp;↗](https://mutable-instruments.net/modules/yarns/), aimed at making Yarns more powerful and user-friendly.
 
 ### Features
-- Cue sequencer with MIDI Song Position [→](yarns/MANUAL.md#master-clock-controls)
-- Looper-style sequencer with real-time polyphonic recording [→](yarns/MANUAL.md#loop-sequencer)
-- Sequencer-programmed arpeggiator movement [→](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
-- 26 oscillator shapes with timbre/amplitude mod matrix [→](yarns/MANUAL.md#oscillator-timbre)
-- ADSR envelopes with velocity shaping [→](yarns/MANUAL.md#envelope)
-- Expanded support for MIDI CCs [→](yarns/MANUAL.md#control-change-messages)
-- New paraphonic layouts with 4-voice paraphonic part and 6 overall voices [→](yarns/MANUAL.md#new-layouts)
-- New polyphonic voicing algorithms [→](yarns/MANUAL.md#polyphonic-voice-allocation)
-- Hold pedal can be used for latching, sostenuto, and more [→](yarns/MANUAL.md#hold-pedal)
+- Cue sequencer with MIDI Song Position&nbsp;[→](yarns/MANUAL.md#master-clock-controls)
+- Looper-style sequencer with real-time polyphonic recording&nbsp;[→](yarns/MANUAL.md#loop-sequencer)
+- Sequencer-programmed arpeggiator movement&nbsp;[→](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
+- 26 oscillator shapes with timbre/amplitude mod matrix&nbsp;[→](yarns/MANUAL.md#oscillator-timbre)
+- ADSR envelopes with velocity shaping&nbsp;[→](yarns/MANUAL.md#envelope)
+- Expanded support for MIDI CCs&nbsp;[→](yarns/MANUAL.md#control-change-messages)
+- New paraphonic layouts with 4-voice paraphonic part and 6 overall voices&nbsp;[→](yarns/MANUAL.md#new-layouts)
+- New polyphonic voicing algorithms&nbsp;[→](yarns/MANUAL.md#polyphonic-voice-allocation)
+- Hold pedal can be used for latching, sostenuto, and more&nbsp;[→](yarns/MANUAL.md#hold-pedal)
   - **[Check the manual for more!](yarns/MANUAL.md)**
 
 ### Caveats
@@ -22,10 +22,10 @@ An alternate firmware for the [Yarns synthesizer module ↗](https://mutable-ins
 
 ### Installation
 1. Download `yarns-loom.syx` from the [latest release's assets](https://github.com/rcrogers/yarns-loom/releases/latest)
-2. Follow the [instructions for installing Yarns firmware ↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/#firmware)
+2. Follow the [instructions for installing Yarns firmware&nbsp;↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/#firmware)
 
 ### Community
-- [Discussion thread on ModWiggler ↗](https://www.modwiggler.com/forum/viewtopic.php?t=255378)
+- [Discussion thread on ModWiggler&nbsp;↗](https://www.modwiggler.com/forum/viewtopic.php?t=255378)
 - GitHub: feel free to create pull requests, feature ideas, and bug reports
 - License: MIT License
 
