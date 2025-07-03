@@ -66,14 +66,15 @@ This manual explains how Loom is different from the original firmware for Yarns.
 ### Panel controls
 
 #### Active part control
-- Used in multi-part layouts
-- Display blinks the active part number and its [play mode](#play-mode)
-- Hold `TAP` button to switch the active part
-- The active part is used to route part-specific panel controls:
-  - When `REC` button is pressed, the active part begins recording
-  - When `REC` button is held, the active part latches its keys
-  - When viewing or editing a setting, the active part's settings are used
 - Replaces the `PART` setting from the original firmware
+- Display blinks the active part number and its [play mode](#play-mode)
+- Hold **TAP button** to switch the active part
+- The active part is used for part-specific functions of the panel interface:
+  - Editing part settings
+  - [Recording a sequence](#sequencer-controls)
+  - [Activating the hold function](#hold-function)
+  - [Swapping part settings](#part-swap-command)
+- Only used in multi-part layouts
 
 #### Tap tempo
 - If a single tap is received without follow-up, the tempo is set to use `EXTERNAL` clocking
@@ -166,11 +167,11 @@ This manual explains how Loom is different from the original firmware for Yarns.
 ### Note processing
 
 #### Input octave transpose
-- Part setting `IT (INPUT TRANSPOSE OCTAVES)` applies octave transposition to notes received by a part
+- Part setting `IT (INPUT TRANSPOSE OCTAVES)` applies octave transposition to notes received by the part
 - Effectively an octave switch for the controller
 
 #### Filtering by velocity
-- Part settings `V> (VELOCITY MIN)` and `V< (VELOCITY MAX)` (inclusive) prevent a part from receiving notes with velocity outside the specified range
+- Part settings `V> (VELOCITY MIN)` and `V< (VELOCITY MAX)` (inclusive) prevent the part from receiving notes with velocity outside the specified range
 - Output velocity range is scaled up to compensate for the restricted range imposed by input filtering
 - Velocity filtering settings are hidden in `4V` layout
 
@@ -184,30 +185,38 @@ This manual explains how Loom is different from the original firmware for Yarns.
 #### Fix for playing on part A while recording part B
 - Bug fix: If playing part A while part B is recording, any MIDI notes ignored by the recording part (due to channel, velocity, etc) are still eligible to be received by other parts
 
-### Hold pedal
+### Hold function
 
-#### Hold pedal mode per part
-- New part setting `HM (HOLD PEDAL MODE)` sets each part's response to the hold pedal
-- `OFF`: pedal has no effect
-- `SUSTAIN`: sustains key-releases while pedal is down, and stops sustained notes on pedal-up
-  - Original firmware behavior
-- `SOSTENUTO`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down; stops sustained notes on pedal-up
-- `LATCH`: sustains key-releases while pedal is down; stops sustained notes on key-press regardless of pedal state
-  - Identical to button-controlled latching (triggered by holding `REC`)
-- `MOMENTARY LATCH`: like `LATCH`, but stop sustained notes on pedal-up, instead of on key-press
-- `CLUTCH`: while pedal is down, sustains key-releases only on keys that were pressed before pedal-down (like `SOSTENUTO`); while pedal is up, stops sustained notes on key-press (like `LATCH`)
-  - Notes triggered while the pedal is down are not sustained, and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
-- `FILTER`: while pedal is down, ignores key-presses and sustains key-releases; while pedal is up, stops sustained notes on key-press
-  - Allows using the pedal to alternately play/latch two different parts, by setting opposite `HOLD PEDAL POLARITY` on two parts
+#### How the hold function works
+- The hold function is a generalization of the original firmware's panel-controlled latch and pedal-controlled sustain
+- Hold function is per-part, as opposed to original firmware's global latch/sustain
+- The hold function is controllable by both pedal CC and panel interface
+  - Pedal: send MIDI CC 64 to a part channel to activate or deactivate the part's hold function
+  - Panel: hold **REC button** (while not recording a sequence) to manually toggle whether the [active part](#active-part-control)'s hold function is active
 
-#### Pedal polarity
-- New part setting `HP (HOLD PEDAL POLARITY)` inverts a part's up/down pedal behavior
-- Allows compatibility with any manufacturer's hold pedals
-- Allows reversing up/down semantics for the selected `HOLD PEDAL MODE`
+#### Hold mode
+- New part setting `HM (HOLD PEDAL MODE)` sets how the part responds to MIDI key-releases and the state of the hold function
+- `OFF`: hold function has no effect
+- `SUSTAIN`: sustains key-releases while hold is active, and stops sustained notes on hold deactivation
+  - Matches original firmware behavior when pressing the pedal to sustain
+- `SOSTENUTO`: while hold is active, sustains key-releases only on keys that were pressed before hold activation; stops sustained notes on hold deactivation
+- `LATCH`: sustains key-releases while hold is active; stops sustained notes on key-press regardless of hold state
+  - Matches original firmware behavior when holding **START/STOP button** to latch
+- `MOMENTARY LATCH`: like `LATCH`, but stops sustained notes on hold deactivation, instead of on key-press
+- `CLUTCH`: while hold is active, sustains key-releases only on keys that were pressed before hold activation (like `SOSTENUTO`); while hold is inactive, stops sustained notes on key-press (like `LATCH`)
+  - Notes triggered while hold is active are not sustained, and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
+- `FILTER`: while hold is active, ignores key-presses and sustains key-releases; while hold is inactive, stops sustained notes on key-press
+  - By setting opposite hold polarity on two parts, allows using the hold function to play one part while latching another
+
+#### Hold polarity
+- New part setting `HP (HOLD PEDAL POLARITY)` inverts the part's active/inactive hold state
+- Allows compatibility with any manufacturer's pedals
+- Allows reversing a hold mode's semantics
 - [More information on negative (default) and positive pedal polarity ↗](http://www.haydockmusic.com/reviews/sustain_pedal_polarity.html)
 
+
 #### Display of pressed/sustained keys
-- Display blinks tick marks to show the state of the [active part](#active-part-control)'s 6 most recently pressed keys, and how the hold pedal is affecting them
+- Display blinks tick marks to show the state of the [active part](#active-part-control)'s 6 most recently pressed keys, and how the hold function is affecting them
 - Bottom-half tick: key is manually held, and will stop when released
 - Full-height tick: key is manually held, and will be sustained when released
 - Steady top-half tick: key is sustained, and will continue after the next key-press
@@ -223,13 +232,13 @@ This manual explains how Loom is different from the original firmware for Yarns.
 - New global setting `C+ (CLOCK OFFSET)` allows fine-tuning the master clock phase by ±63 ticks
 - Applied in real time if the clock is running
 - Designed to aid in multitrack recording
-- Arithmetically, offset is applied **after** `INPUT CLK DIV`
+- Arithmetically, offset is applied **after** `I/ (INPUT CLK DIV)`
 - If offset is negative, the sequencer will not play any notes until tick 0 is reached
 
 #### Settings for synced events
 - Clock divisions/multiplications are expressed as a ratio of the synced event tempo to the master clock tempo
   - E.g. 2/1 means that the synced event runs at twice the master clock tempo
-- Part sequencer: `C/ (CLOCK RATIO)` sets the base tempo of a part's sequencer, relative to the master clock tempo
+- Part sequencer: `C/ (CLOCK RATIO)` sets the base tempo of the part's sequencer, relative to the master clock tempo
   - Sequence phase may be offset by [step offset](#step-offset) or [loop phase offset](#loop-phase-offset)
   - Sequencer phase is also affected by number of steps or [loop length](#how-the-loop-sequencer-works)
 - Output clock: `O/ (OUTPUT CLOCK RATIO)` sets the tempo of the clock gate output, relative to the master clock tempo
@@ -246,21 +255,21 @@ This manual explains how Loom is different from the original firmware for Yarns.
 
 #### Start/stop master clock
 - Start master clock
-  - Press `START/STOP` button while not running, or send MIDI Start/Continue, or send MIDI Note On
+  - Press **START/STOP button** while not running, or send MIDI Start/Continue, or send MIDI Note On
     - NB: starting via MIDI Note On requires `MS (CLOCK MANUAL START)` be disabled, i.e. note-based starts are not blocked.  Original firmware terminology: button or MIDI Start/Continue is "manual" start, MIDI Note On is "automatic" start
     - Bug fix: a manual start supersedes an automatic" clock start, preventing the clock from stopping after all notes are released
   - Display splashes `|>`
   - Starts from master song position
   - Bug fix: recording part responds to MIDI Start
 - Stop master clock
-  - Press `START/STOP` button while running, or send MIDI Stop
+  - Press **START/STOP button** while running, or send MIDI Stop
   - Display splashes `||`
   - Preserves master song position at the time of stopping
   - Bug fix: stopping the clock no longer stops manually held keys, though it still stops notes generated by the sequencer/arpeggiator
 
 #### Set master song position
 - Reset master song position
-  - Hold `START/STOP` button, or start via MIDI Start
+  - Hold **START/STOP button**, or start via MIDI Start
   - Display splashes `[]`
   - Updates song position to 0
 - Cue to an arbitrary master song position
@@ -289,9 +298,9 @@ This manual explains how Loom is different from the original firmware for Yarns.
 
 ### Sequencer controls
 - To enable: set desired [active part](#active-part-control), then set [play mode](#play-mode) to `SEQUENCER`, and set `SM (SEQ MODE)` to `STEP` or `LOOP`
-- Hold `REC` button to clear sequence
-- Hold `TAP` button to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
-- First press of `REC` button switches the display to show the pitch (or `RS`/`TI`) instead of the step number.  Press `REC` button a second time to exit recording
+- Hold **REC button** to clear sequence
+- Hold **TAP button** to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
+- First press of **REC button** switches the display to show the pitch (or `RS`/`TI`) instead of the step number.  Press **REC button** a second time to exit recording
 
 ### Step sequencer
 
@@ -307,9 +316,10 @@ This manual explains how Loom is different from the original firmware for Yarns.
 - When using encoder to scroll through steps, wraps around if the end is reached
 
 #### Step slide interface
-- While recording, hold `START/STOP` button to toggle slide on the selected step
+- While recording, hold **START/STOP button** to toggle slide on the selected step
 - If the selected step has slide, the display will show a fade effect
-- When a `REST` or `TIE` is recorded, slide is removed from that step. If a real note is later overdubbed into this step, slide must be re-added manually
+- When a rest/tie step is recorded, slide is removed from that step
+  - If a real note is later overdubbed into this step, slide must be re-added manually
 
 #### Step offset
 - Part setting `SO (STEP OFFSET)` replaces `ER (EUCLIDEAN ROTATE)` from the original firmware
@@ -334,15 +344,15 @@ This manual explains how Loom is different from the original firmware for Yarns.
 
 #### Recording a new loop
 - Set `SM (SEQ MODE)` to `LOOP`
-- Press `REC` to begin recording
+- Press **REC button** to begin recording
 - Send MIDI notes to the part to record them into the loop
 - Display brightness fades to show loop progress (if not playing a note), or the progress of the currently playing note
 - Channel LEDs show the quarter-phase of the loop
 
 #### Editing a recorded loop
 - Play more notes to overdub
-- Press `START/STOP` button to erase the oldest note, or `TAP` button to erase the newest note
-- Hold `REC` to erase the loop
+- Press **START/STOP button** to erase the oldest note, or **TAP button** to erase the newest note
+- Hold **REC button** to erase the loop
 
 #### Loop phase offset
 - Scroll the encoder to change the loop phase offset
@@ -376,7 +386,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
 - Like with pattern-based rhythms, the arp chord is set by holding keys on the MIDI controller
 - Unlike pattern-based rhythms, the sequencer-based arp rhythm moves through the arp chord only when the loop/step sequencer encounters a new note, instead of advancing on every clock pulse
 - A sequence (either loop or step) must exist to produce arpeggiator output
-- If using a step sequence that contains `REST` or `TIE` steps, the arpeggiator will also emit rests and ties
+- If a sequencer step is a rest/tie, the arpeggiator will emit that rest/tie
 - The velocity of an arpeggiator output note is calculated by multiplying the velocities of the sequencer note and the held key
 
 ### Sequencer-programmed arpeggiator
@@ -478,8 +488,10 @@ This manual explains how Loom is different from the original firmware for Yarns.
 #### Envelope ADSR settings
 - Configured per-part in `▽A (AMPLITUDE MENU)`
 - ADSR parameters: attack time, decay time, sustain level, release time
-- Manual offset for ADSR parameters: `ATTACK INIT`, `DECAY INIT`, `SUSTAIN INIT`, `RELEASE INIT`
-- Bipolar modulation of ADSR parameters by note velocity: `ATTACK MOD VEL`, `DECAY MOD VEL`, `SUSTAIN MOD VEL`, `RELEASE MOD VEL`
+- Manual offset for ADSR parameters:
+  - `AI (ATTACK INIT)`, `DI (DECAY INIT)`, `SI (SUSTAIN INIT)`, `RI (RELEASE INIT)`
+- Bipolar modulation of ADSR parameters by note velocity:
+  - `AM (ATTACK MOD VEL)`, `DM (DECAY MOD VEL)`, `SM (SUSTAIN MOD VEL)`, `RM (RELEASE MOD VEL)`
 - All curves are exponential
 - Stage times range from 0.089 ms (4 samples) to 10 seconds
 
@@ -515,7 +527,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
 ### Low-frequency oscillator
 
 #### LFO speed and sync
-- Part setting `LF (LFO RATE)` sets a part's base LFO speed, and whether it's synced or free-running
+- Part setting `LF (LFO RATE)` sets the part's base LFO speed, and whether it's synced or free-running
 - Turning counter-clockwise: LFO is [synced to master clock](#settings-for-synced-events), with sync ratio increasing from 1/8 to 8/1
 - Turning clockwise: LFO is free-running, with frequency increasing from 0.125 Hz to 16 Hz
   - NB: free-running LFOs ignore [master song position](#set-master-song-position)
