@@ -257,7 +257,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
 - Start master clock
   - Press **START/STOP button** while not running, or send MIDI Start/Continue, or send MIDI Note On
     - NB: starting via MIDI Note On requires `MS (CLOCK MANUAL START)` be disabled, i.e. note-based starts are not blocked.  Original firmware terminology: button or MIDI Start/Continue is "manual" start, MIDI Note On is "automatic" start
-    - Bug fix: a manual start supersedes an automatic" clock start, preventing the clock from stopping after all notes are released
+    - Bug fix: a manual start supersedes an automatic clock start, preventing the clock from stopping after all notes are released
   - Display splashes `|>`
   - Starts from master song position
   - Bug fix: recording part responds to MIDI Start
