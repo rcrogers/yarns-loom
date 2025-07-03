@@ -280,7 +280,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
 ### Cueing synced events from master song position
 
 #### Synced events have deterministic clocking
-- All synced events have [sync settings](#settings-for-synced-events) that establishes their relationship with the master clock
+- All synced events have [sync settings](#settings-for-synced-events) that control the event's relationship to the master clock's tempo and song position
   - E.g.: given that an LFO has sync ratio 1/2 and phase offset 0, and the master song position is the 11th beat, the LFO knows that it should be halfway through its 6th cycle
 - Past clock state is ignored, preventing temporary setting changes from causing permanent phase drift
 - Allows synced clocks to maintain a consistent response to a given song position and sync ratio
