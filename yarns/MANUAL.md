@@ -18,7 +18,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
     - [Play mode](#play-mode)
     - [New layouts](#new-layouts)
     - [Note processing](#note-processing)
-    - [Hold pedal](#hold-pedal)
+    - [Hold function](#hold-function)
 - [Clocking](#clocking)
     - [Clock settings](#clock-settings)
     - [Master clock controls](#master-clock-controls)
