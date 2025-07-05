@@ -10,7 +10,7 @@ An alternate firmware for the [Yarns synthesizer module&nbsp;↗](https://mutabl
 - Expanded support for MIDI CCs&nbsp;[→](yarns/MANUAL.md#control-change-messages)
 - New paraphonic layouts with 4-voice paraphonic part and 6 overall voices&nbsp;[→](yarns/MANUAL.md#new-layouts)
 - New polyphonic voicing algorithms&nbsp;[→](yarns/MANUAL.md#polyphonic-voice-allocation)
-- Hold pedal can be used for latching, sostenuto, and more&nbsp;[→](yarns/MANUAL.md#hold-pedal)
+- Hold pedal can be used for latching, sostenuto, and more&nbsp;[→](yarns/MANUAL.md#hold-function)
   - **[Check the manual for more!](yarns/MANUAL.md)**
 
 ### Caveats
