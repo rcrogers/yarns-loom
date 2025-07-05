@@ -25,6 +25,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
     - [Cueing synced events from master song position](#cueing-synced-events-from-master-song-position)
 - [Sequencer](#sequencer)
     - [Sequencer controls](#sequencer-controls)
+    - [Sequencer input response](#sequencer-input-response)
     - [Step sequencer](#step-sequencer)
     - [Loop sequencer](#loop-sequencer)
 - [Arpeggiator](#arpeggiator)
@@ -179,13 +180,6 @@ New global setting `CC (CONTROL CHANGE MODE)` sets how a CC's value is interpret
 - Output velocity range is scaled up to compensate for the restricted range imposed by input filtering
 - Velocity filtering settings are hidden in `4V` layout
 
-#### Sequencer input response
-Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer to MIDI input (when not recording):
-1. `OFF`: ignores MIDI input
-1. `TRANSPOSE`: original firmware behavior
-1. `REPLACE`: sequencer controls note timing, but MIDI input overrides note pitch
-1. `DIRECT`: MIDI input is directly voiced, allowing accompaniment of a sequence
-
 #### Fix for playing on part A while recording part B
 - Bug fix: If playing part A while part B is recording, any MIDI notes ignored by the recording part (due to channel, velocity, etc) are still eligible to be received by other parts
 
@@ -305,6 +299,13 @@ New global setting `C+ (CLOCK OFFSET)` allows fine-tuning the master clock phase
 - Hold **REC button** to clear sequence
 - Hold **TAP button** to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
 - First press of **REC button** switches the display to show the pitch (or `RS`/`TI`) instead of the step number.  Press **REC button** a second time to exit recording
+
+### Sequencer input response
+Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer to MIDI input (when not recording):
+1. `OFF`: ignores MIDI input
+1. `TRANSPOSE`: original firmware behavior
+1. `REPLACE`: sequencer controls note timing, but MIDI input overrides note pitch
+1. `DIRECT`: MIDI input is directly voiced, allowing accompaniment of a sequence
 
 ### Step sequencer
 
@@ -489,9 +490,10 @@ New and improved values for `VO (VOICING)` setting:
 
 ### Envelope
 
-#### Envelope shape settings
+#### Envelope shape
 - Configured per-part in `▽A (AMPLITUDE MENU)`
-- Baseline envelope shape is set per part, then each voice in the part uses its note velocity to modulate this shape, yielding a unique envelope shape for that note
+- Each voice's envelope is gated by the [voice receiving note-on and note-off events](#note-voicing)
+- Baseline envelope shape is set per part.  When a voice in the part receives a note-on, the note velocity modulates this shape, yielding a unique envelope shape for that note
 - Part settings for the base ADSR of each voice in the part:
     - `AI (ATTACK INIT)`, `DI (DECAY INIT)`, `SI (SUSTAIN INIT)`, `RI (RELEASE INIT)`
 - Part settings for the bipolar modulation of each voice's ADSR by that voice's note velocity:
