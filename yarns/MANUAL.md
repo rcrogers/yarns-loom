@@ -51,7 +51,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
 #### Submenus for settings
 1. `▽S (SETUP MENU)`: configuration, MIDI input/output
 1. `▽O (OSCILLATOR MENU)`: [audio mode](#oscillator-audio-mode) and [timbre](#oscillator-timbre) for the voice oscillator
-1. `▽A (AMPLITUDE MENU)`: voice [envelope](#envelope-adsr-settings) and [tremolo](#modulation-destinations-for-lfo-output)
+2. `▽A (AMPLITUDE MENU)`: voice [envelope](#envelope) and [tremolo LFO](#modulation-destinations-for-lfo-output)
 
 #### Part swap command
 - `*P PART SWAP SETTINGS` in main menu
@@ -489,22 +489,20 @@ New and improved values for `VO (VOICING)` setting:
 
 ### Envelope
 
-#### Envelope ADSR settings
+#### Envelope shape settings
 - Configured per-part in `▽A (AMPLITUDE MENU)`
-- ADSR parameters: attack time, decay time, sustain level, release time
-- Manual offset for ADSR parameters:
-  - `AI (ATTACK INIT)`, `DI (DECAY INIT)`, `SI (SUSTAIN INIT)`, `RI (RELEASE INIT)`
-- Bipolar modulation of ADSR parameters by note velocity:
-  - `AM (ATTACK MOD VEL)`, `DM (DECAY MOD VEL)`, `SM (SUSTAIN MOD VEL)`, `RM (RELEASE MOD VEL)`
+- Baseline envelope shape is set per part, then each voice in the part uses its note velocity to modulate this shape, yielding a unique envelope shape for that note
+- Part settings for the base ADSR of each voice in the part:
+    - `AI (ATTACK INIT)`, `DI (DECAY INIT)`, `SI (SUSTAIN INIT)`, `RI (RELEASE INIT)`
+- Part settings for the bipolar modulation of each voice's ADSR by that voice's note velocity:
+    - `AM (ATTACK MOD VEL)`, `DM (DECAY MOD VEL)`, `SM (SUSTAIN MOD VEL)`, `RM (RELEASE MOD VEL)`
+- Part setting `PV (PEAK VEL MOD)` sets the velocity-sensitivity of the **peak level** for each voice's envelope
+    - Peak level: height of the instantaneous point where attack ends and decay begins
+    - Zero: peak level is always maximum (unity, i.e. equal to the maximum sustain level)
+    - Turning clockwise (positive): peak level is increasingly damped by low note velocity
+    - Turning counter-clockwise (negative): peak level is increasingly damped by high note velocity
 - All curves are exponential
-- Stage times range from 0.089 ms (4 samples) to 10 seconds
-
-#### Modulating envelope's peak level
-- "Peak" is the instantaneous point where attack ends and decay begins
-- `PV (PEAK VEL MOD)` sets the velocity-sensitivity of the level of the peak
-- Zero: peak level is always maximum (unity, i.e. the maximum sustain level)
-- Turning clockwise (positive): peak level is increasingly damped by low note velocity
-- Turning counter-clockwise (negative): peak level is increasingly damped by high note velocity
+- Min/max stage times: ~0.089 ms (4 samples = 4/45000 of a second) to 10 seconds
 
 #### How the envelope adapts to interruptions
 Envelope adjusts to notes that begin/end while a stage or another note is in progress:
@@ -523,10 +521,12 @@ Envelope adjusts to notes that begin/end while a stage or another note is in pro
 
 #### Modulation destinations for envelope output
 - Aux CV output: `ENVELOPE` (itself modulated by [tremolo LFO](#modulation-destinations-for-lfo-output))
-- [Oscillator gain](#oscillator-audio-mode), when `OSCILLATOR MODE` is `ENVELOPED`
-- [Oscillator timbre](#oscillator-timbre), when oscillator is enabled
-  - `TE (TIMBRE ENV MOD)`: part setting that attenuverts envelope's modulation of timbre
-  - `TV (TIMBRE VEL MOD)`: part setting that attenuverts velocity's modulation of the timbre envelope (i.e. velocity can polarize the timbre envelope)
+- [Oscillator gain](#oscillator-audio-mode), when oscillator audio mode is `ENVELOPED`
+- [Oscillator timbre](#oscillator-timbre), when oscillator audio mode is not `OFF`
+    - Timbre modulation by envelope has both a velocity-agnostic and a velocity-dependent component that are added together:
+        - Part setting `TE (TIMBRE ENV MOD)` sets the **velocity-agnostic** bipolar modulation depth of each voice's timbre by its envelope
+        - Part setting `TV (TIMBRE VEL MOD)` sets the **velocity-dependent** bipolar modulation of each voice's timbre by its envelope
+    - Combine these for effects like: negative timbre envelope on low velocity and positive timbre envelope on high velocity, or vice versa
 
 ### Low-frequency oscillator
 
@@ -574,15 +574,15 @@ Envelope adjusts to notes that begin/end while a stage or another note is in pro
 # Voice oscillator
 
 ### Oscillator audio mode
-`OM (OSCILLATOR MODE)` part setting in `▽O (OSCILLATOR MENU)`:
+Part setting `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)` sets whether the part outputs audio:
 1. `OFF`: no audio output
-1. `DRONE`: audio gain is modulated by tremolo LFO, but not by envelope
-1. `ENVELOPED`: audio gain is modulated by both [tremolo LFO](#modulation-destinations-for-lfo-output) and [envelope](#modulation-destinations-for-envelope-output)
+2. `DRONE`: audio gain is modulated by tremolo LFO, but not by envelope
+3. `ENVELOPED`: audio gain is modulated by both [tremolo LFO](#modulation-destinations-for-lfo-output) and [envelope](#modulation-destinations-for-envelope-output)
 
 ### Oscillator timbre
-- Each [oscillator shape](#oscillator-shape) has a timbre parameter
-- Timbre is manually set by part setting `TI (TIMBRE INITIAL)`
-- Timbre can be modulated by [envelope](#modulation-destinations-for-envelope-output) and [LFO](#modulation-destinations-for-lfo-output)
+- Each voice has a timbre parameter, which has different effects depending on [oscillator shape](#oscillator-shape)
+- Part setting `TI (TIMBRE INITIAL)` sets the base timbre for all voices in the part
+- Each voice's individual timbre can be modulated by that voice's [envelope](#modulation-destinations-for-envelope-output) and [timbre LFO](#modulation-destinations-for-lfo-output)
 
 ### Oscillator shape
 - `OS (OSCILLATOR SHAPE)` part setting in `▽O (OSCILLATOR MENU)`
