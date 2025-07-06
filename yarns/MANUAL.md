@@ -151,23 +151,23 @@ New global setting `CC (CONTROL CHANGE MODE)` sets how a CC's value is interpret
     - Rhythm is controlled by the [arpeggiator pattern setting](#arpeggiator-rhythm-settings)
 
 ### New layouts
-- `2+2` 3-part layout: 2-voice polyphonic part + two monophonic parts
-- `2+1` 2-part layout: 2-voice polyphonic part + monophonic part with aux CV
-- `*2` 3-part layout: 4-voice paraphonic part + monophonic part with aux CV + monophonic part without aux CV
-  - Paraphonic part has 4x [oscillators](#voice-oscillator)
-  - [Oscillator mode](#oscillator-audio-mode) cannot be turned off for the paraphonic part
-  - Output channels:
-    1. CV: Part 1's 4x oscillators mixed to 1 audio output, Gate: Part 4's gate
-    1. Part 2, monophonic CV/gate
-    1. Part 2, modulation configurable via `3>`
-    1. Part 3, monophonic CV/gate
-- `3M` 3-part layout: 3 monophonic parts, plus clock on gate 4 and bar/reset on CV 4
-- `*1` 2-part layout: 4-voice paraphonic part + monophonic part with aux CV
-  - Output channels:
-    1. CV: Part 1's 4x oscillators mixed to 1 audio output, Gate: Part 1's gate
-    1. Part 2, monophonic CV/gate
-    1. Part 1's aux CV, configurable via `CV`
-    1. Part 2's aux CV, configurable via `CV`
+1. `2+2` 3-part layout: 2-voice polyphonic part + two monophonic parts
+1. `2+1` 2-part layout: 2-voice polyphonic part + monophonic part with aux CV
+1. `*2` 3-part layout: 4-voice paraphonic part + monophonic part with aux CV + monophonic part without aux CV
+    - Paraphonic part has 4x [oscillators](#voice-oscillator)
+    - [Oscillator mode](#oscillator-audio-mode) cannot be turned off for the paraphonic part
+    - Output channels:
+        1. CV: Part 1's 4x oscillators mixed to 1 audio output, Gate: Part 4's gate
+        1. Part 2, monophonic CV/gate
+        1. Part 2, modulation configurable via `3>`
+        1. Part 3, monophonic CV/gate
+1. `3M` 3-part layout: 3 monophonic parts, plus clock on gate 4 and bar/reset on CV 4
+1. `*1` 2-part layout: 4-voice paraphonic part + monophonic part with aux CV
+    - Output channels:
+        1. CV: Part 1's 4x oscillators mixed to 1 audio output, Gate: Part 1's gate
+        1. Part 2, monophonic CV/gate
+        1. Part 1's aux CV, configurable via `CV`
+        1. Part 2's aux CV, configurable via `CV`
 
 ### Note processing
 
