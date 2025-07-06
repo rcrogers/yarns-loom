@@ -400,19 +400,19 @@ Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer
 - The `JUMP` and `GRID` arp directions can interpret the sequencer pitch as a movement instruction
 - The arpeggiator always has some **active position** within the ordered arp chord, e.g. "the 3rd key of the chord"
 - Changes in the active position ("**movement**") are determined by the pitch of notes emitted by the sequencer
-  - If [arp pattern](#arpeggiator-rhythm-settings) is not sequencer-based, the sequencer pitch data is replaced by the position in the 16-step pattern cycle
+    - If [arp pattern](#arpeggiator-rhythm-settings) is not sequencer-based, the sequencer pitch data is replaced by the position in the 16-step pattern cycle
 - Sequencer pitch is interpreted based on its:
-  - Key **color** (is the key black or white?)
-  - Shown **octave number** (with C as the first note of the octave)
-  - **Pitch ordinal** within octave and color, e.g.
-    - When the sequencer pitch is the 2nd white note of octave 5, the pitch ordinal is 2
-    - When the sequencer pitch is the 4th black note of octave 2, the pitch ordinal is 4
+    1. Key **color** (is the key black or white?)
+    2. Shown **octave number** (with C as the first note of the octave)
+    3. **Pitch ordinal** within octave and color, e.g.
+        - When the sequencer pitch is the 2nd white note of octave 5, the pitch ordinal is 2
+        - When the sequencer pitch is the 4th black note of octave 2, the pitch ordinal is 4
 - The octave and color are used for different purposes by `JUMP` vs `GRID` (see below)
 - The pitch ordinal sets the minimum arp chord size for which the arpeggiator will emit a note
-  - For a sequencer pitch with pitch ordinal N, the arpeggiator emits a note only if there are N or more keys in the arp chord, e.g.:
-    - When the sequencer pitch is the 3rd white key of its octave, a note is emitted only if there are 3+ keys in the arp chord
-    - When the sequencer pitch is the 1st black key of its octave, a note is emitted only if there are 1+ keys in the arp chord
-  - Allows dynamic control of the arpeggiator's rhythmic pattern by varying the size of the arp chord
+    - For a sequencer pitch with pitch ordinal N, the arpeggiator emits a note only if there are N or more keys in the arp chord, e.g.:
+        - When the sequencer pitch is the 3rd white key of its octave, a note is emitted only if there are 3+ keys in the arp chord
+        - When the sequencer pitch is the 1st black key of its octave, a note is emitted only if there are 1+ keys in the arp chord
+    - Allows dynamic control of the arpeggiator's rhythmic pattern by varying the size of the arp chord
 
 #### `JUMP` direction
 - Uses a combination of relative and absolute movement through the ordered arp chord
