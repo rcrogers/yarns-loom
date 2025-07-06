@@ -214,7 +214,7 @@ New part setting `HP (HOLD PEDAL POLARITY)` inverts the part's active/inactive h
 
 
 #### Display of keys affected by the hold function
-Display blinks 1 tick mark for each pressed/sustained key in the [active part](#active-part-control) (max 6 keys):
+Display blinks 1 tick mark for each pressed/sustained key in the [active part](#active-part-control), up to a max of the 6 newest keys:
 1. Bottom-half tick: key is manually pressed, and will stop when released
 1. Full-height tick: key is manually pressed, and will be sustained when released
 1. Steady top-half tick: key is sustained, and will continue after the next key-press
