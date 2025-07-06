@@ -587,7 +587,7 @@ Part setting `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)` sets whether the
 - Each voice's individual timbre can be modulated by that voice's [envelope](#modulation-destinations-for-envelope-output) and [timbre LFO](#modulation-destinations-for-lfo-output)
 
 ### Oscillator shape
-- `OS (OSCILLATOR SHAPE)` part setting in `▽O (OSCILLATOR MENU)`
+Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscillator shape for all voices in the part.
 
 #### `*-` Filtered noise
 - Timbre: filter cutoff (resonance is set by note pitch)
