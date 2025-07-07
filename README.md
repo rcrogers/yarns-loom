@@ -33,4 +33,5 @@ An alternate firmware for the [Yarns synthesizer module&nbsp;↗](https://mutabl
 - Thanks to Dylan Bolink and Fabio Bernardi for beta testing, bug reports, and great ideas
 - Thanks to Mutable forum user Airell for the idea of per-part latching
 - Thanks to Mutable forum user sdejesus13 for encouraging the exploration of clock-based recording
+- Thanks to John Chowning, Barry Truax, and Bernie Hutchins for notes on FM synthesis
 - And above all, thanks to Mutable Instruments for making incredible open-source modules!
