@@ -404,8 +404,8 @@ Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer
     - If [arp pattern](#arpeggiator-rhythm-settings) is not sequencer-based, the sequencer pitch data is replaced by the position in the 16-step pattern cycle
 - Sequencer pitch is interpreted based on its:
     1. Key **color** (is the key black or white?)
-    2. Shown **octave number** (with C as the first note of the octave)
-    3. **Pitch ordinal** within octave and color, e.g.
+    1. Shown **octave number** (with C as the first note of the octave)
+    1. **Pitch ordinal** within octave and color, e.g.
         - When the sequencer pitch is the 2nd white note of octave 5, the pitch ordinal is 2
         - When the sequencer pitch is the 4th black note of octave 2, the pitch ordinal is 4
 - The octave and color are used for different purposes by `JUMP` vs `GRID` (see below)
@@ -494,7 +494,7 @@ New and improved values for `VO (VOICING)` setting:
 #### Envelope shape
 - Configured per-part in `▽A (AMPLITUDE MENU)`
 - Each voice's envelope is gated by the [voice receiving note-on and note-off events](#note-voicing)
-- Within a part, voices share a baseline envelope shape, which is then modulated by the velocity of notes played on that voice, yielding a unique envelope shape for each note
+- Within a part, voices share a baseline envelope shape, which is then modulated by the velocity of each note to yield a unique envelope shape
 - Part settings for the baseline ADSR of each voice in the part:
     - `AI (ATTACK INIT)`, `DI (DECAY INIT)`, `SI (SUSTAIN INIT)`, `RI (RELEASE INIT)`
 - Part settings for the bipolar modulation of each voice's ADSR by that voice's note velocity:
