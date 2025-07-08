@@ -305,7 +305,8 @@ Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer
 1. `OFF`: ignores MIDI input
 1. `TRANSPOSE`: original firmware behavior
 1. `REPLACE`: sequencer controls note timing, but MIDI input overrides note pitch
-1. `DIRECT`: MIDI input is directly voiced, allowing accompaniment of a sequence
+1. `DIRECT`: MIDI input is [directly voiced](#note-voicing) alongside sequencer notes
+    - Allows accompaniment of a sequence
 
 ### Step sequencer
 
@@ -493,8 +494,8 @@ New and improved values for `VO (VOICING)` setting:
 #### Envelope shape
 - Configured per-part in `▽A (AMPLITUDE MENU)`
 - Each voice's envelope is gated by the [voice receiving note-on and note-off events](#note-voicing)
-- Baseline envelope shape is set per part.  When a voice in the part receives a note-on, the note velocity modulates this shape, yielding a unique envelope shape for that note
-- Part settings for the base ADSR of each voice in the part:
+- Within a part, voices share a baseline envelope shape, which is then modulated by the velocity of notes played on that voice, yielding a unique envelope shape for each note
+- Part settings for the baseline ADSR of each voice in the part:
     - `AI (ATTACK INIT)`, `DI (DECAY INIT)`, `SI (SUSTAIN INIT)`, `RI (RELEASE INIT)`
 - Part settings for the bipolar modulation of each voice's ADSR by that voice's note velocity:
     - `AM (ATTACK MOD VEL)`, `DM (DECAY MOD VEL)`, `SM (SUSTAIN MOD VEL)`, `RM (RELEASE MOD VEL)`
@@ -560,15 +561,15 @@ Envelope adjusts to notes that begin/end while a stage or another note is in pro
 #### Modulation destinations for LFO output
 - Aux CV outputs: `LFO`, `VIBRATO LFO` (unattenuated and attenuated versions of vibrato LFO)
 - Vibrato LFO: oscillator pitch, pitch CV
-  - `VB (VIBRATO AMOUNT)` (in `▽S (SETUP MENU)`): part setting that attenuates bipolar vibrato LFO's mdulation of CV/oscillator pitch
-    - Allows vibrato control via panel interface if your MIDI controller doesn't have a modulation wheel
-  - `VS (VIBRATO SHAPE)` (in `▽S (SETUP MENU)`): shape of the vibrato LFO
+    - Part setting `VB (VIBRATO AMOUNT)` in `▽S (SETUP MENU)` sets the depth of bipolar modulation of CV/oscillator pitch for all voices in the part
+        - Allows vibrato control via panel interface if your MIDI controller doesn't have a modulation wheel
+    - Part setting `VS (VIBRATO SHAPE)` in `▽S (SETUP MENU)` sets the shape of the vibrato LFO for all voices in the part
 - Tremolo LFO: [oscillator gain](#oscillator-audio-mode), [`ENVELOPE` output for aux CV](#modulation-destinations-for-envelope-output)
-  - `TR (TREMOLO DEPTH)` (in `▽A (AMPLITUDE MENU)`): part setting that attenuates the unipolar tremolo LFO's reduction of gain for the oscillator and `ENVELOPE` aux CV
-  - `TS (TREMOLO SHAPE)` (in `▽A (AMPLITUDE MENU)`): shape of the tremolo LFO
+    - Part setting `TR (TREMOLO DEPTH)` in `▽A (AMPLITUDE MENU)` sets the depth of the unipolar modulation of oscillator gain and `ENVELOPE` aux CV for all voices in the part
+    - Part setting `TS (TREMOLO SHAPE)` in `▽A (AMPLITUDE MENU)` sets the shape of the tremolo LFO for all voices in the part
 - Timbre LFO: [oscillator timbre](#oscillator-timbre)
-  - `TL (TIMBRE LFO MOD)` (in `▽O (OSCILLATOR MENU)`): part setting that attenuates the bipolar timbre LFO's modulation of oscillator timbre
-  - `LS (TIMBRE LFO SHAPE)` (in `▽O (OSCILLATOR MENU)`): shape of the timbre LFO
+    - Part setting `TL (TIMBRE LFO MOD)` in `▽O (OSCILLATOR MENU)` sets the depth of bipolar modulation of oscillator timbre for all voices in the part
+    - Part setting `LS (TIMBRE LFO SHAPE)` in `▽O (OSCILLATOR MENU)` sets the shape of the timbre LFO for all voices in the part
 - Options for all LFO shapes: triangle, down saw, up saw, square
 
 
