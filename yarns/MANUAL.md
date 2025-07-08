@@ -196,10 +196,10 @@ New global setting `CC (CONTROL CHANGE MODE)` sets how a CC's value is interpret
 New part setting `HM (HOLD PEDAL MODE)` sets how the part responds to MIDI key-releases and the state of the hold function:
 1. `OFF`: hold function has no effect
 1. `SUSTAIN`: sustains key-releases while hold is active, and stops sustained notes on hold deactivation
-    - Matches original firmware behavior when pressing the pedal to sustain
+    - Identical behavior to pressing the pedal to enable sustain mode in original firmware
 1. `SOSTENUTO`: while hold is active, sustains key-releases only on keys that were pressed before hold activation; stops sustained notes on hold deactivation
 1. `LATCH`: sustains key-releases while hold is active; stops sustained notes on key-press regardless of hold state
-    - Matches original firmware behavior when holding **START/STOP button** to latch
+    - Identical behavior to holding **START/STOP button** to enable latch mode in original firmware
 1. `MOMENTARY LATCH`: like `LATCH`, but stops sustained notes on hold deactivation, instead of on key-press
 1. `CLUTCH`: while hold is active, sustains key-releases only on keys that were pressed before hold activation (like `SOSTENUTO`); while hold is inactive, stops sustained notes on key-press (like `LATCH`)
     - Notes triggered while hold is active are not sustained, and do not cause sustained notes to be stopped, which allows temporarily augmenting a sustained chord
