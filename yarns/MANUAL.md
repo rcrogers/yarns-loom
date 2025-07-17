@@ -33,7 +33,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
     - [Arpeggiator rhythm settings](#arpeggiator-rhythm-settings)
     - [Sequencer-programmed arpeggiator](#sequencer-programmed-arpeggiator)
 - [Note voicing](#note-voicing)
-    - [Polyphonic voice allocation](#polyphonic-voice-allocation)
+    - [Polyphony](#polyphony)
     - [Legato and portamento](#legato-and-portamento)
 - [Voice modulation](#voice-modulation)
     - [Envelope](#envelope)
@@ -140,7 +140,7 @@ New global setting `CC (CONTROL CHANGE MODE)` sets how a CC's value is interpret
 
 #### How play mode works
 - Part setting `PM (PLAY MODE)` sets how each part generates MIDI and CV/gate output
-- This explicit setting replaces the implicit switching in the original firmware (sequencer enabled if recorded sequence exists; arpeggiator enabled if `ARP RANGE` > 0)
+- This explicit setting replaces the implicit switching in the original firmware (sequencer enabled if sequence exists; arpeggiator enabled if range is not 0)
 - Allows changing mode without altering the recorded sequence or arpeggiator range
  
 #### Play mode options
@@ -296,8 +296,8 @@ New global setting `C+ (CLOCK OFFSET)` allows fine-tuning the master clock phase
 
 ### Sequencer controls
 - To enable: set desired [active part](#active-part-control), then set [play mode](#play-mode) to `SEQUENCER`, and set `SM (SEQ MODE)` to `STEP` or `LOOP`
-- Hold **REC button** to clear sequence
-- Hold **TAP button** to toggle triggered-erase mode, which will clear the sequence as soon as a new note is recorded
+- Hold **REC button** to erase sequence
+- Hold **TAP button** to toggle triggered-erase mode, which will erase the sequence as soon as a new note is recorded
 - First press of **REC button** switches the display to show the pitch (or `RS`/`TI`) instead of the step number.  Press **REC button** a second time to exit recording
 
 ### Sequencer input response
@@ -434,9 +434,9 @@ Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer
 
 # Note voicing
 
-### Polyphonic voice allocation
+### Polyphony
 
-#### Polyphonic voicing options
+#### Polyphonic voice allocation
 New and improved values for `VO (VOICING)` setting:
 - `sM STEAL LOWEST PRIORITY RELEASE MUTE`
   - Steal from the lowest-priority existing note IFF the incoming note has higher priority
@@ -462,14 +462,14 @@ New and improved values for `VO (VOICING)` setting:
 
 #### Note priority changes
 - Added new `FIRST` (oldest) setting to `NP (NOTE PRIORITY)`
-- Polyphonic voicing respects note priority where applicable
+- Voice allocation respects note priority where applicable
 - [Arpeggiator respects note priority](#arpeggiator-basics)
 
 #### Other polyphony changes
 - Notes that steal a voice are considered legato
 - Bug fix: `UNISON` allocates notes without gaps
 - Bug fix: prevent unneeded reassignment/retrigger in `PRIORITY ORDER`/`UNISON` during a partial chord change
-- `PRIORITY ORDER` and `UNISON RELEASE REASSIGN` reassign voices on `NoteOff` if there are unvoiced notes
+- `PRIORITY ORDER` and `UNISON RELEASE REASSIGN` reassign voices to unvoiced notes on release
 - Allow monophonic parts to use all voicing modes
 
 ### Legato and portamento
@@ -493,7 +493,7 @@ New and improved values for `VO (VOICING)` setting:
 
 #### Envelope shape
 - Configured per-part in `▽A (AMPLITUDE MENU)`
-- Each voice's envelope is gated by the [voice receiving note-on and note-off events](#note-voicing)
+- Each voice's envelope is gated by the [voice receiving notes](#note-voicing)
 - Within a part, voices share a baseline envelope shape, which is then modulated by the velocity of each note to yield a unique envelope shape
 - Part settings for the baseline ADSR of each voice in the part:
     - `AI (ATTACK INIT)`, `DI (DECAY INIT)`, `SI (SUSTAIN INIT)`, `RI (RELEASE INIT)`
