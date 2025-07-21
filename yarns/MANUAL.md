@@ -371,12 +371,17 @@ Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer
 
 ### Arpeggiator basics
 - To enable: set desired [active part](#active-part-control), then set [play mode](#play-mode) to `ARPEGGIATOR`
-- `NP (NOTE PRIORITY)` determines how held keys are ordered in the arp chord
+- [Note priority](#note-priority) determines how held keys are ordered in the arp chord
 - `AD (ARP DIRECTION)` sets the algorithm used to traverse the ordered arp chord
+  1. `LINEAR` moves through each key in order, then returns to the first key
+  1. `BOUNCE` reverses order when reaching first/last key
+  1. `RANDOM` is random
+  1. [`JUMP`](#jump-direction) uses sequencer notes to traverse the arp chord
+  1. [`GRID`](#grid-direction) uses sequencer notes to traverse two-dimensional grids created from the arp chord
 - Combine these to create traditional and novel arp behaviors:
-  - "Up": set `NOTE PRIORITY` to `LOW` and `ARP DIRECTION` to `LINEAR`
-  - "Up-down": set `NOTE PRIORITY` to `LOW` and `ARP DIRECTION` to `BOUNCE`
-  - "Played order": set `NOTE PRIORITY` to `FIRST` and `ARP DIRECTION` to `LINEAR`
+  - "Up": set note priority to `LOW` and arp direction to `LINEAR`
+  - "Up-down": set note priority to `LOW` and arp direction to `BOUNCE`
+  - "Played order": set note priority to `FIRST` and arp direction to `LINEAR`
 
 ### Arpeggiator rhythm settings
 
@@ -460,7 +465,7 @@ New and improved values for `VO (VOICING)` setting:
   - Steal from the highest-priority existing note IFF the incoming note has higher priority
   - Reassigns voices to unvoiced notes on release
 
-#### Note priority changes
+#### Note priority
 - Added new `FIRST` (oldest) setting to `NP (NOTE PRIORITY)`
 - Voice allocation respects note priority where applicable
 - [Arpeggiator respects note priority](#arpeggiator-basics)
