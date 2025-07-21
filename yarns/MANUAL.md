@@ -378,10 +378,10 @@ Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer
   1. `RANDOM` is random
   1. [`JUMP`](#jump-direction) uses sequencer notes to traverse the arp chord
   1. [`GRID`](#grid-direction) uses sequencer notes to traverse two-dimensional grids created from the arp chord
-- Combine these to create traditional and novel arp behaviors:
+- Combine note priority and arp direction to achieve more arp behaviors:
   - "Up": set note priority to `LOW` and arp direction to `LINEAR`
   - "Up-down": set note priority to `LOW` and arp direction to `BOUNCE`
-  - "Played order": set note priority to `FIRST` and arp direction to `LINEAR`
+  - "Reverse played order": set note priority to `LAST` and arp direction to `LINEAR`
 
 ### Arpeggiator rhythm settings
 
