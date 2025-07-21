@@ -382,6 +382,7 @@ Part setting `SI (SEQ INPUT RESPONSE)` sets the response of the part's sequencer
   - "Up": set note priority to `LOW` and arp direction to `LINEAR`
   - "Up-down": set note priority to `LOW` and arp direction to `BOUNCE`
   - "Reverse played order": set note priority to `LAST` and arp direction to `LINEAR`
+- Use [hold function](#hold-function) to latch an arp chord 
 
 ### Arpeggiator rhythm settings
 
