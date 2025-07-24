@@ -186,11 +186,11 @@ New global setting `CC (CONTROL CHANGE MODE)` sets how a CC's value is interpret
 ### Hold function
 
 #### How the hold function works
-- The hold function is a generalization of the original firmware's panel-controlled latch and pedal-controlled sustain
-- Hold function is per-part, as opposed to original firmware's global latch/sustain
+- The hold function is a generalization of the original firmware's panel-controlled arpeggiator latch and pedal-controlled key sustain
+- The hold function is per-part, versus original firmware's global latch/sustain
 - The hold function is controllable by both pedal CC and panel interface
-  - Pedal: send MIDI CC 64 to a part channel to activate or deactivate the part's hold function
-  - Panel: hold **REC button** (while not recording a sequence) to manually toggle whether the [active part](#active-part-control)'s hold function is active
+  - Pedal: send MIDI CC 64 to a part channel to activate or deactivate the hold function for the receiving part(s)
+  - Panel: hold **REC button** (while not recording a sequence) to toggle whether the hold function is active for the [active part](#active-part-control)
 
 #### Hold mode
 New part setting `HM (HOLD PEDAL MODE)` sets how the part responds to MIDI key-releases and the state of the hold function:
