@@ -134,7 +134,7 @@ void Part::AllocateVoices(Voice* voice, uint8_t num_voices, bool polychain) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i] = voice + i;
   }
-  poly_allocator_.Clear();
+  poly_allocator_.Reset();
   poly_allocator_.set_size(num_voices_ * (polychain ? 2 : 1));
   TouchVoices();
 }
@@ -715,7 +715,7 @@ void Part::ResetAllControllers() {
 }
 
 void Part::AllNotesOff() {
-  poly_allocator_.ClearNotes();
+  poly_allocator_.AllNotesOff();
   mono_allocator_.Clear();
 
   ResetAllKeys();
