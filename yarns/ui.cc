@@ -45,6 +45,7 @@ const uint16_t kRefreshMsec = 900;
 const uint16_t kCrossfadeMsec = kRefreshMsec >> 3;
 const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
 const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
+const uint32_t kFastFade = kRefreshFreq << 1;
 
 /* static */
 const Ui::Command Ui::commands_[] = {
@@ -156,6 +157,8 @@ void Ui::Init() {
   
   push_it_note_ = kC4;
   command_index_ = 0;
+
+  editing_setting_value_ = 0;
   modes_[UI_MODE_MAIN_MENU].incremented_variable = &command_index_;
   modes_[UI_MODE_LOAD_SELECT_PROGRAM].incremented_variable = &program_index_;
   modes_[UI_MODE_SAVE_SELECT_PROGRAM].incremented_variable = &program_index_;
@@ -280,7 +283,7 @@ void Ui::PrintParameterName() {
 }
 
 void Ui::PrintParameterValue() {
-  PrintSettingValue(setting(), active_part_);
+  PrintSettingValue(setting(), active_part_, editing_setting_value_);
 }
 
 void Ui::PrintCommandName() {
@@ -386,7 +389,7 @@ void Ui::PrintStepSequencerStatus() {
     rec_step == recording_part().playing_step()
   ) ? UINT16_MAX : 43690;
   const SequencerStep& step = recording_part().sequencer_settings().step[rec_step];
-  uint16_t fade = step.is_slid() ? kRefreshFreq << 1 : 0;
+  uint16_t fade = step.is_slid() ? kFastFade : 0;
 
   if (recording_mode_is_displaying_pitch_) {
     if (step.is_rest()) display_.Print("RS", "RS", brightness, fade);
@@ -466,13 +469,17 @@ void Ui::SplashPartString(const char* label, uint8_t part) {
 }
 
 void Ui::PrintSettingValue(const Setting& s, uint8_t part) {
-  char prefix = setting_defs.Print(
-    s, multi.GetSettingValue(s, part), buffer_
-  );
-  display_.Print(
-    buffer_, buffer_,
-    UINT16_MAX, GetFadeForSetting(s), prefix
-  );
+  PrintSettingValue(s, part, multi.GetSettingValue(s, part));
+}
+
+void Ui::PrintSettingValue(const Setting& s, uint8_t part, int16_t value) {
+  char prefix = setting_defs.Print(s, value, buffer_);
+  uint16_t fade = GetFadeForSetting(s);
+  // Add fast fade for unapplied values
+  if (value != multi.GetSettingValue(s, part)) {
+    fade = kFastFade;
+  }
+  display_.Print(buffer_, buffer_, UINT16_MAX, fade, prefix);
 }
 
 void Ui::SplashSetting(const Setting& s, uint8_t part) {
@@ -515,6 +522,11 @@ void Ui::OnLongClick(const Event& e) {
 }
 
 void Ui::OnClick(const Event& e) {
+  // Apply editing value for deferred settings when leaving edit mode
+  if (mode_ == UI_MODE_PARAMETER_EDIT && IsDeferredSetting(setting())) {
+    multi.ApplySetting(setting(), active_part_, editing_setting_value_);
+  }
+
   if (&setting() == &setting_defs.get(SETTING_MENU_SETUP)) {
     current_menu_ = &setup_menu_;
     return;
@@ -527,7 +539,13 @@ void Ui::OnClick(const Event& e) {
   } else if (current_menu_ != &live_menu_ && mode_ == UI_MODE_PARAMETER_EDIT) {
     current_menu_ = &live_menu_;
   }
-  mode_ = modes_[mode_].next_mode; 
+
+  mode_ = modes_[mode_].next_mode;
+
+  // Initialize editing value when entering edit mode
+  if (mode_ == UI_MODE_PARAMETER_EDIT) {
+    editing_setting_value_ = multi.GetSettingValue(setting(), active_part_);
+  }
 }
 
 void Ui::OnIncrement(const Event& e) {
@@ -630,9 +648,16 @@ void Ui::OnIncrementParameterSelect(const Event& e) {
 }
 
 void Ui::OnIncrementParameterEdit(const stmlib::Event& e) {
-  int16_t value = multi.GetSettingValue(setting(), active_part_);
-  value += e.data;
-  multi.ApplySetting(setting(), active_part_, value);
+  editing_setting_value_ += e.data;
+
+  // Apply dynamic min/max constraints
+  SettingRange setting_range = multi.GetSettingRange(setting(), active_part_);
+  CONSTRAIN(editing_setting_value_, setting_range.min, setting_range.max);
+
+  if (IsDeferredSetting(setting())) return;
+
+  // Apply immediately
+  multi.ApplySetting(setting(), active_part_, editing_setting_value_);
 }
 
 void Ui::OnIncrementCalibrationAdjustment(const stmlib::Event& e) {

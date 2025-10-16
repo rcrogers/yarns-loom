@@ -145,6 +145,10 @@ class Ui {
   }
   inline uint8_t calibration_voice() const { return calibration_voice_; }
   inline uint8_t calibration_note() const { return calibration_note_; }
+
+  inline bool IsDeferredSetting(const Setting& s) const {
+    return &s == &setting_defs.get(SETTING_LAYOUT);
+  }
   
   void StartFactoryTesting() {
     mode_ = UI_MODE_FACTORY_TESTING;
@@ -199,6 +203,7 @@ class Ui {
   void PrintParameterName();
   void PrintParameterValue();
   void PrintSettingValue(const Setting& s, uint8_t part);
+  void PrintSettingValue(const Setting& s, uint8_t part, int16_t value);
   void PrintCommandName();
   void PrintProgramNumber();
   void PrintCalibrationVoiceNumber();
@@ -285,6 +290,8 @@ class Ui {
   bool push_it_;
   int16_t push_it_note_;
   bool recording_mode_is_displaying_pitch_;
+
+  int16_t editing_setting_value_;
   
   UiFactoryTestingDisplay factory_testing_display_;
   int8_t factory_testing_number_;
