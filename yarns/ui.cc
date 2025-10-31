@@ -650,9 +650,7 @@ void Ui::OnIncrementParameterSelect(const Event& e) {
 void Ui::OnIncrementParameterEdit(const stmlib::Event& e) {
   editing_setting_value_ += e.data;
 
-  // Apply dynamic min/max constraints
-  SettingRange setting_range = multi.GetSettingRange(setting(), active_part_);
-  CONSTRAIN(editing_setting_value_, setting_range.min, setting_range.max);
+  editing_setting_value_ = multi.ClampToSettingRange(setting(), active_part_, editing_setting_value_);
 
   if (IsDeferredSetting(setting())) return;
 

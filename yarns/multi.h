@@ -80,6 +80,7 @@ struct SettingRange {
     this->min = min;
     this->max = max;
   }
+  int16_t delta() const { return max - min + 1; }
   int16_t min;
   int16_t max;
 };
@@ -331,6 +332,7 @@ class Multi {
 
   SettingRange GetControllableRange(CCRouting cc) const;
   SettingRange GetSettingRange(const Setting& setting, uint8_t part) const;
+  int16_t ClampToSettingRange(const Setting& setting, uint8_t part, int16_t value) const;
 
   void ApplySetting(SettingIndex setting, uint8_t part, int16_t raw_value) {
     ApplySetting(setting_defs.get(setting), part, raw_value);

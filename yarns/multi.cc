@@ -943,8 +943,7 @@ int16_t Multi::UpdateController(CCRouting cc, uint8_t value_7bits) {
       ? SaturatingIncrement(controller_values[controller], relative_increment)
       : value_7bits; // CONTROL_CHANGE_MODE_ABSOLUTE
     CONSTRAIN(controller_values[controller], 0, 127);
-    uint8_t delta = range.max - range.min + 1;
-    scaled_value = delta * controller_values[controller] >> 7;
+    scaled_value = range.delta() * controller_values[controller] >> 7;
     scaled_value += range.min;
   }
   return scaled_value;
@@ -1035,7 +1034,7 @@ uint8_t Multi::ScaleSettingToController(SettingRange range, int16_t scaled_value
   int32_t value =
     // Add 0.5 to scaled_value to place it in the middle of the range of absolute knob values allotted to this setting value
     (((scaled_value << 1) + 1 - (range.min << 1)) << 6) /
-    (range.max - range.min + 1);
+    range.delta();
   return static_cast<uint8_t>(value);
 }
 
@@ -1116,10 +1115,14 @@ SettingRange Multi::GetSettingRange(const Setting& setting, uint8_t part) const 
   return SettingRange(min_value, max_value);
 }
 
+int16_t Multi::ClampToSettingRange(const Setting& setting, uint8_t part, int16_t scaled_value) const {
+  SettingRange range = GetSettingRange(setting, part);
+  CONSTRAIN(scaled_value, range.min, range.max);
+  return scaled_value;
+}
+
 void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t scaled_value) {
-  // Apply dynamic min/max as needed
-  SettingRange setting_range = GetSettingRange(setting, part);
-  CONSTRAIN(scaled_value, setting_range.min, setting_range.max);
+  scaled_value = ClampToSettingRange(setting, part, scaled_value);
 
   int16_t prev_scaled_value = GetSettingValue(setting, part);
   if (prev_scaled_value == scaled_value) return;
