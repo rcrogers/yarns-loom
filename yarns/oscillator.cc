@@ -449,9 +449,14 @@ void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples)
 void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff;
-    this_sample = Interpolate824(wav_sine, phase);
-    this_sample = this_sample * timbre >> 15;
-    this_sample = Interpolate88(wav_sizzle, this_sample + 32768);
+    int32_t sine = Interpolate824(wav_sine, phase);
+    int32_t scaled_sine = sine * timbre;
+
+    int16_t dither = phase ^ (phase >> 16);
+    int16_t dither_14 = dither >> (16 - 14);
+    int32_t dithered_scaled_sine = (scaled_sine + dither_14) >> 15;
+
+    this_sample = Interpolate88(wav_sizzle, dithered_scaled_sine + 0x8000);
   )
 }
 
