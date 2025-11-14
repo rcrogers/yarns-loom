@@ -35,6 +35,8 @@
 
 namespace yarns {
 
+const uint8_t kNumLeds = 4;
+
 class ChannelLeds {
  public:
   ChannelLeds() { }
@@ -42,22 +44,23 @@ class ChannelLeds {
   
   void Init();
   
-  void set_channel(uint8_t channel, uint8_t brightness) {
-    brightness_[channel] = brightness;
-  }
-  
-  void Write(const uint8_t* brightness) {
-    std::copy(&brightness[0], &brightness[4], &brightness_[0]);
+  void SetBrightness(const uint8_t* brightness) {
+    std::copy(&brightness[0], &brightness[kNumLeds], &brightness_[0]);
   }
   
   void Write();
   
  private:
-  uint8_t pwm_counter_;
-  uint8_t brightness_[4];
+  int8_t bcm_bit_pos_;
+  int8_t bcm_bit_pos_increment_;
+  uint8_t bcm_bit_countdown_;
+
+  uint8_t brightness_[kNumLeds];
   
   DISALLOW_COPY_AND_ASSIGN(ChannelLeds);
 };
+
+extern ChannelLeds channel_leds;
 
 }  // namespace yarns
 

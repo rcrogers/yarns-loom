@@ -116,7 +116,7 @@ characters = {
   'u': 'edc',
   'v': 'en',
   'w': 'enlc',
-  'x': 'gnjl',
+  'x': 'gjln',
   'y': 'gkbcd',
   'z': 'pnd',
   
@@ -206,11 +206,12 @@ characters = {
   '\x9E': 'efa',
   '\x9F': 'fab',
 
+  # Filter types
   '\xA0': low_pass,
   '\xA1': high_pass,
   '\xA2': notch,
 
-  # CZ
+  # CZ waveforms
   '\xB0': CZ + low_pass,
   '\xB1': CZ + peaking,
   '\xB2': CZ + band_pass,

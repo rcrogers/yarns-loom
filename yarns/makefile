@@ -47,6 +47,7 @@ TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
 
 include stmlib/makefile.inc
 
+MAKEFLAGS += -j8
 
 # Rules for building the SysEx update file.
 SYSEX_FLAGS    = --page_size=512 --device_id=11

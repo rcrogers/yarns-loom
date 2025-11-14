@@ -1,40 +1,37 @@
 # Loom
-An alternative firmware for the [Yarns MIDI interface by Mutable Instruments](https://mutable-instruments.net/modules/yarns/), with an emphasis on dynamic voicing, open-ended musical composition, and flexible control.
+An alternate firmware for the [Yarns synthesizer module&nbsp;↗](https://mutable-instruments.net/modules/yarns/), aimed at making Yarns more powerful and user-friendly.
 
 ### Features
-- [Looper-style sequencer with real-time recording and overdubbing](yarns/MANUAL.md#looper-style-sequencing-mode-with-real-time-recording)
-- [Braids-inspired oscillator waveforms with timbre modulation: 10 synthesis models, with over 30 variants](yarns/MANUAL.md#oscillator-controls)
-- [ADSR envelopes with velocity-sensitive segments and amplitude](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
-- [Tremolo with variable depth and shape](yarns/MANUAL.md#amplitude-dynamics-envelope-and-tremolo)
-- [New layouts, including a layout that features a 3-voice paraphonic part](yarns/MANUAL.md#layouts)
-- [New and improved algorithms for polyphonic dispatch](yarns/MANUAL.md#voicing-allocation-methods)
-- [New ways to use the hold pedal, including latch, sostenuto, and note filtering](yarns/MANUAL.md#hold-pedal)
-- [Velocity filtering](yarns/MANUAL.md#event-routing-filtering-and-transformation)
-- [Input octave switch](yarns/MANUAL.md#event-routing-filtering-and-transformation)
-- [Sequencer-driven arpeggiator](yarns/MANUAL.md#sequencer-driven-arpeggiator)
-- [More options for how a sequence interacts with keyboard input](yarns/MANUAL.md#event-routing-filtering-and-transformation)
-- [Global control and display of the active part and its play mode](yarns/MANUAL.md#global-control-and-display-of-the-active-part-and-its-play-mode)
-- [Expanded CC support: recording control, macro functions, display of received values](yarns/MANUAL.md#expanded-support-for-control-change-events)
-- [Check the manual for more!](yarns/MANUAL.md)
+- Cue sequencer with MIDI Song Position&nbsp;[→](yarns/MANUAL.md#master-clock-controls)
+- Looper-style sequencer with real-time polyphonic recording&nbsp;[→](yarns/MANUAL.md#loop-sequencer)
+- Sequencer-programmed arpeggiator movement&nbsp;[→](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
+- 26 oscillator shapes with timbre/amplitude mod matrix&nbsp;[→](yarns/MANUAL.md#oscillator-timbre)
+- ADSR envelopes with velocity shaping&nbsp;[→](yarns/MANUAL.md#envelope)
+- Expanded support for MIDI CCs&nbsp;[→](yarns/MANUAL.md#control-change-messages)
+- New paraphonic layouts with 4-voice paraphonic part and 6 overall voices&nbsp;[→](yarns/MANUAL.md#new-layouts)
+- New polyphonic voicing algorithms&nbsp;[→](yarns/MANUAL.md#polyphonic-voice-allocation)
+- Hold pedal can be used for latching, sostenuto, and more&nbsp;[→](yarns/MANUAL.md#hold-function)
+  - **[Check the manual for more!](yarns/MANUAL.md)**
 
 ### Caveats
 - Installation of this firmware is at your own risk
-- Presets saved in this firmware cannot be loaded with the manufacturer's firmware, and vice versa.  Users are advised to run `INIT` from the main menu after switching firmware
-- Some changes are not documented in the changelog
-- Some of Yarns' stock capabilities have been downgraded to accomodate new features (e.g. the sequencer holds 30 notes instead of the original 64)
+- Presets saved in this firmware will not load with the manufacturer's firmware, and vice versa
+  - Run `INIT` from the main menu after switching firmware
+- Some of Yarns' original features have been downgraded to make room for new features
+  - E.g. the sequencer holds 30 notes instead of the original 64
 
 ### Installation
-1. Download `yarns.syx` from the [latest release's assets](https://github.com/rcrogers/mutable-instruments-eurorack/releases/latest)
-2. [Follow the manufacturer's instructions for installing new firmware](https://mutable-instruments.net/modules/yarns/manual/#firmware)
+1. Download `yarns-loom.syx` from the [latest release's assets](https://github.com/rcrogers/yarns-loom/releases/latest)
+2. Follow the [instructions for installing Yarns firmware&nbsp;↗](https://pichenettes.github.io/mutable-instruments-documentation/modules/yarns/manual/#firmware)
 
 ### Community
-- [Discussion thread on the Mutable Instruments forums](https://forum.mutable-instruments.net/t/loom-alternative-firmware-for-yarns-looper-paraphony-and-more/17723)
-- [Support on Patreon](https://www.patreon.com/rcrogers)
-- Forks, pull requests, feature ideas, and bug reports are welcome (though I can't guarantee a timely response)
+- [Discussion thread on ModWiggler&nbsp;↗](https://www.modwiggler.com/forum/viewtopic.php?t=255378)
+- GitHub: feel free to create pull requests, feature ideas, and bug reports
 - License: MIT License
 
-### Acknowledgements
-- Thanks to [forum user `bloc`](https://forum.mutable-instruments.net/t/loom-alternative-firmware-for-yarns-looper-paraphony-and-more/17723/3) for beta testing, bug reports, support, and many great ideas
-- Thanks to [forum user `Airell`](https://forum.mutable-instruments.net/t/yarns-firmware-wish-list/8051/39) for the idea of per-part latching
-- Thanks to [forum user `sdejesus13`](https://forum.mutable-instruments.net/t/yarns-firmware-wish-list/8051/24) for encouraging the exploration of clock-based recording
-- And above all, thanks to Émilie Gillet for making a great open-source module!
+### Kudos
+- Thanks to Dylan Bolink and Fabio Bernardi for beta testing, bug reports, and great ideas
+- Thanks to Mutable forum user Airell for the idea of per-part latching
+- Thanks to Mutable forum user sdejesus13 for encouraging the exploration of clock-based recording
+- Thanks to John Chowning, Barry Truax, and Bernie Hutchins for notes on FM synthesis
+- And above all, thanks to Mutable Instruments for making incredible open-source modules!

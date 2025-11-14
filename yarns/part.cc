@@ -30,9 +30,11 @@
 #include "yarns/part.h"
 
 #include <algorithm>
+#include <stdlib.h>
 
 #include "stmlib/midi/midi.h"
 #include "stmlib/utils/random.h"
+#include "stmlib/utils/dsp.h"
 
 #include "yarns/just_intonation_processor.h"
 #include "yarns/midi_handler.h"
@@ -74,8 +76,9 @@ void Part::Init() {
   midi_.transpose_octaves = 0;
 
   voicing_.allocation_priority = NOTE_STACK_PRIORITY_LAST;
-  voicing_.allocation_mode = VOICE_ALLOCATION_MODE_MONO;
-  voicing_.legato_mode = LEGATO_MODE_OFF;
+  voicing_.allocation_mode = POLY_MODE_OFF;
+  voicing_.legato_retrigger = true;
+  voicing_.portamento_legato_only = false;
   voicing_.portamento = 0;
   voicing_.pitch_bend_range = 2;
   voicing_.vibrato_range = 1;
@@ -113,7 +116,7 @@ void Part::Init() {
   seq_.gate_length = 3;
   seq_.arp_range = 0;
   seq_.arp_direction = 0;
-  seq_.arp_pattern = 1;
+  seq_.arp_pattern = LUT_ARPEGGIATOR_PATTERNS_SIZE - 1; // Pattern 0
   midi_.input_response = SEQUENCER_INPUT_RESPONSE_TRANSPOSE;
   midi_.play_mode = PLAY_MODE_MANUAL;
   seq_.clock_quantization = 0;
@@ -131,7 +134,7 @@ void Part::AllocateVoices(Voice* voice, uint8_t num_voices, bool polychain) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i] = voice + i;
   }
-  poly_allocator_.Clear();
+  poly_allocator_.Reset();
   poly_allocator_.set_size(num_voices_ * (polychain ? 2 : 1));
   TouchVoices();
 }
@@ -141,7 +144,7 @@ uint8_t Part::HeldKeysNoteOn(HeldKeys &keys, uint8_t pitch, uint8_t velocity) {
   return keys.stack.NoteOn(pitch, velocity);
 }
 
-bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
+void Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
   bool sent_from_step_editor = channel & 0x80;
   
   // scale velocity to compensate for its min/max range, so that voices using
@@ -149,7 +152,6 @@ bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
   velocity = ((velocity - midi_.min_velocity) << 7) / (midi_.max_velocity - midi_.min_velocity + 1);
 
   if (seq_recording_) {
-    note = ArpUndoTransposeInputPitch(note);
     if (!looped() && !sent_from_step_editor) {
       RecordStep(SequencerStep(note, velocity));
     } else if (looped()) {
@@ -164,22 +166,19 @@ bool Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
       InternalNoteOn(note, velocity);
     }
   }
-
-  return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
 }
 
-bool Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
+void Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
   bool sent_from_step_editor = channel & 0x80;
 
-  uint8_t recording_pitch = ArpUndoTransposeInputPitch(note);
-  uint8_t pressed_key_index = manual_keys_.stack.Find(recording_pitch);
+  uint8_t pressed_key_index = manual_keys_.stack.Find(note);
   if (seq_recording_ && looped() && looper_is_recording(pressed_key_index)) {
     // Directly mapping pitch to looper notes would be cleaner, but requires a
     // data structure more sophisticated than an array
     LooperRecordNoteOff(pressed_key_index);
     // Sustain is respected only if it was applied before recording
-    if (!manual_keys_.IsSustained(recording_pitch)) {
-      manual_keys_.stack.NoteOff(recording_pitch);
+    if (!manual_keys_.IsSustained(note)) {
+      manual_keys_.stack.NoteOff(note);
     }
   } else if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
     arp_keys_.NoteOff(note, respect_sustain);
@@ -189,7 +188,6 @@ bool Part::NoteOff(uint8_t channel, uint8_t note, bool respect_sustain) {
       InternalNoteOff(note);
     }
   }
-  return midi_.out_mode == MIDI_OUT_MODE_THRU && !polychained_;
 }
 
 void Part::HeldKeysSustainOn(HeldKeys &keys) {
@@ -250,7 +248,7 @@ void Part::ResetAllKeys() {
   ControlChange(0, kCCHoldPedal, hold_pedal_engaged_ ? 127 : 0);
 }
 
-bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
+void Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
   switch (controller) {
     case kCCBreathController:
     case kCCFootPedalMsb:
@@ -264,16 +262,16 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       break;
       
     case kCCOmniModeOn:
-      midi_.channel = 0x10;
+      midi_.channel = kMidiChannelOmni;
       break;
       
     case kCCMonoModeOn:
-      voicing_.allocation_mode = VOICE_ALLOCATION_MODE_MONO;
+      voicing_.allocation_mode = POLY_MODE_OFF;
       TouchVoiceAllocation();
       break;
       
     case kCCPolyModeOn:
-      voicing_.allocation_mode = VOICE_ALLOCATION_MODE_POLY;
+      voicing_.allocation_mode = POLY_MODE_STEAL_RELEASE_SILENT;
       TouchVoiceAllocation();
       break;
       
@@ -299,14 +297,7 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       }
       break;
 
-    case 0x73:
-      if (looped()) {
-        looper_.pos_offset = value << 9;
-        ui.SplashOn(SPLASH_LOOPER_PHASE_OFFSET);
-      }
-      break;
-    
-    case 0x78:
+    case 0x78: // All Sound Off
       AllNotesOff();
       break;
       
@@ -314,29 +305,25 @@ bool Part::ControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
       ResetAllControllers();
       break;
       
-    case 0x7b:
+    case 0x7b: // All Notes Off
       AllNotesOff();
       break;
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
+void Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->PitchBend(pitch_bend);
   }
   
   if (seq_recording_ &&
       (pitch_bend > 8192 + 2048 || pitch_bend < 8192 - 2048)) {
-    // Set slide flag
-    seq_.step[seq_rec_step_].data[1] |= 0x80;
+    seq_.step[seq_rec_step_].set_slid(true);
   }
-  
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
-  if (voicing_.allocation_mode != VOICE_ALLOCATION_MODE_MONO) {
+void Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
+  if (voicing_.allocation_mode != POLY_MODE_OFF) {
     uint8_t voice_index = \
         uses_poly_allocator() ? \
         poly_allocator_.Find(note) : \
@@ -347,52 +334,82 @@ bool Part::Aftertouch(uint8_t channel, uint8_t note, uint8_t velocity) {
   } else {
     Aftertouch(channel, velocity);
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
-bool Part::Aftertouch(uint8_t channel, uint8_t velocity) {
+void Part::Aftertouch(uint8_t channel, uint8_t velocity) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i]->Aftertouch(velocity);
   }
-  return midi_.out_mode != MIDI_OUT_MODE_OFF;
 }
 
 void Part::Reset() {
-  Stop();
-  for (uint8_t i = 0; i < num_voices_; ++i) {
-    VoiceNoteOff(i);
-    voice_[i]->ResetAllControllers();
+  AllNotesOff();
+  ResetAllControllers();
+}
+
+bool Part::current_step_has_swing() const {
+  if (!multi.settings().clock_swing) return false;
+
+  uint32_t step_counter = ticks_to_steps(multi.tick_counter());
+  bool swing_even = multi.settings().clock_swing >= 0;
+  bool step_even = step_counter % 2 == 1;
+  return swing_even == step_even;
+}
+
+void Part::ClockStep() {
+  step_counter_ = ticks_to_steps(multi.tick_counter());
+  // Reset sequencer-driven arpeggiator (step or loop), if needed
+  //
+  // NB: when using looper, this produces predictable changes in the arp
+  // output (i.e., resets the arp at a predictable point in the loop) IFF the
+  // looper's LFO is locked onto the clock's phase and frequency. Clocking
+  // changes may break the lock, and briefly cause mistimed arp resets
+  if (arp_should_reset_on_step(step_counter_)) arpeggiator_.Reset();
+
+  // The rest of the method is only for the step sequencer and/or arpeggiator
+  if (!doing_stepped_stuff()) return;
+
+  SequencerArpeggiatorResult result = BuildNextStepResult(step_counter_);
+  arpeggiator_ = result.arpeggiator;
+  if (result.note.has_note()) {
+    uint8_t pitch = result.note.note();
+    uint8_t velocity = result.note.velocity();
+    GeneratedNoteOff(pitch); // Simulate a human retriggering a key
+    if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
+      InternalNoteOn(pitch, velocity, result.note.is_slid());
+    }
   }
 }
 
-void Part::Clock() { // From Multi::ClockFast
-  if (looper_in_use() || midi_.play_mode == PLAY_MODE_MANUAL) return;
+SequencerArpeggiatorResult Part::BuildNextStepResult(uint32_t step_counter) const {
+  // In case of early return, the arp does not advance, and the note is a REST
+  SequencerArpeggiatorResult result = {
+    arpeggiator_, SequencerStep(SEQUENCER_STEP_REST, 0),
+  };
 
-  uint16_t ticks_per_step = lut_clock_ratio_ticks[seq_.clock_division];
-
-  if (multi.tick_counter() % ticks_per_step == 0) { // New step
-    uint32_t step_counter = multi.tick_counter() / ticks_per_step;
-    SequencerStep* step_ptr = NULL;
-    SequencerStep step;
-    if (seq_.num_steps) {
-      seq_step_ = step_counter % seq_.num_steps;
-      step = BuildSeqStep(seq_step_);
-      step_ptr = &step;
-    }
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      arp_ = BuildArpState(step_ptr);
-      step_ptr = &arp_.step;
-    }
-    if (step_ptr && step_ptr->has_note()) {
-      uint8_t pitch = step_ptr->note();
-      uint8_t velocity = step_ptr->velocity();
-      GeneratedNoteOff(pitch); // Simulate a human retriggering a key
-      if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
-        InternalNoteOn(pitch, velocity, step_ptr->is_slid());
-      }
-    }
+  if (seq_.euclidean_length != 0) {
+    // If euclidean rhythm is enabled, advance euclidean state
+    uint32_t pattern_mask = 1 << (step_counter % seq_.euclidean_length);
+    // Read euclidean pattern from ROM.
+    uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) << 5;
+    uint32_t pattern = lut_euclidean[offset + seq_.euclidean_fill];
+    if (!(pattern_mask & pattern)) return result; // If skipping this beat, early return
   }
 
+  // Advance sequencer and arpeggiator state
+  if (seq_.num_steps) {
+    result.note = BuildSeqStep(step_counter % seq_.num_steps);
+  }
+  if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+    // If seq-driven and there are no steps, early return
+    if (seq_driven_arp() && !seq_.num_steps) return result;
+    if (arp_should_reset_on_step(step_counter)) result.arpeggiator.Reset();
+    result = result.arpeggiator.BuildNextResult(*this, arp_keys_, step_counter, result.note);
+  }
+  return result;
+}
+
+void Part::ClockStepGateEndings() {
   for (uint8_t v = 0; v < num_voices_; ++v) {
     if (gate_length_counter_[v]) { // Gate hasn't ended yet
       --gate_length_counter_[v];
@@ -400,20 +417,11 @@ void Part::Clock() { // From Multi::ClockFast
     }
     // Peek at next step to see if it's a continuation
     // If more than one voice has a step ending, the peek is redundant
-    SequencerStep* next_step_ptr = NULL;
-    SequencerStep next_step;
-    if (seq_.num_steps) {
-      next_step = BuildSeqStep((seq_step_ + 1) % seq_.num_steps);
-      next_step_ptr = &next_step;
-    }
-    if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
-      next_step = BuildArpState(next_step_ptr).step;
-      next_step_ptr = &next_step;
-    }
-    if (next_step_ptr && next_step_ptr->is_continuation()) {
+    SequencerStep next_step = BuildNextStepResult(step_counter_ + 1).note;
+    if (next_step.is_continuation()) {
       // The next step contains a "sustain" message; or a slid note. Extends
       // the duration of the current note.
-      gate_length_counter_[v] += ticks_per_step;
+      gate_length_counter_[v] += PPQN();
     } else if (active_note_[v] != VOICE_ALLOCATION_NOT_FOUND) {
       GeneratedNoteOff(active_note_[v]);
     }
@@ -421,10 +429,41 @@ void Part::Clock() { // From Multi::ClockFast
 }
 
 void Part::Start() {
-  arp_.ResetKey();
-  arp_.step_index = 0;
-  
-  looper_.Rewind();
+  arpeggiator_.Reset();
+
+  // Fast-forward the sequencer/arpeggiator state to the current song position.
+  // If using the sequencer-driven arpeggiator, produces the cumulative arp
+  // state based on any held keys
+  if (looper_in_use()) {
+    // First, move to the looper's start position, without side effects
+    looper_.JumpToTick(0, NULL, NULL);
+
+    // Don't generate side effects for negative ticks
+    int32_t ticks = std::max(static_cast<int32_t>(0), multi.tick_counter(1));
+
+    NoteOnFn on_fn = midi_.play_mode == PLAY_MODE_ARPEGGIATOR ? &Part::AdvanceArpForLooperNoteOnWithoutReturn : NULL;
+    div_t cycles = std::div(static_cast<uint32_t>(ticks), looper_.period_ticks());
+    for (uint16_t i = 0; i <= cycles.quot; i++) {
+      if (i % sequence_repeats_per_arp_reset() == 0) arpeggiator_.Reset();
+
+      uint16_t cycle_ticks = i < cycles.quot ? looper_.period_ticks() : cycles.rem;
+      if (!cycle_ticks) continue; // Remainder is zero
+
+      looper_.JumpToTick(cycle_ticks, on_fn, NULL);
+    }
+  } else if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+    // The only state produced by the step sequencer is the arp
+    int16_t last_step_triggered = seq_.step_offset + DIV_FLOOR(multi.tick_counter(), PPQN());
+    uint16_t arp_reset_steps = steps_per_arp_reset();
+    // NOOP if the last step triggered is less than 0 -- can't predict arp states before 0
+    for (uint16_t step = 0; step <= last_step_triggered; step++) {
+      if (arp_reset_steps && step % arp_reset_steps == 0) arpeggiator_.Reset();
+      SequencerArpeggiatorResult result = BuildNextStepResult(step);
+      arpeggiator_ = result.arpeggiator;
+    }
+  }
+
+  // Reset state for notes being actively output or recorded
   std::fill(
     &looper_note_recording_pressed_key_[0],
     &looper_note_recording_pressed_key_[kNoteStackMapping],
@@ -440,13 +479,7 @@ void Part::Start() {
     &output_pitch_for_looper_note_[kNoteStackMapping],
     looper::kNullIndex
   );
-
   generated_notes_.Clear();
-}
-
-void Part::Stop() {
-  StopSequencerArpeggiatorNotes();
-  AllNotesOff();
 }
 
 void Part::StopRecording() {
@@ -572,175 +605,106 @@ const SequencerStep Part::BuildSeqStep(uint8_t step_index) const {
     // note = first note.
     // But this is not the case when we are playing several sequences at the
     // same time. In this case, we use root note = 60.
-    int8_t root_note = !has_siblings_ ? seq_.first_note() : 60;
+    int8_t root_note = !has_siblings_ ? seq_.first_note() : kC4;
     note = ApplySequencerInputResponse(note, root_note);
   }
   return SequencerStep((0x80 & step.data[0]) | (0x7f & note), step.data[1]);
 }
 
-const ArpeggiatorState Part::BuildArpState(SequencerStep* seq_step_ptr) const {
-  SequencerStep seq_step;
-  ArpeggiatorState next = arp_;
-  // In case the pattern doesn't hit a note, the default output step is a REST
-  next.step.data[0] = SEQUENCER_STEP_REST;
+void Part::RecordStep(const SequencerStep& step) {
+  if (!seq_recording_) return;
 
-  // Advance pattern
-  uint32_t pattern_mask;
-  uint32_t pattern;
-  uint8_t pattern_length;
-  bool hit = false;
-  if (seq_driven_arp()) {
-    pattern_length = seq_.num_steps;
-    if (!seq_step_ptr) return next;
-    seq_step = *seq_step_ptr;
-    if (seq_step.has_note()) {
-      hit = true;
-    } else { // Here, the output step can also be a TIE
-      next.step.data[0] = seq_step.data[0];
-    }
-  } else {
-    // Build a dummy input step for ROTATE/SUBROTATE
-    seq_step.data[0] = kC4 + 1 + next.step_index;
-    seq_step.data[1] = 0x7f; // Full velocity
+  if (seq_overwrite_) { DeleteRecording(); }
+  SequencerStep* target = &seq_.step[seq_rec_step_];
+  target->data[0] = step.data[0];
+  target->data[1] |= step.data[1];
+  if (!target->has_note()) target->set_slid(false);
+  ++seq_rec_step_;
+  uint8_t last_step = seq_overdubbing_ ? seq_.num_steps : kNumSteps;
+  // Extend sequence.
+  if (!seq_overdubbing_ && seq_rec_step_ > seq_.num_steps) {
+    seq_.num_steps = seq_rec_step_;
+  }
+  // Wrap to first step.
+  if (seq_rec_step_ >= last_step) {
+    seq_rec_step_ = 0;
+  }
+}
 
-    if (seq_.euclidean_length != 0) {
-      pattern_length = seq_.euclidean_length;
-      pattern_mask = 1 << ((next.step_index + seq_.euclidean_rotate) % seq_.euclidean_length);
-      // Read euclidean pattern from ROM.
-      uint16_t offset = static_cast<uint16_t>(seq_.euclidean_length - 1) << 5;
-      pattern = lut_euclidean[offset + seq_.euclidean_fill];
-      hit = pattern_mask & pattern;
+void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t velocity) {
+  if (!looper_in_use()) return;
+  uint8_t generated_note_index = GeneratedNoteOn(pitch, velocity);
+  if (!generated_note_index) return;
+  looper_note_index_for_generated_note_index_[generated_note_index] = looper_note_index;
+  pitch = ApplySequencerInputResponse(pitch);
+  if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+    // Advance arp
+    SequencerArpeggiatorResult result = AdvanceArpForLooperNoteOn(pitch, velocity);
+    arpeggiator_ = result.arpeggiator;
+    pitch = result.note.note();
+    if (result.note.has_note()) {
+      bool slide = result.note.is_slid();
+      InternalNoteOn(pitch, result.note.velocity(), slide);
+      if (slide) {
+        // NB: currently impossible (see LooperPlayNoteOff)
+        InternalNoteOff(output_pitch_for_looper_note_[looper_note_index]);
+      }
+      output_pitch_for_looper_note_[looper_note_index] = pitch;
+    } //  else if tie, output_pitch_for_looper_note_ is already set to the tied pitch
+  } else if (looper_can_control(pitch)) {
+    InternalNoteOn(pitch, velocity);
+    output_pitch_for_looper_note_[looper_note_index] = pitch;
+  }
+}
+
+void Part::LooperPlayNoteOff(uint8_t looper_note_index, uint8_t pitch) {
+  if (!looper_in_use()) { return; }
+  looper_note_index_for_generated_note_index_[generated_notes_.NoteOff(pitch)] = looper::kNullIndex;
+  pitch = output_pitch_for_looper_note_[looper_note_index];
+  if (pitch == looper::kNullIndex) { return; }
+  output_pitch_for_looper_note_[looper_note_index] = looper::kNullIndex;
+  if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR) {
+    // Peek at next looper note
+    uint8_t next_on_index = looper_.PeekNextOn();
+    const looper::Note& next_on_note = looper_.note_at(next_on_index);
+    SequencerStep next_step = SequencerStep(next_on_note.pitch, next_on_note.velocity);
+    // Predicting whether the looper will have looped around by this next note
+    // (and possibly caused an arp reset) is hard, but fortunately, a reset
+    // does not currently affect whether the arp output note is a
+    // continuation, so we don't care
+    //
+    // Also NB: step_counter_ doesn't matter (see LooperPlayNoteOn)
+    next_step = arpeggiator_.BuildNextResult(*this, arp_keys_, 0, next_step).note;
+    if (next_step.is_continuation()) {
+      // Leave this pitch in the care of the next looper note
+      //
+      // NB: currently impossible, since the arp can only return a
+      // continuation when driven by an input sequencer note that is a
+      // continuation, which the looper can't do
+      output_pitch_for_looper_note_[next_on_index] = pitch;
     } else {
-      pattern_length = 16;
-      pattern_mask = 1 << next.step_index;
-      pattern = lut_arpeggiator_patterns[seq_.arp_pattern - 1];
-      hit = pattern_mask & pattern;
+      InternalNoteOff(pitch);
     }
+  } else if (looper_can_control(pitch)) {
+    InternalNoteOff(pitch);
   }
-  ++next.step_index;
-  if (next.step_index >= pattern_length) {
-    next.step_index = 0;
+}
+
+void Part::LooperRecordNoteOn(uint8_t pressed_key_index) {
+  if (seq_overwrite_) { DeleteRecording(); }
+  const stmlib::NoteEntry& e = manual_keys_.stack.note(pressed_key_index);
+  uint8_t looper_note_index = looper_.RecordNoteOn(e.note, e.velocity & 0x7f);
+  looper_note_recording_pressed_key_[pressed_key_index] = looper_note_index;
+  LooperPlayNoteOn(looper_note_index, e.note, e.velocity & 0x7f);
+}
+
+void Part::LooperRecordNoteOff(uint8_t pressed_key_index) {
+  const stmlib::NoteEntry& e = manual_keys_.stack.note(pressed_key_index);
+  uint8_t looper_note_index = looper_note_recording_pressed_key_[pressed_key_index];
+  if (looper_.RecordNoteOff(looper_note_index)) {
+    LooperPlayNoteOff(looper_note_index, e.note);
   }
-
-  // If the pattern didn't hit a note, return a REST/TIE output step, and don't
-  // advance the arp key
-  if (!hit) { return next; }
-  uint8_t num_keys = arp_keys_.stack.size();
-  if (!num_keys) {
-    next.ResetKey();
-    return next;
-  }
-
-  uint8_t key_with_octave = next.octave * num_keys + next.key_index;
-  // Update arepggiator note/octave counter.
-  switch (seq_.arp_direction) {
-    case ARPEGGIATOR_DIRECTION_RANDOM:
-      {
-        uint16_t random = Random::GetSample();
-        next.octave = random & 0xff;
-        next.key_index = random >> 8;
-      }
-      break;
-    case ARPEGGIATOR_DIRECTION_STEP_ROTATE:
-      {
-        if (seq_step.is_white()) {
-          // Move immediately
-          next.key_increment = 0;
-          next.key_index = key_with_octave + seq_step.white_key_distance_from_middle_c();
-        } else { // If black key
-          int8_t key_offset = seq_step.black_key_distance_from_middle_c();
-          if (abs(key_offset) >= num_keys * (seq_.arp_range + 1)) {
-            // If offset is outside range, rest
-            return next;
-          }
-          next.key_index += key_offset;
-          next.key_increment = -key_offset;
-        }
-        next.octave = next.key_index / num_keys;
-      }
-      break;
-    case ARPEGGIATOR_DIRECTION_STEP_SUBROTATE:
-      {
-        next.key_increment = 0; // These arp directions move before playing the note
-        // Movement instructions derived from sequence step
-        uint8_t limit = seq_step.octave();
-        uint8_t clock;
-        uint8_t spacer;
-        if (seq_step.is_white()) {
-          clock = seq_step.white_key_value();
-          spacer = 1;
-        } else {
-          clock = 1;
-          spacer = seq_step.black_key_value() + 1;
-        }
-        uint8_t old_pos = modulo(key_with_octave / spacer, limit);
-        uint8_t new_pos = modulo(old_pos + clock, limit);
-        int8_t key_without_wrap = key_with_octave + spacer * (new_pos - old_pos);
-        next.octave = key_without_wrap / num_keys;
-        if (next.octave < 0 || next.octave > seq_.arp_range) {
-          // If outside octave range
-          next.key_index = key_with_octave - spacer * old_pos;
-          next.octave = next.key_index / num_keys;
-        } else {
-          next.key_index = key_without_wrap;
-        }
-      }
-      break;
-    default:
-      {
-        if (num_keys == 1 && seq_.arp_range == 0) {
-          // This is a corner case for the Up/down pattern code.
-          // Get it out of the way.
-          next.key_index = 0;
-          next.octave = 0;
-        } else {
-          bool wrapped = true;
-          while (wrapped) {
-            if (next.key_index >= num_keys || next.key_index < 0) {
-              next.octave += next.key_increment;
-              next.key_index = next.key_increment > 0 ? 0 : num_keys - 1;
-            }
-            wrapped = false;
-            if (next.octave > seq_.arp_range || next.octave < 0) {
-              next.octave = next.key_increment > 0 ? 0 : seq_.arp_range;
-              if (seq_.arp_direction == ARPEGGIATOR_DIRECTION_UP_DOWN) {
-                next.key_increment = -next.key_increment;
-                next.key_index = next.key_increment > 0 ? 1 : num_keys - 2;
-                next.octave = next.key_increment > 0 ? 0 : seq_.arp_range;
-                wrapped = true;
-              }
-            }
-          }
-        }
-      }
-      break;
-  }
-  // Invariants
-  next.octave = stmlib::modulo(next.octave, seq_.arp_range + 1);
-  next.key_index = stmlib::modulo(next.key_index, num_keys);
-
-  // Build arpeggiator step
-  const NoteEntry* arpeggio_note = &arp_keys_.stack.played_note(next.key_index);
-  next.key_index += next.key_increment;
-
-  // TODO step type algorithm
-
-  uint8_t note = arpeggio_note->note;
-  uint8_t velocity = arpeggio_note->velocity & 0x7f;
-  if (
-    seq_.arp_direction == ARPEGGIATOR_DIRECTION_STEP_ROTATE ||
-    seq_.arp_direction == ARPEGGIATOR_DIRECTION_STEP_SUBROTATE
-  ) {
-    velocity = (velocity * seq_step.velocity()) >> 7;
-  }
-  note += 12 * next.octave;
-  while (note > 127) {
-    note -= 12;
-  }
-  next.step.data[0] = note;
-  next.step.data[1] = velocity;
-
-  return next;
+  looper_note_recording_pressed_key_[pressed_key_index] = looper::kNullIndex;
 }
 
 void Part::ResetAllControllers() {
@@ -751,7 +715,7 @@ void Part::ResetAllControllers() {
 }
 
 void Part::AllNotesOff() {
-  poly_allocator_.ClearNotes();
+  poly_allocator_.AllNotesOff();
   mono_allocator_.Clear();
 
   ResetAllKeys();
@@ -769,9 +733,10 @@ void Part::AllNotesOff() {
 
 void Part::StopNotesBySustainStatus(HeldKeys &keys, bool sustain_status) {
   for (uint8_t i = 1; i <= keys.stack.max_size(); ++i) {
-    NoteEntry* e = keys.stack.mutable_note(i);
-    if (keys.IsSustained(*e) != sustain_status) continue;
-    NoteOff(tx_channel(), e->note, false);
+    const NoteEntry& e = keys.stack.note(i);
+    if (e.note == NOTE_STACK_FREE_SLOT) continue;
+    if (keys.IsSustained(e) != sustain_status) continue;
+    NoteOff(tx_channel(), e.note, false);
   }
 }
 
@@ -783,7 +748,7 @@ struct DispatchNote {
 void Part::DispatchSortedNotes(bool via_note_off) {
   uint8_t num_notes = mono_allocator_.size();
   uint8_t num_dispatch = num_voices_;
-  bool unison = voicing_.allocation_mode != VOICE_ALLOCATION_MODE_POLY_SORTED;
+  bool unison = voicing_.allocation_mode != POLY_MODE_SORTED;
   if (!unison) { num_dispatch = std::min(num_dispatch, num_notes); }
 
   // Set up structures to track assignments
@@ -827,28 +792,19 @@ void Part::VoiceNoteOn(
   uint8_t voice_index, uint8_t pitch, uint8_t vel,
   bool legato, bool reset_gate_counter
 ) {
-  uint8_t portamento = voicing_.portamento;
-  bool trigger = !legato;
-  switch (voicing_.legato_mode) {
-    case LEGATO_MODE_OFF:
-      trigger = true;
-      break;
-    case LEGATO_MODE_AUTO_PORTAMENTO:
-      if (trigger) { portamento = 0; }
-      break;
-    default:
-      break;
-  }
+  uint8_t portamento = legato || !voicing_.portamento_legato_only ?
+    voicing_.portamento : 0;
+  bool trigger = !legato || voicing_.legato_retrigger;
+
   // If this pitch is under manual control, don't extend the gate
   if (reset_gate_counter && !manual_keys_.stack.Find(pitch)) {
-    gate_length_counter_[voice_index] = seq_.gate_length + 1;
+    gate_length_counter_[voice_index] = gate_length();
   }
   active_note_[voice_index] = pitch;
   Voice* voice = voice_[voice_index];
 
   int32_t timbre_14 = (voicing_.timbre_mod_envelope << 7) + vel * voicing_.timbre_mod_velocity;
   CONSTRAIN(timbre_14, -1 << 13, (1 << 13) - 1)
-  voice->set_timbre_mod_envelope(timbre_14 << 2);
 
   uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
   int32_t damping_22 = -voicing_.amplitude_mod_velocity * vel_concave_up;
@@ -856,15 +812,24 @@ void Part::VoiceNoteOn(
     damping_22 += voicing_.amplitude_mod_velocity << 16;
   }
 
-  voice->envelope()->SetADSR(
-    UINT16_MAX - (damping_22 >> (22 - 16)),
-    modulate_7bit(voicing_.env_init_attack, voicing_.env_mod_attack, vel),
-    modulate_7bit(voicing_.env_init_decay, voicing_.env_mod_decay, vel),
-    modulate_7bit(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel),
-    modulate_7bit(voicing_.env_init_release, voicing_.env_mod_release, vel)
+  ADSR adsr;
+  adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));
+  adsr.sustain = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
+  // NB: this LUT only has 128 values, so we use a 15-bit index
+  adsr.attack   = Interpolate88(
+    lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << (15 - 13)
+  );
+  adsr.decay    = Interpolate88(
+    lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << (15 - 13)
+  );
+  adsr.release  = Interpolate88(
+    lut_envelope_phase_increments,
+    modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
 
-  voice->NoteOn(Tune(pitch), vel, portamento, trigger);
+  voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {
@@ -880,13 +845,20 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
   const NoteEntry& before = priority_note();
   mono_allocator_.NoteOn(note, velocity);
   const NoteEntry& after = priority_note();
-  bool legato = force_legato || mono_allocator_.size() > 1;
-  if (voicing_.allocation_mode == VOICE_ALLOCATION_MODE_MONO) {
+  if (voicing_.allocation_mode == POLY_MODE_OFF) {
+    bool stealing = mono_allocator_.size() > 1;
+    // If a previous note was a sequencer step tie/slide, it will have skipped
+    // its normal ending, so we end all generated notes except the new note
+    for (uint8_t i = 1; i <= generated_notes_.max_size(); ++i) {
+      if (generated_notes_.note(i).note != after.note) {
+        GeneratedNoteOff(generated_notes_.note(i).note);
+      }
+    }
     // Check if the note that has been played should be triggered according
     // to selected voice priority rules.
     if (before.note != after.note) {
       for (uint8_t i = 0; i < num_voices_; ++i) {
-        VoiceNoteOn(i, after.note, after.velocity, legato, true);
+        VoiceNoteOn(i, after.note, after.velocity, force_legato || stealing, true);
       }
     }
   } else if (uses_sorted_dispatch()) {
@@ -894,19 +866,27 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
   } else {
     uint8_t voice_index = 0;
     switch (voicing_.allocation_mode) {
-      case VOICE_ALLOCATION_MODE_POLY:
-        voice_index = poly_allocator_.NoteOn(note, VOICE_STEALING_MODE_LRU);
+      case POLY_MODE_STEAL_RELEASE_SILENT:
+      case POLY_MODE_STEAL_RELEASE_REASSIGN:
+      case POLY_MODE_STEAL_HIGHEST_PRIORITY_RELEASE_REASSIGN:
+      case POLY_MODE_STEAL_HIGHEST_PRIORITY: {
+        bool note_justifies_steal = mono_allocator_.priority_for_note(
+          static_cast<stmlib::NoteStackFlags>(voicing_.allocation_priority),
+          note
+        ) < num_voices_;
+        bool steal_highest = voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY ||
+          voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY_RELEASE_REASSIGN;
+        uint8_t note_to_steal_voice_from = steal_highest
+          ? before.note // Highest priority before this note
+          : priority_note(num_voices_).note; // Note that just got deprioritized
+        uint8_t stealable_voice_index = note_justifies_steal
+          ? FindVoiceForNote(note_to_steal_voice_from) : NOT_ALLOCATED;
+        voice_index = poly_allocator_.NoteOn(note, stealable_voice_index);
+        if (voice_index == NOT_ALLOCATED) return;
         break;
-      
-      case VOICE_ALLOCATION_MODE_POLY_STEAL_MOST_RECENT:
-        voice_index = poly_allocator_.NoteOn(note, VOICE_STEALING_MODE_MRU);
-        break;
-
-      case VOICE_ALLOCATION_MODE_POLY_NICE:
-        voice_index = poly_allocator_.NoteOn(note, VOICE_STEALING_MODE_NONE);
-        break;
+      }
         
-      case VOICE_ALLOCATION_MODE_POLY_CYCLIC:
+      case POLY_MODE_CYCLIC:
         if (cyclic_allocation_note_counter_ >= num_voices_) {
           cyclic_allocation_note_counter_ = 0;
         }
@@ -914,11 +894,11 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
         ++cyclic_allocation_note_counter_;
         break;
       
-      case VOICE_ALLOCATION_MODE_POLY_RANDOM:
+      case POLY_MODE_RANDOM:
         voice_index = (Random::GetWord() >> 24) % num_voices_;
         break;
         
-      case VOICE_ALLOCATION_MODE_POLY_VELOCITY:
+      case POLY_MODE_VELOCITY:
         voice_index = (static_cast<uint16_t>(velocity) * num_voices_) >> 7;
         break;
         
@@ -927,18 +907,10 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
     }
     
     if (voice_index < num_voices_) {
-      if (legato) {
-        if (active_note_[voice_index] != VOICE_ALLOCATION_NOT_FOUND) {
-          // Disable legato when stealing
-          legato = false;
-        } else {
-          // Begin portamento from the preceding priority note
-          voice_[voice_index]->SetPortamento(Tune(before.note), velocity, 0);
-        }
-      }
       // Prevent the same note from being simultaneously played on two channels.
       KillAllInstancesOfNote(note);
-      VoiceNoteOn(voice_index, note, velocity, legato, true);
+      bool stealing = active_note_[voice_index] != VOICE_ALLOCATION_NOT_FOUND;
+      VoiceNoteOn(voice_index, note, velocity, force_legato || stealing, true);
     } else {
       // Polychaining forwarding.
       midi_handler.OnInternalNoteOn(tx_channel(), note, velocity);
@@ -966,11 +938,11 @@ void Part::InternalNoteOff(uint8_t note) {
     just_intonation_processor.NoteOff(note);
   }
   
-  bool had_extra_notes = mono_allocator_.size() > num_voices_;
+  bool had_unvoiced_notes = mono_allocator_.size() > num_voices_;
   const NoteEntry& before = priority_note();
   mono_allocator_.NoteOff(note);
   const NoteEntry& after = priority_note();
-  if (voicing_.allocation_mode == VOICE_ALLOCATION_MODE_MONO) {
+  if (voicing_.allocation_mode == POLY_MODE_OFF) {
     if (mono_allocator_.size() == 0) {
       // No key is pressed, we just close the gate.
       for (uint8_t i = 0; i < num_voices_; ++i) {
@@ -985,8 +957,8 @@ void Part::InternalNoteOff(uint8_t note) {
   } else if (uses_sorted_dispatch()) {
     KillAllInstancesOfNote(note);
     if (
-        voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_UNISON_1 ||
-        had_extra_notes
+      voicing_.allocation_mode == POLY_MODE_UNISON_RELEASE_REASSIGN ||
+      had_unvoiced_notes
     ) {
       DispatchSortedNotes(true);
     }
@@ -997,13 +969,17 @@ void Part::InternalNoteOff(uint8_t note) {
         FindVoiceForNote(note);
     if (voice_index < num_voices_) {
       VoiceNoteOff(voice_index);
-      if (
-        had_extra_notes &&
-        voicing_.allocation_mode == VOICE_ALLOCATION_MODE_POLY_NICE
-      ) {
-        const NoteEntry& nice = priority_note(NOTE_STACK_PRIORITY_FIRST, num_voices_ - 1);
-        poly_allocator_.NoteOn(nice.note, VOICE_STEALING_MODE_NONE);
-        VoiceNoteOn(voice_index, nice.note, nice.velocity, true, false);
+      bool reassign = voicing_.allocation_mode == POLY_MODE_STEAL_RELEASE_REASSIGN ||
+        voicing_.allocation_mode == POLY_MODE_STEAL_HIGHEST_PRIORITY_RELEASE_REASSIGN;
+      if (had_unvoiced_notes && reassign) {
+        // Reassign freed voice to the highest-priority note that is not voiced
+        const NoteEntry* priority_unvoiced_note = &after; // Just for initialization
+        for (uint8_t i = 0; i < mono_allocator_.size(); ++i) {
+          priority_unvoiced_note = &priority_note(i);
+          if (FindVoiceForNote(priority_unvoiced_note->note) == VOICE_ALLOCATION_NOT_FOUND) break;
+        }
+        poly_allocator_.NoteOn(priority_unvoiced_note->note, NOT_ALLOCATED);
+        VoiceNoteOn(voice_index, priority_unvoiced_note->note, priority_unvoiced_note->velocity, true, false);
       }
     } else {
        midi_handler.OnInternalNoteOff(tx_channel(), note);
@@ -1019,8 +995,8 @@ void Part::TouchVoiceAllocation() {
 void Part::TouchVoices() {
   CONSTRAIN(voicing_.aux_cv, 0, MOD_AUX_LAST - 1);
   CONSTRAIN(voicing_.aux_cv_2, 0, MOD_AUX_LAST - 1);
-  voice_[0]->garbage(0);
   for (uint8_t i = 0; i < num_voices_; ++i) {
+    voice_[i]->garbage(0);
     voice_[i]->set_pitch_bend_range(voicing_.pitch_bend_range);
     voice_[i]->set_vibrato_range(voicing_.vibrato_range);
     voice_[i]->set_vibrato_mod(voicing_.vibrato_mod);
@@ -1093,7 +1069,15 @@ bool Part::Set(uint8_t address, uint8_t value) {
       break;
       
     case PART_SEQUENCER_ARP_DIRECTION:
-      arp_.key_increment = 1;
+      arpeggiator_.key_increment = 1;
+      break;
+
+    case PART_SEQUENCER_ARP_PATTERN:
+      if (midi_.play_mode == PLAY_MODE_ARPEGGIATOR &&
+        // If changing seq_driven_arp
+        (previous_value >= LUT_ARPEGGIATOR_PATTERNS_SIZE) !=
+        (value >= LUT_ARPEGGIATOR_PATTERNS_SIZE)
+      ) StopSequencerArpeggiatorNotes();
       break;
 
     case PART_MIDI_SUSTAIN_MODE:
@@ -1110,6 +1094,32 @@ bool Part::Set(uint8_t address, uint8_t value) {
       break;
   }
   return true;
+}
+
+void Part::Pack(PackedPart& packed) const {
+  looper_.Pack(packed);
+  midi_.Pack(packed);
+  voicing_.Pack(packed);
+  seq_.Pack(packed);
+}
+
+void Part::Unpack(PackedPart& packed) {
+  looper_.Unpack(packed);
+  midi_.Unpack(packed);
+  voicing_.Unpack(packed);
+  seq_.Unpack(packed);
+}
+
+void Part::AfterDeserialize() {
+  CONSTRAIN(midi_.play_mode, 0, PLAY_MODE_LAST - 1);
+  CONSTRAIN(seq_.clock_quantization, 0, 1);
+  CONSTRAIN(seq_.loop_length, 0, 7);
+  CONSTRAIN(seq_.arp_range, 0, 3);
+  CONSTRAIN(seq_.arp_direction, 0, ARPEGGIATOR_DIRECTION_LAST - 1);
+  AllNotesOff();
+  TouchVoices();
+  TouchVoiceAllocation();
+  ResetAllKeys();
 }
 
 struct Ratio { int p; int q; };

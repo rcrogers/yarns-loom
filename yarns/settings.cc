@@ -39,7 +39,29 @@
 namespace yarns {
 
 const char* const layout_values[LAYOUT_LAST] = {
-  "1M", "2M", "4M", "2P", "4P", "2>", "4>", "8>", "4T", "4V", "31", "22", "21", "*2", "3M"
+  "1M 1 MONO PART",
+  "2M 2 MONO PARTS",
+  "4M 4 MONO PARTS",
+  "2P 2-VOICE POLY",
+  "4P 4-VOICE POLY",
+  "2> 2-VOICE POLYCHAINED",
+  "4> 4-VOICE POLYCHAINED",
+  "8> 8-VOICE POLYCHAINED",
+  "4T 4 TRIGGERS",
+  "4V 4 CONTROL VOLTAGES",
+  "31 3-VOICE POLY + 1 MONO PART",
+  "22 2-VOICE POLY + 2 MONO PARTS",
+  "21 2-VOICE POLY + 1 MONO PART",
+  "*2 PARAPHONIC + 2 MONO PARTS + 1 GATE",
+  "3M 3 MONO PARTS",
+  "*1 PARAPHONIC + 1 MONO PART",
+};
+
+const char* const control_change_mode_values[CONTROL_CHANGE_MODE_LAST] = {
+  "OFF",
+  "ABSOLUTE 0-127",
+  "RD RELATIVE DIRECT",
+  "RS RELATIVE SCALED",
 };
 
 const char* const midi_out_mode_values[] = {
@@ -50,13 +72,22 @@ const char* const boolean_values[] = {
   "OFF", "ON"
 };
 
-const char* const voicing_allocation_mode_values[VOICE_ALLOCATION_MODE_LAST] = {
-  "MONO", "POLY", "CYCLIC", "RANDOM", "VELO", "SORTED", "U1 UNISON",
-  "U2 UNISON 2", "STEAL MOST RECENT", "NICE"
+const char* const voicing_allocation_mode_values[POLY_MODE_LAST] = {
+  "MONOPHONIC",
+  "sM STEAL LOWEST PRIORITY RELEASE MUTE",
+  "CYCLIC",
+  "RANDOM",
+  "VELOCITY",
+  "PRIORITY ORDER",
+  "UR UNISON RELEASE REASSIGN",
+  "UM UNISON RELEASE MUTE",
+  "SM STEAL HIGHEST PRIORITY RELEASE MUTE",
+  "sR STEAL LOWEST PRIORITY RELEASE REASSIGN",
+  "SR STEAL HIGHEST PRIORITY RELEASE REASSIGN",
 };
 
 const char* const sequencer_arp_direction_values[ARPEGGIATOR_DIRECTION_LAST] = {
-  "LINEAR", "BOUNCE", "RANDOM", "ROTATE", "SUBROTATE"
+  "LINEAR", "BOUNCE", "RANDOM", "JUMP", "GRID"
 };
 
 const char* const voicing_aux_cv_values[MOD_AUX_LAST] = {
@@ -76,19 +107,15 @@ const char* const voicing_aux_cv_values[MOD_AUX_LAST] = {
   // lut_fm_ratio_names[4],
   // lut_fm_ratio_names[5],
   // lut_fm_ratio_names[6],
-  "11 FM 1/1", "12 FM 1/2", "13 FM 1/3", "15 FM 1/5",
-  "17 FM 1/7", "25 FM 2/5", "27 FM 2/7"
-};
-
-const char* const legato_mode_values[LEGATO_MODE_LAST] = {
-  "OFF", "AUTO PORTAMENTO", "ON"
+  "11 FM 1/1", "21 FM 2/1", "31 FM 3/1", "51 FM 5/1",
+  "71 FM 7/1", "52 FM 5/2", "72 FM 7/2"
 };
 
 const char* const voicing_oscillator_mode_values[OSCILLATOR_MODE_LAST] = {
   "OFF", "DRONE", "ENVELOPED"
 };
 
-const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
+const char* const voicing_oscillator_shape_values[] = {
   "*\xA2 NOISE NOTCH SVF",
   "*\xA0 NOISE LOW-PASS SVF",
   "*^ NOISE BAND-PASS SVF",
@@ -105,17 +132,23 @@ const char* const voicing_oscillator_shape_values[OSC_SHAPE_FM] = {
   "\x88\xA0 SAW LOW-PASS SVF",
   "\x8CW PULSE WIDTH MOD",
   "\x88W SAW WIDTH MOD",
+  "\x88\x8C SAW-PULSE MORPH",
   "S$ SINE SYNC",
+  // "^$ TRIANGLE SYNC",
   "\x8C$ PULSE SYNC",
   "\x88$ SAW SYNC",
   "SF SINE FOLD",
   "^F TRIANGLE FOLD",
-  "ST SINE TANH",
-  "SX SINE EXP",
+  "\x8E\x8E DIRAC COMB",
   "WHISTLE",
   "\x8F\xA0 PING LOW-PASS SVF",
-  "\x8E\x8E DIRAC COMB",
+  "ST SINE TANH",
+  "SX SINE EXPONENTIAL",
 };
+STATIC_ASSERT(
+  OSC_SHAPE_FM == sizeof(voicing_oscillator_shape_values) / sizeof(const char*),
+  osc
+);
 
 const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
   "/\\",
@@ -255,20 +288,26 @@ const Setting Settings::settings_[] = {
   {
     "SW", "SWING",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_SWING, 0 },
-    SETTING_UNIT_UINT8, 0, 99, NULL,
+    SETTING_UNIT_INT8, -63, 63, NULL,
     0xff, 3,
   },
   {
-    "I/", "INPUT CLK DIV",
+    "I/", "INPUT CLOCK DIV",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_INPUT_DIVISION, 0 },
     SETTING_UNIT_UINT8, 1, 4, NULL,
     0xff, 0xff,
   },
   {
-    "O/", "OUTPUT CLK RATIO",
+    "O/", "OUTPUT CLOCK RATIO OUT/IN",
     SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OUTPUT_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     0xff, 0,
+  },
+  {
+    "C+", "CLOCK OFFSET",
+    SETTING_DOMAIN_MULTI, { MULTI_CLOCK_OFFSET, 0 },
+    SETTING_UNIT_INT8, -64, 63, NULL,
+    0xff, 0xff,
   },
   {
     "B-", "BAR DURATION",
@@ -295,9 +334,15 @@ const Setting Settings::settings_[] = {
     0xff, 0xff,
   },
   {
+    "CC", "CONTROL CHANGE MODE",
+    SETTING_DOMAIN_MULTI, { MULTI_CONTROL_CHANGE_MODE, 0 },
+    SETTING_UNIT_ENUMERATION, 0, CONTROL_CHANGE_MODE_LAST - 1, control_change_mode_values,
+    0xff, 0xff,
+  },
+  {
     "CH", "CHANNEL",
     SETTING_DOMAIN_PART, { PART_MIDI_CHANNEL, 0 },
-    SETTING_UNIT_MIDI_CHANNEL, 0, 16, NULL,
+    SETTING_UNIT_MIDI_CHANNEL_LAST_OMNI, 0, 16, NULL,
     0xff, 4,
   },
   {
@@ -345,7 +390,7 @@ const Setting Settings::settings_[] = {
   {
     "VO", "VOICING",
     SETTING_DOMAIN_PART, { PART_VOICING_ALLOCATION_MODE, 0 },
-    SETTING_UNIT_ENUMERATION, 0, VOICE_ALLOCATION_MODE_LAST - 1,
+    SETTING_UNIT_ENUMERATION, 0, POLY_MODE_LAST - 1,
     voicing_allocation_mode_values,
     18, 8,
   },
@@ -358,14 +403,20 @@ const Setting Settings::settings_[] = {
   {
     "PO", "PORTAMENTO",
     SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO, 0 },
-    SETTING_UNIT_PORTAMENTO, 0, 127, NULL,
+    SETTING_UNIT_PORTAMENTO, 1, 127, NULL,
     5, 10,
   },
   {
-    "LG", "LEGATO MODE",
-    SETTING_DOMAIN_PART, { PART_VOICING_LEGATO_MODE, 0 },
-    SETTING_UNIT_ENUMERATION, 0, LEGATO_MODE_LAST - 1, legato_mode_values,
+    "LG", "LEGATO RETRIGGER",
+    SETTING_DOMAIN_PART, { PART_VOICING_LEGATO_RETRIGGER, 0 },
+    SETTING_UNIT_ENUMERATION, 0, 1, boolean_values,
     20, 11,
+  },
+  {
+    "PL", "PORTAMENTO LEGATO ONLY",
+    SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO_LEGATO_ONLY, 0 },
+    SETTING_UNIT_ENUMERATION, 0, 1, boolean_values,
+    32, 0xff,
   },
   {
     "BR", "BEND RANGE",
@@ -413,13 +464,13 @@ const Setting Settings::settings_[] = {
     "VS", "VIBRATO SHAPE",
     SETTING_DOMAIN_PART, { PART_VOICING_VIBRATO_SHAPE, 0 },
     SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, lfo_shape_values,
-    125, 0xff,
+    95, 0xff,
   },
   {
     "LS", "TIMBRE LFO SHAPE",
     SETTING_DOMAIN_PART, { PART_VOICING_TIMBRE_LFO_SHAPE, 0 },
     SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, lfo_shape_values,
-    126, 0xff,
+    81, 0xff,
   },
   {
     "TS", "TREMOLO SHAPE",
@@ -579,7 +630,7 @@ const Setting Settings::settings_[] = {
     89, 0xff,
   },
   {
-    "C/", "CLK RATIO OUT-IN",
+    "C/", "CLOCK RATIO OUT/IN",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_CLOCK_DIVISION, 0 },
     SETTING_UNIT_CLOCK_DIV, 0, LUT_CLOCK_RATIO_NAMES_SIZE - 1, NULL,
     102, 24,
@@ -606,13 +657,13 @@ const Setting Settings::settings_[] = {
   {
     "AP", "ARP PATTERN",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_ARP_PATTERN, 0 },
-    SETTING_UNIT_ARP_PATTERN, 0, LUT_ARPEGGIATOR_PATTERNS_SIZE, NULL,
+    SETTING_UNIT_ARP_PATTERN, 0, 31, NULL,
     106, 28,
   },
   {
     "RP", "RHYTHMIC PATTERN",
     SETTING_DOMAIN_PART, { PART_SEQUENCER_ARP_PATTERN, 0 },
-    SETTING_UNIT_ARP_PATTERN, 0, LUT_ARPEGGIATOR_PATTERNS_SIZE, NULL,
+    SETTING_UNIT_ARP_PATTERN, 0, 31, NULL,
     0xff, 0xff,
   },
   {
@@ -628,8 +679,8 @@ const Setting Settings::settings_[] = {
     108, 30,
   },
   {
-    "ER", "EUCLIDEAN ROTATE",
-    SETTING_DOMAIN_PART, { PART_SEQUENCER_EUCLIDEAN_ROTATE, 0 },
+    "SO", "STEP OFFSET",
+    SETTING_DOMAIN_PART, { PART_SEQUENCER_STEP_OFFSET, 0 },
     SETTING_UNIT_UINT8, 0, 31, NULL,
     109, 31,
   },
@@ -672,7 +723,7 @@ const Setting Settings::settings_[] = {
   {
     "RC", "REMOTE CONTROL CHANNEL",
     SETTING_DOMAIN_MULTI, { MULTI_REMOTE_CONTROL_CHANNEL, 0 },
-    SETTING_UNIT_MIDI_CHANNEL_OFF, 0, 16, NULL,
+    SETTING_UNIT_MIDI_CHANNEL_FIRST_OFF, 0, 16, NULL,
     0xff, 0xff,
   },
   {
@@ -704,95 +755,101 @@ void Settings::Init() {
   }
 }
 
-void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const {
+// Return prefix character for display
+char Settings::Print(const Setting& setting, uint8_t value, char* buffer) const {
   switch (setting.unit) {
     case SETTING_UNIT_UINT8:
-      PrintInteger(buffer, value);
-      break;
+      return PrintInteger(buffer, value);
       
     case SETTING_UNIT_INT8:
-      PrintSignedInteger(buffer, value);
-      break;
+      if (&setting == &setting_defs.get(SETTING_CLOCK_SWING)) {
+        int8_t swing = static_cast<int8_t>(value);
+        if (value == 0) {
+          strcpy(buffer, "OFF");
+          return '\0';
+        } else {
+          return PrintInteger(buffer, abs(swing), swing ? (swing < 0 ? 'o' : 'e') : '\0');
+        }
+      } else {
+        return PrintSignedInteger(buffer, value);
+      }
     
     case SETTING_UNIT_INDEX:
-      PrintInteger(buffer, value + 1);
-      break;
+      return PrintInteger(buffer, value + 1);
       
     case SETTING_UNIT_BAR_DURATION:
       if (value <= kMaxBarDuration) {
-        PrintInteger(buffer, value);
+        return PrintInteger(buffer, value);
       } else {
         strcpy(buffer, "oo");
+        return '\0';
       }
-      break;
 
     case SETTING_UNIT_TEMPO:
       if (value == TEMPO_EXTERNAL) {
         strcpy(buffer, "EXTERNAL");
+        return '\0';
       } else {
-        PrintInteger(buffer, value);
+        return PrintInteger(buffer, value);
       }
-      break;
 
-    case SETTING_UNIT_MIDI_CHANNEL:
-      if (value == 0x10) {
+    case SETTING_UNIT_MIDI_CHANNEL_LAST_OMNI:
+      if (value == kMidiChannelOmni) {
         strcpy(buffer, "ALL");
+        return '\0';
       } else {
-        PrintInteger(buffer, value + 1);
+        return PrintInteger(buffer, value + 1);
       }
-      break;
 
-    case SETTING_UNIT_MIDI_CHANNEL_OFF:
+    case SETTING_UNIT_MIDI_CHANNEL_FIRST_OFF:
       if (value == 0x00) {
         strcpy(buffer, "OFF");
+        return '\0';
       } else {
-        PrintInteger(buffer, value);
+        return PrintInteger(buffer, value);
       }
-      break;
 
     case SETTING_UNIT_CLOCK_DIV:
       strcpy(buffer, lut_clock_ratio_names[value]);
-      break;
+      return '\0';
     
     case SETTING_UNIT_LFO_RATE:
       if (value < 64) {
         STATIC_ASSERT(LUT_CLOCK_RATIO_NAMES_SIZE == 32, ratios); // Allows an easy bit shift
-        Print(settings_[SETTING_SEQUENCER_CLOCK_DIVISION], (64 - value - 1) >> 1, buffer);
+        return Print(settings_[SETTING_SEQUENCER_CLOCK_DIVISION], (64 - value - 1) >> 1, buffer);
       } else {
-        PrintInteger(buffer, value + 1 - 64);
-        if (buffer[0] == ' ') buffer[0] = 'F';
+        return PrintInteger(buffer, value + 1 - 64, 'F');
       }
-      break;
       
     case SETTING_UNIT_PORTAMENTO:
     {
-      uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE >> 1;
-      if (value < split_point) {
-        PrintInteger(buffer, split_point - value);
+      uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
+      if (value == split_point) {
+        strcpy(buffer, "OFF");
+        return '\0';
+      } else if (value < split_point) {
+        return PrintInteger(buffer, split_point - value, 'T');
       } else {
-        PrintInteger(buffer, value - split_point);
+        return PrintInteger(buffer, value - split_point, 'R');
       }
-      if (buffer[0] == ' ') {
-        buffer[0] = value < split_point ? 'T' : 'R';
-      }
-      break;
     }
       
     case SETTING_UNIT_ENUMERATION:
       strcpy(buffer, setting.values[value]);
-      break;
+      return '\0';
 
     case SETTING_UNIT_ARP_PATTERN:
-      if (value == 0) {
-        strcpy(buffer, "SEQUENCER");
-      } else {
-        PrintInteger(buffer, value);
+      {
+        int8_t pattern = LUT_ARPEGGIATOR_PATTERNS_SIZE - value;
+        if (pattern > 0) { // Pattern-driven, left side
+          return PrintInteger(buffer, pattern, 'P');
+        } else { // Sequencer-driven, right side
+          return PrintInteger(buffer, abs(pattern), 'S');
+        }
       }
-      break;
 
     case SETTING_UNIT_LOOP_LENGTH:
-      PrintInteger(buffer, 1 << value);
-      break;
+      return PrintInteger(buffer, 1 << value);
 
     case SETTING_UNIT_OSCILLATOR_SHAPE:
       if (value >= OSC_SHAPE_FM) {
@@ -800,49 +857,34 @@ void Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       } else {
         strcpy(buffer, voicing_oscillator_shape_values[value]);
       }
-      break;
+      return '\0';
 
     case SETTING_UNIT_LFO_SPREAD: {
       int8_t spread = value;
       bool dephase = spread < 0;
       if (dephase) spread++;
-      PrintInteger(buffer, abs(spread));
-      if (buffer[0] == ' ') buffer[0] = dephase ? 'P' : 'F';
-      break;
+      return PrintInteger(buffer, abs(spread), dephase ? 'P' : 'F');
     }
       
     default:
       strcpy(buffer, "??");
+      return '\0';
   }
 }
 
 /* static */
-void Settings::PrintInteger(char* buffer, uint8_t number) {
+char Settings::PrintInteger(char* buffer, uint8_t number, char prefix) {
   buffer[1] = '0' + (number % 10);
   number /= 10;
   buffer[0] = number ? '0' + (number % 10) : ' ';
   number /= 10;
   buffer[2] = '\0';
+  return number ? '0' + (number % 10) : prefix;
 }
 
 /* static */
-void Settings::PrintSignedInteger(char* buffer, int8_t number) {
-  if (number >= 0) {
-    PrintInteger(buffer, number);
-    if (buffer[0] == ' ') {
-      buffer[0] = '+';
-    }
-  } else if (number > -10){
-    PrintInteger(buffer, -number);
-    buffer[0] = '-';
-  } else {
-    PrintInteger(buffer, -number);
-    buffer[2] = ' ';
-    buffer[3] = '-';
-    buffer[4] = buffer[0];
-    buffer[5] = buffer[1];
-    buffer[6] = '\0';
-  }
+char Settings::PrintSignedInteger(char* buffer, int8_t number) {
+  return PrintInteger(buffer, abs(number), number < 0 ? '-' : '+');
 }
 
 /* extern */

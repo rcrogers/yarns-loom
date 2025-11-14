@@ -45,8 +45,8 @@ enum SettingUnit {
   SETTING_UNIT_INDEX,
   SETTING_UNIT_TEMPO,
   SETTING_UNIT_CLOCK_DIV,
-  SETTING_UNIT_MIDI_CHANNEL,
-  SETTING_UNIT_MIDI_CHANNEL_OFF,
+  SETTING_UNIT_MIDI_CHANNEL_LAST_OMNI,
+  SETTING_UNIT_MIDI_CHANNEL_FIRST_OFF,
   SETTING_UNIT_BAR_DURATION,
   SETTING_UNIT_LFO_RATE,
   SETTING_UNIT_PORTAMENTO,
@@ -68,10 +68,12 @@ enum SettingIndex {
   SETTING_CLOCK_SWING,
   SETTING_CLOCK_INPUT_DIVISION,
   SETTING_CLOCK_OUTPUT_DIVISION,
+  SETTING_CLOCK_OFFSET,
   SETTING_CLOCK_BAR_DURATION,
   SETTING_CLOCK_NUDGE_FIRST_TICK,
   SETTING_CLOCK_MANUAL_START,
   SETTING_CLOCK_OVERRIDE,
+  SETTING_CONTROL_CHANGE_MODE,
   SETTING_MIDI_CHANNEL,
   SETTING_MIDI_MIN_NOTE,
   SETTING_MIDI_MAX_NOTE,
@@ -83,7 +85,8 @@ enum SettingIndex {
   SETTING_VOICING_ALLOCATION_MODE,
   SETTING_VOICING_ALLOCATION_PRIORITY,
   SETTING_VOICING_PORTAMENTO,
-  SETTING_VOICING_LEGATO_MODE,
+  SETTING_VOICING_LEGATO_RETRIGGER,
+  SETTING_VOICING_PORTAMENTO_LEGATO_ONLY,
   SETTING_VOICING_PITCH_BEND_RANGE,
   SETTING_VOICING_VIBRATO_RANGE,
   SETTING_VOICING_LFO_RATE,
@@ -127,7 +130,7 @@ enum SettingIndex {
   SETTING_SEQUENCER_RHYTHM_PATTERN,  // Alias for arp pattern
   SETTING_SEQUENCER_EUCLIDEAN_LENGTH,
   SETTING_SEQUENCER_EUCLIDEAN_FILL,
-  SETTING_SEQUENCER_EUCLIDEAN_ROTATE,
+  SETTING_SEQUENCER_STEP_OFFSET,
   SETTING_SEQUENCER_PLAY_MODE,
   SETTING_MIDI_INPUT_RESPONSE,
   SETTING_SEQUENCER_CLOCK_QUANTIZATION,
@@ -158,19 +161,20 @@ class Settings {
   Settings() { }
   ~Settings() { }
 
+  // Maps a controller number to a setting index.
   uint8_t part_cc_map[128];
   uint8_t remote_control_cc_map[128];
   
   void Init();
   
-  void Print(const Setting& setting, uint8_t value, char* buffer) const;
+  char Print(const Setting& setting, uint8_t value, char* buffer) const;
   
   inline const Setting& get(uint8_t index) const {
     return settings_[index];
   }
   
-  static void PrintInteger(char* buffer, uint8_t number);
-  static void PrintSignedInteger(char* buffer, int8_t number);
+  static char PrintInteger(char* buffer, uint8_t number, char prefix = '\0');
+  static char PrintSignedInteger(char* buffer, int8_t number);
   
  private:
    
