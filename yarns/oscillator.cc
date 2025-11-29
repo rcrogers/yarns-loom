@@ -335,12 +335,33 @@ void Oscillator::RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_sam
   )
 }
 
+#define VARIABLE_SAW_WIDTH(timbre) \
+  (UINT16_MAX - Interpolate88(lut_env_expo, (timbre) + ((timbre) >> 1)))
+
 void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+  uint16_t previous_saw_width = VARIABLE_SAW_WIDTH(timbre_samples[0]);
   RENDER_PERIODIC(
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_SAW(phase, phase_increment) }
-    timbre = timbre + (timbre >> 1); // 3/4
-    uint16_t saw_width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
+    uint16_t saw_width = VARIABLE_SAW_WIDTH(timbre);
+
+    // BLAMP for corner where ramp meets flat
+    // Slope goes from (1/saw_width) to 0, so delta = -1/saw_width
+    // Use previous saw_width for the transition detection
+    if (saw_width < 0xfffe) {
+      uint32_t corner_phase = static_cast<uint32_t>(saw_width) << 16;
+      uint32_t prev_corner = static_cast<uint32_t>(previous_saw_width) << 16;
+      bool crossed = (phase >= corner_phase) && (phase - phase_increment < prev_corner);
+      if (crossed && !self_reset) {
+        uint32_t t = (phase - corner_phase) / (phase_increment >> 16);
+        // Slope magnitude = 0x7fff / saw_width, scaled by phase_increment
+        int32_t slope_step = ((phase_increment >> 16) * 0x7fff) / saw_width;
+        this_sample -= (slope_step * ThisBlampSample(t)) >> 12;
+        next_sample -= (slope_step * NextBlampSample(t)) >> 12;
+      }
+    }
+    previous_saw_width = saw_width;
+
     if ((phase >> 16) < saw_width) next_sample += (phase / saw_width) >> 1;
     else next_sample += 0x7fff;
     this_sample = (this_sample - 0x4000) << 1;
@@ -364,6 +385,28 @@ void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_sam
     bool self_reset = phase < phase_increment;
     // BLEP falling pulse edge only
     while (self_reset) { EDGES_PULSE(phase, phase_increment) }
+
+    // BLAMP for corners where flat meets ramp
+    // Slope magnitude = 0x7fff / (saw_width >> 16)
+    if (saw_width > (phase_increment << 1)) {  // Only if ramp is wide enough
+      int32_t slope_step = ((phase_increment >> 16) * 0x7fff) / (saw_width >> 16);
+
+      // Corner at start of ramp (phase = pw): slope goes 0 -> positive
+      if (phase >= pw && phase - phase_increment < pw) {
+        uint32_t t = (phase - pw) / (phase_increment >> 16);
+        this_sample += (slope_step * ThisBlampSample(t)) >> 12;
+        next_sample += (slope_step * NextBlampSample(t)) >> 12;
+      }
+
+      // Corner at end of ramp (phase = pw + saw_width): slope goes positive -> 0
+      uint32_t ramp_end = pw + saw_width;
+      if (phase >= ramp_end && phase - phase_increment < ramp_end) {
+        uint32_t t = (phase - ramp_end) / (phase_increment >> 16);
+        this_sample -= (slope_step * ThisBlampSample(t)) >> 12;
+        next_sample -= (slope_step * NextBlampSample(t)) >> 12;
+      }
+    }
+
     if (phase < pw) next_sample += 0;
     else if (phase < pw + saw_width) next_sample += ((phase - pw) / (saw_width >> 16)) >> 1;
     else next_sample += 0x7fff;
@@ -403,7 +446,28 @@ void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samp
       break, // No edges
       false // No extra transition
     );
-    (void) transition_during_reset; (void) sync_reset; (void) self_reset;
+    (void) transition_during_reset; (void) sync_reset;
+
+    // BLAMP for triangle corners at trough (phase=0) and peak (phase=0.5)
+    // Slope changes from +2 to -2 (delta = -4) at peak, -2 to +2 (delta = +4) at trough
+    // Scale: slope is in units per full phase, phase_increment is fraction of phase per sample
+    // slope_change * phase_increment gives the per-sample derivative discontinuity
+    int32_t slope_step = modulator_phase_increment >> 14;  // 4 * (phase_inc >> 16) in Q14-ish
+
+    // Corner at trough (phase wrap from 1 to 0)
+    if (self_reset) {
+      uint32_t t = modulator_phase / (modulator_phase_increment >> 16);
+      this_sample += (slope_step * ThisBlampSample(t)) >> 12;
+      next_sample += (slope_step * NextBlampSample(t)) >> 12;
+    }
+
+    // Corner at peak (phase = 0.5)
+    if ((modulator_phase >= 0x80000000) != (modulator_phase - modulator_phase_increment >= 0x80000000)) {
+      uint32_t t = (modulator_phase - 0x80000000) / (modulator_phase_increment >> 16);
+      this_sample -= (slope_step * ThisBlampSample(t)) >> 12;
+      next_sample -= (slope_step * NextBlampSample(t)) >> 12;
+    }
+
     this_sample = TRIANGLE_BIPOLAR(modulator_phase);
   )
 }
