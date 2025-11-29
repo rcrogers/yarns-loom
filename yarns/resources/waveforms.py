@@ -106,7 +106,13 @@ fill = numpy.fmod(
     WAVETABLE_SIZE)
 
 waveforms.append(('sine', scale(sine[quadrature])))
-
+def scale(array, min=-32766, max=32766, center=True, dither_level=2):
+  if center:
+    array -= array.mean()
+  mx = numpy.abs(array).max()
+  array = (array + mx) / (2 * mx)
+  array = array * (max - min) + min
+  return dither(array, order=dither_level)
 sizzle_input = sine_input * numpy.pi + numpy.pi / 3
 sizzle = numpy.sin(numpy.exp(sizzle_input)) * 127.5 + 127.5
 waveforms.append(('sizzle', scale(sizzle)))

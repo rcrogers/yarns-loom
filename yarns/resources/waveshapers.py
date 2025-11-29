@@ -63,3 +63,13 @@ sine_fold /= numpy.abs(sine_fold).max()
 waveshapers.append(('violent_overdrive', scale(violent_overdrive)))
 waveshapers.append(('sine_fold', scale(sine_fold, center=False)))
 waveshapers.append(('tri_fold', scale(tri_fold)))
+
+# Linear fold waveshaper: hard reflections at +/-1
+# Input range: -8 to +8 (for up to 8x gain/folding)
+# Uses triangle wave formula for continuous folding
+x_wide = ((numpy.arange(0, 257) / 128.0 - 1.0)) * 8  # -8 to +8
+x_wide[-1] = x_wide[-2]
+# Triangle wave folding: abs(((x + 1) mod 4) - 2) - 1
+# This creates linear folds at +/-1, +/-3, +/-5, +/-7
+linear_fold = numpy.abs(((x_wide + 1) % 4) - 2) - 1
+waveshapers.append(('linear_fold', scale(linear_fold, center=False)))

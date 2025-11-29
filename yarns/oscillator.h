@@ -87,12 +87,22 @@ enum OscillatorShape {
   OSC_SHAPE_VARIABLE_SAW,
   OSC_SHAPE_SAW_PULSE_MORPH,
   OSC_SHAPE_SYNC_SINE,
-  // OSC_SHAPE_SYNC_TRIANGLE,
+  OSC_SHAPE_SYNC_TRIANGLE,
   OSC_SHAPE_SYNC_PULSE,
   OSC_SHAPE_SYNC_SAW,
+  // OSC_SHAPE_HALF_RECT_SINE,
+  // OSC_SHAPE_HALF_RECT_TRIANGLE,
+  // OSC_SHAPE_HALF_RECT_SAW_UP,
+  // OSC_SHAPE_HALF_RECT_SAW_DOWN,
+  OSC_SHAPE_FULL_RECT_SINE,
+  OSC_SHAPE_FULL_RECT_TRIANGLE,
+  OSC_SHAPE_FULL_RECT_SAW,
+  OSC_SHAPE_LINEAR_FOLD_SINE,
+  OSC_SHAPE_LINEAR_FOLD_TRIANGLE,
+  OSC_SHAPE_LINEAR_FOLD_SAW,
   OSC_SHAPE_FOLD_SINE,
   OSC_SHAPE_FOLD_TRIANGLE,
-  OSC_SHAPE_DIRAC_COMB,
+  // OSC_SHAPE_DIRAC_COMB,
   OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_EXP_SINE,
   OSC_SHAPE_FM,
@@ -152,9 +162,19 @@ class Oscillator {
   void RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderHalfRectSine(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderHalfRectTriangle(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderHalfRectSawUp(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderHalfRectSawDown(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderFullRectSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderFullRectTriangle(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderFullRectSaw(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderLinearFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderLinearFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderLinearFoldSaw(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderFM(int16_t* timbre_samples, int16_t* audio_samples);
@@ -162,55 +182,16 @@ class Oscillator {
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
   // 2-point cubic PolyBLEP: t²(3 - 2t) / 2
-  // Input: t in Q16 (0..65535)
-  // Output: ~Q14
-  inline int32_t ThisBlepSample(uint32_t t) const {
-    if (t > 65535) {
-      t = 65535;
-    }
-    // t² in Q16
-    uint32_t t2 = (t * t) >> 16;
-    // (3 - 2t) in Q15: 3 = 3<<15, 2t in Q15 = t
-    int32_t shape = (3 << 15) - t;
-    // t² * (3 - 2t) >> 17 gives Q14 result
-    return static_cast<int32_t>(t2 * shape) >> 17;
-  }
-
-  inline int32_t NextBlepSample(uint32_t t) const {
-    if (t > 65535) {
-      t = 65535;
-    }
-    t = 65535 - t;
-    uint32_t t2 = (t * t) >> 16;
-    int32_t shape = (3 << 15) - t;
-    return -(static_cast<int32_t>(t2 * shape) >> 17);
-  }
+  // Input: t in Q16 (0..65535), Output: ~Q14
+  int32_t ThisBlepSample(uint32_t t) const;
+  int32_t NextBlepSample(uint32_t t) const;
 
   // PolyBLAMP (integrated BLEP) for corner discontinuities
   // Formula: 3/16 - t/2 + 3t²/8 - t⁴/16
-  // Input: t in Q16 (0..65535)
-  // Output: Q14-ish (0..3072)
+  // Input: t in Q16 (0..65535), Output: Q14-ish (0..3072)
   // Must be scaled by slope change (phase_increment * slope_delta)
-  inline int32_t ThisBlampSample(uint32_t t) const {
-    if (t > 65535) {
-      t = 65535;
-    }
-    t = 65535 - t;
-    int32_t t14 = t >> 2;
-    int32_t t2 = (t14 * t14) >> 14;
-    int32_t t4 = (t2 * t2) >> 14;
-    return 3072 - (t14 >> 1) + ((t2 * 3) >> 3) - (t4 >> 4);
-  }
-
-  inline int32_t NextBlampSample(uint32_t t) const {
-    if (t > 65535) {
-      t = 65535;
-    }
-    int32_t t14 = t >> 2;
-    int32_t t2 = (t14 * t14) >> 14;
-    int32_t t4 = (t2 * t2) >> 14;
-    return 3072 - (t14 >> 1) + ((t2 * 3) >> 3) - (t4 >> 4);
-  }
+  int32_t ThisBlampSample(uint32_t t) const;
+  int32_t NextBlampSample(uint32_t t) const;
 
   OscillatorShape shape_;
   Envelope gain_envelope_, timbre_envelope_;

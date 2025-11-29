@@ -177,9 +177,9 @@ characters = {
   '\x87': 'nml',
   
   # Waveforms
-  '\x88': 'efgl',  # Saw
+  '\x88': 'efgl',  # Down saw
   '\x89': 'pjb',   # CSaw
-  '\x8A': 'ml',    # Baby saw
+  '\x8A': 'ml',    # Small down saw
   '\x8B': 'nl',    # Tri
   '\x8C': 'efabc', # Square
   '\x8D': 'epkc',   # Baby square

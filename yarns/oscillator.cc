@@ -65,12 +65,22 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderVariableSaw,
   &Oscillator::RenderSawPulseMorph,
   &Oscillator::RenderSyncSine,
-  // &Oscillator::RenderSyncTriangle,
+  &Oscillator::RenderSyncTriangle,
   &Oscillator::RenderSyncPulse,
   &Oscillator::RenderSyncSaw,
+  // &Oscillator::RenderHalfRectSine,
+  // &Oscillator::RenderHalfRectTriangle,
+  // &Oscillator::RenderHalfRectSawUp,
+  // &Oscillator::RenderHalfRectSawDown,
+  &Oscillator::RenderFullRectSine,
+  &Oscillator::RenderFullRectTriangle,
+  &Oscillator::RenderFullRectSaw,
+  &Oscillator::RenderLinearFoldSine,
+  &Oscillator::RenderLinearFoldTriangle,
+  &Oscillator::RenderLinearFoldSaw,
   &Oscillator::RenderFoldSine,
   &Oscillator::RenderFoldTriangle,
-  &Oscillator::RenderDiracComb,
+  // &Oscillator::RenderDiracComb,
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderExponentialSine,
   &Oscillator::RenderFM,
@@ -89,6 +99,38 @@ void StateVariableFilter::Init() {
 void StateVariableFilter::RenderInit(int16_t resonance) {
   damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17) >> 1);
   damp.ComputeSlope();
+}
+
+int32_t Oscillator::ThisBlepSample(uint32_t t) const {
+  if (t > 65535) t = 65535;
+  uint32_t t2 = (t * t) >> 16;
+  int32_t shape = (3 << 15) - t;
+  return static_cast<int32_t>(t2 * shape) >> 17;
+}
+
+int32_t Oscillator::NextBlepSample(uint32_t t) const {
+  if (t > 65535) t = 65535;
+  t = 65535 - t;
+  uint32_t t2 = (t * t) >> 16;
+  int32_t shape = (3 << 15) - t;
+  return -(static_cast<int32_t>(t2 * shape) >> 17);
+}
+
+int32_t Oscillator::ThisBlampSample(uint32_t t) const {
+  if (t > 65535) t = 65535;
+  t = 65535 - t;
+  int32_t t14 = t >> 2;
+  int32_t t2 = (t14 * t14) >> 14;
+  int32_t t4 = (t2 * t2) >> 14;
+  return 3072 - (t14 >> 1) + ((t2 * 3) >> 3) - (t4 >> 4);
+}
+
+int32_t Oscillator::NextBlampSample(uint32_t t) const {
+  if (t > 65535) t = 65535;
+  int32_t t14 = t >> 2;
+  int32_t t2 = (t14 * t14) >> 14;
+  int32_t t4 = (t2 * t2) >> 14;
+  return 3072 - (t14 >> 1) + ((t2 * 3) >> 3) - (t4 >> 4);
 }
 
 void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias) {
@@ -484,6 +526,119 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
   )
 }
 
+// // Half-wave rectified sine
+// // Timbre controls threshold: 0 = thresh at -1 (no rect), max = thresh at +1 (full rect)
+// void Oscillator::RenderHalfRectSine(int16_t* timbre_samples, int16_t* audio_samples) {
+//   RENDER_PERIODIC(
+//     int32_t threshold = (timbre << 1) - 32768;
+//     int32_t sine = Interpolate824(wav_sine, phase);
+//     this_sample = sine >= threshold ? sine : threshold;
+//   )
+// }
+
+// // Half-wave rectified triangle
+// void Oscillator::RenderHalfRectTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+//   RENDER_PERIODIC(
+//     int32_t threshold = (timbre << 1) - 32768;
+//     int32_t triangle = TRIANGLE_BIPOLAR(phase);
+//     this_sample = triangle >= threshold ? triangle : threshold;
+//   )
+// }
+
+// // Half-wave rectified up saw /|
+// void Oscillator::RenderHalfRectSawUp(int16_t* timbre_samples, int16_t* audio_samples) {
+//   RENDER_PERIODIC(
+//     int32_t threshold = (timbre << 1) - 32768;
+//     int32_t saw = (phase >> 16) - 32768;
+
+//     bool self_reset = phase < phase_increment;
+
+//     // BLEP at reset: rectified output goes from 32767 to max(-32768, threshold)
+//     if (self_reset) {
+//       uint32_t t = phase / (phase_increment >> 16);
+//       // After reset, value is max(-32768, threshold). Step = 32767 - max(-32768, threshold)
+//       int32_t post_reset_value = threshold > -32768 ? threshold : -32768;
+//       int32_t step = 32767 - post_reset_value;
+//       this_sample -= (step * ThisBlepSample(t)) >> 16;
+//       next_sample -= (step * NextBlepSample(t)) >> 16;
+//     }
+
+//     // Output in -32768..32767 range, shift to 0..32767 for unipolar, then center
+//     int32_t output = saw >= threshold ? saw : threshold;
+//     next_sample += (output + 32768) >> 1;
+//     this_sample = (this_sample - 0x4000) << 1;
+//   )
+// }
+
+// // Half-wave rectified down saw
+// void Oscillator::RenderHalfRectSawDown(int16_t* timbre_samples, int16_t* audio_samples) {
+//   RENDER_PERIODIC(
+//     int32_t threshold = (timbre << 1) - 32768;
+//     int32_t saw = 32767 - (phase >> 16);
+
+//     bool self_reset = phase < phase_increment;
+
+//     // BLEP at reset: rectified output goes from max(-32768, threshold) to 32767
+//     if (self_reset) {
+//       uint32_t t = phase / (phase_increment >> 16);
+//       // Before reset, value is max(-32768, threshold). Step = 32767 - max(-32768, threshold)
+//       int32_t pre_reset_value = threshold > -32768 ? threshold : -32768;
+//       int32_t step = 32767 - pre_reset_value;
+//       this_sample += (step * ThisBlepSample(t)) >> 16;
+//       next_sample += (step * NextBlepSample(t)) >> 16;
+//     }
+
+//     // Output in -32768..32767 range, shift to 0..32767 for unipolar, then center
+//     int32_t output = saw >= threshold ? saw : threshold;
+//     next_sample += (output + 32768) >> 1;
+//     this_sample = (this_sample - 0x4000) << 1;
+//   )
+// }
+
+// Full-wave rectified sine
+// Timbre controls threshold: 0 = thresh at -1 (no rect), max = thresh at 0 (classic full-wave)
+void Oscillator::RenderFullRectSine(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    int32_t threshold = -32768 + timbre;
+    int32_t sine = Interpolate824(wav_sine, phase);
+    this_sample = sine >= threshold ? sine : (threshold << 1) - sine;
+  )
+}
+
+// Full-wave rectified triangle
+void Oscillator::RenderFullRectTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    int32_t threshold = -32768 + timbre;
+    int32_t triangle = TRIANGLE_BIPOLAR(phase);
+    this_sample = triangle >= threshold ? triangle : (threshold << 1) - triangle;
+  )
+}
+
+// Full-wave rectified saw
+void Oscillator::RenderFullRectSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    int32_t threshold = -32768 + timbre;
+    int32_t saw = 32767 - (phase >> 16);
+
+    bool self_reset = phase < phase_increment;
+    // At reset, raw saw goes -32768 -> +32767
+    // Before reset: saw = -32768, output = (threshold << 1) - (-32768) = 2*threshold + 32768
+    // After reset: saw = +32767, output = +32767
+    // Step = 32767 - (2*threshold + 32768) = -1 - 2*threshold
+    if (self_reset) {
+      uint32_t t = phase / (phase_increment >> 16);
+      int32_t step = -1 - (threshold << 1);  // ranges from 65535 (thresh=-32768) to 1 (thresh=-1)
+      this_sample += (step * ThisBlepSample(t)) >> 16;
+      next_sample += (step * NextBlepSample(t)) >> 16;
+    }
+
+    // Output in -32768..32767 range, shift to 0..32767 for unipolar, then center
+    int32_t output = saw >= threshold ? saw : (threshold << 1) - saw;
+    next_sample += (output + 32768) >> 1;
+    this_sample = (this_sample - 0x4000) << 1;
+  )
+}
+
 void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = TRIANGLE_UNIPOLAR(phase);
@@ -498,6 +653,37 @@ void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples)
     this_sample = Interpolate824(wav_sine, phase);
     this_sample = this_sample * timbre >> 15;
     this_sample = Interpolate88(ws_sine_fold, this_sample + 32768);
+  )
+}
+
+// Linear fold: hard reflections at ±1, up to 8x gain
+// At timbre=0: unity gain (no folding)
+// At timbre=max: 8x gain (up to 8 folds)
+void Oscillator::RenderLinearFoldSine(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    int32_t wave = Interpolate824(wav_sine, phase);
+    // Gain from 1x to 8x: gain_factor = 32767 + 7*timbre
+    int32_t gain_factor = 32767 + 7 * timbre;
+    int32_t scaled = wave * gain_factor >> 18;  // >> 15 for timbre, >> 3 for /8
+    this_sample = Interpolate88(ws_linear_fold, scaled + 32768);
+  )
+}
+
+void Oscillator::RenderLinearFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    int32_t wave = TRIANGLE_BIPOLAR(phase);
+    int32_t gain_factor = 32767 + 7 * timbre;
+    int32_t scaled = wave * gain_factor >> 18;
+    this_sample = Interpolate88(ws_linear_fold, scaled + 32768);
+  )
+}
+
+void Oscillator::RenderLinearFoldSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    int32_t wave = 32767 - (phase >> 16);  // Down saw: +32767 to -32768
+    int32_t gain_factor = 32767 + 7 * timbre;
+    int32_t scaled = wave * gain_factor >> 18;
+    this_sample = Interpolate88(ws_linear_fold, scaled + 32768);
   )
 }
 
@@ -611,19 +797,19 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
   )
 }
 
-void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples) {
-  RENDER_PERIODIC(
-    int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
-    uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
-    size_t index = zone_14 >> 10; // Use highest 4 bits
-    CONSTRAIN(index, 0, kNumZones - 1);
-    const int16_t* wave_1 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
-    index += 1;
-    CONSTRAIN(index, 0, kNumZones - 1);
-    const int16_t* wave_2 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
-    this_sample = Crossfade(wave_1, wave_2, phase, crossfade);
-  )
-}
+// void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples) {
+//   RENDER_PERIODIC(
+//     int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
+//     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
+//     size_t index = zone_14 >> 10; // Use highest 4 bits
+//     CONSTRAIN(index, 0, kNumZones - 1);
+//     const int16_t* wave_1 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
+//     index += 1;
+//     CONSTRAIN(index, 0, kNumZones - 1);
+//     const int16_t* wave_2 = waveform_table[WAV_BANDLIMITED_COMB_0 + index];
+//     this_sample = Crossfade(wave_1, wave_2, phase, crossfade);
+//   )
+// }
 
 void Oscillator::RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_samples) {
   StateVariableFilter svf = svf_;
