@@ -291,12 +291,6 @@ void Oscillator::Render(int16_t* audio_mix) {
     high_ = false; \
   } \
 
-#define TRIANGLE_UNIPOLAR(phase) \
-  (((phase >> 16) << 1) ^ ((phase >> 16) & 0x8000 ? 0xffff : 0x0000))
-
-#define TRIANGLE_BIPOLAR(phase) \
-  TRIANGLE_UNIPOLAR(phase) - 0x8000
-
 void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(0x7fff);
@@ -374,12 +368,12 @@ void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_sam
 void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_MODULATED(
     SYNC(
-      wav_sine[0] - Interpolate824(wav_sine, modulator_phase_at_reset),
+      sine(0) - sine(modulator_phase_at_reset),
       break, // No edges
       false // No extra transition
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
-    this_sample = Interpolate824(wav_sine, modulator_phase);
+    this_sample = sine(modulator_phase);
   )
 }
 
@@ -399,12 +393,12 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples
 void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_MODULATED(
     SYNC(
-      TRIANGLE_BIPOLAR(0) - TRIANGLE_BIPOLAR(modulator_phase_at_reset),
+      triangle(0) - triangle(modulator_phase_at_reset),
       break, // No edges
       false // No extra transition
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
-    this_sample = TRIANGLE_BIPOLAR(modulator_phase);
+    this_sample = triangle(modulator_phase);
   )
 }
 
@@ -422,8 +416,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
 
 void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
-    this_sample = TRIANGLE_UNIPOLAR(phase);
-    this_sample += 32768;
+    this_sample = triangle(phase);
     this_sample = this_sample * timbre >> 15;
     this_sample = Interpolate88(ws_tri_fold, this_sample + 32768);
   )
@@ -431,7 +424,7 @@ void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samp
 
 void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
-    this_sample = Interpolate824(wav_sine, phase);
+    this_sample = sine(phase);
     this_sample = this_sample * timbre >> 15;
     this_sample = Interpolate88(ws_sine_fold, this_sample + 32768);
   )
@@ -439,7 +432,7 @@ void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples)
 
 void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
-    this_sample = Interpolate824(wav_sine, phase);
+    this_sample = sine(phase);
     int16_t baseline = this_sample >> 6;
     this_sample = baseline + ((this_sample - baseline) * timbre >> 15);
     this_sample = Interpolate88(ws_violent_overdrive, this_sample + 32768);
@@ -449,8 +442,8 @@ void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples)
 void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff;
-    int32_t sine = Interpolate824(wav_sine, phase);
-    int32_t scaled_sine = sine * timbre;
+    int32_t sine_sample = sine(phase);
+    int32_t scaled_sine = sine_sample * timbre;
 
     int16_t dither = phase ^ (phase >> 16);
     int16_t dither_14 = dither >> (16 - 14);
@@ -471,13 +464,13 @@ void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {
   bool index_shift_halfbit = index_2x_upshift & 1;
   RENDER_MODULATED(
     modulator_phase += modulator_phase_increment;
-    int16_t modulator = Interpolate824(wav_sine, modulator_phase);
+    int16_t modulator = sine(modulator_phase);
     uint32_t phase_mod = modulator * timbre;
     phase_mod =
       (phase_mod << index_shift) +
       // Conditional multiplication by 1.5 to approximate sqrt(2)
       (index_shift_halfbit ? (phase_mod << (index_shift - 1)) : 0);
-    this_sample = Interpolate824(wav_sine, phase + phase_mod);
+    this_sample = sine(phase + phase_mod);
   )
 }
 
@@ -505,7 +498,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* au
       pd_square_.polarity = !pd_square_.polarity;
       modulator_phase = kPhaseResetPulse[filter_type];
     }
-    int32_t carrier = Interpolate824(wav_sine, modulator_phase);
+    int32_t carrier = sine(modulator_phase);
     uint16_t window = ~(phase >> 15); // Double saw
     int32_t pulse = (carrier * window) >> 16;
     if (pd_square_.polarity) pulse = -pulse;
@@ -535,7 +528,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
     if (phase < phase_increment) {
       modulator_phase = kPhaseResetSaw[filter_type];
     }
-    int32_t carrier = Interpolate824(wav_sine, modulator_phase);
+    int32_t carrier = sine(modulator_phase);
     uint16_t window = ~(phase >> 16); // Saw
     int16_t output;
     if (filter_type & 2) { // Band- or high-pass

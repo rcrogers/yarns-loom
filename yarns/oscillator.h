@@ -31,8 +31,10 @@
 #define YARNS_OSCILLATOR_H_
 
 #include "stmlib/stmlib.h"
+#include "stmlib/utils/dsp.h"
 
 #include "yarns/envelope.h"
+#include "yarns/resources.h"
 #include "yarns/interpolator.h"
 #include "yarns/drivers/dac.h"
 
@@ -174,6 +176,14 @@ class Oscillator {
     }
     t = 65535 - t;
     return -static_cast<int32_t>(t * t >> 18);
+  }
+
+  inline int16_t sine(uint32_t phase) const {
+    return stmlib::Interpolate824(wav_sine, phase);
+  }
+
+  inline int16_t triangle(uint32_t phase) const {
+    return ((phase >> 15) ^ (phase >> 31 ? 0xffff : 0x0000)) - 0x8000;
   }
 
   OscillatorShape shape_;
