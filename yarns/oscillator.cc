@@ -450,7 +450,7 @@ void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples)
 
 void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
-    timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff;
+    timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff; // Use top 7/8
     int32_t sine_sample = sine(phase);
     int32_t scaled_sine = sine_sample * timbre;
 
@@ -462,80 +462,95 @@ void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_s
   )
 }
 
-// Waveshaper: (base_wave(phase) + bias) * gain → transfer_wave(as_phase)
-// Baseline 4x gain, doubled for each sine involved (max 16x for sine→sine)
-#define WAVE_TRANSFER_QUADRATURE_BIAS 0x40000000u  // 90° in 32-bit phase
-#define WAVE_TRANSFER_GAIN(t, max_gain_bits) ({ \
-    const int32_t unity_bits = 16; /* log2(2^31 / 32767): peak → half period */ \
-    (1 << (unity_bits - (max_gain_bits))) + ((t) << 1) - ((t) >> ((max_gain_bits) - 1)); \
-  })
-// Phase calculation: overflow wraps naturally
-// Bias is scaled by normalized gain (unity = 2^13), so bias >> 13 * gain
-#define WAVE_TRANSFER_PHASE(sample, gain, bias, max_gain_bits) \
-    ((((uint32_t)((sample) * (gain))) << (max_gain_bits)) + \
-     ((bias) ? (uint32_t)((gain) * ((bias) >> 13)) : 0u))
+// Waveshaper: (sample + bias) * gain → 32-bit phase for transfer function
+// Baseline 4x max gain, doubled for each sine involved (up to 16x for sine/sine)
+// Phase overflow wraps naturally (like Python's phase % 1)
+inline uint32_t amplify_as_transfer_phase(
+    int16_t sample, int max_gain_bits, int16_t dynamic_gain_u15, bool quadrature_bias
+) {
+  // At min gain (timbre=0), peak sample   (2^15) → half phase (2^31)
+  const int unity_gain_bits = 31 - 15;  // = 16
+  int32_t min_gain = 1 << (unity_gain_bits - max_gain_bits);
+  int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (max_gain_bits - 1));
+
+  uint32_t sample_phase = ((uint32_t)(sample * gain)) << max_gain_bits;
+
+  // Quadrature (90°) bias: min_gain << shift = 2^30
+  const int quadrature_shift = 30 - unity_gain_bits + max_gain_bits;
+  uint32_t bias_phase = ((uint32_t)(gain * quadrature_bias)) << quadrature_shift;
+
+  return sample_phase + bias_phase;
+}
 
 void Oscillator::RenderTransferSineThruSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
+    const int max_gain_bits = 4;  // 16x gain sine/sine
     this_sample = sine(phase);
-    int32_t gain = WAVE_TRANSFER_GAIN(timbre, 4);  // 16x: sine + sine
-    this_sample = sine(WAVE_TRANSFER_PHASE(this_sample, gain, 0, 4));
+    uint32_t transfer_phase = amplify_as_transfer_phase(this_sample, max_gain_bits, timbre, false);
+    this_sample = sine(transfer_phase);
   )
 }
 
 void Oscillator::RenderTransferTriThruSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
+    const int max_gain_bits = 3;  // 8x gain tri/sine
     this_sample = triangle(phase);
-    int32_t gain = WAVE_TRANSFER_GAIN(timbre, 3);  // 8x: tri + sine
-    this_sample = sine(WAVE_TRANSFER_PHASE(this_sample, gain, 0, 3));
+    uint32_t transfer_phase = amplify_as_transfer_phase(this_sample, max_gain_bits, timbre, false);
+    this_sample = sine(transfer_phase);
   )
 }
 
 void Oscillator::RenderTransferSineThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
+    const int max_gain_bits = 4;  // 16x gain sine/sine
     this_sample = sine(phase);
-    int32_t gain = WAVE_TRANSFER_GAIN(timbre, 4);  // 16x: sine + sine
-    this_sample = sine(WAVE_TRANSFER_PHASE(this_sample, gain, WAVE_TRANSFER_QUADRATURE_BIAS, 4));
+    uint32_t transfer_phase = amplify_as_transfer_phase(this_sample, max_gain_bits, timbre, true);
+    this_sample = sine(transfer_phase);
   )
 }
 
 void Oscillator::RenderTransferTriThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
+    const int max_gain_bits = 3;  // 8x gain tri/sine
     this_sample = triangle(phase);
-    int32_t gain = WAVE_TRANSFER_GAIN(timbre, 3);  // 8x: tri + sine
-    this_sample = sine(WAVE_TRANSFER_PHASE(this_sample, gain, WAVE_TRANSFER_QUADRATURE_BIAS, 3));
+    uint32_t transfer_phase = amplify_as_transfer_phase(this_sample, max_gain_bits, timbre, true);
+    this_sample = sine(transfer_phase);
   )
 }
 
 void Oscillator::RenderTransferSineThruTri(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
+    const int max_gain_bits = 3;  // 8x gain sine/tri
     this_sample = sine(phase);
-    int32_t gain = WAVE_TRANSFER_GAIN(timbre, 3);  // 8x: sine + tri
-    this_sample = triangle(WAVE_TRANSFER_PHASE(this_sample, gain, 0, 3));
+    uint32_t transfer_phase = amplify_as_transfer_phase(this_sample, max_gain_bits, timbre, false);
+    this_sample = triangle(transfer_phase);
   )
 }
 
 void Oscillator::RenderTransferTriThruTri(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
+    const int max_gain_bits = 2;  // 4x gain tri/tri
     this_sample = triangle(phase);
-    int32_t gain = WAVE_TRANSFER_GAIN(timbre, 2);  // 4x: tri + tri
-    this_sample = triangle(WAVE_TRANSFER_PHASE(this_sample, gain, 0, 2));
+    uint32_t transfer_phase = amplify_as_transfer_phase(this_sample, max_gain_bits, timbre, false);
+    this_sample = triangle(transfer_phase);
   )
 }
 
 void Oscillator::RenderTransferSineThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
+    const int max_gain_bits = 3;  // 8x gain sine/tri
     this_sample = sine(phase);
-    int32_t gain = WAVE_TRANSFER_GAIN(timbre, 3);  // 8x: sine + tri
-    this_sample = triangle(WAVE_TRANSFER_PHASE(this_sample, gain, WAVE_TRANSFER_QUADRATURE_BIAS, 3));
+    uint32_t transfer_phase = amplify_as_transfer_phase(this_sample, max_gain_bits, timbre, true);
+    this_sample = triangle(transfer_phase);
   )
 }
 
 void Oscillator::RenderTransferTriThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
+    const int max_gain_bits = 2;  // 4x gain tri/tri
     this_sample = triangle(phase);
-    int32_t gain = WAVE_TRANSFER_GAIN(timbre, 2);  // 4x: tri + tri
-    this_sample = triangle(WAVE_TRANSFER_PHASE(this_sample, gain, WAVE_TRANSFER_QUADRATURE_BIAS, 2));
+    uint32_t transfer_phase = amplify_as_transfer_phase(this_sample, max_gain_bits, timbre, true);
+    this_sample = triangle(transfer_phase);
   )
 }
 
