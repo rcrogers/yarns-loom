@@ -542,7 +542,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
 
 void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
-    int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 1));
+    int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 3));
     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
     size_t index = zone_14 >> 10; // Use highest 4 bits
     CONSTRAIN(index, 0, kNumZones - 1);
