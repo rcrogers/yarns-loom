@@ -73,6 +73,10 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderDiracComb,
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderExponentialSine,
+  &Oscillator::RenderWaveSineSine,
+  &Oscillator::RenderWaveTriSine,
+  &Oscillator::RenderWaveSineTri,
+  &Oscillator::RenderWaveTriTri,
   &Oscillator::RenderFM,
 };
 
@@ -133,6 +137,7 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
     shape == OSC_SHAPE_FOLD_SINE ||
     shape == OSC_SHAPE_FOLD_TRIANGLE ||
     shape == OSC_SHAPE_EXP_SINE ||
+    (shape >= OSC_SHAPE_WAVE_SINE_SINE && shape <= OSC_SHAPE_WAVE_TRI_TRI) ||
     shape >= OSC_SHAPE_FM
   ) {
     // Additive synthesis reduces timbre as pitch increases
@@ -450,6 +455,45 @@ void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_s
     int32_t dithered_scaled_sine = (scaled_sine + dither_14) >> 15;
 
     this_sample = Interpolate88(wav_sizzle, dithered_scaled_sine + 0x8000);
+  )
+}
+
+// Waveshaper: base_wave(phase) * gain (from timbre) → transfer_wave(as_phase)
+#define WAVE_TRANSFER_MAX_GAIN_BITS 3  // 8x
+#define WAVE_TRANSFER_GAIN(t) ({ \
+    const int32_t unity_bits = 16; /* log2(2^31 / 32767): peak → half period */ \
+    (1 << (unity_bits - WAVE_TRANSFER_MAX_GAIN_BITS)) + ((t) << 1) - ((t) >> (WAVE_TRANSFER_MAX_GAIN_BITS - 1)); \
+  })
+
+void Oscillator::RenderWaveSineSine(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = sine(phase);
+    uint32_t transfer_phase = (this_sample * WAVE_TRANSFER_GAIN(timbre)) << WAVE_TRANSFER_MAX_GAIN_BITS;
+    this_sample = sine(transfer_phase);
+  )
+}
+
+void Oscillator::RenderWaveTriSine(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = triangle(phase);
+    uint32_t transfer_phase = (this_sample * WAVE_TRANSFER_GAIN(timbre)) << WAVE_TRANSFER_MAX_GAIN_BITS;
+    this_sample = sine(transfer_phase);
+  )
+}
+
+void Oscillator::RenderWaveSineTri(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = sine(phase);
+    uint32_t transfer_phase = (this_sample * WAVE_TRANSFER_GAIN(timbre)) << WAVE_TRANSFER_MAX_GAIN_BITS;
+    this_sample = triangle(transfer_phase);
+  )
+}
+
+void Oscillator::RenderWaveTriTri(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = triangle(phase);
+    uint32_t transfer_phase = (this_sample * WAVE_TRANSFER_GAIN(timbre)) << WAVE_TRANSFER_MAX_GAIN_BITS;
+    this_sample = triangle(transfer_phase);
   )
 }
 

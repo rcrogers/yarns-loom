@@ -180,7 +180,7 @@ characters = {
   '\x88': 'efgl',  # Saw
   '\x89': 'pjb',   # CSaw
   '\x8A': 'ml',    # Baby saw
-  '\x8B': 'nl',    # Tri
+  '\x8B': 'nl',    # Triangle
   '\x8C': 'efabc', # Square
   '\x8D': 'epkc',   # Baby square
   '\x8E': 'dhm',   # Pulse

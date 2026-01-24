@@ -142,6 +142,10 @@ const char* const voicing_oscillator_shape_values[] = {
   "\x8E\x8E DIRAC COMB",
   "ST SINE TANH",
   "SX SINE EXPONENTIAL",
+  "Ss SINE THRU SINE",
+  "^s TRI THRU SINE",
+  "S^ SINE THRU TRI",
+  "^^ TRI THRU TRI",
 };
 STATIC_ASSERT(
   OSC_SHAPE_FM == sizeof(voicing_oscillator_shape_values) / sizeof(const char*),

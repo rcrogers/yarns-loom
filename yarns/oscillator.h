@@ -97,6 +97,10 @@ enum OscillatorShape {
   OSC_SHAPE_DIRAC_COMB,
   OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_EXP_SINE,
+  OSC_SHAPE_WAVE_SINE_SINE,
+  OSC_SHAPE_WAVE_TRI_SINE,
+  OSC_SHAPE_WAVE_SINE_TRI,
+  OSC_SHAPE_WAVE_TRI_TRI,
   OSC_SHAPE_FM,
 };
 
@@ -159,6 +163,10 @@ class Oscillator {
   void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderWaveSineSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderWaveSineTri(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderWaveTriSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderWaveTriTri(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderFM(int16_t* timbre_samples, int16_t* audio_samples);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
