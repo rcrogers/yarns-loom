@@ -104,7 +104,7 @@ extern const int16_t wav_exponential[];
 extern const int16_t wav_ring[];
 extern const int16_t wav_steps[];
 extern const int16_t wav_noise[];
-extern const int16_t wav_sine[];
+extern const int16_t wav_sine_quadrant[];
 extern const int16_t wav_sizzle[];
 extern const int16_t wav_bandlimited_comb_0[];
 extern const int16_t wav_bandlimited_comb_1[];
@@ -223,8 +223,8 @@ extern const uint16_t chr_characters[];
 #define WAV_STEPS_SIZE 257
 #define WAV_NOISE 3
 #define WAV_NOISE_SIZE 257
-#define WAV_SINE 4
-#define WAV_SINE_SIZE 257
+#define WAV_SINE_QUADRANT 4
+#define WAV_SINE_QUADRANT_SIZE 257
 #define WAV_SIZZLE 5
 #define WAV_SIZZLE_SIZE 257
 #define WAV_BANDLIMITED_COMB_0 6

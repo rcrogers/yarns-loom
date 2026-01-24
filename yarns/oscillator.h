@@ -179,7 +179,14 @@ class Oscillator {
   }
 
   inline int16_t sine(uint32_t phase) const {
-    return stmlib::Interpolate824(wav_sine, phase);
+    // Quarter-table lookup with quadrant symmetry for 4x effective resolution.
+    uint32_t quarter_phase = phase << 2;
+    // Mirror for quadrants 1 and 3 (bit 30 set)
+    quarter_phase ^= -((phase >> 30) & 1);
+    int16_t value = stmlib::Interpolate824(wav_sine_quadrant, quarter_phase);
+    // Negate for quadrants 2 and 3 (bit 31 set)
+    int32_t sign = static_cast<int32_t>(phase) >> 31;
+    return (value ^ sign) - sign;
   }
 
   inline int16_t triangle(uint32_t phase) const {
