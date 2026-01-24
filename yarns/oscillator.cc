@@ -463,21 +463,23 @@ void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_s
 }
 
 // Waveshaper: sample * gain + offset → 32-bit phase for transfer function
-// Baseline 4x max gain, doubled for each sine involved (up to 16x for sine/sine)
-// Phase overflow wraps naturally (like Python's phase % 1)
+// Phase overflow wraps naturally (mod 2^32, like Python's phase % 1)
 inline uint32_t amplify_as_transfer_phase(
     int16_t sample, int max_gain_bits, int16_t dynamic_gain_u15, bool quadrature_offset
 ) {
-  // At min gain (timbre=0), peak sample (2^15) → half phase (2^31)
-  const int unity_gain_bits = 31 - 15;  // = 16
-  int32_t min_gain = 1 << (unity_gain_bits - max_gain_bits);
+  // Gain scaling: at timbre=0, peak sample (2^15) maps to quarter phase (2^30).
+  // With quadrature offset, this yields [0, 0.5] phase range = unfolded output.
+  // At timbre=max, gain is 2^max_gain_bits higher, giving that many folds.
+  const int min_gain_bits = 15 - max_gain_bits;  // 2^15 * 2^min_gain_bits * 2^max_gain_bits = 2^30
+  int32_t min_gain = 1 << min_gain_bits;
   int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (max_gain_bits - 1));
 
   uint32_t sample_phase = ((uint32_t)(sample * gain)) << max_gain_bits;
 
-  // Quadrature (90°) offset: constant 2^30 regardless of gain (analog-style)
-  const int quadrature_shift = 30 - unity_gain_bits + max_gain_bits;
-  uint32_t offset_phase = ((uint32_t)(min_gain * quadrature_offset)) << quadrature_shift;
+  // Quadrature (90°) offset: constant 2^30 regardless of gain.
+  // Analog-style: offset doesn't scale with gain, so timbre envelope
+  // only affects fold depth, not the operating point in transfer function.
+  uint32_t offset_phase = (uint32_t)quadrature_offset << 30;
 
   return sample_phase + offset_phase;
 }
