@@ -219,6 +219,10 @@ characters = {
 
   '\xC0': 'plcb', # sqrt
   '\xC1': 'fhak', # pi
+
+  # Rotated transfer function symbols (180 degrees)
+  '\xC2': 'agp',  # rotated 's' (sine)
+  '\xC3': 'gj',   # rotated '^' (tri)
   
   '\xFF': 'abcdefghjklmnp',
   
