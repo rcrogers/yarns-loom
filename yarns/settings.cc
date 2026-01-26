@@ -146,8 +146,8 @@ const char* const voicing_oscillator_shape_values[] = {
   "^s TRI THRU SINE",
   "S\xC2 BIASED SINE THRU SINE",
   "^\xC2 BIASED TRI THRU SINE",
-  "S^ BIASED SINE THRU TRI",
-  "^^ BIASED TRI THRU TRI",
+  "S^ SINE THRU TRI",
+  "^^ TRI THRU TRI",
   "S\xC3 BIASED SINE THRU TRI",
   "^\xC3 BIASED TRI THRU TRI",
 };
