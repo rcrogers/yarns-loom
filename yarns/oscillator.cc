@@ -464,61 +464,53 @@ void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_s
 
 
 static const int kSampleBits = 15; // int16_t peak ≈ 2^15
-static const int kPhaseBits = 32; // uint32_t phase range
+
+
+// Transfer waveshaping: input sample is amplified and used as phase for a
+// transfer function (sine or triangle). The transfer function's output
+// becomes the final sample.
+//
+// Key property: all transfer functions satisfy f(0) = 0 (zero-crossing at
+// phase 0, peak at phase 1/4). This ensures input 0 produces output 0.
+//
+// At min timbre, the input peak maps to the transfer peak (phase 1/4),
+// placing the signal at the fold threshold: maximum amplitude before
+// wavefolding begins. Output equals input (clean pass-through).
+
+// Transfer peak phase (1/4 cycle = 2^30)
+static const uint32_t kTransferPeakPhase = 1u << (32 - 2);
 static const int kTransferMaxGainBits = 4; // 16x max gain
 
-// Transfer function peaks and zero-crossings:
-//   - Sine: peak at phase 1/4, zero-crossing at phase 0
-//   - Triangle: peak at phase 1/2, zero-crossing at phase 1/4
-//
-// For clean pass-through at min timbre (fold threshold from app_bipolar.py):
-//   - Input 0 must map to transfer function's zero-crossing
-//   - Input peak must map to transfer function's peak
-//
-// This requires:
-//   - gain: maps input peak to (peak_phase - zero_crossing_phase)
-//   - offset: the zero-crossing phase
-//
-// For sine: gain maps to 1/4, offset = 0
-// For triangle: gain maps to 1/4, offset = 1/4
-// Both have the same gain! The "distance" from zero-crossing to peak is 1/4 cycle.
-//
-// min_gain = (1/4 cycle) / (input_peak * 16)
-//          = 2^30 / (2^15 * 2^4) = 2^11 = 2048
-static const int32_t kMinGainTransfer = 1 << (kPhaseBits - 2 - kSampleBits - kTransferMaxGainBits);
+// Biased variants add a DC bias (after amplification) to shift the operating
+// point on the transfer function, creating asymmetric harmonic content.
+static const uint32_t kTransferAsymmetricBias = kTransferPeakPhase / 2;  // 1/8 cycle -- max asymmetry
 
-// Zero-crossing phase for each transfer function
-static const uint32_t kZeroCrossingSine = 0;
-static const uint32_t kZeroCrossingTri = 1u << (kPhaseBits - 2); // 2^30
-
-template<uint32_t ZERO_CROSSING_PHASE, bool ADD_QUADRATURE_OFFSET>
+template<uint32_t TRANSFER_PHASE_BIAS>
 inline uint32_t amplify_for_transfer(int16_t sample, int16_t dynamic_gain_u15) {
-  // At min timbre (dynamic_gain=0), the transfer function is at the fold threshold:
-  // input peak maps to transfer peak, with no folding yet.
+  // min_gain derivation (at min timbre, input peak maps to transfer peak):
+  //   input_peak * min_gain * 2^kTransferMaxGainBits + bias = phase_peak
+  //   2^15 * min_gain * 2^4 = 2^30 - bias
+  //   min_gain = (2^30 - bias) >> 19
   //
-  // For biased variants, reduce gain by 2/3 since the offset shifts the operating point.
-  static const int32_t min_gain = ADD_QUADRATURE_OFFSET
-      ? kMinGainTransfer * 2 / 3
-      : kMinGainTransfer;
+  // Examples:
+  //   bias = 0:           min_gain = 2^30 >> 19 = 2048
+  //   bias = 2^30/3:      min_gain = (2/3 * 2^30) >> 19 = 1365  (bias 1/12 cycle)
+  //   bias = 2^29:        min_gain = 2^29 >> 19 = 1024          (bias 1/8 cycle)
+  static const int32_t min_gain =
+      (kTransferPeakPhase - TRANSFER_PHASE_BIAS) >> (kSampleBits + kTransferMaxGainBits);
 
   int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
 
-  // Wrapping is intentional - this becomes phase for the transfer function
+  // Signed multiply, then reinterpret as phase (wrapping is intentional)
   uint32_t amped_sample = ((uint32_t)(sample * gain)) << kTransferMaxGainBits;
 
-  // Offset centers input=0 on the transfer function's zero-crossing.
-  // For biased variants, shift by an additional 1/3 of the zero-to-peak distance.
-  static const uint32_t offset_phase = ADD_QUADRATURE_OFFSET
-      ? ZERO_CROSSING_PHASE + (1u << (kPhaseBits - 2)) / 3
-      : ZERO_CROSSING_PHASE;
-
-  return amped_sample + offset_phase;
+  return amped_sample + TRANSFER_PHASE_BIAS;
 }
 
 void Oscillator::RenderTransferSineThruSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = sine(phase);
-    uint32_t transfer_phase = amplify_for_transfer<kZeroCrossingSine, false>(this_sample, timbre);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
     this_sample = sine(transfer_phase);
   )
 }
@@ -526,7 +518,7 @@ void Oscillator::RenderTransferSineThruSine(int16_t* timbre_samples, int16_t* au
 void Oscillator::RenderTransferTriThruSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = triangle(phase);
-    uint32_t transfer_phase = amplify_for_transfer<kZeroCrossingSine, false>(this_sample, timbre);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
     this_sample = sine(transfer_phase);
   )
 }
@@ -534,7 +526,7 @@ void Oscillator::RenderTransferTriThruSine(int16_t* timbre_samples, int16_t* aud
 void Oscillator::RenderTransferSineThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = sine(phase);
-    uint32_t transfer_phase = amplify_for_transfer<kZeroCrossingSine, true>(this_sample, timbre);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
     this_sample = sine(transfer_phase);
   )
 }
@@ -542,7 +534,7 @@ void Oscillator::RenderTransferSineThruSineBiased(int16_t* timbre_samples, int16
 void Oscillator::RenderTransferTriThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = triangle(phase);
-    uint32_t transfer_phase = amplify_for_transfer<kZeroCrossingSine, true>(this_sample, timbre);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
     this_sample = sine(transfer_phase);
   )
 }
@@ -550,7 +542,7 @@ void Oscillator::RenderTransferTriThruSineBiased(int16_t* timbre_samples, int16_
 void Oscillator::RenderTransferSineThruTri(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = sine(phase);
-    uint32_t transfer_phase = amplify_for_transfer<kZeroCrossingTri, false>(this_sample, timbre);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
     this_sample = triangle(transfer_phase);
   )
 }
@@ -558,7 +550,7 @@ void Oscillator::RenderTransferSineThruTri(int16_t* timbre_samples, int16_t* aud
 void Oscillator::RenderTransferTriThruTri(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = triangle(phase);
-    uint32_t transfer_phase = amplify_for_transfer<kZeroCrossingTri, false>(this_sample, timbre);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
     this_sample = triangle(transfer_phase);
   )
 }
@@ -566,7 +558,7 @@ void Oscillator::RenderTransferTriThruTri(int16_t* timbre_samples, int16_t* audi
 void Oscillator::RenderTransferSineThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = sine(phase);
-    uint32_t transfer_phase = amplify_for_transfer<kZeroCrossingTri, true>(this_sample, timbre);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
     this_sample = triangle(transfer_phase);
   )
 }
@@ -574,7 +566,7 @@ void Oscillator::RenderTransferSineThruTriBiased(int16_t* timbre_samples, int16_
 void Oscillator::RenderTransferTriThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     this_sample = triangle(phase);
-    uint32_t transfer_phase = amplify_for_transfer<kZeroCrossingTri, true>(this_sample, timbre);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
     this_sample = triangle(transfer_phase);
   )
 }

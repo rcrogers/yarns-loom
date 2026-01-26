@@ -206,6 +206,9 @@ class Oscillator {
   }
 
   inline int16_t triangle(uint32_t phase) const {
+    // Phase offset ensures f(0) = 0, with peak at phase 1/4 (like sine).
+    // This simplifies transfer waveshaping: input 0 always yields output 0.
+    phase += 0x40000000;
     return ((phase >> 15) ^ (phase >> 31 ? 0xffff : 0x0000)) - 0x8000;
   }
 
