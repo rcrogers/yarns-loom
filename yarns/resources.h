@@ -64,6 +64,7 @@ extern const char str_dummy[];
 extern const uint16_t lut_env_expo[];
 extern const uint16_t lut_arpeggiator_patterns[];
 extern const uint16_t lut_consonance[];
+extern const uint16_t lut_expo_fm_freq_mult[];
 extern const uint16_t lut_clock_ratio_ticks[];
 extern const uint16_t lut_svf_cutoff[];
 extern const uint16_t lut_svf_damp[];
@@ -98,6 +99,7 @@ extern const int16_t lut_scale_chandradeep[];
 extern const int16_t lut_scale_kaushik_todi[];
 extern const int16_t lut_scale_jogeshwari[];
 extern const int16_t lut_fm_modulator_intervals[];
+extern const int16_t lut_expo_fm_pitch_correction[];
 extern const char* const lut_fm_ratio_names[];
 extern const char* const lut_clock_ratio_names[];
 extern const int16_t wav_exponential[];
@@ -139,13 +141,15 @@ extern const uint16_t chr_characters[];
 #define LUT_ARPEGGIATOR_PATTERNS_SIZE 23
 #define LUT_CONSONANCE 2
 #define LUT_CONSONANCE_SIZE 1536
-#define LUT_CLOCK_RATIO_TICKS 3
+#define LUT_EXPO_FM_FREQ_MULT 3
+#define LUT_EXPO_FM_FREQ_MULT_SIZE 257
+#define LUT_CLOCK_RATIO_TICKS 4
 #define LUT_CLOCK_RATIO_TICKS_SIZE 32
-#define LUT_SVF_CUTOFF 4
+#define LUT_SVF_CUTOFF 5
 #define LUT_SVF_CUTOFF_SIZE 257
-#define LUT_SVF_DAMP 5
+#define LUT_SVF_DAMP 6
 #define LUT_SVF_DAMP_SIZE 257
-#define LUT_SVF_SCALE 6
+#define LUT_SVF_SCALE 7
 #define LUT_SVF_SCALE_SIZE 257
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12
@@ -211,6 +215,8 @@ extern const uint16_t chr_characters[];
 #define LUT_SCALE_RASIA_SIZE 12
 #define LUT_FM_MODULATOR_INTERVALS 31
 #define LUT_FM_MODULATOR_INTERVALS_SIZE 26
+#define LUT_EXPO_FM_PITCH_CORRECTION 32
+#define LUT_EXPO_FM_PITCH_CORRECTION_SIZE 257
 #define LUT_FM_RATIO_NAMES 0
 #define LUT_FM_RATIO_NAMES_SIZE 26
 #define LUT_CLOCK_RATIO_NAMES 1

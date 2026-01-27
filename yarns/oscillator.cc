@@ -82,10 +82,11 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderTransferSineThruTriBiased,
   &Oscillator::RenderTransferTriThruTriBiased,
   &Oscillator::RenderFM,
+  &Oscillator::RenderExpoFM,
 };
 
 STATIC_ASSERT(
-  sizeof(Oscillator::fn_table_) / sizeof(Oscillator::RenderFn) == OSC_SHAPE_FM + 1,
+  sizeof(Oscillator::fn_table_) / sizeof(Oscillator::RenderFn) == OSC_SHAPE_EXPO_FM + 1,
   oscillator_fn_table_size_mismatch
 );
 
@@ -204,7 +205,7 @@ void Oscillator::Render(int16_t* audio_mix) {
   timbre_envelope_.RenderSamples(timbre_samples, timbre_bias << 16);
 
   uint8_t fn_index = shape_;
-  CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
+  CONSTRAIN(fn_index, 0, OSC_SHAPE_EXPO_FM);
   RenderFn fn = fn_table_[fn_index];
   int16_t audio_samples[kAudioBlockSize] = {0};
   (this->*fn)(timbre_samples, audio_samples);
@@ -590,6 +591,86 @@ void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {
       (index_shift_halfbit ? (phase_mod << (index_shift - 1)) : 0);
     this_sample = sine(phase + phase_mod);
   )
+}
+
+// Exponential FM: carrier frequency is modulated exponentially.
+// Instantaneous freq = carrier_freq * 2^(modulator * index)
+//
+// Rising case (fm > fc): perceived pitch = fc * I0(beta * ln(2))
+// We pre-correct carrier pitch to maintain pitch stability.
+//
+// Performance: 3 multiplications per sample
+// - modulator * timbre (1 mult)
+// - Interpolate824 for freq_mult (1 mult)
+// - phase_increment * freq_mult (1 mult)
+// - triangle carrier (0 mults)
+void Oscillator::RenderExpoFM(int16_t* timbre_samples, int16_t* audio_samples) {
+  uint8_t fm_shape = shape_ - OSC_SHAPE_EXPO_FM;
+  int16_t interval = lut_fm_modulator_intervals[fm_shape];
+
+  // Compensate for higher FM ratios having sweet spot at lower index
+  uint8_t index_2x_upshift = lut_fm_index_2x_upshifts[fm_shape];
+  uint8_t index_shift = index_2x_upshift >> 1;
+  bool index_shift_halfbit = index_2x_upshift & 1;
+
+  // Pitch correction: compensate for expo FM pitch rise using I0 formula
+  // Use average timbre over block for correction calculation
+  int16_t avg_timbre = (timbre_samples[0] + timbre_samples[kAudioBlockSize - 1]) >> 1;
+  // Apply FM index scaling to get effective timbre for pitch correction
+  int32_t scaled_timbre = avg_timbre;
+  scaled_timbre =
+    (scaled_timbre << index_shift) +
+    (index_shift_halfbit ? (scaled_timbre << (index_shift - 1)) : 0);
+  // Clamp to LUT range (0-65535 maps to 256 entries)
+  if (scaled_timbre < 0) scaled_timbre = 0;
+  if (scaled_timbre > 65535) scaled_timbre = 65535;
+  int16_t pitch_correction = lut_expo_fm_pitch_correction[scaled_timbre >> 8];
+
+  // Compute modulator phase increment (at fm = fc + interval)
+  int32_t modulator_pitch = pitch_ + interval;
+  CONSTRAIN(modulator_pitch, 0, kHighestNote - 1);
+  uint32_t modulator_phase_increment = ComputePhaseIncrement(modulator_pitch);
+
+  // Compute corrected carrier phase increment
+  int32_t corrected_pitch = pitch_ - pitch_correction;
+  CONSTRAIN(corrected_pitch, 0, kHighestNote - 1);
+  uint32_t carrier_phase_increment_base = ComputePhaseIncrement(corrected_pitch);
+
+  uint32_t phase = phase_;
+  uint32_t modulator_phase = modulator_phase_;
+
+  RENDER_CORE(
+    // Triangle modulator (0 mults)
+    modulator_phase += modulator_phase_increment;
+    int16_t modulator = triangle(modulator_phase);
+
+    // Compute frequency exponent: modulator * timbre * scale
+    // Product is ~30 bits, shift to get phase for LUT interpolation
+    int32_t exponent_product = modulator * timbre;  // 1 mult
+    // Apply FM index scaling
+    exponent_product =
+      (exponent_product << index_shift) +
+      (index_shift_halfbit ? (exponent_product << (index_shift - 1)) : 0);
+    // Convert to unsigned phase for LUT lookup (centered at 0x80000000)
+    // At max modulator (32767) * max timbre (32767) = ~2^30
+    // Shift left by 1 to use full 32-bit range for interpolation
+    uint32_t lut_phase = (exponent_product << 1) + 0x80000000;
+
+    // Interpolated 2^x lookup (1 mult)
+    // LUT values are scaled with 2^14 = 1.0
+    uint16_t freq_mult = Interpolate824(lut_expo_fm_freq_mult, lut_phase);
+
+    // Variable phase increment: base * freq_mult / 2^14
+    // We compute (base >> 14) * freq_mult to stay in 32-bit range
+    uint32_t phase_increment = (carrier_phase_increment_base >> 14) * freq_mult;  // 1 mult
+    phase += phase_increment;
+
+    // Triangle carrier (0 mults)
+    this_sample = triangle(phase);
+  )
+
+  phase_ = phase;
+  modulator_phase_ = modulator_phase;
 }
 
 const uint32_t kPhaseResetSaw[] = {

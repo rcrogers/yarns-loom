@@ -106,6 +106,7 @@ enum OscillatorShape {
   OSC_SHAPE_SINE_THRU_TRI_BIASED,
   OSC_SHAPE_TRI_THRU_TRI_BIASED,
   OSC_SHAPE_FM,
+  OSC_SHAPE_EXPO_FM,  // Exponential FM with pitch correction (rising case)
 };
 
 class Oscillator {
@@ -176,6 +177,7 @@ class Oscillator {
   void RenderTransferSineThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderFM(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderExpoFM(int16_t* timbre_samples, int16_t* audio_samples);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   

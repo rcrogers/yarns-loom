@@ -784,6 +784,56 @@ fm_index_upshifts_f = numpy.log2(fm_index_scales)
 lookup_tables_8.append(('fm_index_2x_upshifts', numpy.round(fm_index_upshifts_f * 2)))
 
 
+"""----------------------------------------------------------------------------
+Exponential FM lookup tables
+
+For expo FM, instantaneous frequency = carrier_freq * 2^(modulator * index).
+The "Rising Case" (fm > fc) formula predicts perceived pitch = fc * I0(beta * ln(2))
+where I0 is the modified Bessel function of the first kind, order 0.
+
+To maintain pitch stability, we pre-correct the carrier frequency by dividing
+by I0(beta * ln(2)), where beta is the modulation index in octaves.
+----------------------------------------------------------------------------"""
+
+def expo_fm_tables():
+  from scipy.special import iv  # Modified Bessel function of the first kind
+
+  # Maximum modulation index in octaves
+  # At max timbre with triangle modulator: freq swings from fc/2^max to fc*2^max
+  EXPO_FM_MAX_OCTAVES = 2.0
+
+  # Frequency multiplier LUT: maps scaled exponent to 2^x
+  # Input: 0-256 representing exponent from -max to +max octaves
+  # Output: frequency multiplier with 2^14 = 16384 (unity)
+  # Range: 2^(-max) to 2^(+max) in 16-bit fixed point
+  num_entries = 257
+  exponent_octaves = numpy.linspace(-EXPO_FM_MAX_OCTAVES, EXPO_FM_MAX_OCTAVES, num_entries)
+  freq_mult = numpy.power(2.0, exponent_octaves)
+  # Scale so that 1.0 maps to 2^14 = 16384
+  # At +2 octaves: 4.0 * 16384 = 65536 - clamp to 65535 to fit uint16_t
+  # At -2 octaves: 0.25 * 16384 = 4096
+  freq_mult_scaled = numpy.minimum(freq_mult * 16384.0, 65535.0)
+  lookup_tables.append(('expo_fm_freq_mult', freq_mult_scaled.astype(int)))
+
+  # Pitch correction LUT: compensate for expo FM pitch rise
+  # Maps timbre (0-256) to pitch correction in MIDI units (128 per semitone)
+  # Formula: correction = log2(I0(beta * ln(2))) * 12 * 128
+  # where beta = (timbre/256) * max_octaves
+  timbre_normalized = numpy.linspace(0, 1, num_entries)
+  beta = timbre_normalized * EXPO_FM_MAX_OCTAVES
+  i0_values = iv(0, beta * numpy.log(2))
+  # Pitch correction in octaves
+  pitch_correction_octaves = numpy.log2(i0_values)
+  # Convert to MIDI units (128 per semitone = 1536 per octave)
+  pitch_correction_midi = pitch_correction_octaves * 12 * 128
+  lookup_tables_signed.append(('expo_fm_pitch_correction', pitch_correction_midi.astype(int)))
+
+  print('Expo FM max pitch correction (MIDI units):', pitch_correction_midi[-1])
+  print('Expo FM max pitch correction (semitones):', pitch_correction_midi[-1] / 128)
+
+expo_fm_tables()
+
+
 clock_ratio_ticks = []
 clock_ratio_names = []
 for ratio in numpy.unique([Fraction(*x) for x in itertools.product(range(1, 10), range(1, 10))]):
