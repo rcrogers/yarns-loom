@@ -172,7 +172,7 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
     midi_pitch -= kOctave;
     --num_shifts;
   }
-  int32_t ref_pitch = midi_pitch;
+  int16_t ref_pitch = midi_pitch;
   ref_pitch -= kPitchTableStart;
   while (ref_pitch < 0) {
     ref_pitch += kOctave;
@@ -217,10 +217,10 @@ void Oscillator::Render(int16_t* audio_mix) {
 }
 
 #define RENDER_CORE(...) \
-  int32_t next_sample = next_sample_; \
+  int16_t next_sample = next_sample_; \
   for (size_t size = kAudioBlockSize; size--;) { \
     int16_t timbre = *timbre_samples++; \
-    int32_t this_sample = next_sample; \
+    int16_t this_sample = next_sample; \
     next_sample = 0; \
     __VA_ARGS__ \
     *audio_samples++ = this_sample; \
@@ -451,7 +451,7 @@ void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples)
 void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff; // Use top 7/8
-    int32_t sine_sample = sine(phase);
+    int16_t sine_sample = sine(phase);
     int32_t scaled_sine = sine_sample * timbre;
 
     int16_t dither = phase ^ (phase >> 16);
@@ -616,9 +616,9 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* au
       pd_square_.polarity = !pd_square_.polarity;
       modulator_phase = kPhaseResetPulse[filter_type];
     }
-    int32_t carrier = sine(modulator_phase);
+    int16_t carrier = sine(modulator_phase);
     uint16_t window = ~(phase >> 15); // Double saw
-    int32_t pulse = (carrier * window) >> 16;
+    int16_t pulse = (carrier * window) >> 16;
     if (pd_square_.polarity) pulse = -pulse;
     uint16_t integrator_gain = modulator_phase_increment >> 16; // Orig 14
     integrator += (pulse * integrator_gain) >> 14; // Orig 16
@@ -646,7 +646,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
     if (phase < phase_increment) {
       modulator_phase = kPhaseResetSaw[filter_type];
     }
-    int32_t carrier = sine(modulator_phase);
+    int16_t carrier = sine(modulator_phase);
     uint16_t window = ~(phase >> 16); // Saw
     int16_t output;
     if (filter_type & 2) { // Band- or high-pass
@@ -660,7 +660,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
 
 void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
-    int32_t zone_14 = (pitch_ + ((32767 - timbre) >> 3));
+    int32_t zone_14 = pitch_ + ((32767 - timbre) >> 3);
     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
     size_t index = zone_14 >> 10; // Use highest 4 bits
     CONSTRAIN(index, 0, kNumZones - 1);
