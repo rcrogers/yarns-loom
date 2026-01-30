@@ -32,6 +32,7 @@
 
 #include "stmlib/stmlib.h"
 #include "stmlib/utils/dsp.h"
+#include "stmlib/dsp/dsp.h"
 
 #include "yarns/envelope.h"
 #include "yarns/resources.h"
@@ -51,13 +52,13 @@ class StateVariableFilter {
   inline void RenderSample(int32_t in, int16_t cutoff) {
     damp.Tick();
     notch = in - (bp * damp.value() >> 14);
-    CLIP(notch);
+    notch = Clip16(notch);
     lp += cutoff * bp >> 14;
-    CLIP(lp);
+    lp = Clip16(lp);
     hp = notch - lp;
-    CLIP(hp);
+    hp = Clip16(hp);
     bp += cutoff * hp >> 14;
-    CLIP(bp);
+    bp = Clip16(bp);
   }
 
   int32_t bp, lp, notch, hp;
