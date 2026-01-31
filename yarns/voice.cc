@@ -100,6 +100,7 @@ void CVOutput::Init(bool reset_calibration) {
   dc_role_ = DC_PITCH;
   envelope_.Init(0);
   envelope_bias_ = 0;
+  num_dc_voices_ = 0;
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
@@ -110,7 +111,7 @@ void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
 }
 
 uint16_t CVOutput::pitch_dac_code() {
-  int32_t note = dc_voice_->note();
+  int32_t note = dc_voices_[0]->note();
   if (dirty_ || note_ != note) dac_code_ = NoteToDacCode(note);
   dirty_ = false;
   note_ = note;

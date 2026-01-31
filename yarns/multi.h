@@ -514,10 +514,10 @@ class Multi {
     return true;
   }
   
-  void AssignOutputVoice(
-    uint8_t cv_i, uint8_t voice_i, DCRole r, uint8_t num_audio_voices
+  void MapVoices(
+    uint8_t cv_i, DCRole role, uint8_t voice_i, uint8_t num_dc, uint8_t num_audio
   ) {
-    cv_outputs_[cv_i].assign(&voice_[voice_i], r, num_audio_voices);
+    cv_outputs_[cv_i].AssignVoices(&voice_[voice_i], role, num_dc, num_audio);
   }
   void AssignVoicesToCVOutputs();
   void GetCvGate(uint16_t* cv, bool* gate);

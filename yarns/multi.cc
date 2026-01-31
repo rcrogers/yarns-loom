@@ -407,25 +407,25 @@ void Multi::AssignVoicesToCVOutputs() {
   switch (settings_.layout) {
     case LAYOUT_MONO:
     case LAYOUT_DUAL_POLYCHAINED:
-      AssignOutputVoice(0, 0, DC_PITCH, 0);
-      AssignOutputVoice(1, 0, DC_VELOCITY, 0);
-      AssignOutputVoice(2, 0, DC_AUX_1, 0);
-      AssignOutputVoice(3, 0, DC_AUX_2, 1);
+      MapVoices(0, DC_PITCH, 0, 1, 0);
+      MapVoices(1, DC_VELOCITY, 0, 1, 0);
+      MapVoices(2, DC_AUX_1, 0, 1, 0);
+      MapVoices(3, DC_AUX_2, 0, 1, 1);
       break;
 
     case LAYOUT_DUAL_MONO:
-      AssignOutputVoice(0, 0, DC_PITCH, 0);
-      AssignOutputVoice(1, 1, DC_PITCH, 0);
-      AssignOutputVoice(2, 0, DC_AUX_1, 1);
-      AssignOutputVoice(3, 1, DC_AUX_1, 1);
+      MapVoices(0, DC_PITCH, 0, 1, 0);
+      MapVoices(1, DC_PITCH, 1, 1, 0);
+      MapVoices(2, DC_AUX_1, 0, 1, 1);
+      MapVoices(3, DC_AUX_1, 1, 1, 1);
       break;
 
     case LAYOUT_DUAL_POLY:
     case LAYOUT_QUAD_POLYCHAINED:
-      AssignOutputVoice(0, 0, DC_PITCH, 0);
-      AssignOutputVoice(1, 1, DC_PITCH, 0);
-      AssignOutputVoice(2, 0, DC_AUX_1, 1);
-      AssignOutputVoice(3, 1, DC_AUX_2, 1);
+      MapVoices(0, DC_PITCH, 0, 1, 0);
+      MapVoices(1, DC_PITCH, 1, 1, 0);
+      MapVoices(2, DC_AUX_1, 0, 1, 1);
+      MapVoices(3, DC_AUX_2, 1, 1, 1);
       break;
 
     case LAYOUT_QUAD_MONO:
@@ -434,47 +434,47 @@ void Multi::AssignVoicesToCVOutputs() {
     case LAYOUT_THREE_ONE:
     case LAYOUT_TWO_TWO:
       for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        AssignOutputVoice(i, i, DC_PITCH, 1);
+        MapVoices(i, DC_PITCH, i, 1, 1);
       }
       break;
     case LAYOUT_QUAD_VOLTAGES:
       for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        AssignOutputVoice(i, i, DC_AUX_1, 1);
+        MapVoices(i, DC_AUX_1, i, 1, 1);
       }
       break;
     case LAYOUT_QUAD_TRIGGERS:
       for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        AssignOutputVoice(i, i, DC_TRIGGER, 1);
+        MapVoices(i, DC_TRIGGER, i, 1, 1);
       }
       break;
 
     case LAYOUT_TWO_ONE:
-      AssignOutputVoice(0, 0, DC_PITCH, 1);
-      AssignOutputVoice(1, 1, DC_PITCH, 1);
-      AssignOutputVoice(2, 2, DC_PITCH, 1);
-      AssignOutputVoice(3, 2, DC_AUX_2, 0);
+      MapVoices(0, DC_PITCH, 0, 1, 1);
+      MapVoices(1, DC_PITCH, 1, 1, 1);
+      MapVoices(2, DC_PITCH, 2, 1, 1);
+      MapVoices(3, DC_AUX_2, 2, 1, 0);
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
-      AssignOutputVoice(0, 0, DC_PITCH, kNumParaphonicVoices);
-      AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 1);
-      AssignOutputVoice(2, kNumParaphonicVoices, DC_AUX_1, 0);
-      AssignOutputVoice(3, kNumParaphonicVoices + 1, DC_PITCH, 1);
+      MapVoices(0, DC_PITCH, 0, 1, kNumParaphonicVoices);
+      MapVoices(1, DC_PITCH, kNumParaphonicVoices, 1, 1);
+      MapVoices(2, DC_AUX_1, kNumParaphonicVoices, 1, 0);
+      MapVoices(3, DC_PITCH, kNumParaphonicVoices + 1, 1, 1);
       // Do not assign the last voice to any CV output, since it only outputs gates
       break;
 
     case LAYOUT_TRI_MONO:
       for (uint8_t i = 0; i < 3; ++i) {
-        AssignOutputVoice(i, i, DC_PITCH, 1);
+        MapVoices(i, DC_PITCH, i, 1, 1);
       }
-      AssignOutputVoice(3, 0, DC_VELOCITY, 0); // Dummy, will be overwritten in GetCvGate
+      MapVoices(3, DC_VELOCITY, 0, 1, 0); // Dummy, will be overwritten in GetCvGate
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_ONE:
-      AssignOutputVoice(0, 0, DC_PITCH, kNumParaphonicVoices);
-      AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 0);
-      AssignOutputVoice(2, 0, DC_AUX_1, 0);
-      AssignOutputVoice(3, kNumParaphonicVoices, DC_AUX_1, 1);
+      MapVoices(0, DC_PITCH, 0, 1, kNumParaphonicVoices);
+      MapVoices(1, DC_PITCH, kNumParaphonicVoices, 1, 0);
+      MapVoices(2, DC_AUX_1, 0, kNumParaphonicVoices, 0);
+      MapVoices(3, DC_AUX_1, kNumParaphonicVoices, 1, 1);
       break;
   }
 }
