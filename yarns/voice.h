@@ -117,7 +117,7 @@ class Voice {
     int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
     ADSR& adsr, int16_t timbre_envelope_target
   );
-  void NoteOff();
+  void NoteOff(bool force = false);
   void ControlChange(uint8_t controller, uint8_t value);
   void PitchBend(uint16_t pitch_bend) {
     mod_pitch_bend_ = pitch_bend;
@@ -343,9 +343,11 @@ class CVOutput {
   inline void NoteOn(ADSR& adsr) {
     envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
   }
-  inline void NoteOff() {
-    for (uint8_t i = 0; i < num_dc_voices_; ++i) {
-      if (dc_voices_[i]->gate_on()) return;
+  inline void NoteOff(bool force = false) {
+    if (!force) {
+      for (uint8_t i = 0; i < num_dc_voices_; ++i) {
+        if (dc_voices_[i]->gate_on()) return;
+      }
     }
     envelope_.NoteOff();
   }

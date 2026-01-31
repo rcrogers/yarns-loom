@@ -288,7 +288,7 @@ void Voice::NoteOn(
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
-      NoteOff();
+      NoteOff(true);  // Force envelope release for retrigger
     }
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
@@ -325,11 +325,11 @@ void Voice::NoteOn(
   mod_velocity_ = velocity;
 }
 
-void Voice::NoteOff() {
+void Voice::NoteOff(bool force_envelope) {
   gate_ = false;
   if (uses_audio()) oscillator_.NoteOff();
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff(force_envelope);
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff(force_envelope);
 }
 
 void Voice::ControlChange(uint8_t controller, uint8_t value) {
