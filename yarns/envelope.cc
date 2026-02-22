@@ -77,7 +77,7 @@ void Envelope::NoteOn(
       break;
     case ENV_STAGE_DECAY:
     case ENV_STAGE_SUSTAIN:
-      // Legato: respect changes to sustain target
+      // Legato: respect changes to sustain target, using decay to transition
       Trigger(ENV_STAGE_DECAY);
       break;
     case ENV_STAGE_RELEASE:
