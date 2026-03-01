@@ -311,16 +311,58 @@ void Voice::NoteOn(
 
   portamento_phase_ = 0;
   uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
+
+  // Map portamento knob to speed_param 0..62 (slow to fast)
+  uint8_t speed_param;
   if (portamento < split_point) {
-    portamento_phase_increment_ = lut_portamento_increments[(split_point - portamento)];
+    speed_param = portamento - 1;                      // T mode: 1->0(slow), 63->62(fast)
     portamento_exponential_shape_ = true;
   } else {
-    uint32_t base_increment = lut_portamento_increments[(portamento - split_point)];
-    uint32_t delta = abs(note_target_ - note_source_) + 1;
-    portamento_phase_increment_ = (1536 * (base_increment >> 11) / delta) << 11;
-    CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
+    speed_param = split_point * 2 - 1 - portamento;   // R mode: 65->62(fast), 127->0(slow)
     portamento_exponential_shape_ = false;
   }
+
+  // Piecewise-linear multiplier in 8-bit fixed point.
+  // 1/8x at speed_param=0, 1x at midpoint (31), 8x at 62.
+  const uint32_t kOne = 256;
+  const uint32_t kMinMul = kOne >> 3;   // 0.125x
+  const uint32_t kMaxMul = kOne << 3;   // 8.0x
+  uint32_t multiplier;
+  if (speed_param <= 31) {
+    multiplier = kMinMul + (kOne - kMinMul) * speed_param / 31;
+  } else {
+    multiplier = kOne + (kMaxMul - kOne) * (speed_param - 31) / 31;
+  }
+
+  // Scale attack increment from audio rate to refresh rate.
+  // kFrameHz / 4000 = 45/4; using 45/4 directly to reduce overflow range.
+  uint32_t base;
+  if (adsr.attack > UINT32_MAX / 45) {
+    base = UINT32_MAX;
+  } else {
+    base = adsr.attack * 45 / 4;
+  }
+
+  // Apply multiplier, saturating on overflow.
+  if (base > UINT32_MAX / multiplier) {
+    base = UINT32_MAX;
+  } else {
+    base = base * multiplier >> 8;
+  }
+
+  if (portamento >= split_point) {
+    // Constant rate: one octave per attack-period at 1x.
+    const uint32_t kOctave = 12 << 7;  // one octave in note units
+    uint32_t interval = abs(note_target_ - note_source_) + 1;
+    if (base > UINT32_MAX / kOctave) {
+      base = base / interval * kOctave;
+    } else {
+      base = base * kOctave / interval;
+    }
+  }
+
+  portamento_phase_increment_ = base;
+  CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
 
   mod_velocity_ = velocity;
 }
