@@ -173,9 +173,18 @@ void Voice::Refresh() {
     portamento_phase_increment_ = 0;
     note_source_ = note_target_;
   }
-  uint16_t portamento_level = portamento_exponential_shape_
-      ? Interpolate824(lut_env_expo, portamento_phase_)
-      : portamento_phase_ >> 16;
+  uint16_t portamento_level;
+  if (portamento_exponential_shape_) {
+    // S-curve: ease-in (mirrored expo) for first half, ease-out for second
+    uint32_t half_phase = portamento_phase_ << 1;
+    if (portamento_phase_ < 0x80000000) {
+      portamento_level = (65535 - Interpolate824(lut_env_expo, ~half_phase)) >> 1;
+    } else {
+      portamento_level = (Interpolate824(lut_env_expo, half_phase) >> 1) + 32768;
+    }
+  } else {
+    portamento_level = portamento_phase_ >> 16;
+  }
   int32_t note = note_source_ + \
       ((note_target_ - note_source_) * portamento_level >> 16);
 
