@@ -145,7 +145,10 @@ class Oscillator {
     gain_envelope_.NoteOff();
     timbre_envelope_.NoteOff();
   }
-  
+  inline bool sounding() const {
+    return gain_envelope_.stage() != ENV_STAGE_DEAD;
+  }
+
   void Render(int16_t* audio_mix);
 
   static RenderFn fn_table_[];

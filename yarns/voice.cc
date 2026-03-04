@@ -285,6 +285,13 @@ void Voice::NoteOn(
   int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
   ADSR& adsr, int16_t timbre_envelope_target
 ) {
+  // Check if voice is still producing sound (gated or releasing).
+  // Only check envelopes that are actually active for this voice.
+  // Must check before NoteOn resets the envelope.
+  bool is_sounding_prev_note = gate_
+    || (uses_audio() && oscillator_.sounding())
+    || (aux_1_envelope() && dc_output(DC_AUX_1)->sounding())
+    || (aux_2_envelope() && dc_output(DC_AUX_2)->sounding());
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
@@ -303,65 +310,49 @@ void Voice::NoteOn(
 
   if (!has_cv_output()) return;
 
-  note_source_ = note_portamento_;  
+  note_source_ = note_portamento_;
   note_target_ = note;
-  if (!portamento) {
-    note_source_ = note_target_;
-  }
-
   portamento_phase_ = 0;
+
   uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
 
-  // Map portamento knob to speed_param 0..62 (slow to fast)
-  uint8_t speed_param;
-  if (portamento < split_point) {
-    speed_param = portamento - 1;                      // T mode: 1->0(slow), 63->62(fast)
+  // Distance from OFF. 0 at OFF, 1..63 toward extremes on each side.
+  uint32_t distance;
+  if (portamento <= split_point) {
+    distance = split_point - portamento;
     portamento_exponential_shape_ = true;
   } else {
-    speed_param = split_point * 2 - 1 - portamento;   // R mode: 65->62(fast), 127->0(slow)
+    distance = portamento - split_point;
     portamento_exponential_shape_ = false;
   }
 
-  // Piecewise-linear multiplier in 8-bit fixed point.
-  // 1/8x at speed_param=0, 1x at midpoint (31), 8x at 62.
-  const uint32_t kOne = 256;
-  const uint32_t kMinMul = kOne >> 3;   // 0.125x
-  const uint32_t kMaxMul = kOne << 3;   // 8.0x
-  uint32_t multiplier;
-  if (speed_param <= 31) {
-    multiplier = kMinMul + (kOne - kMinMul) * speed_param / 31;
-  } else {
-    multiplier = kOne + (kMaxMul - kOne) * (speed_param - 31) / 31;
+  // No portamento when: programmatically suppressed, or voice was silent
+  if (!portamento || !is_sounding_prev_note) {
+    note_source_ = note_target_;
   }
 
-  // Scale attack increment from audio rate to refresh rate.
+  // Time multiplier in 8-bit fixed point: ~0x at OFF, ~2x at extremes.
+  // Concave-up expo curve: fine resolution near 0x, steep ramp toward 2x.
+  const uint32_t kMaxTime = 256 << 1;  // 2.0x
+  uint32_t capped = std::min(distance, static_cast<uint32_t>(63));
+  uint32_t time_factor = std::max(static_cast<uint32_t>(1), kMaxTime
+    - (kMaxTime * lut_env_expo[(63 - capped) << 2] >> 16));
+
+  // Base rate: attack increment scaled from audio rate to refresh rate.
   // kFrameHz / 4000 = 45/4; using 45/4 directly to reduce overflow range.
-  uint32_t base;
-  if (adsr.attack > UINT32_MAX / 45) {
-    base = UINT32_MAX;
-  } else {
-    base = adsr.attack * 45 / 4;
-  }
+  uint32_t base = std::min(adsr.attack, UINT32_MAX / 45) * 45 / 4;
 
-  // Apply multiplier, saturating on overflow.
-  if (base > UINT32_MAX / multiplier) {
-    base = UINT32_MAX;
-  } else {
-    base = base * multiplier >> 8;
-  }
-
-  if (portamento >= split_point) {
+  if (portamento > split_point) {
     // Constant rate: one octave per attack-period at 1x.
     const uint32_t kOctave = 12 << 7;  // one octave in note units
     uint32_t interval = abs(note_target_ - note_source_) + 1;
-    if (base > UINT32_MAX / kOctave) {
-      base = base / interval * kOctave;
-    } else {
-      base = base * kOctave / interval;
-    }
+    base = std::min(base, UINT32_MAX / kOctave) * kOctave / interval;
   }
 
-  portamento_phase_increment_ = base;
+  // phase_increment = base / (time_factor / 256)
+  // time_factor=256 → 1x attack time, time_factor=512 → 2x attack time.
+  portamento_phase_increment_ = std::min(base / time_factor << 8,
+    static_cast<uint32_t>(0x7FFFFFFF));
   CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
 
   mod_velocity_ = velocity;

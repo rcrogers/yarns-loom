@@ -340,6 +340,9 @@ class CVOutput {
       (dc_role_ == DC_AUX_2 && dc_voices_[0]->aux_2_envelope())
     );
   }
+  inline bool sounding() const {
+    return envelope_.stage() != ENV_STAGE_DEAD;
+  }
   inline void NoteOn(ADSR& adsr) {
     envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
   }
