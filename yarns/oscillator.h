@@ -93,8 +93,8 @@ enum OscillatorShape {
   // OSC_SHAPE_SYNC_TRIANGLE,
   OSC_SHAPE_SYNC_PULSE,
   OSC_SHAPE_SYNC_SAW,
-  OSC_SHAPE_FOLD_SINE,
-  OSC_SHAPE_FOLD_TRIANGLE,
+  // OSC_SHAPE_FOLD_SINE,
+  // OSC_SHAPE_FOLD_TRIANGLE,
   OSC_SHAPE_DIRAC_COMB,
   OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_EXP_SINE,
@@ -163,8 +163,8 @@ class Oscillator {
   void RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples);

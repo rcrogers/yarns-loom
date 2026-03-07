@@ -122,8 +122,6 @@ extern const int16_t wav_bandlimited_comb_12[];
 extern const int16_t wav_bandlimited_comb_13[];
 extern const int16_t wav_bandlimited_comb_14[];
 extern const int16_t ws_violent_overdrive[];
-extern const int16_t ws_sine_fold[];
-extern const int16_t ws_tri_fold[];
 extern const uint32_t lut_lfo_increments[];
 extern const uint32_t lut_portamento_increments[];
 extern const uint32_t lut_envelope_phase_increments[];
@@ -259,10 +257,6 @@ extern const uint16_t chr_characters[];
 #define WAV_BANDLIMITED_COMB_14_SIZE 257
 #define WS_VIOLENT_OVERDRIVE 0
 #define WS_VIOLENT_OVERDRIVE_SIZE 257
-#define WS_SINE_FOLD 1
-#define WS_SINE_FOLD_SIZE 257
-#define WS_TRI_FOLD 2
-#define WS_TRI_FOLD_SIZE 257
 #define LUT_LFO_INCREMENTS 0
 #define LUT_LFO_INCREMENTS_SIZE 64
 #define LUT_PORTAMENTO_INCREMENTS 1

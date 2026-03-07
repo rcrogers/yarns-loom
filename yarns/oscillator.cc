@@ -68,8 +68,8 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   // &Oscillator::RenderSyncTriangle,
   &Oscillator::RenderSyncPulse,
   &Oscillator::RenderSyncSaw,
-  &Oscillator::RenderFoldSine,
-  &Oscillator::RenderFoldTriangle,
+  // &Oscillator::RenderFoldSine,
+  // &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderDiracComb,
   &Oscillator::RenderTanhSine,
   &Oscillator::RenderExponentialSine,
@@ -138,8 +138,6 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
   }
 
   if (
-    shape == OSC_SHAPE_FOLD_SINE ||
-    shape == OSC_SHAPE_FOLD_TRIANGLE ||
     shape == OSC_SHAPE_EXP_SINE ||
     (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_TRI_THRU_TRI_BIASED) ||
     shape >= OSC_SHAPE_FM
@@ -423,21 +421,21 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
   )
 }
 
-void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
-  RENDER_PERIODIC(
-    this_sample = triangle(phase);
-    this_sample = this_sample * timbre >> 15;
-    this_sample = Interpolate88(ws_tri_fold, this_sample + 32768);
-  )
-}
+// void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+//   RENDER_PERIODIC(
+//     this_sample = triangle(phase);
+//     this_sample = this_sample * timbre >> 15;
+//     this_sample = Interpolate88(ws_tri_fold, this_sample + 32768);
+//   )
+// }
 
-void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples) {
-  RENDER_PERIODIC(
-    this_sample = sine(phase);
-    this_sample = this_sample * timbre >> 15;
-    this_sample = Interpolate88(ws_sine_fold, this_sample + 32768);
-  )
-}
+// void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples) {
+//   RENDER_PERIODIC(
+//     this_sample = sine(phase);
+//     this_sample = this_sample * timbre >> 15;
+//     this_sample = Interpolate88(ws_sine_fold, this_sample + 32768);
+//   )
+// }
 
 void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples) {
   RENDER_PERIODIC(
