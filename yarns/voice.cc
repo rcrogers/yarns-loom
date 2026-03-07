@@ -331,16 +331,20 @@ void Voice::NoteOn(
     note_source_ = note_target_;
   }
 
-  // Time multiplier in 8-bit fixed point: ~0x at OFF, ~2x at extremes.
+  // Time multiplier in 8-bit fixed point: 0x at OFF, ~2x at extremes.
   // Concave-up expo curve: fine resolution near 0x, steep ramp toward 2x.
+  // At distance=0 (OFF), lut_env_expo[256]=UINT16_MAX, so time_factor=0 exactly.
   const uint32_t kMaxTime = 256 << 1;  // 2.0x
-  uint32_t capped = std::min(distance, static_cast<uint32_t>(63));
-  uint32_t time_factor = std::max(static_cast<uint32_t>(1), kMaxTime
-    - (kMaxTime * lut_env_expo[(63 - capped) << 2] >> 16));
+  uint32_t capped = std::min(distance, static_cast<uint32_t>(64));
+  uint32_t time_factor = kMaxTime
+    - kMaxTime * lut_env_expo[(64 - capped) << 2] / UINT16_MAX;
 
   // Base rate: attack increment scaled from audio rate to refresh rate.
-  // kFrameHz / 4000 = 45/4; using 45/4 directly to reduce overflow range.
-  uint32_t base = std::min(adsr.attack, UINT32_MAX / 45) * 45 / 4;
+  // Divide first for large values (fast attacks) to avoid overflow;
+  // multiply first for small values (slow attacks) to preserve precision.
+  uint32_t base = adsr.attack <= UINT32_MAX / kFrameHz
+    ? adsr.attack * kFrameHz / kRefreshHz
+    : adsr.attack / kRefreshHz * kFrameHz;
 
   if (portamento > split_point) {
     // Constant rate: one octave per attack-period at 1x.
@@ -350,8 +354,9 @@ void Voice::NoteOn(
   }
 
   // phase_increment = base / (time_factor / 256)
-  // time_factor=256 → 1x attack time, time_factor=512 → 2x attack time.
-  portamento_phase_increment_ = std::min(base / time_factor << 8,
+  // time_factor=0 (OFF) saturates to instant; completes in one Refresh tick.
+  uint32_t divisor = std::max(time_factor, static_cast<uint32_t>(1));
+  portamento_phase_increment_ = std::min(base / divisor << 8,
     static_cast<uint32_t>(0x7FFFFFFF));
   CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
 

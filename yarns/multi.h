@@ -42,6 +42,7 @@
 
 namespace yarns {
 
+const uint32_t kRefreshHz = 4000;
 const uint8_t kNumParts = 4;
 // One paraphonic part, one voice per remaining output
 const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
