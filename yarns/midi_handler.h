@@ -38,6 +38,15 @@
 
 namespace yarns {
 
+enum SysExCommand {
+  SYSEX_COMMAND_DUMP_PACKET_PACKED = 1,
+  SYSEX_COMMAND_DUMP_PACKET_TAGGED = 2,
+  SYSEX_COMMAND_REQUEST_PACKETS_PACKED = 17,
+  SYSEX_COMMAND_REQUEST_PACKETS_TAGGED = 18,
+  SYSEX_COMMAND_FACTORY_TESTING_MODE = 32,
+  SYSEX_COMMAND_CALIBRATE = 33,
+};
+
 const size_t kSysexMaxChunkSize = 64;
 const size_t kSysexRxBufferSize = kSysexMaxChunkSize * 2 + 16;
 
@@ -236,7 +245,9 @@ class MidiHandler {
     while (output_buffer_.readable());
   }
   
-  static void SysExSendPackets(const uint8_t* data, size_t size);
+  static void SysExSendPackets(
+      const uint8_t* data, size_t size,
+      uint8_t command = SYSEX_COMMAND_DUMP_PACKET_PACKED);
   
   static inline bool calibrating() {
     return calibration_voice_ < kNumCVOutputs && calibration_note_ < kNumOctaves;
@@ -254,7 +265,8 @@ class MidiHandler {
   static void SysExSendPacket(
       uint8_t packet_index,
       const uint8_t* data,
-      size_t size);
+      size_t size,
+      uint8_t command = SYSEX_COMMAND_DUMP_PACKET_PACKED);
   static void DecodeSysExMessage();
   inline static void ProcessSysExByte(uint8_t sysex_byte) {
     if (!multi.direct_thru()) {

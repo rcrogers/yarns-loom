@@ -33,22 +33,25 @@
 
 namespace yarns {
 
+STATIC_ASSERT(kStreamBufferSize >= Multi::kTaggedPayloadSize, tagged_buffer_capacity);
+STATIC_ASSERT(kStreamBufferSize >= kPackedMaxSize, packed_buffer_capacity);
+
 void StorageManager::SaveMulti(uint8_t slot) {
   stream_buffer_.Rewind();
-  multi.Serialize(&stream_buffer_);
+  multi.SerializePacked(&stream_buffer_);
   storage_.Save(stream_buffer_.bytes(), stream_buffer_.position(), 1 + slot);
 }
 
 bool StorageManager::LoadMulti(uint8_t slot) {
   // Dummy serialization of the multi to know its size.
   stream_buffer_.Rewind();
-  multi.Serialize(&stream_buffer_);
+  multi.SerializePacked(&stream_buffer_);
   uint32_t expected_size = stream_buffer_.position();
   
   if (!storage_.Load(stream_buffer_.mutable_bytes(), expected_size, 1 + slot)) {
     return false;
   } else {
-    DeserializeMulti();
+    DeserializeMultiPacked();
     return true;
   }
 }
@@ -73,17 +76,32 @@ bool StorageManager::LoadCalibration() {
   }
 }
 
-void StorageManager::SysExSendMulti() {
+void StorageManager::SysExSendMultiPacked() {
   stream_buffer_.Rewind();
-  multi.Serialize(&stream_buffer_);
+  multi.SerializePacked(&stream_buffer_);
   midi_handler.SysExSendPackets(
       stream_buffer_.bytes(),
       stream_buffer_.position());
 }
 
-void StorageManager::DeserializeMulti() {
+void StorageManager::SysExSendMultiTagged() {
   stream_buffer_.Rewind();
-  multi.Deserialize(&stream_buffer_);
+  multi.SerializeTagged(&stream_buffer_);
+  midi_handler.SysExSendPackets(
+      stream_buffer_.bytes(),
+      stream_buffer_.position(),
+      SYSEX_COMMAND_DUMP_PACKET_TAGGED);
+}
+
+bool StorageManager::DeserializeMultiPacked() {
+  stream_buffer_.Rewind();
+  multi.DeserializePacked(&stream_buffer_);
+  return true;  // Packed format has no structural validation
+}
+
+bool StorageManager::DeserializeMultiTagged() {
+  stream_buffer_.Rewind();
+  return multi.DeserializeTagged(&stream_buffer_);
 }
 
 /* extern */

@@ -33,6 +33,7 @@
 #include "yarns/multi.h"
 #ifndef TEST
 #include "yarns/storage_manager.h"
+#include "yarns/ui.h"
 #endif // TEST
 
 namespace yarns {
@@ -148,18 +149,12 @@ void MidiHandler::HandleScaleOctaveTuning2ByteForm() {
 }
 
 
-enum SysExCommand {
-  SYSEX_COMMAND_DUMP_PACKET = 1,
-  SYSEX_COMMAND_REQUEST_PACKETS = 17,
-  SYSEX_COMMAND_FACTORY_TESTING_MODE = 32,
-  SYSEX_COMMAND_CALIBRATE = 33,
-};
-
 /* static */
 void MidiHandler::HandleYarnsSpecificMessage() {
 #ifndef TEST
   uint8_t command = sysex_rx_buffer_[6];
-  if (command == SYSEX_COMMAND_DUMP_PACKET) {
+  if (command == SYSEX_COMMAND_DUMP_PACKET_PACKED ||
+      command == SYSEX_COMMAND_DUMP_PACKET_TAGGED) {
     uint8_t packet_index = sysex_rx_buffer_[7];
     
     // Handle packet reception.
@@ -191,14 +186,29 @@ void MidiHandler::HandleYarnsSpecificMessage() {
     if (size != 0) {
       storage_manager.AppendData(data, size, packet_index == 0);
     } else if (packet_index) {
-      storage_manager.DeserializeMulti();
+      if (command == SYSEX_COMMAND_DUMP_PACKET_TAGGED) {
+        bool ok = storage_manager.DeserializeMultiTagged();
+        ui.SplashString(ok ? "T+" : "T-");
+      } else {
+        storage_manager.DeserializeMultiPacked();
+        ui.SplashString("P+");
+      }
     }
-  } else if (command == SYSEX_COMMAND_REQUEST_PACKETS) {
+  } else if (command == SYSEX_COMMAND_REQUEST_PACKETS_PACKED) {
     if (sysex_rx_buffer_[7] == 0 &&
-        sysex_rx_buffer_[8] == 0 && 
+        sysex_rx_buffer_[8] == 0 &&
         sysex_rx_buffer_[9] == 0 &&
         sysex_rx_buffer_[10] == 0xf7) {
-      storage_manager.SysExSendMulti();
+      storage_manager.SysExSendMultiPacked();
+      ui.SplashString("P>");
+    }
+  } else if (command == SYSEX_COMMAND_REQUEST_PACKETS_TAGGED) {
+    if (sysex_rx_buffer_[7] == 0 &&
+        sysex_rx_buffer_[8] == 0 &&
+        sysex_rx_buffer_[9] == 0 &&
+        sysex_rx_buffer_[10] == 0xf7) {
+      storage_manager.SysExSendMultiTagged();
+      ui.SplashString("T>");
     }
   } else if (command == SYSEX_COMMAND_FACTORY_TESTING_MODE) {
     if (sysex_rx_buffer_[7] == 0 &&
@@ -226,13 +236,14 @@ void MidiHandler::HandleYarnsSpecificMessage() {
 void MidiHandler::SysExSendPacket(
     uint8_t packet_index,
     const uint8_t* data,
-    size_t size) {
+    size_t size,
+    uint8_t command) {
   Flush();
-  
+
   for (uint8_t i = 0; i < 6; ++i) {
     SendBlocking(accepted_sysex_[0].prefix[i]);
   }
-  SendBlocking(SYSEX_COMMAND_DUMP_PACKET);
+  SendBlocking(command);
   SendBlocking(packet_index);
   
   // Outputs the data.
@@ -252,17 +263,18 @@ void MidiHandler::SysExSendPacket(
 }
 
 /* static */
-void MidiHandler::SysExSendPackets(const uint8_t* data, size_t size) {
+void MidiHandler::SysExSendPackets(
+    const uint8_t* data, size_t size, uint8_t command) {
   uint8_t block_index = 0;
   while (size) {
     size_t chunk_size = min(size, kSysexMaxChunkSize);
-    SysExSendPacket(block_index, data, chunk_size);
+    SysExSendPacket(block_index, data, chunk_size, command);
     size -= chunk_size;
     data += chunk_size;
     ++block_index;
   }
   // Send a NULL packet to indicate end of transmission.
-  SysExSendPacket(block_index, NULL, 0);
+  SysExSendPacket(block_index, NULL, 0, command);
 }
 
 /* extern */

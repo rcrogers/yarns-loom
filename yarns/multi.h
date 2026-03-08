@@ -37,7 +37,6 @@
 #include "yarns/layout_configurator.h"
 #include "yarns/part.h"
 #include "yarns/voice.h"
-#include "yarns/storage_manager.h"
 #include "yarns/settings.h"
 
 namespace yarns {
@@ -524,7 +523,7 @@ class Multi {
   void GetLedsBrightness(uint8_t* brightness);
 
   template<typename T>
-  void Serialize(T* stream_buffer) {
+  void SerializePacked(T* stream_buffer) {
     PackedMulti packed;
     for (uint8_t i = 0; i < kNumParts; i++) {
       part_[i].Pack(packed.parts[i]);
@@ -534,12 +533,12 @@ class Multi {
     // char (*__debug)[size] = 1;
     STATIC_ASSERT(size == 1020, expected);
     STATIC_ASSERT(size % 4 == 0, flash_word);
-    STATIC_ASSERT(size <= kMaxSize, capacity);
+    // Packed size validated by STATIC_ASSERT in storage_manager.cc
     stream_buffer->Write(packed);
   };
   
   template<typename T>
-  void Deserialize(T* stream_buffer) {
+  void DeserializePacked(T* stream_buffer) {
     StopRecording(recording_part_);
     Stop();
     PackedMulti packed;
@@ -551,8 +550,366 @@ class Multi {
     AfterDeserialize();
   };
 
+  // Tagged serialization: setting-index-based format with typed sections.
+  //
+  // The packed format is a raw memory dump of PackedMulti — the struct
+  // layout implicitly defines where each field lives, so any change to the
+  // struct (adding fields, changing bitfield widths) breaks all saved presets.
+  //
+  // The tagged format uses typed, length-prefixed sections so the
+  // deserializer can skip unrecognized types — future firmware can add new
+  // section types without breaking older loaders.
+  enum TaggedFormatVersion {
+    TAGGED_FORMAT_VERSION = 0x01,
+  };
+
+  enum TaggedSectionType {
+    TAGGED_SECTION_END             = 0x00,
+    TAGGED_SECTION_MULTI_SETTINGS  = 0x01,
+    TAGGED_SECTION_CUSTOM_PITCH    = 0x02,
+    TAGGED_SECTION_PART_SETTINGS   = 0x03,
+    TAGGED_SECTION_SEQUENCER       = 0x04,
+    TAGGED_SECTION_LOOPER          = 0x05,
+  };
+
+  // Wire format structs — these are the single source of truth for section
+  // layout.  sizeof() these to compute section lengths; read/write them
+  // directly to the stream buffer.
+
+  struct TaggedSectionHeader {
+    uint8_t type;
+    uint16_t length;  // byte count of data following this header
+  } __attribute__((packed));
+
+  struct TaggedSettingPair {
+    uint8_t setting_index;
+    uint8_t value;
+  } __attribute__((packed));
+
+  // Part settings: { part_index } followed by TaggedSettingPair[]
+  struct TaggedPartPrefix {
+    uint8_t part_index;
+  } __attribute__((packed));
+
+  // Sequencer: { part_index, num_steps } followed by TaggedSequencerStep[kNumSteps]
+  struct TaggedSequencerPrefix {
+    uint8_t part_index;
+    uint8_t num_steps;
+  } __attribute__((packed));
+
+  struct TaggedSequencerStep {
+    uint8_t pitch;
+    uint8_t velocity;
+  } __attribute__((packed));
+
+  // Looper: { part_index, size, oldest_index } followed by TaggedLooperNote[kMaxNotes]
+  struct TaggedLooperPrefix {
+    uint8_t part_index;
+    uint8_t size;
+    uint8_t oldest_index;
+  } __attribute__((packed));
+
+  struct TaggedLooperNote {
+    uint16_t on_pos;
+    uint16_t off_pos;
+    uint8_t pitch;
+    uint8_t velocity;
+  } __attribute__((packed));
+
+  // Settings skipped during tagged serialization — single source of truth.
+  // Both IsTaggedSerializedSetting and the compile-time payload size derive
+  // from this array.
+  static const SettingIndex kTaggedSkippedSettings[];
+  static const uint8_t kNumTaggedSkippedSettings;
+
+  static bool IsTaggedSerializedSetting(uint8_t i) {
+    for (uint8_t j = 0; j < kNumTaggedSkippedSettings; j++) {
+      if (i == kTaggedSkippedSettings[j]) return false;
+    }
+    return true;
+  }
+
+  // Setting counts per domain.  Validated by STATIC_ASSERTs in multi.cc.
+  static const uint16_t kNumTaggedMultiSettings = 12;
+  static const uint16_t kNumTaggedPartSettings = 63;
+
+  // Complete wire layout of a tagged payload.  Not used for actual I/O
+  // (we stream element-by-element to avoid a large stack allocation), but
+  // sizeof(TaggedPayload) is the definitive buffer size.
+  struct TaggedPayload {
+    uint8_t version;
+    TaggedSectionHeader multi_settings_header;
+    TaggedSettingPair multi_settings[kNumTaggedMultiSettings];
+    TaggedSectionHeader custom_pitch_header;
+    int8_t custom_pitch_table[sizeof(((MultiSettings*)0)->custom_pitch_table)];
+    struct {
+      TaggedSectionHeader header;
+      TaggedPartPrefix prefix;
+      TaggedSettingPair settings[kNumTaggedPartSettings];
+    } part_settings[kNumParts];
+    struct {
+      TaggedSectionHeader header;
+      TaggedSequencerPrefix prefix;
+      TaggedSequencerStep steps[kNumSteps];
+    } sequencers[kNumParts];
+    struct {
+      TaggedSectionHeader header;
+      TaggedLooperPrefix prefix;
+      TaggedLooperNote notes[looper::kMaxNotes];
+    } loopers[kNumParts];
+    uint8_t end;
+  } __attribute__((packed));
+
+  static const uint16_t kTaggedPayloadSize = sizeof(TaggedPayload);
+
+  // Writes a section header with a placeholder length, returns the position
+  // of the length field so it can be patched after the data is written.
+  template<typename T>
+  size_t SerializeTaggedSectionBegin(T* b, uint8_t type) {
+    TaggedSectionHeader header = { type, 0 };
+    b->Write(header);
+    return b->position();  // data starts here
+  }
+
+  // Bounds-checked read: returns false (without reading) if we would read past
+  // the end of the section.
+  template<typename T, typename V>
+  bool ReadTaggedObject(T* b, V* value, size_t section_end) {
+    if (b->position() + sizeof(*value) > section_end) return false;
+    b->Read(value);
+    return true;
+  }
+
+  // Patches the length field written by SerializeTaggedSectionBegin.
+  // data_start is the position returned by SerializeTaggedSectionBegin.
+  template<typename T>
+  void SerializeTaggedSectionEnd(T* b, size_t data_start) {
+    size_t end = b->position();
+    uint16_t length = end - data_start;
+    b->Seek(data_start - sizeof(TaggedSectionHeader::length));
+    b->Write(length);
+    b->Seek(end);
+  }
+
+  template<typename T>
+  void SerializeTagged(T* b) {
+    const uint8_t version = TAGGED_FORMAT_VERSION;
+    b->Write(version);
+
+    // Multi settings
+    {
+      size_t data_start = SerializeTaggedSectionBegin(b, TAGGED_SECTION_MULTI_SETTINGS);
+      for (uint8_t i = 0; i < SETTING_LAST; i++) {
+        if (!IsTaggedSerializedSetting(i)) continue;
+        const Setting& setting = setting_defs.get(i);
+        if (setting.domain != SETTING_DOMAIN_MULTI) continue;
+        TaggedSettingPair pair = {
+          i, static_cast<uint8_t>(GetSettingValue(setting, 0))
+        };
+        b->Write(pair);
+      }
+      SerializeTaggedSectionEnd(b, data_start);
+    }
+
+    // Custom pitch table
+    {
+      size_t data_start = SerializeTaggedSectionBegin(b, TAGGED_SECTION_CUSTOM_PITCH);
+      for (uint8_t i = 0; i < sizeof(settings_.custom_pitch_table); i++) {
+        b->Write(settings_.custom_pitch_table[i]);
+      }
+      SerializeTaggedSectionEnd(b, data_start);
+    }
+
+    // Part settings (one section per part)
+    for (uint8_t p = 0; p < kNumParts; p++) {
+      size_t data_start = SerializeTaggedSectionBegin(b, TAGGED_SECTION_PART_SETTINGS);
+      TaggedPartPrefix prefix = { p };
+      b->Write(prefix);
+      for (uint8_t setting_index = 0; setting_index < SETTING_LAST; setting_index++) {
+        if (!IsTaggedSerializedSetting(setting_index)) continue;
+        const Setting& setting = setting_defs.get(setting_index);
+        if (setting.domain != SETTING_DOMAIN_PART) continue;
+        TaggedSettingPair pair = {
+          setting_index, static_cast<uint8_t>(GetSettingValue(setting, p))
+        };
+        b->Write(pair);
+      }
+      SerializeTaggedSectionEnd(b, data_start);
+    }
+
+    // Sequencer data (one section per part)
+    for (uint8_t p = 0; p < kNumParts; p++) {
+      size_t data_start = SerializeTaggedSectionBegin(b, TAGGED_SECTION_SEQUENCER);
+      const SequencerSettings& seq = part_[p].sequencer_settings();
+      TaggedSequencerPrefix prefix = { p, seq.num_steps };
+      b->Write(prefix);
+      for (uint8_t i = 0; i < kNumSteps; i++) {
+        TaggedSequencerStep step = { seq.step[i].data[0], seq.step[i].data[1] };
+        b->Write(step);
+      }
+      SerializeTaggedSectionEnd(b, data_start);
+    }
+
+    // Looper data (one section per part).
+    // Uses PackedPart as intermediary — Deck's only serialization interface.
+    for (uint8_t p = 0; p < kNumParts; p++) {
+      size_t data_start = SerializeTaggedSectionBegin(b, TAGGED_SECTION_LOOPER);
+      PackedPart packed;
+      part_[p].looper().Pack(packed);
+      TaggedLooperPrefix prefix = {
+        p,
+        static_cast<uint8_t>(packed.looper_size),
+        static_cast<uint8_t>(packed.looper_oldest_index)
+      };
+      b->Write(prefix);
+      for (uint8_t i = 0; i < looper::kMaxNotes; i++) {
+        TaggedLooperNote note = {
+          static_cast<uint16_t>(packed.looper_notes[i].on_pos),
+          static_cast<uint16_t>(packed.looper_notes[i].off_pos),
+          static_cast<uint8_t>(packed.looper_notes[i].pitch),
+          static_cast<uint8_t>(packed.looper_notes[i].velocity)
+        };
+        b->Write(note);
+      }
+      SerializeTaggedSectionEnd(b, data_start);
+    }
+
+    // End marker
+    {
+      uint8_t type = TAGGED_SECTION_END;
+      b->Write(type);
+    }
+  };
+
+  template<typename T>
+  void DeserializeTaggedSection(T* b, uint8_t type, size_t section_end) {
+    switch (type) {
+      case TAGGED_SECTION_MULTI_SETTINGS:
+        while (true) {
+          TaggedSettingPair pair = {};
+          if (!ReadTaggedObject(b, &pair, section_end)) break;
+          if (pair.setting_index < SETTING_LAST) {
+            const Setting& setting = setting_defs.get(pair.setting_index);
+            if (setting.domain == SETTING_DOMAIN_MULTI) {
+              Set(setting.address[0], pair.value);
+            }
+          }
+        }
+        return;
+
+      case TAGGED_SECTION_CUSTOM_PITCH:
+        for (uint8_t i = 0; i < sizeof(settings_.custom_pitch_table); i++) {
+          if (!ReadTaggedObject(b, &settings_.custom_pitch_table[i], section_end)) break;
+        }
+        return;
+
+      case TAGGED_SECTION_PART_SETTINGS: {
+        TaggedPartPrefix prefix = {};
+        if (!ReadTaggedObject(b, &prefix, section_end)) return;
+        if (prefix.part_index >= kNumParts) return;
+        while (true) {
+          TaggedSettingPair pair = {};
+          if (!ReadTaggedObject(b, &pair, section_end)) break;
+          if (pair.setting_index < SETTING_LAST) {
+            const Setting& setting = setting_defs.get(pair.setting_index);
+            if (setting.domain == SETTING_DOMAIN_PART) {
+              part_[prefix.part_index].Set(setting.address[0], pair.value);
+            }
+          }
+        }
+        return;
+      }
+
+      case TAGGED_SECTION_SEQUENCER: {
+        TaggedSequencerPrefix prefix = {};
+        if (!ReadTaggedObject(b, &prefix, section_end)) return;
+        if (prefix.part_index >= kNumParts) return;
+        SequencerSettings* seq = part_[prefix.part_index].mutable_sequencer_settings();
+        seq->num_steps = prefix.num_steps;
+        for (uint8_t i = 0; i < kNumSteps; i++) {
+          TaggedSequencerStep step = {};
+          if (!ReadTaggedObject(b, &step, section_end)) break;
+          seq->step[i].data[0] = step.pitch;
+          seq->step[i].data[1] = step.velocity;
+        }
+        return;
+      }
+
+      // Uses PackedPart as intermediary — Deck::Unpack rebuilds linked lists.
+      case TAGGED_SECTION_LOOPER: {
+        TaggedLooperPrefix prefix = {};
+        if (!ReadTaggedObject(b, &prefix, section_end)) return;
+        if (prefix.part_index >= kNumParts) return;
+        PackedPart packed;
+        packed.looper_size = prefix.size;
+        packed.looper_oldest_index = prefix.oldest_index;
+        for (uint8_t i = 0; i < looper::kMaxNotes; i++) {
+          TaggedLooperNote note = {};
+          if (!ReadTaggedObject(b, &note, section_end)) break;
+          packed.looper_notes[i].on_pos = note.on_pos;
+          packed.looper_notes[i].off_pos = note.off_pos;
+          packed.looper_notes[i].pitch = note.pitch;
+          packed.looper_notes[i].velocity = note.velocity;
+        }
+        part_[prefix.part_index].mutable_looper().Unpack(packed);
+        return;
+      }
+
+      default:
+        return;
+    }
+  }
+
+  // Validate that the stream has a recognized version and well-formed section
+  // headers.  Returns false without modifying any state if validation fails.
+  template<typename T>
+  bool ValidateTaggedStream(T* b) {
+    uint8_t version = 0;
+    b->Read(&version);
+    if (version != TAGGED_FORMAT_VERSION) return false;
+
+    while (true) {
+      size_t position_before = b->position();
+      TaggedSectionHeader header = { TAGGED_SECTION_END, 0 };
+      b->Read(&header);
+      if (header.type == TAGGED_SECTION_END || b->position() == position_before)
+        return true;
+      b->Seek(b->position() + header.length);
+    }
+  }
+
+  template<typename T>
+  bool DeserializeTagged(T* b) {
+    // First pass: validate structure without modifying state.
+    b->Rewind();
+    if (!ValidateTaggedStream(b)) return false;
+
+    // Second pass: apply.
+    b->Rewind();
+    StopRecording(recording_part_);
+    Stop();
+    Init(false);  // Reset to defaults, preserve calibration
+
+    uint8_t version = 0;
+    b->Read(&version);  // Already validated
+
+    while (true) {
+      size_t position_before = b->position();
+      TaggedSectionHeader header = { TAGGED_SECTION_END, 0 };
+      b->Read(&header);
+      if (header.type == TAGGED_SECTION_END || b->position() == position_before)
+        break;
+      size_t section_end = b->position() + header.length;
+      DeserializeTaggedSection(b, header.type, section_end);
+      b->Seek(section_end);
+    }
+
+    AfterDeserialize();
+    return true;
+  };
+
   void SwapParts(uint8_t x, uint8_t y);
-  
+
   template<typename T>
   void SerializeCalibration(T* stream_buffer) {
     // 4 voices x 11 octaves x 2 bytes = 88 bytes

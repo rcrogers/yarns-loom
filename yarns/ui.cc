@@ -846,7 +846,8 @@ void Ui::DoInitCommand() {
 }
 
 void Ui::DoDumpCommand() {
-  storage_manager.SysExSendMulti();
+  storage_manager.SysExSendMultiTagged();
+  SplashString("T>");
 }
 
 void Ui::DoLearnCommand() {

@@ -1174,6 +1174,21 @@ int16_t Multi::GetSettingValue(const Setting& setting, uint8_t part) const {
   return value;
 }
 
+const SettingIndex Multi::kTaggedSkippedSettings[] = {
+  SETTING_MENU_SETUP,
+  SETTING_MENU_OSCILLATOR,
+  SETTING_MENU_ENVELOPE,
+  SETTING_MIDI_NOTE,
+};
+const uint8_t Multi::kNumTaggedSkippedSettings =
+    sizeof(kTaggedSkippedSettings) / sizeof(kTaggedSkippedSettings[0]);
+STATIC_ASSERT(
+    Multi::kNumTaggedMultiSettings + Multi::kNumTaggedPartSettings
+        == SETTING_LAST - Multi::kNumTaggedSkippedSettings,
+    tagged_settings_total);
+// Per-domain counts are validated at runtime in Settings::Init where the
+// settings_[] array is available — see settings.cc.
+
 /* extern */
 Multi multi;
 
