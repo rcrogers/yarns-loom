@@ -64,6 +64,20 @@ This manual explains how Loom is different from the original firmware for Yarns.
 - Display splashes the result after executing a save/load
 - Hold encoder to exit preset selection
 
+#### SysEx dump
+The `>>` command sends a SysEx dump of the current preset over MIDI out.
+
+For v3.1.0+, SysEx dumps use a tagged format that encodes each setting by ID rather than by packed memory location. These tagged dumps will remain forward-compatible with future releases, even if internal data structures have changed.  Legacy-style dumps from v3.0.0 and earlier can also still be loaded provided the versions are save-compatible (see [release notes](https://github.com/rcrogers/yarns-loom/releases)).
+
+Display splashes the result after sending or receiving a SysEx dump:
+- `T>` — tagged format sent
+- `T+` — tagged format loading succeeded
+- `T-` — tagged format loading failed (settings unchanged)
+- `P>` — packed (legacy) format sent
+- `P+` — packed (legacy) format loading succeeded
+
+An external tool can also request a dump by sending the appropriate SysEx command. Command 17 requests the legacy packed format; command 18 requests the tagged format.
+
 ### Panel controls
 
 #### Active part control
@@ -623,10 +637,6 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Timbre: detunes the synced oscillator
 - Shapes: sine, pulse, saw
 
-#### `-F` Wavefolder
-- Timbre: folding amount
-- Shapes: sine, triangle
-
 #### `┴┴` Dirac comb
 - Timbre: harmonic content
 
@@ -635,6 +645,12 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 
 #### `SX` Exponential sine
 - Timbre: exponentiation amount
+
+#### `-s`, `-^` Wavefolding transfer functions
+- Timbre: transfer function gain
+- Carrier wave (first symbol): sine (`S`), triangle (`^`)
+- Transfer function (second symbol): sine, triangle
+- Biased variants of transfer function (`ˢ`, `ˇ`): offset the transfer function input by a quarter cycle, producing asymmetric harmonics
 
 #### `FM` Frequency modulation
 - Timbre: modulation index
