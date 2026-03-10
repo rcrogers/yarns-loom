@@ -150,6 +150,10 @@ const char* const voicing_oscillator_shape_values[] = {
   "^^ TRI THRU TRI",
   "S\xC3 BIASED SINE THRU TRI",
   "^\xC3 BIASED TRI THRU TRI",
+  "Se SINE THRU EXP",
+  "^e TRI THRU EXP",
+  "S\xC4 BIASED SINE THRU EXP",
+  "^\xC4 BIASED TRI THRU EXP",
 };
 STATIC_ASSERT(
   OSC_SHAPE_FM == sizeof(voicing_oscillator_shape_values) / sizeof(const char*),

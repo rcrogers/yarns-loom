@@ -81,6 +81,10 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderTransferTriThruTri,
   &Oscillator::RenderTransferSineThruTriBiased,
   &Oscillator::RenderTransferTriThruTriBiased,
+  &Oscillator::RenderTransferSineThruExp,
+  &Oscillator::RenderTransferTriThruExp,
+  &Oscillator::RenderTransferSineThruExpBiased,
+  &Oscillator::RenderTransferTriThruExpBiased,
   &Oscillator::RenderFM,
 };
 
@@ -139,7 +143,7 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
 
   if (
     shape == OSC_SHAPE_EXP_SINE ||
-    (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_TRI_THRU_TRI_BIASED) ||
+    (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_TRI_THRU_EXP_BIASED) ||
     shape >= OSC_SHAPE_FM
   ) {
     // Additive synthesis reduces timbre as pitch increases
@@ -568,6 +572,39 @@ void Oscillator::RenderTransferTriThruTriBiased(int16_t* timbre_samples, int16_t
     this_sample = triangle(transfer_phase);
   )
 }
+
+void Oscillator::RenderTransferSineThruExp(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = sine(phase);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
+    this_sample = expo(transfer_phase);
+  )
+}
+
+void Oscillator::RenderTransferTriThruExp(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = triangle(phase);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
+    this_sample = expo(transfer_phase);
+  )
+}
+
+void Oscillator::RenderTransferSineThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = sine(phase);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
+    this_sample = expo(transfer_phase);
+  )
+}
+
+void Oscillator::RenderTransferTriThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = triangle(phase);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
+    this_sample = expo(transfer_phase);
+  )
+}
+
 
 void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {
   uint8_t fm_shape = shape_ - OSC_SHAPE_FM;

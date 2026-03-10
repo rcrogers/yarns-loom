@@ -97,7 +97,7 @@ characters = {
   'b': 'fedlp',
   'c': 'pked',
   'd': 'bcdnk',
-  'e': 'pkbafed',
+  'e': 'nped',
   'f': 'afpe',
   'g': 'agkbcd',
   'h': 'fpkec',
@@ -223,6 +223,7 @@ characters = {
   # Rotated transfer function symbols (180 degrees)
   '\xC2': 'agp',  # rotated 's' (sine)
   '\xC3': 'gj',   # rotated '^' (tri)
+  '\xC4': 'abjk', # rotated 'e' (expo)
   
   '\xFF': 'abcdefghjklmnp',
   
