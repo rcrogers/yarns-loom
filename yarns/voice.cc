@@ -282,7 +282,8 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
 }
 
 void Voice::NoteOn(
-  int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+  int16_t note, uint8_t velocity, uint8_t portamento,
+  int8_t portamento_mod_velocity, bool trigger,
   ADSR& adsr, int16_t timbre_envelope_target
 ) {
   // Check if voice is still producing sound (gated or releasing).
@@ -312,12 +313,17 @@ void Voice::NoteOn(
 
   note_source_ = note_portamento_;
   note_target_ = note;
-  portamento_phase_ = 0;
 
-  uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
+  // No portamento when: programmatically suppressed, or voice was silent
+  if (!portamento || !is_sounding_prev_note) {
+    note_source_ = note_target_;
+  }
+
+  portamento_phase_ = 0;
+  const uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
 
   // Distance from OFF. 0 at OFF, 1..63 toward extremes on each side.
-  uint32_t distance;
+  uint8_t distance;
   if (portamento <= split_point) {
     distance = split_point - portamento;
     portamento_exponential_shape_ = true;
@@ -326,39 +332,23 @@ void Voice::NoteOn(
     portamento_exponential_shape_ = false;
   }
 
-  // No portamento when: programmatically suppressed, or voice was silent
-  if (!portamento || !is_sounding_prev_note) {
-    note_source_ = note_target_;
-  }
-
-  // Time multiplier in 8-bit fixed point: 0x at OFF, ~2x at extremes.
-  // Concave-up expo curve: fine resolution near 0x, steep ramp toward 2x.
-  // At distance=0 (OFF), lut_env_expo[256]=UINT16_MAX, so time_factor=0 exactly.
-  const uint32_t kMaxTime = 256 << 1;  // 2.0x
-  uint32_t capped = std::min(distance, static_cast<uint32_t>(64));
-  uint32_t time_factor = kMaxTime
-    - kMaxTime * lut_env_expo[(64 - capped) << 2] / UINT16_MAX;
-
-  // Base rate: attack increment scaled from audio rate to refresh rate.
-  // Divide first for large values (fast attacks) to avoid overflow;
-  // multiply first for small values (slow attacks) to preserve precision.
-  uint32_t base = adsr.attack <= UINT32_MAX / kFrameHz
-    ? adsr.attack * kFrameHz / kRefreshHz
-    : adsr.attack / kRefreshHz * kFrameHz;
+  // Velocity-modulated LUT index in 6.7 fixed-point.
+  // vel * scale spans ±8128 ≈ 63<<7, so full mod just zeroes out T63/R63.
+  int16_t mod_distance = (static_cast<int16_t>(distance) << 7)
+    + static_cast<int16_t>(velocity) * portamento_mod_velocity;
+  CONSTRAIN(mod_distance, 0, (63 << 7) - 1);
+  // Shift 6.7 to 8.8 for Interpolate88; upper bound keeps index ≤ 62.
+  uint32_t base_increment = Interpolate88(
+    lut_portamento_increments, static_cast<uint16_t>(mod_distance) << 1
+  );
 
   if (portamento > split_point) {
-    // Constant rate: one octave per attack-period at 1x.
-    const uint32_t kOctave = 12 << 7;  // one octave in note units
-    uint32_t interval = abs(note_target_ - note_source_) + 1;
-    base = std::min(base, UINT32_MAX / kOctave) * kOctave / interval;
+    uint32_t delta = abs(note_target_ - note_source_) + 1;
+    portamento_phase_increment_ = (1536 * (base_increment >> 11) / delta) << 11;
+    CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
+  } else {
+    portamento_phase_increment_ = base_increment;
   }
-
-  // phase_increment = base / (time_factor / 256)
-  // time_factor=0 (OFF) saturates to instant; completes in one Refresh tick.
-  uint32_t divisor = std::max(time_factor, static_cast<uint32_t>(1));
-  portamento_phase_increment_ = std::min(base / divisor << 8,
-    static_cast<uint32_t>(0x7FFFFFFF));
-  CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
 
   mod_velocity_ = velocity;
 }

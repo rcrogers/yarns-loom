@@ -829,7 +829,8 @@ void Part::VoiceNoteOn(
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
 
-  voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);
+  voice->NoteOn(Tune(pitch), vel, portamento,
+    voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {

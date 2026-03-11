@@ -142,7 +142,7 @@ struct SequencerArpeggiatorResult { // Supports multiple return
 };
 
 struct PackedPart {
-  // Currently has 7 bits to spare
+  // Currently has 0 bits to spare
 
   struct PackedSequencerStep {
     unsigned int
@@ -173,7 +173,8 @@ struct PackedPart {
     env_mod_attack : kTimbreBits,
     env_mod_decay : kTimbreBits,
     env_mod_sustain : kTimbreBits,
-    env_mod_release : kTimbreBits;
+    env_mod_release : kTimbreBits,
+    portamento_mod_velocity : kTimbreBits;
 
   // MidiSettings
   unsigned int
@@ -321,7 +322,7 @@ struct VoicingSettings {
   int8_t env_mod_decay;
   int8_t env_mod_sustain;
   int8_t env_mod_release;
-  // uint8_t padding[-2];
+  int8_t portamento_mod_velocity;
 
   void Pack(PackedPart& packed) const {
     packed.allocation_mode = allocation_mode;
@@ -364,6 +365,7 @@ struct VoicingSettings {
     packed.env_mod_decay = env_mod_decay;
     packed.env_mod_sustain = env_mod_sustain;
     packed.env_mod_release = env_mod_release;
+    packed.portamento_mod_velocity = portamento_mod_velocity;
   }
 
   void Unpack(PackedPart& packed) {
@@ -407,6 +409,7 @@ struct VoicingSettings {
     env_mod_decay = packed.env_mod_decay;
     env_mod_sustain = packed.env_mod_sustain;
     env_mod_release = packed.env_mod_release;
+    portamento_mod_velocity = packed.portamento_mod_velocity;
   }
 
 };
@@ -465,6 +468,7 @@ enum PartSetting {
   PART_VOICING_ENV_MOD_DECAY,
   PART_VOICING_ENV_MOD_SUSTAIN,
   PART_VOICING_ENV_MOD_RELEASE,
+  PART_VOICING_PORTAMENTO_MOD_VELOCITY,
   PART_VOICING_LAST = PART_VOICING_ALLOCATION_MODE + sizeof(VoicingSettings) - 1,
   PART_SEQUENCER_CLOCK_DIVISION,
   PART_SEQUENCER_GATE_LENGTH,

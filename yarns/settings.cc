@@ -748,6 +748,12 @@ const Setting Settings::settings_[] = {
     SETTING_UNIT_ENUMERATION, 0, 13,
     tuning_factor_values,
     0xff, 0xff,
+  },
+  {
+    "PM", "PORTAMENTO MOD VEL",
+    SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO_MOD_VELOCITY, 0 },
+    SETTING_UNIT_INT8, -64, 63, NULL,
+    0xff, 0xff,
   }
 };
 
@@ -839,7 +845,7 @@ char Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       
     case SETTING_UNIT_PORTAMENTO:
     {
-      uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
+      const uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
       if (value == split_point) {
         strcpy(buffer, "OFF");
         return '\0';
