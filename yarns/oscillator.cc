@@ -75,16 +75,22 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderExponentialSine,
   &Oscillator::RenderTransferSineThruSine,
   &Oscillator::RenderTransferTriThruSine,
+  &Oscillator::RenderTransferExpThruSine,
   &Oscillator::RenderTransferSineThruSineBiased,
   &Oscillator::RenderTransferTriThruSineBiased,
+  &Oscillator::RenderTransferExpThruSineBiased,
   &Oscillator::RenderTransferSineThruTri,
   &Oscillator::RenderTransferTriThruTri,
+  &Oscillator::RenderTransferExpThruTri,
   &Oscillator::RenderTransferSineThruTriBiased,
   &Oscillator::RenderTransferTriThruTriBiased,
+  &Oscillator::RenderTransferExpThruTriBiased,
   &Oscillator::RenderTransferSineThruExp,
   &Oscillator::RenderTransferTriThruExp,
+  &Oscillator::RenderTransferExpThruExp,
   &Oscillator::RenderTransferSineThruExpBiased,
   &Oscillator::RenderTransferTriThruExpBiased,
+  &Oscillator::RenderTransferExpThruExpBiased,
   &Oscillator::RenderFM,
 };
 
@@ -143,7 +149,7 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
 
   if (
     shape == OSC_SHAPE_EXP_SINE ||
-    (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_TRI_THRU_EXP_BIASED) ||
+    (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
     shape >= OSC_SHAPE_FM
   ) {
     // Additive synthesis reduces timbre as pitch increases
@@ -605,6 +611,53 @@ void Oscillator::RenderTransferTriThruExpBiased(int16_t* timbre_samples, int16_t
   )
 }
 
+void Oscillator::RenderTransferExpThruSine(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = expo(phase);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
+    this_sample = sine(transfer_phase);
+  )
+}
+
+void Oscillator::RenderTransferExpThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = expo(phase);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
+    this_sample = sine(transfer_phase);
+  )
+}
+
+void Oscillator::RenderTransferExpThruTri(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = expo(phase);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
+    this_sample = triangle(transfer_phase);
+  )
+}
+
+void Oscillator::RenderTransferExpThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = expo(phase);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
+    this_sample = triangle(transfer_phase);
+  )
+}
+
+void Oscillator::RenderTransferExpThruExp(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = expo(phase);
+    uint32_t transfer_phase = amplify_for_transfer<0>(this_sample, timbre);
+    this_sample = expo(transfer_phase);
+  )
+}
+
+void Oscillator::RenderTransferExpThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples) {
+  RENDER_PERIODIC(
+    this_sample = expo(phase);
+    uint32_t transfer_phase = amplify_for_transfer<kTransferAsymmetricBias>(this_sample, timbre);
+    this_sample = expo(transfer_phase);
+  )
+}
 
 void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {
   uint8_t fm_shape = shape_ - OSC_SHAPE_FM;

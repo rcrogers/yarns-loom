@@ -100,16 +100,22 @@ enum OscillatorShape {
   OSC_SHAPE_EXP_SINE,
   OSC_SHAPE_SINE_THRU_SINE,
   OSC_SHAPE_TRI_THRU_SINE,
+  OSC_SHAPE_EXP_THRU_SINE,
   OSC_SHAPE_SINE_THRU_SINE_BIASED,
   OSC_SHAPE_TRI_THRU_SINE_BIASED,
+  OSC_SHAPE_EXP_THRU_SINE_BIASED,
   OSC_SHAPE_SINE_THRU_TRI,
   OSC_SHAPE_TRI_THRU_TRI,
+  OSC_SHAPE_EXP_THRU_TRI,
   OSC_SHAPE_SINE_THRU_TRI_BIASED,
   OSC_SHAPE_TRI_THRU_TRI_BIASED,
+  OSC_SHAPE_EXP_THRU_TRI_BIASED,
   OSC_SHAPE_SINE_THRU_EXP,
   OSC_SHAPE_TRI_THRU_EXP,
+  OSC_SHAPE_EXP_THRU_EXP,
   OSC_SHAPE_SINE_THRU_EXP_BIASED,
   OSC_SHAPE_TRI_THRU_EXP_BIASED,
+  OSC_SHAPE_EXP_THRU_EXP_BIASED,
   OSC_SHAPE_FM,
 };
 
@@ -174,16 +180,22 @@ class Oscillator {
   void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruTri(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruTri(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruTri(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruExp(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruExp(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruExp(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderFM(int16_t* timbre_samples, int16_t* audio_samples);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
