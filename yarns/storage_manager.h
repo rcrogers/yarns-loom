@@ -36,9 +36,15 @@
 #include "stmlib/utils/stream_buffer.h"
 #include "stmlib/system/storage.h"
 
+#include "yarns/multi.h"
+
 namespace yarns {
 
-const uint16_t kMaxSize = PAGE_SIZE - 2; // 2 bytes for checksum
+const uint16_t kPackedMaxSize = PAGE_SIZE - 2; // 2 bytes for checksum
+// Must fit both packed and tagged payloads.
+const uint16_t kStreamBufferSize =
+    Multi::kTaggedPayloadSize > kPackedMaxSize
+    ? Multi::kTaggedPayloadSize : kPackedMaxSize;
 
 class StorageManager {
  public:
@@ -49,8 +55,9 @@ class StorageManager {
   bool LoadMulti(uint8_t slot);
   void SaveCalibration();
   bool LoadCalibration();
-  void SysExSendMulti();
-  
+  void SysExSendMultiPacked();
+  void SysExSendMultiTagged();
+
   void AppendData(const uint8_t* data, size_t size, bool rewind) {
     if (rewind) {
       stream_buffer_.Rewind();
@@ -58,10 +65,11 @@ class StorageManager {
     stream_buffer_.Write(data, size);
   }
   
-  void DeserializeMulti();
+  bool DeserializeMultiPacked();
+  bool DeserializeMultiTagged();
 
  private:
-  stmlib::StreamBuffer<kMaxSize> stream_buffer_;
+  stmlib::StreamBuffer<kStreamBufferSize> stream_buffer_;
   stmlib::Storage<0x8020000, 9> storage_;
   
   DISALLOW_COPY_AND_ASSIGN(StorageManager);

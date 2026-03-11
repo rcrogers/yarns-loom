@@ -84,10 +84,7 @@ def scale(array, min=-32766, max=32766, center=True, dither_level=2):
   array = array * (max - min) + min
   return dither(array, order=dither_level)
 
-# Quarter sine wave (0 to pi/2) for symmetric lookup with quadrant logic.
-# This gives 4x the effective resolution for the same table size.
 sine_quadrant_input = numpy.arange(WAVETABLE_SIZE + 1) / float(WAVETABLE_SIZE) * (numpy.pi / 2)
-sine_quadrant = numpy.sin(sine_quadrant_input) * 32767.0
 
 # Band limited waveforms.
 SAMPLE_RATE=45000
@@ -105,8 +102,6 @@ quadrature = numpy.fmod(
 fill = numpy.fmod(
     numpy.arange(WAVETABLE_SIZE + 1),
     WAVETABLE_SIZE)
-
-waveforms.append(('sine_quadrant', numpy.round(sine_quadrant).astype(numpy.int16)))
 
 sizzle_input = sine_quadrant_input * 2 + numpy.pi / 3
 sizzle = numpy.sin(numpy.exp(sizzle_input)) * 127.5 + 127.5

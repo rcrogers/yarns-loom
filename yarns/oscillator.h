@@ -93,19 +93,29 @@ enum OscillatorShape {
   // OSC_SHAPE_SYNC_TRIANGLE,
   OSC_SHAPE_SYNC_PULSE,
   OSC_SHAPE_SYNC_SAW,
-  OSC_SHAPE_FOLD_SINE,
-  OSC_SHAPE_FOLD_TRIANGLE,
+  // OSC_SHAPE_FOLD_SINE,
+  // OSC_SHAPE_FOLD_TRIANGLE,
   OSC_SHAPE_DIRAC_COMB,
   OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_EXP_SINE,
   OSC_SHAPE_SINE_THRU_SINE,
   OSC_SHAPE_TRI_THRU_SINE,
+  OSC_SHAPE_EXP_THRU_SINE,
   OSC_SHAPE_SINE_THRU_SINE_BIASED,
   OSC_SHAPE_TRI_THRU_SINE_BIASED,
+  OSC_SHAPE_EXP_THRU_SINE_BIASED,
   OSC_SHAPE_SINE_THRU_TRI,
   OSC_SHAPE_TRI_THRU_TRI,
+  OSC_SHAPE_EXP_THRU_TRI,
   OSC_SHAPE_SINE_THRU_TRI_BIASED,
   OSC_SHAPE_TRI_THRU_TRI_BIASED,
+  OSC_SHAPE_EXP_THRU_TRI_BIASED,
+  OSC_SHAPE_SINE_THRU_EXP,
+  OSC_SHAPE_TRI_THRU_EXP,
+  OSC_SHAPE_EXP_THRU_EXP,
+  OSC_SHAPE_SINE_THRU_EXP_BIASED,
+  OSC_SHAPE_TRI_THRU_EXP_BIASED,
+  OSC_SHAPE_EXP_THRU_EXP_BIASED,
   OSC_SHAPE_FM,
 };
 
@@ -166,19 +176,29 @@ class Oscillator {
   void RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
+  // void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruSine(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruSine(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruSineBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruTri(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruTri(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruTri(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferSineThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderTransferTriThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruTriBiased(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferSineThruExp(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferTriThruExp(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruExp(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferSineThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferTriThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderTransferExpThruExpBiased(int16_t* timbre_samples, int16_t* audio_samples);
   void RenderFM(int16_t* timbre_samples, int16_t* audio_samples);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
@@ -198,15 +218,24 @@ class Oscillator {
     return -static_cast<int32_t>(t * t >> 18);
   }
 
-  inline int16_t sine(uint32_t phase) const {
-    // Quarter-table lookup with quadrant symmetry for 4x effective resolution.
+  // Quarter-table lookup with quadrant symmetry for 4x effective resolution.
+  // Table must be uint16_t[257] mapping 0..1 quadrant to 0..65535.
+  inline int16_t quadrant_lookup(const uint16_t* table, uint32_t phase) const {
     uint32_t quarter_phase = phase << 2;
     // Mirror for quadrants 1 and 3 (bit 30 set)
     quarter_phase ^= -((phase >> 30) & 1);
-    int16_t value = stmlib::Interpolate824(wav_sine_quadrant, quarter_phase);
+    uint16_t value = Interpolate824(table, quarter_phase);
     // Negate for quadrants 2 and 3 (bit 31 set)
     int32_t sign = static_cast<int32_t>(phase) >> 31;
-    return (value ^ sign) - sign;
+    return static_cast<int16_t>(((value ^ sign) - sign) >> 1);
+  }
+
+  inline int16_t sine(uint32_t phase) const {
+    return quadrant_lookup(lut_sine_quadrant, phase);
+  }
+
+  inline int16_t expo(uint32_t phase) const {
+    return quadrant_lookup(lut_env_expo, phase);
   }
 
   inline int16_t triangle(uint32_t phase) const {

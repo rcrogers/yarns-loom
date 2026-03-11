@@ -109,6 +109,12 @@ def envelope():
     # lookup_tables.append(('env_inverse_expo', env_inverse_expo / env_inverse_expo.max() * 65535.0))
   expo()
 
+  # Quarter sine wave (0 to pi/2) for symmetric lookup with quadrant logic.
+  # uint16_t range (0..65535) for use with quadrant_lookup alongside lut_env_expo.
+  sine_quadrant_input = numpy.arange(257) / 256.0 * (numpy.pi / 2)
+  sine_quadrant = numpy.sin(sine_quadrant_input) * 65535.0
+  lookup_tables.append(('sine_quadrant', numpy.round(sine_quadrant)))
+
   # Like the above, but with 7-bit phase and 7-bit value instead of 8-bit phase and 16-bit value
   # env_linear = numpy.arange(0, 128.0 + 1) / 128
   # env_expo_7bit = make_expo(env_linear)
