@@ -1182,12 +1182,15 @@ const SettingIndex Multi::kTaggedSkippedSettings[] = {
 };
 const uint8_t Multi::kNumTaggedSkippedSettings =
     sizeof(kTaggedSkippedSettings) / sizeof(kTaggedSkippedSettings[0]);
+
 STATIC_ASSERT(
-    Multi::kNumTaggedMultiSettings + Multi::kNumTaggedPartSettings
-        == SETTING_LAST - Multi::kNumTaggedSkippedSettings,
-    tagged_settings_total);
-// Per-domain counts are validated at runtime in Settings::Init where the
-// settings_[] array is available — see settings.cc.
+  SETTING_LAST == (
+    Multi::kNumTaggedMultiSettings +
+    Multi::kNumTaggedPartSettings +
+    Multi::kNumTaggedSkippedSettings
+  ),
+  all_settings_tagged_or_skipped
+);
 
 /* extern */
 Multi multi;

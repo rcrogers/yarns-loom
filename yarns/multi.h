@@ -530,11 +530,6 @@ class Multi {
       part_[i].Pack(packed.parts[i]);
     }
     settings_.Pack(packed);
-    const uint16_t size = sizeof(packed);
-    // char (*__debug)[size] = 1;
-    STATIC_ASSERT(size == 1020, expected);
-    STATIC_ASSERT(size % 4 == 0, flash_word);
-    // Packed size validated by STATIC_ASSERT in storage_manager.cc
     stream_buffer->Write(packed);
   };
   

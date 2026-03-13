@@ -33,8 +33,16 @@
 
 namespace yarns {
 
-STATIC_ASSERT(kStreamBufferSize >= Multi::kTaggedPayloadSize, tagged_buffer_capacity);
-STATIC_ASSERT(kStreamBufferSize >= kPackedMaxSize, packed_buffer_capacity);
+// Assert packed size satisfies flash constraints
+STATIC_ASSERT(kPackedSize % 4 == 0, flash_aligns_packed);
+STATIC_ASSERT(kPackedSize <= FlashStorage::MAX_DATA_SIZE, flash_fits_packed);
+
+// Informational
+// char (*__debug_packed)[kPackedSize] = 1;
+STATIC_ASSERT(kPackedSize == 1020, i_just_want_to_know_if_this_changes);
+
+STATIC_ASSERT(kStreamBufferSize >= kPackedSize, buffer_fits_packed);
+STATIC_ASSERT(kStreamBufferSize >= Multi::kTaggedPayloadSize, buffer_fits_tagged);
 
 void StorageManager::SaveMulti(uint8_t slot) {
   stream_buffer_.Rewind();
