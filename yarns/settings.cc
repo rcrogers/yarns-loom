@@ -845,7 +845,8 @@ char Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       
     case SETTING_UNIT_PORTAMENTO:
     {
-      const uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
+      // Exclude Interpolate88 guard entry from split point.
+      const uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE - 1;
       if (value == split_point) {
         strcpy(buffer, "OFF");
         return '\0';

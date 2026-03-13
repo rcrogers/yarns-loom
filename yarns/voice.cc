@@ -320,26 +320,29 @@ void Voice::NoteOn(
   }
 
   portamento_phase_ = 0;
-  const uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
+  // Exclude Interpolate88 guard entry from split point.
+  const uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE - 1;
 
   // Distance from OFF. 0 at OFF, 1..63 toward extremes on each side.
-  uint8_t distance;
+  uint8_t distance_6;
   if (portamento <= split_point) {
-    distance = split_point - portamento;
+    distance_6 = split_point - portamento;
     portamento_exponential_shape_ = true;
   } else {
-    distance = portamento - split_point;
+    distance_6 = portamento - split_point;
     portamento_exponential_shape_ = false;
   }
 
-  // Velocity-modulated LUT index in 6.7 fixed-point.
-  // vel * scale spans ±8128 ≈ 63<<7, so full mod just zeroes out T63/R63.
-  int16_t mod_distance = (static_cast<int16_t>(distance) << 7)
-    + static_cast<int16_t>(velocity) * portamento_mod_velocity;
-  CONSTRAIN(mod_distance, 0, (63 << 7) - 1);
-  // Shift 6.7 to 8.8 for Interpolate88; upper bound keeps index ≤ 62.
+  // Velocity-modulated LUT index via modulate_7_13.
+  // distance_6 is 6-bit; << 1 adapts to 7-bit init so full mod (±64)
+  // spans the full distance_6 range.  13-bit result << 1 gives a 6.8
+  // index for Interpolate88 over the 64-entry (+guard) portamento LUT.
   uint32_t base_increment = Interpolate88(
-    lut_portamento_increments, static_cast<uint16_t>(mod_distance) << 1
+    lut_portamento_increments,
+    modulate_7_13(
+      static_cast<uint8_t>(distance_6 << 1),
+      portamento_mod_velocity, velocity
+    ) << (14 - 13)
   );
 
   if (portamento > split_point) {

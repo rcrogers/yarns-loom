@@ -76,6 +76,7 @@ def portamento():
   max_increment = excursion / (min_time * refresh_rate)
   rates = numpy.linspace(numpy.power(max_increment, -gamma), numpy.power(min_increment, -gamma), num_values)
   values = numpy.power(rates, -1/gamma).astype(int)
+  values = numpy.append(values, values[-1])  # Interpolate88 guard entry
   lookup_tables_32.append(
       ('portamento_increments', values)
   )
@@ -221,7 +222,7 @@ def envelope():
   max_increment = excursion / min_samples
   rates = numpy.linspace(numpy.power(max_increment, -gamma), numpy.power(min_increment, -gamma), num_duration_values)
   values = list(numpy.power(rates, -1/gamma).astype(int))
-  values.append(values[-1])
+  values.append(values[-1])  # Interpolate88 guard entry
   lookup_tables_32.append(
       ('envelope_phase_increments', values)
   )
