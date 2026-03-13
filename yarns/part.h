@@ -163,7 +163,7 @@ struct PackedPart {
     // MidiSettings
     transpose_octaves : 3, // values free: 0
     // VoicingSettings
-    tuning_transpose : 7, // values free: 55
+    tuning_transpose : 6, // values free: 0
     tuning_fine : 7, // values free: 0
     lfo_spread_types : kTimbreBits,
     lfo_spread_voices : kTimbreBits,

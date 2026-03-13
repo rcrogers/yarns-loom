@@ -497,7 +497,7 @@ const Setting Settings::settings_[] = {
   {
     "TT", "TRANSPOSE",
     SETTING_DOMAIN_PART, { PART_VOICING_TUNING_TRANSPOSE, 0 },
-    SETTING_UNIT_INT8, -36, 36, NULL,
+    SETTING_UNIT_INT8, -32, 31, NULL,
     24, 15,
   },
   {
