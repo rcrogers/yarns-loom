@@ -39,7 +39,7 @@ STATIC_ASSERT(kPackedSize <= FlashStorage::MAX_DATA_SIZE, flash_fits_packed);
 
 // Informational
 // char (*__debug_packed)[kPackedSize] = 1;
-STATIC_ASSERT(kPackedSize == 1020, i_just_want_to_know_if_this_changes);
+STATIC_ASSERT(kPackedSize == 1016, i_just_want_to_know_if_this_changes);
 
 STATIC_ASSERT(kStreamBufferSize >= kPackedSize, buffer_fits_packed);
 STATIC_ASSERT(kStreamBufferSize >= Multi::kTaggedPayloadSize, buffer_fits_tagged);

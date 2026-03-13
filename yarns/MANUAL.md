@@ -17,6 +17,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
     - [Control Change messages](#control-change-messages)
     - [Play mode](#play-mode)
     - [New layouts](#new-layouts)
+    - [Changed layouts](#changed-layouts)
     - [Note processing](#note-processing)
     - [Hold function](#hold-function)
 - [Clocking](#clocking)
@@ -182,6 +183,13 @@ New global setting `CC (CONTROL CHANGE MODE)` sets how a CC's value is interpret
         1. Part 2, monophonic CV/gate
         1. Part 1's aux CV, configurable via `CV`
         1. Part 2's aux CV, configurable via `CV`
+
+### Changed layouts
+
+#### `4T` Quad triggers
+CV output channels are now based on the general-purpose `CV` setting, instead of fixed trigger shapes (original firmware behavior).  Configuring this channel as an [envelope CV output](#modulation-destinations-for-envelope-output) or [enveloped audio output](#voice-oscillator) allows for flexible shaping, velocity modulation, and timbral control of the resulting trigger CV.
+
+The `T- (TRIG DURATION)`, `T* (TRIG VELOCITY SCALE)`, and `T|⟍ (TRIG SHAPE)` settings have been removed. Gate outputs are unchanged.
 
 ### Note processing
 

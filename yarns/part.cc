@@ -86,7 +86,6 @@ void Part::Init() {
   voicing_.lfo_rate = 70;
   voicing_.lfo_spread_types = 0;
   voicing_.lfo_spread_voices = 0;
-  voicing_.trigger_duration = 2;
   voicing_.aux_cv = MOD_AUX_ENVELOPE;
   voicing_.aux_cv_2 = MOD_AUX_ENVELOPE;
   voicing_.tuning_transpose = 0;
@@ -1005,9 +1004,6 @@ void Part::TouchVoices() {
     voice_[i]->set_lfo_shape(LFO_ROLE_PITCH, voicing_.vibrato_shape);
     voice_[i]->set_lfo_shape(LFO_ROLE_TIMBRE, voicing_.timbre_lfo_shape);
     voice_[i]->set_lfo_shape(LFO_ROLE_AMPLITUDE, voicing_.tremolo_shape);
-    voice_[i]->set_trigger_duration(voicing_.trigger_duration);
-    voice_[i]->set_trigger_scale(voicing_.trigger_scale);
-    voice_[i]->set_trigger_shape(voicing_.trigger_shape);
     voice_[i]->set_aux_cv(voicing_.aux_cv);
     voice_[i]->set_aux_cv_2(voicing_.aux_cv_2);
     voice_[i]->set_oscillator_mode(voicing_.oscillator_mode);
@@ -1056,9 +1052,6 @@ bool Part::Set(uint8_t address, uint8_t value) {
     case PART_VOICING_VIBRATO_SHAPE:
     case PART_VOICING_TIMBRE_LFO_SHAPE:
     case PART_VOICING_TREMOLO_SHAPE:
-    case PART_VOICING_TRIGGER_DURATION:
-    case PART_VOICING_TRIGGER_SHAPE:
-    case PART_VOICING_TRIGGER_SCALE:
     case PART_VOICING_AUX_CV:
     case PART_VOICING_AUX_CV_2:
     case PART_VOICING_OSCILLATOR_SHAPE:

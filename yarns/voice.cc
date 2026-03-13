@@ -78,7 +78,6 @@ void Voice::Init() {
   portamento_phase_increment_ = 1U << 31;
   portamento_exponential_shape_ = false;
 
-  trigger_duration_ = 2;
 }
 
 /* static */
@@ -87,8 +86,10 @@ CVOutput::DCFn CVOutput::dc_fn_table_[] = {
   &CVOutput::velocity_dac_code,
   &CVOutput::aux_cv_dac_code,
   &CVOutput::aux_cv_dac_code_2,
-  &CVOutput::trigger_dac_code,
 };
+STATIC_ASSERT(
+    sizeof(CVOutput::dc_fn_table_) / sizeof(CVOutput::dc_fn_table_[0]) == DC_LAST,
+    dc_fn_table_matches_enum);
 
 void CVOutput::Init(bool reset_calibration) {
   if (reset_calibration) {
@@ -242,14 +243,6 @@ void Voice::Refresh() {
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
   mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
   
-  if (trigger_phase_increment_) {
-    trigger_phase_ += trigger_phase_increment_;
-    if (trigger_phase_ < trigger_phase_increment_) {
-      trigger_phase_ = 0;
-      trigger_phase_increment_ = 0;
-    }
-  }
-
   note_ = note;
 }
 
@@ -298,9 +291,7 @@ void Voice::NoteOn(
       retrigger_delay_ = 3;
       NoteOff(true);  // Force envelope release for retrigger
     }
-    trigger_pulse_ = trigger_duration_ * 2;
-    trigger_phase_ = 0;
-    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_ >> 1];
+    trigger_pulse_ = kRefreshHz * 2 / 1000;  // 2ms
   }
   gate_ = true;
   adsr_ = adsr;
@@ -372,32 +363,6 @@ void Voice::ControlChange(uint8_t controller, uint8_t value) {
     case kCCFootPedalMsb:
       mod_aux_[MOD_AUX_PEDAL] = value << 9;
       break;
-  }
-}
-
-uint16_t Voice::trigger_value() const {
-  if (trigger_phase_ <= trigger_phase_increment_) {
-    return 0;
-  } else {
-    int32_t velocity_coefficient = trigger_scale_ ? mod_velocity_ << 8 : 32768;
-    int32_t value = 0;
-    switch(trigger_shape_) {
-      case TRIGGER_SHAPE_SQUARE:
-        value = 32767;
-        break;
-      case TRIGGER_SHAPE_LINEAR:
-        value = 32767 - (trigger_phase_ >> 17);
-        break;
-      default:
-        {
-          const int16_t* table = waveform_table[
-              trigger_shape_ - TRIGGER_SHAPE_EXPONENTIAL];
-          value = Interpolate824(table, trigger_phase_);
-        }
-        break;
-    }
-    value = value * velocity_coefficient >> 15;
-    return value;
   }
 }
 

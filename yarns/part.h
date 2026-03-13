@@ -156,8 +156,8 @@ struct PackedPart {
     looper_oldest_index : looper::kBitsNoteIndex,
     looper_size         : looper::kBitsNoteIndex;
 
-  static const uint8_t kTimbreBits = 7;
-  static const uint8_t kLFOShapeBits = 2;
+  static const uint8_t kTimbreBits = 7; // values free: 0
+  static const uint8_t kLFOShapeBits = 2; // values free: 0
 
   signed int
     // MidiSettings
@@ -202,9 +202,6 @@ struct PackedPart {
     lfo_rate : 7, // values free: 0
     tuning_root : 4, // values free: 4
     tuning_system : 6, // values free: 30
-    trigger_duration : 7, // Breaking: probably excessive
-    trigger_scale : 1,
-    trigger_shape : 3, // values free: 2
     aux_cv : 4, // values free: 0
     aux_cv_2 : 4, // values free: 0
     tuning_factor : 4, // values free: 2
@@ -301,9 +298,6 @@ struct VoicingSettings {
   int8_t tuning_fine;
   int8_t tuning_root;
   uint8_t tuning_system;
-  uint8_t trigger_duration;
-  uint8_t trigger_scale;
-  uint8_t trigger_shape;
   uint8_t aux_cv;
   uint8_t aux_cv_2;
   uint8_t tuning_factor;
@@ -344,9 +338,6 @@ struct VoicingSettings {
     packed.tuning_fine = tuning_fine;
     packed.tuning_root = tuning_root;
     packed.tuning_system = tuning_system;
-    packed.trigger_duration = trigger_duration;
-    packed.trigger_scale = trigger_scale;
-    packed.trigger_shape = trigger_shape;
     packed.aux_cv = aux_cv;
     packed.aux_cv_2 = aux_cv_2;
     packed.tuning_factor = tuning_factor;
@@ -388,9 +379,6 @@ struct VoicingSettings {
     tuning_fine = packed.tuning_fine;
     tuning_root = packed.tuning_root;
     tuning_system = packed.tuning_system;
-    trigger_duration = packed.trigger_duration;
-    trigger_scale = packed.trigger_scale;
-    trigger_shape = packed.trigger_shape;
     aux_cv = packed.aux_cv;
     aux_cv_2 = packed.aux_cv_2;
     tuning_factor = packed.tuning_factor;
@@ -447,9 +435,6 @@ enum PartSetting {
   PART_VOICING_TUNING_FINE,
   PART_VOICING_TUNING_ROOT,
   PART_VOICING_TUNING_SYSTEM,
-  PART_VOICING_TRIGGER_DURATION,
-  PART_VOICING_TRIGGER_SCALE,
-  PART_VOICING_TRIGGER_SHAPE,
   PART_VOICING_AUX_CV,
   PART_VOICING_AUX_CV_2,
   PART_VOICING_TUNING_FACTOR,
