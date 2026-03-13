@@ -40,11 +40,13 @@
 
 namespace yarns {
 
-const uint16_t kPackedMaxSize = PAGE_SIZE - 2; // 2 bytes for checksum
+typedef stmlib::Storage<0x8020000, 9> FlashStorage;
+const uint16_t kPackedSize = sizeof(PackedMulti);
 // Must fit both packed and tagged payloads.
 const uint16_t kStreamBufferSize =
-    Multi::kTaggedPayloadSize > kPackedMaxSize
-    ? Multi::kTaggedPayloadSize : kPackedMaxSize;
+    Multi::kTaggedPayloadSize > kPackedSize
+    ? Multi::kTaggedPayloadSize
+    : kPackedSize;
 
 class StorageManager {
  public:
@@ -70,7 +72,7 @@ class StorageManager {
 
  private:
   stmlib::StreamBuffer<kStreamBufferSize> stream_buffer_;
-  stmlib::Storage<0x8020000, 9> storage_;
+  FlashStorage storage_;
   
   DISALLOW_COPY_AND_ASSIGN(StorageManager);
 };
