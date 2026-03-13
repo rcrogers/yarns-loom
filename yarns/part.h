@@ -142,7 +142,7 @@ struct SequencerArpeggiatorResult { // Supports multiple return
 };
 
 struct PackedPart {
-  // Currently has 0 bits to spare
+  // Currently has 12 bits to spare
 
   struct PackedSequencerStep {
     unsigned int

@@ -574,7 +574,7 @@ const Setting Settings::settings_[] = {
     91, 0xff,
   },
   {
-    "PV", "PEAK VEL MOD",
+    "PE", "PEAK VEL MOD",
     SETTING_DOMAIN_PART, { PART_VOICING_ENV_PEAK_MOD_VELOCITY, 0 },
     SETTING_UNIT_INT8, -64, 63, NULL,
     92, 0xff,
@@ -732,7 +732,7 @@ const Setting Settings::settings_[] = {
     0xff, 0xff,
   },
   {
-    "PM", "PORTAMENTO MOD VEL",
+    "PV", "PORTAMENTO MOD VEL",
     SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO_MOD_VELOCITY, 0 },
     SETTING_UNIT_INT8, -64, 63, NULL,
     0xff, 0xff,
