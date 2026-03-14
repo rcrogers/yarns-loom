@@ -389,7 +389,7 @@ void Ui::PrintStepSequencerStatus() {
     rec_step == recording_part().playing_step()
   ) ? UINT16_MAX : 43690;
   const SequencerStep& step = recording_part().sequencer_settings().step[rec_step];
-  uint16_t fade = step.is_slid() ? kFastFade : 0;
+  uint16_t fade = step.is_slide() ? kFastFade : 0;
 
   if (recording_mode_is_displaying_pitch_) {
     if (step.is_rest()) display_.Print("RS", "RS", brightness, fade);
@@ -811,7 +811,7 @@ void Ui::OnSwitchHeld(const Event& e) {
         } else {
           // Toggle slide flag on recording step
           SequencerStep* step = &mutable_recording_part()->mutable_sequencer_settings()->step[recording_part().recording_step()];
-          step->set_slid(!step->is_slid());
+          step->set_slide(!step->is_slide());
         }
       } else {
         multi.set_next_clock_input_tick(0); // Reset song position

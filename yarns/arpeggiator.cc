@@ -183,7 +183,7 @@ const SequencerArpeggiatorResult Arpeggiator::BuildNextResult(
     note -= 12;
   }
   result.note = SequencerStep(note, velocity);
-  result.note.set_slid(seq_step.is_slid());
+  result.note.set_slide(seq_step.is_slide());
 
   return result;
 }
