@@ -79,7 +79,8 @@ void Part::Init() {
   voicing_.allocation_mode = POLY_MODE_OFF;
   voicing_.legato_retrigger = true;
   voicing_.portamento_legato_only = false;
-  voicing_.portamento = 0;
+  voicing_.portamento = 36;  // T28
+  voicing_.portamento_mod_velocity = -24;
   voicing_.pitch_bend_range = 2;
   voicing_.vibrato_range = 1;
   voicing_.vibrato_mod = 0;
