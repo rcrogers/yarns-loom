@@ -31,6 +31,8 @@
 #define YARNS_SYNCED_LFO_H_
 
 #include "stmlib/stmlib.h"
+#include "stmlib/utils/random.h"
+#include "yarns/svf.h"
 using namespace stmlib;
 
 namespace yarns {
@@ -40,6 +42,8 @@ enum LFOShape {
   LFO_SHAPE_SAW_DOWN,
   LFO_SHAPE_SAW_UP,
   LFO_SHAPE_SQUARE,
+  LFO_SHAPE_RANDOM_STEPPED,
+  LFO_SHAPE_NOISE,
 
   LFO_SHAPE_LAST
 };
@@ -50,6 +54,16 @@ class SyncedLFO {
 
   SyncedLFO() { }
   ~SyncedLFO() { }
+  void Init() {
+    phase_ = 0;
+    phase_increment_ = 0;
+    previous_phase_ = 0;
+    previous_target_phase_ = 0;
+    held_value_ = 0;
+    next_value_ = 0;
+    svf_.Init();
+    damp_ = 0;
+  }
   void SetPhase(uint32_t phase) { phase_ = phase; }
   void RegisterPhase(uint32_t phase, bool force) {
     if (force) {
@@ -62,25 +76,33 @@ class SyncedLFO {
   uint32_t GetTargetPhase() const { return previous_target_phase_; }
   uint32_t GetPhaseIncrement() const { return phase_increment_; }
   void SetPhaseIncrement(uint32_t i) { phase_increment_ = i; }
+  void SetDamp(int16_t damp) { damp_ = damp; }
   void Refresh() { phase_ += phase_increment_; }
 
-  int16_t shape(LFOShape s) const { return shape(s, phase_); }
-  int16_t shape(LFOShape shape, uint32_t phase) const {
-    switch (shape) {
-      case LFO_SHAPE_TRIANGLE:
-        return phase < 1UL << 31      // x < 0.5
-          ? INT16_MIN + (phase >> 15) // y = -0.5 + 2x = 2(x - 1/4)
-          : 0x17fff - (phase >> 15);  // y =  1.5 - 2x = 2(3/4 - x)
-      case LFO_SHAPE_SAW_DOWN:
-        return INT16_MAX - (phase >> 16);
-      case LFO_SHAPE_SAW_UP:
-        return INT16_MIN + (phase >> 16);
-      case LFO_SHAPE_SQUARE:
-        return phase < 1UL << 31 ? INT16_MAX : INT16_MIN;
-      default:
-        return 0;
-    } 
+  void Refresh(LFOShape shape) {
+    phase_ += phase_increment_;
+
+    // Compute raw shape value
+    int16_t raw;
+    if (shape == LFO_SHAPE_NOISE) {
+      raw = Random::GetSample();
+    } else if (shape == LFO_SHAPE_RANDOM_STEPPED) {
+      if (phase_ < phase_increment_) {
+        held_value_ = next_value_;
+        next_value_ = Random::GetSample();
+      }
+      raw = held_value_;
+    } else {
+      raw = DeterministicShape(shape, phase_);
+    }
+
+    int16_t cutoff = CutoffFromPhaseIncrement();
+    svf_.Process(raw, cutoff, damp_);
+    output_ = svf_.lp;
   }
+
+  int16_t shape(LFOShape s) const { return output_; }
+  int16_t shape(LFOShape s, uint32_t phase) const { return output_; }
 
   uint32_t ComputeTargetPhase(int32_t tick_counter, uint16_t period_ticks, uint32_t phase_offset = 0) const {
     uint16_t tick_phase = modulo(tick_counter, period_ticks);
@@ -106,10 +128,38 @@ class SyncedLFO {
   }
 
  private:
+  static int16_t DeterministicShape(LFOShape s, uint32_t phase) {
+    switch (s) {
+      case LFO_SHAPE_TRIANGLE:
+        return phase < 1UL << 31
+          ? INT16_MIN + (phase >> 15)
+          : 0x17fff - (phase >> 15);
+      case LFO_SHAPE_SAW_DOWN:
+        return INT16_MAX - (phase >> 16);
+      case LFO_SHAPE_SAW_UP:
+        return INT16_MIN + (phase >> 16);
+      case LFO_SHAPE_SQUARE:
+        return phase < 1UL << 31 ? INT16_MAX : INT16_MIN;
+      default:
+        return 0;
+    }
+  }
+
+  inline int16_t CutoffFromPhaseIncrement() const {
+    int32_t cutoff = phase_increment_ >> 10;
+    if (cutoff > 16383) cutoff = 16383;
+    if (cutoff < 1) cutoff = 1;
+    return static_cast<int16_t>(cutoff);
+  }
 
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t previous_phase_, previous_target_phase_;
+  int16_t held_value_;
+  int16_t next_value_;
+  SVF svf_;
+  int16_t damp_; // 0 = bypass, >0 = SVF damping coefficient
+  int16_t output_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncedLFO);
 };

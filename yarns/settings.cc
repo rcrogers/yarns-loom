@@ -167,10 +167,12 @@ STATIC_ASSERT(
 );
 
 const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
-  "/\\",
-  "|\\",
-  "/|",
-  "\x8C_",
+  "/\\ TRIANGLE",
+  "|\\ DOWN SAW",
+  "/| UP SAW",
+  "\x8C_ SQUARE",
+  "R\x8C STEPPED RANDOM",
+  "R* NOISE",
 };
 
 const char* const voicing_allocation_priority_values[] = {
@@ -489,6 +491,12 @@ const Setting Settings::settings_[] = {
     SETTING_DOMAIN_PART, { PART_VOICING_TREMOLO_SHAPE, 0 },
     SETTING_UNIT_ENUMERATION, 0, LFO_SHAPE_LAST - 1, lfo_shape_values,
     94, 0xff,
+  },
+  {
+    "LW", "LFO WOGGLE",
+    SETTING_DOMAIN_PART, { PART_VOICING_LFO_WOGGLE, 0 },
+    SETTING_UNIT_UINT8, 0, 127, NULL,
+    0xff, 0xff,
   },
   {
     "TT", "TRANSPOSE",

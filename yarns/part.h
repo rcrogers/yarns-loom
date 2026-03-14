@@ -143,7 +143,7 @@ struct SequencerArpeggiatorResult { // Supports multiple return
 };
 
 struct PackedPart {
-  // 36 bits to spare per part: up to 32 from the last bitfield word's padding,
+  // 26 bits to spare per part: up to 22 from the last bitfield word's padding,
   // plus 4 more if a new bitfield group is added (at the cost of 28 bits of
   // word-alignment overhead).  Dense pitch encoding accounts for 24 of these.
 
@@ -159,7 +159,7 @@ struct PackedPart {
     looper_size         : looper::kBitsNoteIndex;
 
   static const uint8_t kTimbreBits = 7; // values free: 0
-  static const uint8_t kLFOShapeBits = 2; // values free: 0
+  static const uint8_t kLFOShapeBits = 3; // values free: 0
 
   signed int
     // MidiSettings
@@ -213,6 +213,7 @@ struct PackedPart {
     vibrato_shape : kLFOShapeBits,
     timbre_lfo_shape : kLFOShapeBits,
     tremolo_shape : kLFOShapeBits,
+    lfo_woggle : kTimbreBits,
     timbre_initial : kTimbreBits,
     timbre_mod_lfo : kTimbreBits,
     env_init_attack : kTimbreBits,
@@ -293,6 +294,7 @@ struct VoicingSettings {
   uint8_t vibrato_shape;
   uint8_t timbre_lfo_shape;
   uint8_t tremolo_shape;
+  uint8_t lfo_woggle;
   uint8_t lfo_rate;
   int8_t lfo_spread_types;
   int8_t lfo_spread_voices;
@@ -333,6 +335,7 @@ struct VoicingSettings {
     packed.vibrato_shape = vibrato_shape;
     packed.timbre_lfo_shape = timbre_lfo_shape;
     packed.tremolo_shape = tremolo_shape;
+    packed.lfo_woggle = lfo_woggle;
     packed.lfo_rate = lfo_rate;
     packed.lfo_spread_types = lfo_spread_types;
     packed.lfo_spread_voices = lfo_spread_voices;
@@ -374,6 +377,7 @@ struct VoicingSettings {
     vibrato_shape = packed.vibrato_shape;
     timbre_lfo_shape = packed.timbre_lfo_shape;
     tremolo_shape = packed.tremolo_shape;
+    lfo_woggle = packed.lfo_woggle;
     lfo_rate = packed.lfo_rate;
     lfo_spread_types = packed.lfo_spread_types;
     lfo_spread_voices = packed.lfo_spread_voices;
@@ -430,6 +434,7 @@ enum PartSetting {
   PART_VOICING_VIBRATO_SHAPE,
   PART_VOICING_TIMBRE_LFO_SHAPE,
   PART_VOICING_TREMOLO_SHAPE,
+  PART_VOICING_LFO_WOGGLE,
   PART_VOICING_LFO_RATE,
   PART_VOICING_LFO_SPREAD_TYPES,
   PART_VOICING_LFO_SPREAD_VOICES,

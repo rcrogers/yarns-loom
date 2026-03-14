@@ -100,6 +100,7 @@ STATIC_ASSERT(
 );
 
 void StateVariableFilter::Init() {
+  SVF::Init();
   damp.Init();
 }
 

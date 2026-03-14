@@ -630,7 +630,7 @@ class Multi {
 
   // Setting counts per domain.  Validated by STATIC_ASSERTs in multi.cc.
   static const uint16_t kNumTaggedMultiSettings = 12;
-  static const uint16_t kNumTaggedPartSettings = 61;
+  static const uint16_t kNumTaggedPartSettings = 62;
 
   // Complete wire layout of a tagged payload.  Not used for actual I/O
   // (we stream element-by-element to avoid a large stack allocation), but

@@ -129,6 +129,11 @@ class Voice {
   inline void set_lfo_shape(LFORole role, uint8_t shape) {
     lfo_shapes_[role] = static_cast<LFOShape>(shape);
   }
+  inline void set_lfo_damp(int16_t damp) {
+    for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
+      lfos_[i].SetDamp(damp);
+    }
+  }
   inline int16_t lfo_value(LFORole role) const {
     return lfos_[role].shape(lfo_shapes_[role]);
   }
