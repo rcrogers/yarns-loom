@@ -38,6 +38,7 @@
 
 #include "yarns/resources.h"
 #include "yarns/drivers/dac.h"
+#include "yarns/dense_array.h"
 #include "yarns/looper.h"
 #include "yarns/sequencer_step.h"
 #include "yarns/arpeggiator.h"
@@ -142,14 +143,15 @@ struct SequencerArpeggiatorResult { // Supports multiple return
 };
 
 struct PackedPart {
-  // Currently has 12 bits to spare
+  // 36 bits to spare per part: up to 32 from the last bitfield word's padding,
+  // plus 4 more if a new bitfield group is added (at the cost of 28 bits of
+  // word-alignment overhead).  Dense pitch encoding accounts for 24 of these.
 
-  struct PackedSequencerStep {
-    unsigned int
-      pitch : 8, // values free: 126 (about 29 bits' worth across 30 steps)
-      velocity: 8; // values free: 0
-  }__attribute__((packed));
-  PackedSequencerStep sequencer_steps[kNumSteps];
+  // 128 MIDI notes + rest + tie
+  typedef DenseArray<kNumSteps, SEQUENCER_STEP_TIE + 1> StepPitchDenseArray;
+
+  uint8_t dense_step_pitches[StepPitchDenseArray::kNumBytes];
+  uint8_t step_velocity[kNumSteps];  // 7 bits velocity + 1 bit slide
 
   looper::PackedNote looper_notes[looper::kMaxNotes];
   unsigned int
@@ -487,10 +489,13 @@ struct SequencerSettings {
   uint8_t padding_steps[2];
 
   void Pack(PackedPart& packed) const {
+    std::fill(
+        &packed.dense_step_pitches[0],
+        &packed.dense_step_pitches[PackedPart::StepPitchDenseArray::kNumBytes],
+        0);
     for (uint8_t i = 0; i < kNumSteps; i++) {
-      PackedPart::PackedSequencerStep& packed_step = packed.sequencer_steps[i];
-      packed_step.pitch = step[i].data[0];
-      packed_step.velocity = step[i].data[1];
+      PackedPart::StepPitchDenseArray::Encode(packed.dense_step_pitches, step[i].data[0]);
+      packed.step_velocity[i] = step[i].data[1];
     }
 
     packed.clock_division = clock_division;
@@ -507,10 +512,9 @@ struct SequencerSettings {
   }
 
   void Unpack(PackedPart& packed) {
-    for (uint8_t i = 0; i < kNumSteps; i++) {
-      PackedPart::PackedSequencerStep& packed_step = packed.sequencer_steps[i];
-      step[i].data[0] = packed_step.pitch;
-      step[i].data[1] = packed_step.velocity;
+    for (int8_t i = kNumSteps - 1; i >= 0; i--) {
+      step[i].data[0] = PackedPart::StepPitchDenseArray::Decode(packed.dense_step_pitches);
+      step[i].data[1] = packed.step_velocity[i];
     }
 
     clock_division = packed.clock_division;
