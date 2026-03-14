@@ -593,8 +593,11 @@ class Multi {
   } __attribute__((packed));
 
   struct TaggedSequencerStep {
-    uint8_t pitch;
-    uint8_t velocity;
+    uint8_t pitch;     // MIDI note 0-127 (only meaningful when is_rest=0 and is_tie=0)
+    uint8_t velocity;  // 7-bit, no flags
+    uint8_t is_rest;
+    uint8_t is_tie;
+    uint8_t is_slide;
   } __attribute__((packed));
 
   // Looper: { part_index, size, oldest_index } followed by TaggedLooperNote[kMaxNotes]
@@ -739,7 +742,14 @@ class Multi {
       TaggedSequencerPrefix prefix = { p, seq.num_steps };
       b->Write(prefix);
       for (uint8_t i = 0; i < kNumSteps; i++) {
-        TaggedSequencerStep step = { seq.step[i].data[0], seq.step[i].data[1] };
+        const SequencerStep& s = seq.step[i];
+        TaggedSequencerStep step = {
+          s.note(),
+          static_cast<uint8_t>(s.data[1] & 0x7F),
+          s.is_rest(),
+          s.is_tie(),
+          s.is_slide()
+        };
         b->Write(step);
       }
       SerializeTaggedSectionEnd(b, data_start);
@@ -824,8 +834,10 @@ class Multi {
         for (uint8_t i = 0; i < kNumSteps; i++) {
           TaggedSequencerStep step = {};
           if (!ReadTaggedObject(b, &step, section_end)) break;
-          seq->step[i].data[0] = step.pitch;
-          seq->step[i].data[1] = step.velocity;
+          seq->step[i].data[0] = step.is_rest ? SEQUENCER_STEP_REST
+              : step.is_tie ? SEQUENCER_STEP_TIE
+              : step.pitch;
+          seq->step[i].data[1] = (step.is_slide << 7) | (step.velocity & 0x7F);
         }
         return;
       }
