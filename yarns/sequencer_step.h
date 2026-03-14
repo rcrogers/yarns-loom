@@ -44,11 +44,11 @@ struct SequencerStep {
   inline bool has_note() const { return !(data[0] & 0x80); }
   inline bool is_rest() const { return data[0] == SEQUENCER_STEP_REST; }
   inline bool is_tie() const { return data[0] == SEQUENCER_STEP_TIE; }
-  inline bool is_continuation() const { return is_tie() || is_slid(); }
+  inline bool is_continuation() const { return is_tie() || is_slide(); }
   inline uint8_t note() const { return data[0] & 0x7f; }
 
-  inline bool is_slid() const { return data[1] & 0x80; }
-  inline void set_slid(bool slid) {
+  inline bool is_slide() const { return data[1] & 0x80; }
+  inline void set_slide(bool slid) {
     if (slid) {
       data[1] |= 0x80;
     } else {

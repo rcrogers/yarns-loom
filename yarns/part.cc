@@ -318,7 +318,7 @@ void Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
   
   if (seq_recording_ &&
       (pitch_bend > 8192 + 2048 || pitch_bend < 8192 - 2048)) {
-    seq_.step[seq_rec_step_].set_slid(true);
+    seq_.step[seq_rec_step_].set_slide(true);
   }
 }
 
@@ -376,7 +376,7 @@ void Part::ClockStep() {
     uint8_t velocity = result.note.velocity();
     GeneratedNoteOff(pitch); // Simulate a human retriggering a key
     if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
-      InternalNoteOn(pitch, velocity, result.note.is_slid());
+      InternalNoteOn(pitch, velocity, result.note.is_slide());
     }
   }
 }
@@ -618,7 +618,7 @@ void Part::RecordStep(const SequencerStep& step) {
   SequencerStep* target = &seq_.step[seq_rec_step_];
   target->data[0] = step.data[0];
   target->data[1] |= step.data[1];
-  if (!target->has_note()) target->set_slid(false);
+  if (!target->has_note()) target->set_slide(false);
   ++seq_rec_step_;
   uint8_t last_step = seq_overdubbing_ ? seq_.num_steps : kNumSteps;
   // Extend sequence.
@@ -643,7 +643,7 @@ void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t ve
     arpeggiator_ = result.arpeggiator;
     pitch = result.note.note();
     if (result.note.has_note()) {
-      bool slide = result.note.is_slid();
+      bool slide = result.note.is_slide();
       InternalNoteOn(pitch, result.note.velocity(), slide);
       if (slide) {
         // NB: currently impossible (see LooperPlayNoteOff)
