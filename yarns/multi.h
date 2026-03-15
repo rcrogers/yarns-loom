@@ -41,7 +41,6 @@
 
 namespace yarns {
 
-const uint32_t kRefreshHz = 4000;
 const uint8_t kNumParts = 4;
 // One paraphonic part, one voice per remaining output
 const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
@@ -630,7 +629,7 @@ class Multi {
 
   // Setting counts per domain.  Validated by STATIC_ASSERTs in multi.cc.
   static const uint16_t kNumTaggedMultiSettings = 12;
-  static const uint16_t kNumTaggedPartSettings = 62;
+  static const uint16_t kNumTaggedPartSettings = 61;
 
   // Complete wire layout of a tagged payload.  Not used for actual I/O
   // (we stream element-by-element to avoid a large stack allocation), but

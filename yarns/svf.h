@@ -25,13 +25,19 @@
 //
 // -----------------------------------------------------------------------------
 //
-// State variable filter core.
+// Chamberlin state variable filter.
+//
+// cutoff is Q0.15 (range [0, 1.0), encodes 2*sin(pi*fc/fs)).
+// damp is Q1.14 (range [0, 2.0), encodes 2*(1-resonance)).
 
 #ifndef YARNS_SVF_H_
 #define YARNS_SVF_H_
 
 #include "stmlib/stmlib.h"
 #include "stmlib/dsp/dsp.h"
+#include "stmlib/utils/dsp.h"
+
+#include "yarns/resources.h"
 
 using namespace stmlib;
 
@@ -44,16 +50,31 @@ struct SVF {
     bp = lp = notch = hp = 0;
   }
 
-  // cutoff and damp are 14-bit (0..16383)
+  // cutoff: Q0.15, damp: Q1.14 (Chamberlin needs damp range 0..2.0)
   inline void Process(int32_t in, int16_t cutoff, int16_t damp) {
-    notch = in - (bp * damp >> 14);
+    int32_t damped_bp = bp * damp >> 14;
+    notch = in - damped_bp;
     notch = Clip16(notch);
-    lp += cutoff * bp >> 14;
+    lp += cutoff * bp >> 15;
     lp = Clip16(lp);
     hp = notch - lp;
     hp = Clip16(hp);
-    bp += cutoff * hp >> 14;
+    bp += cutoff * hp >> 15;
     bp = Clip16(bp);
+  }
+
+  // Conversion methods. Callers pass Q0.15 domain values, get back
+  // parameters ready for Process.
+  static inline int16_t DampFromResonance(int16_t resonance_q_0_15) {
+    uint32_t index = resonance_q_0_15 << (32 - 15);
+    uint16_t damp_u_1_15 = Interpolate824(lut_svf_damp, index);
+    int16_t damp_q_1_14 = damp_u_1_15 >> 1;
+    return damp_q_1_14;
+  }
+  static inline int16_t CutoffFromFreq(int16_t freq_q_0_15) {
+    uint32_t index = freq_q_0_15 << (32 - 15);
+    int16_t cutoff_q_0_15 = Interpolate824(lut_svf_cutoff, index);
+    return cutoff_q_0_15;
   }
 };
 

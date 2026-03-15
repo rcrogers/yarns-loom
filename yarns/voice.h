@@ -42,9 +42,6 @@ namespace yarns {
 
 const uint16_t kNumOctaves = 11;
 
-// 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
-const uint8_t kLowFreqRefreshBits = 5;
-
 enum OscillatorMode {
   OSCILLATOR_MODE_OFF,
   OSCILLATOR_MODE_DRONE,
@@ -129,11 +126,12 @@ class Voice {
   inline void set_lfo_shape(LFORole role, uint8_t shape) {
     lfo_shapes_[role] = static_cast<LFOShape>(shape);
   }
-  inline void set_lfo_damp(int16_t damp) {
-    for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
-      lfos_[i].SetDamp(damp);
-    }
-  }
+  // inline void set_lfo_woggle(uint8_t amount, int16_t damp) {
+  //   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
+  //     lfos_[i].SetWoggleAmount(amount);
+  //     lfos_[i].SetWoggleDamp(damp);
+  //   }
+  // }
   inline int16_t lfo_value(LFORole role) const {
     return lfos_[role].shape(lfo_shapes_[role]);
   }
@@ -243,7 +241,7 @@ class Voice {
   uint16_t trigger_pulse_;
 
   uint8_t refresh_counter_;
-  Interpolator<kLowFreqRefreshBits> pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
+  Interpolator<kRefreshHzToLfoSampleHzRatioBits> pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
 
   uint16_t tremolo_mod_target_;
   uint16_t tremolo_mod_current_;

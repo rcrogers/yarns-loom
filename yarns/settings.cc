@@ -171,7 +171,9 @@ const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
   "|\\ DOWN SAW",
   "/| UP SAW",
   "\x8C_ SQUARE",
-  "R\x8C STEPPED RANDOM",
+  "R\\ LINEAR RANDOM",
+  "Re EXPO SLEW RANDOM",
+  "R\xC5 STEPPED RANDOM",
   "R* NOISE",
 };
 
@@ -493,12 +495,6 @@ const Setting Settings::settings_[] = {
     94, 0xff,
   },
   {
-    "LW", "LFO WOGGLE",
-    SETTING_DOMAIN_PART, { PART_VOICING_LFO_WOGGLE, 0 },
-    SETTING_UNIT_UINT8, 0, 127, NULL,
-    0xff, 0xff,
-  },
-  {
     "TT", "TRANSPOSE",
     SETTING_DOMAIN_PART, { PART_VOICING_TUNING_TRANSPOSE, 0 },
     SETTING_UNIT_INT8, -32, 31, NULL,
@@ -744,7 +740,13 @@ const Setting Settings::settings_[] = {
     SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO_MOD_VELOCITY, 0 },
     SETTING_UNIT_INT8, -64, 63, NULL,
     0xff, 0xff,
-  }
+  },
+  // {
+  //   "LW", "LFO WOGGLE",
+  //   SETTING_DOMAIN_PART, { PART_VOICING_LFO_WOGGLE, 0 },
+  //   SETTING_UNIT_UINT8, 0, 127, NULL,
+  //   0xff, 0xff,
+  // },
 };
 
 void Settings::Init() {

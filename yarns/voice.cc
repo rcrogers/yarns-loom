@@ -190,11 +190,16 @@ void Voice::Refresh() {
   
   // Render modulation sources
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
-    lfos_[i].Refresh(lfo_shapes_[i]);
+    lfos_[i].Refresh();
   }
-  int32_t vibrato_lfo = lfo_value(LFO_ROLE_PITCH);
 
   if (refresh_counter_ == 0) {
+    // Compute shape + SVF at 125Hz
+    for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
+      lfos_[i].RefreshShape(lfo_shapes_[i]);
+    }
+
+    int32_t vibrato_lfo = lfo_value(LFO_ROLE_PITCH);
     uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
     // Fraction by which gain envelope should be damped
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
@@ -211,7 +216,7 @@ void Voice::Refresh() {
     pitch_lfo_interpolator_.SetTarget(pitch_lfo_15);
     pitch_lfo_interpolator_.ComputeSlope();
   }
-  refresh_counter_ = (refresh_counter_ + 1) % (1 << kLowFreqRefreshBits);
+  refresh_counter_ = (refresh_counter_ + 1) % (1 << kRefreshHzToLfoSampleHzRatioBits);
 
   pitch_lfo_interpolator_.Tick();
   timbre_lfo_interpolator_.Tick();
@@ -241,7 +246,7 @@ void Voice::Refresh() {
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
-  mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
+  mod_aux_[MOD_AUX_FULL_LFO] = lfo_value(LFO_ROLE_PITCH) + 32768;
   
   note_ = note;
 }

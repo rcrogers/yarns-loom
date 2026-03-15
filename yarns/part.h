@@ -36,6 +36,7 @@
 #include "stmlib/algorithms/voice_allocator.h"
 #include "stmlib/algorithms/note_stack.h"
 
+#include "yarns/constants.h"
 #include "yarns/resources.h"
 #include "yarns/drivers/dac.h"
 #include "yarns/dense_array.h"
@@ -135,7 +136,14 @@ enum SustainMode {
   SUSTAIN_MODE_LAST,
 };
 
-typedef SyncedLFO<15, 9> FastSyncedLFO; // Locks on in less than a second
+// The ~minimum that doesn't cause obvious LFO sampling error
+const uint32_t kLfoSampleHz = 125;
+const uint8_t kRefreshHzToLfoSampleHzRatioBits = 5;
+STATIC_ASSERT(
+  kRefreshHz / kLfoSampleHz == (1 << kRefreshHzToLfoSampleHzRatioBits),
+  refresh_to_lfo_sample_ratio_bits_mismatch
+);
+typedef SyncedLFO<15, 9, kRefreshHzToLfoSampleHzRatioBits> FastSyncedLFO;
 
 struct SequencerArpeggiatorResult { // Supports multiple return
   Arpeggiator arpeggiator; // Resulting arp state
@@ -143,7 +151,7 @@ struct SequencerArpeggiatorResult { // Supports multiple return
 };
 
 struct PackedPart {
-  // 26 bits to spare per part: up to 22 from the last bitfield word's padding,
+  // 33 bits to spare per part: up to 29 from the last bitfield word's padding,
   // plus 4 more if a new bitfield group is added (at the cost of 28 bits of
   // word-alignment overhead).  Dense pitch encoding accounts for 24 of these.
 
@@ -213,7 +221,7 @@ struct PackedPart {
     vibrato_shape : kLFOShapeBits,
     timbre_lfo_shape : kLFOShapeBits,
     tremolo_shape : kLFOShapeBits,
-    lfo_woggle : kTimbreBits,
+    // lfo_woggle : kTimbreBits,
     timbre_initial : kTimbreBits,
     timbre_mod_lfo : kTimbreBits,
     env_init_attack : kTimbreBits,
@@ -294,7 +302,7 @@ struct VoicingSettings {
   uint8_t vibrato_shape;
   uint8_t timbre_lfo_shape;
   uint8_t tremolo_shape;
-  uint8_t lfo_woggle;
+  // uint8_t lfo_woggle;
   uint8_t lfo_rate;
   int8_t lfo_spread_types;
   int8_t lfo_spread_voices;
@@ -335,7 +343,7 @@ struct VoicingSettings {
     packed.vibrato_shape = vibrato_shape;
     packed.timbre_lfo_shape = timbre_lfo_shape;
     packed.tremolo_shape = tremolo_shape;
-    packed.lfo_woggle = lfo_woggle;
+    // packed.lfo_woggle = lfo_woggle;
     packed.lfo_rate = lfo_rate;
     packed.lfo_spread_types = lfo_spread_types;
     packed.lfo_spread_voices = lfo_spread_voices;
@@ -377,7 +385,7 @@ struct VoicingSettings {
     vibrato_shape = packed.vibrato_shape;
     timbre_lfo_shape = packed.timbre_lfo_shape;
     tremolo_shape = packed.tremolo_shape;
-    lfo_woggle = packed.lfo_woggle;
+    // lfo_woggle = packed.lfo_woggle;
     lfo_rate = packed.lfo_rate;
     lfo_spread_types = packed.lfo_spread_types;
     lfo_spread_voices = packed.lfo_spread_voices;
@@ -434,7 +442,7 @@ enum PartSetting {
   PART_VOICING_VIBRATO_SHAPE,
   PART_VOICING_TIMBRE_LFO_SHAPE,
   PART_VOICING_TREMOLO_SHAPE,
-  PART_VOICING_LFO_WOGGLE,
+  // PART_VOICING_LFO_WOGGLE,
   PART_VOICING_LFO_RATE,
   PART_VOICING_LFO_SPREAD_TYPES,
   PART_VOICING_LFO_SPREAD_VOICES,
