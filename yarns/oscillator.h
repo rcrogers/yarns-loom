@@ -137,6 +137,7 @@ class Oscillator {
     phase_increment_ = 1;
     high_ = false;
     next_sample_ = 0;
+    transfer_crest_factor_ = 1;
   }
 
   void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias);
@@ -243,6 +244,7 @@ class Oscillator {
   }
 
   OscillatorShape shape_;
+  uint8_t transfer_crest_factor_;
   Envelope gain_envelope_, timbre_envelope_;
   int16_t raw_timbre_bias_;
   uint16_t raw_gain_bias_;
