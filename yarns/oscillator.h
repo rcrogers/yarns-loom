@@ -130,6 +130,8 @@ class Oscillator {
     phase_increment_ = 1;
     high_ = false;
     next_sample_ = 0;
+    prev_transfer_raw_ = 0;
+    prev_transfer_avg_ = 0;
     transfer_crest_factor_ = 1;
   }
 
@@ -255,6 +257,8 @@ class Oscillator {
   PhaseDistortionSquareModulator pd_square_;
   
   int32_t next_sample_;
+  int16_t prev_transfer_raw_;
+  int16_t prev_transfer_avg_;
   uint16_t scale_;
 
  private:
