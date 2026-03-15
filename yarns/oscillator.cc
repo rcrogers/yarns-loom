@@ -44,6 +44,7 @@ static const size_t kNumZones = 15;
 static const uint16_t kHighestNote = 128 * 128;
 static const uint16_t kPitchTableStart = 116 * 128;
 static const uint16_t kOctave = 12 * 128;
+static const int kTransferMaxGainBits = 4; // 16x max gain
 
 /* static */
 Oscillator::RenderFn Oscillator::fn_table_[] = {
@@ -114,6 +115,8 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
   // if (shape_ >= OSC_SHAPE_FM) {
   //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
   // }
+  CONSTRAIN(pitch_, 0, kHighestNote - 1);
+  phase_increment_ = ComputePhaseIncrement(pitch_);
   raw_gain_bias_ = gain_bias;
   raw_timbre_bias_ = timbre_bias;
 }
@@ -152,10 +155,27 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
     (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
     shape >= OSC_SHAPE_FM
   ) {
-    // Additive synthesis reduces timbre as pitch increases
-    int32_t lowness = 0x7fff - (pitch_ << 1);
-    CONSTRAIN(lowness, 0, 0x7fff);
-    return timbre * lowness >> 15;
+    // Soft-knee compression: unity gain at low timbre, asymptotes to
+    // pitch-dependent ceiling.  f(t) = knee * t / (knee + t), computed as
+    // t - t^2/(knee + t) to avoid 32-bit overflow.
+    //
+    // Crest factor compensates for carrier/transfer steepness:
+    // sine=1, tri=2 (derivative discontinuities), expo=3 (peak slope).
+    // Combined factor is carrier * transfer.
+    uint8_t crest_factor;
+    if (shape >= OSC_SHAPE_SINE_THRU_SINE &&
+        shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
+      crest_factor = transfer_crest_factor_;
+    } else if (shape == OSC_SHAPE_EXP_SINE) {
+      crest_factor = 3;
+    } else {
+      crest_factor = 1;  // FM
+    }
+    uint32_t max_folds = 0x80000000u / phase_increment_ / crest_factor;
+    if (max_folds > 0x80000u) return timbre;
+    int32_t knee = static_cast<int32_t>(max_folds << (15 - kTransferMaxGainBits));
+    if (knee <= 0) return 0;
+    return timbre - (timbre * timbre / (knee + timbre));
   }
 
   return timbre;
@@ -172,6 +192,16 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   timbre_envelope_.Rescale(scaling_factor);
 
   shape_ = new_shape;
+
+  transfer_crest_factor_ = 1;
+  if (new_shape >= OSC_SHAPE_SINE_THRU_SINE &&
+      new_shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
+    static const uint8_t slope_factor[] = {1, 2, 3}; // sine, tri, expo
+    uint8_t index = new_shape - OSC_SHAPE_SINE_THRU_SINE;
+    uint8_t carrier = index % 3;
+    uint8_t transfer = index / 6;
+    transfer_crest_factor_ = slope_factor[carrier] * slope_factor[transfer];
+  }
 }
 
 uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
@@ -200,12 +230,6 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
 }
 
 void Oscillator::Render(int16_t* audio_mix) {
-  if (pitch_ >= kHighestNote) {
-    pitch_ = kHighestNote - 1;
-  } else if (pitch_ < 0) {
-    pitch_ = 0;
-  }
-  phase_increment_ = ComputePhaseIncrement(pitch_);
   
   int16_t timbre_samples[kAudioBlockSize] = {0};
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
@@ -487,8 +511,6 @@ static const int kSampleBits = 15; // int16_t peak ≈ 2^15
 
 // Transfer peak phase (1/4 cycle = 2^30)
 static const uint32_t kTransferPeakPhase = 1u << (32 - 2);
-static const int kTransferMaxGainBits = 4; // 16x max gain
-
 // Biased variants add a DC bias (after amplification) to shift the operating
 // point on the transfer function, creating asymmetric harmonic content.
 static const uint32_t kTransferAsymmetricBias = kTransferPeakPhase / 2;  // 1/8 cycle -- max asymmetry
