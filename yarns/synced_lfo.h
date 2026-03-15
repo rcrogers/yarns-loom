@@ -192,45 +192,6 @@ class SyncedLFO {
     lp_value_ += error * alpha;
   }
 
-  // --- Woggle (resonant SVF on all shapes) — disabled, kept for reference ---
-  // Requires: #include "yarns/svf.h", part-global woggle setting (0-127),
-  // SETTING_VOICING_LFO_WOGGLE, PART_VOICING_LFO_WOGGLE, lfo_woggle in
-  // VoicingSettings/PackedPart, kNumTaggedPartSettings += 1.
-  //
-  // State: SVF svf_; int16_t woggle_damp_; uint8_t woggle_amount_;
-  //
-  // void SetWoggleDamp(int16_t damp) { woggle_damp_ = damp; }
-  // void SetWoggleAmount(uint8_t amount) { woggle_amount_ = amount; }
-  //
-  // In RefreshShape, replace output assignment with:
-  //   int16_t cutoff = WoggleCutoff();
-  //   // Shift input down for resonance headroom (see Braids RenderFilteredNoise)
-  //   svf_.Process(raw >> kSVFHeadroomBits, cutoff, woggle_damp_);
-  //   int32_t output = svf_.lp << kSVFHeadroomBits;
-  //   CONSTRAIN(output, INT16_MIN, INT16_MAX);
-  //   output_ = output;
-  //
-  // static const uint8_t kSVFHeadroomBits = 1;
-  // static const uint8_t kSVFCutoffMultiplierBits = 3; // ~1.3× f_lfo at max
-  //
-  // // Q0.15 cutoff interpolated: woggle=0 → wide open, woggle=127 → rate-tracking
-  // inline int16_t WoggleCutoff() const {
-  //   static const uint8_t kNetShift =
-  //     32 - 15 - kSVFCutoffMultiplierBits - REFRESH_HZ_TO_OUTPUT_HZ_RATIO_BITS;
-  //   int32_t rate_cutoff = phase_increment_ >> kNetShift;
-  //   CONSTRAIN(rate_cutoff, 1, INT16_MAX);
-  //   int32_t cutoff = INT16_MAX -
-  //     ((INT16_MAX - rate_cutoff) * woggle_amount_ >> 7);
-  //   return static_cast<int16_t>(cutoff);
-  // }
-  //
-  // In part.cc TouchVoices:
-  //   voice_[i]->set_lfo_woggle(
-  //     voicing_.lfo_woggle,
-  //     SVF::DampFromResonance(
-  //       static_cast<int16_t>(voicing_.lfo_woggle) << (15 - 7)));
-  // --- End woggle ---
-
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t previous_phase_, previous_target_phase_;

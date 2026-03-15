@@ -1005,10 +1005,6 @@ void Part::TouchVoices() {
     voice_[i]->set_lfo_shape(LFO_ROLE_PITCH, voicing_.vibrato_shape);
     voice_[i]->set_lfo_shape(LFO_ROLE_TIMBRE, voicing_.timbre_lfo_shape);
     voice_[i]->set_lfo_shape(LFO_ROLE_AMPLITUDE, voicing_.tremolo_shape);
-    // voice_[i]->set_lfo_woggle(
-    //   voicing_.lfo_woggle,
-    //   SVF::DampFromResonance(
-    //     static_cast<int16_t>(voicing_.lfo_woggle) << (15 - 7)));
     voice_[i]->set_aux_cv(voicing_.aux_cv);
     voice_[i]->set_aux_cv_2(voicing_.aux_cv_2);
     voice_[i]->set_oscillator_mode(voicing_.oscillator_mode);
@@ -1057,7 +1053,6 @@ bool Part::Set(uint8_t address, uint8_t value) {
     case PART_VOICING_VIBRATO_SHAPE:
     case PART_VOICING_TIMBRE_LFO_SHAPE:
     case PART_VOICING_TREMOLO_SHAPE:
-    // case PART_VOICING_LFO_WOGGLE:
     case PART_VOICING_AUX_CV:
     case PART_VOICING_AUX_CV_2:
     case PART_VOICING_OSCILLATOR_SHAPE:

@@ -140,7 +140,6 @@ enum SettingIndex {
   SETTING_REMOTE_CONTROL_CHANNEL,
   SETTING_VOICING_TUNING_FACTOR,
   SETTING_VOICING_PORTAMENTO_MOD_VELOCITY,
-  // SETTING_VOICING_LFO_WOGGLE,
 
   // NB: Add new settings here. These values are wire format identifiers
   // in tagged sysex — inserting in the middle breaks saved data.
