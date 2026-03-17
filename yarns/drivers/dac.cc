@@ -46,7 +46,10 @@ static volatile uint32_t dma_ss_low [kDacWordsPerSample] __attribute__((aligned(
 void Dac::Init() {
   can_fill_ = false;
   fillable_block_ = 1; // DMA will initially be consuming the first half
-  std::fill(&spi_tx_buffer_[0], &spi_tx_buffer_[kBufferSize], 0);
+  for (size_t i = 0; i < kBufferSize; i += kDacWordsPerSample) {
+    spi_tx_buffer_[i] = kNoopHighWord;
+    spi_tx_buffer_[i + 1] = kNoopLowWord;
+  }
 
   // Initialize SS pin.
   GPIO_InitTypeDef gpio_init = {0};
@@ -163,27 +166,72 @@ void Dac::Init() {
   TIM_Cmd(TIM1, ENABLE);
 }
 
-// Write interleaved DAC words
-#define BUFFER_SAMPLES(channel, dac_words_exp) \
+// Write a packed high:low command word pair to a buffer position
+#define WRITE_WORDS(ptr, words_exp) do { \
+  uint32_t w_ = (words_exp); \
+  (ptr)[0] = (w_ >> 16) & 0xFFFF; \
+  (ptr)[1] = w_ & 0xFFFF; \
+} while(0)
+
+// Write interleaved DAC words starting at start_frame
+#define BUFFER_SAMPLES(channel, dac_words_exp, start_frame) \
   volatile uint16_t* ptr = &spi_tx_buffer_[0]; \
   /* Offset for buffer half */ \
   ptr += block ? kDacWordsPerBlock : 0; \
-  /* Offset for channel */ \
+  /* Offset for channel and start frame */ \
   ptr += channel << kDacWordsPerSampleBits; \
-  for (size_t i = 0; i < kAudioBlockSize; ++i) { \
-    uint32_t words = (dac_words_exp); \
-    ptr[0] = (words >> 16) & 0xFFFF; \
-    ptr[1] = words & 0xFFFF; \
+  ptr += (start_frame) * kDacWordsPerFrame; \
+  for (size_t i = (start_frame); i < kAudioBlockSize; ++i) { \
+    WRITE_WORDS(ptr, dac_words_exp); \
     ptr += kDacWordsPerFrame; \
   }
 
 void Dac::BufferSamples(uint8_t block, uint8_t channel, int16_t* samples) {
-  BUFFER_SAMPLES(channel, FormatCommandWords(channel, samples[i]))
+  BUFFER_SAMPLES(channel, FormatCommandWords(channel, samples[i]), 0)
 }
 
 void Dac::BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample) {
   uint32_t static_words = FormatCommandWords(channel, sample);
-  BUFFER_SAMPLES(channel, static_words)
+  BUFFER_SAMPLES(channel, static_words, 0)
+}
+
+// Low-latency DC update, called from SysTick at 4kHz for each DC channel.
+//
+// Two writes per call:
+//
+// 1. Frame 0 of the fillable block — ensures the next block DMA consumes has
+//    the current value in its first frame. Safe because DMA is consuming the
+//    OTHER block; the main loop never touches frame 0 of DC channels (it only
+//    writes NOOPs to frames 1-63 via FillDCNoops).
+//
+// 2. Injection near the DMA cursor in the being-consumed block — places the
+//    value a few frames ahead of where DMA is currently reading, so the DAC
+//    latches it within ~22-44us instead of waiting for the next block. Safe
+//    because the write completes in a few cycles while DMA advances one word
+//    per ~400 cycles. If the target wraps into the fillable block, it's
+//    redundant with write #1 and will be erased by the next FillDCNoops pass.
+//    Stale injections in the consumed block are erased when the main loop
+//    fills that block with NOOPs on its next cycle.
+void Dac::UpdateDC(uint8_t channel, uint16_t sample) {
+  uint32_t words = FormatCommandWords(channel, sample);
+
+  // (1) Frame 0 of fillable block
+  size_t frame0_offset = (fillable_block_ ? kDacWordsPerBlock : 0)
+                       + (channel << kDacWordsPerSampleBits);
+  WRITE_WORDS(&spi_tx_buffer_[frame0_offset], words);
+
+  // (2) Inject ahead of DMA cursor
+  size_t cursor_frame = (kBufferSize - DMA1_Channel6->CNDTR) / kDacWordsPerFrame;
+  size_t target_frame = (cursor_frame + kInjectGapFrames) % kTotalFrames;
+  size_t inject_offset = target_frame * kDacWordsPerFrame
+                       + (channel << kDacWordsPerSampleBits);
+  WRITE_WORDS(&spi_tx_buffer_[inject_offset], words);
+}
+
+void Dac::FillDCNoops(uint8_t block, uint8_t channel) {
+  // Skip frame 0 (owned by SysTick's UpdateDC)
+  static const uint32_t noop = (static_cast<uint32_t>(kNoopHighWord) << 16) | kNoopLowWord;
+  BUFFER_SAMPLES(channel, noop, 1)
 }
 
 uint32_t Dac::timer_base_freq(uint8_t apb) const {

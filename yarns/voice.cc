@@ -277,7 +277,7 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
     }
     dac.BufferSamples(block, channel, samples);
   } else {
-    dac.BufferStaticSample(block, channel, default_low_freq_cv);
+    dac.FillDCNoops(block, channel);
   }
 }
 

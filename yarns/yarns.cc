@@ -130,6 +130,14 @@ void SysTick_Handler() {
       gate[3] = (factory_testing_counter % 200) < 100;
       ++factory_testing_counter;
     }
+
+    // Low-latency DC injection: write frame 0 of the fillable block and
+    // inject near the DMA cursor in the being-consumed block.
+    for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
+      if (!multi.cv_output(channel).is_high_freq()) {
+        dac.UpdateDC(channel, cv[channel]);
+      }
+    }
   }
 }
 
