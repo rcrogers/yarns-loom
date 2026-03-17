@@ -5,7 +5,7 @@ An alternate firmware for the [Yarns synthesizer module&nbsp;↗](https://mutabl
 - Cue sequencer with MIDI Song Position&nbsp;[→](yarns/MANUAL.md#master-clock-controls)
 - Looper-style sequencer with real-time polyphonic recording&nbsp;[→](yarns/MANUAL.md#loop-sequencer)
 - Sequencer-programmed arpeggiator movement&nbsp;[→](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
-- 26 oscillator shapes with timbre/amplitude mod matrix&nbsp;[→](yarns/MANUAL.md#oscillator-timbre)
+- 27 oscillator shapes, with mod matrix for timbre and amplitude&nbsp;[→](yarns/MANUAL.md#oscillator-timbre)
 - ADSR envelopes with velocity shaping&nbsp;[→](yarns/MANUAL.md#envelope)
 - Expanded support for MIDI CCs&nbsp;[→](yarns/MANUAL.md#control-change-messages)
 - New paraphonic layouts with 4-voice paraphonic part and 6 overall voices&nbsp;[→](yarns/MANUAL.md#new-layouts)
