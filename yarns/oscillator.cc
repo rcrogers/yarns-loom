@@ -208,6 +208,10 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
     transfer_bias_ = (index % 6) >= 3 ? kTransferAsymmetricBias : 0;
     transfer_crest_factor_ = slope_factor[transfer_carrier_]
         * slope_factor[transfer_function_];
+    // Halve max transfer gain when triangle is involved (carrier or transfer)
+    // to compensate for its derivative discontinuities.
+    transfer_gain_shift_ = (transfer_carrier_ == 1 || transfer_function_ == 1)
+        ? 1 : 0;
   }
 }
 
@@ -537,8 +541,9 @@ void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_samples)
   uint8_t carrier_index = transfer_carrier_;
   uint8_t transfer_index = transfer_function_;
   uint32_t bias = transfer_bias_;
-  int16_t prev_raw = prev_transfer_raw_;
-  int16_t prev_avg = prev_transfer_avg_;
+  uint8_t gain_shift = transfer_gain_shift_;
+  // int16_t prev_raw = prev_transfer_raw_;
+  // int16_t prev_avg = prev_transfer_avg_;
   // Cascaded boxcar (triangular window {1/4, 1/2, 1/4}) anti-aliasing:
   // double null at Nyquist, -6dB at Nyquist/2.
   RENDER_PERIODIC(
@@ -548,21 +553,20 @@ void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_samples)
       case 2: this_sample = expo(phase); break;
     }
     uint32_t transfer_phase =
-        amplify_for_transfer(this_sample, timbre, bias);
-    int16_t raw;
+        amplify_for_transfer(this_sample, timbre >> gain_shift, bias);
     switch (transfer_index) {
-      case 0: raw = sine(transfer_phase); break;
-      case 1: raw = triangle(transfer_phase); break;
-      case 2: raw = expo(transfer_phase); break;
-      default: raw = 0; break;
+      case 0: this_sample = sine(transfer_phase); break;
+      case 1: this_sample = triangle(transfer_phase); break;
+      case 2: this_sample = expo(transfer_phase); break;
     }
-    int16_t avg = (raw + prev_raw) >> 1;
-    this_sample = (avg + prev_avg) >> 1;
-    prev_raw = raw;
-    prev_avg = avg;
+    // int16_t raw = this_sample;
+    // int16_t avg = (raw + prev_raw) >> 1;
+    // this_sample = (avg + prev_avg) >> 1;
+    // prev_raw = raw;
+    // prev_avg = avg;
   )
-  prev_transfer_raw_ = prev_raw;
-  prev_transfer_avg_ = prev_avg;
+  // prev_transfer_raw_ = prev_raw;
+  // prev_transfer_avg_ = prev_avg;
 }
 
 void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {

@@ -229,14 +229,17 @@ class Oscillator {
   }
 
   OscillatorShape shape_;
-  uint8_t transfer_carrier_;
-  uint8_t transfer_function_;
-  uint32_t transfer_bias_;
-  uint8_t transfer_crest_factor_;
   Envelope gain_envelope_, timbre_envelope_;
   int16_t raw_timbre_bias_;
   uint16_t raw_gain_bias_;
   int16_t pitch_;
+
+  // Calculated from shape, cached to avoid conditionals during render
+  uint8_t transfer_carrier_;
+  uint8_t transfer_function_;
+  uint32_t transfer_bias_;
+  uint8_t transfer_crest_factor_;
+  uint8_t transfer_gain_shift_;
 
   uint32_t phase_;
   uint32_t phase_increment_;
