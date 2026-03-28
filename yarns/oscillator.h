@@ -218,7 +218,7 @@ class Oscillator {
   }
 
   inline int16_t expo(uint32_t phase) const {
-    return quadrant_lookup(lut_env_expo, phase);
+    return quadrant_lookup(lut_expo_quadrant, phase);
   }
 
   inline int16_t triangle(uint32_t phase) const {
