@@ -294,8 +294,8 @@ void Voice::NoteOn(
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
-      NoteOff(true);  // Force envelope release for retrigger
     }
+    NoteOff(true);  // Force envelope release for retrigger
     trigger_pulse_ = kRefreshHz * 2 / 1000;  // 2ms
   }
   gate_ = true;

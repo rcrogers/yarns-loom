@@ -116,6 +116,12 @@ def envelope():
   sine_quadrant = numpy.sin(sine_quadrant_input) * 65535.0
   lookup_tables.append(('sine_quadrant', numpy.round(sine_quadrant)))
 
+  # C1-continuous expo-like quarter wave for quadrant_lookup.
+  # 1-(1-x)^3: f'(0)=3 (steep), f'(1)=0 (smooth at quadrant boundary).
+  expo_quadrant_input = numpy.arange(257) / 256.0
+  expo_quadrant = (1.0 - (1.0 - expo_quadrant_input) ** 3) * 65535.0
+  lookup_tables.append(('expo_quadrant', numpy.round(expo_quadrant)))
+
   # Like the above, but with 7-bit phase and 7-bit value instead of 8-bit phase and 16-bit value
   # env_linear = numpy.arange(0, 128.0 + 1) / 128
   # env_expo_7bit = make_expo(env_linear)
