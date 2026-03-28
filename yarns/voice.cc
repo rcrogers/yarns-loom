@@ -288,8 +288,8 @@ void Voice::NoteOn(
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
-      NoteOff(true);  // Force envelope release for retrigger
     }
+    NoteOff(true);  // Force envelope release for retrigger
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
     trigger_phase_increment_ = lut_portamento_increments[trigger_duration_ >> 1];
