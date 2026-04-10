@@ -165,6 +165,8 @@ class Voice {
   inline uint8_t aux_cv_2() const { return aux_cv_2_16bit() >> 8; }
   
   inline bool gate_on() const { return gate_; }
+  inline bool is_highest_priority() const { return is_highest_priority_; }
+  inline void set_highest_priority(bool v) { is_highest_priority_ = v; }
 
   inline bool gate() const { return gate_ && !retrigger_delay_; }
   inline bool trigger() const  {
@@ -233,7 +235,10 @@ class Voice {
   int32_t note_;
   int32_t tuning_;
   bool gate_;
-  
+
+  // Sets whether this voice can control a paraphonic CV envelope's tremolo
+  bool is_highest_priority_;
+
   int16_t mod_pitch_bend_;
   uint16_t mod_aux_[MOD_AUX_LAST];
   uint8_t mod_velocity_;
@@ -352,8 +357,12 @@ class CVOutput {
     envelope_.NoteOff();
   }
 
-  uint16_t RefreshEnvelope(uint16_t tremolo) {
-    envelope_bias_ = envelope_.tremolo(tremolo);
+  // When paraphonic (num_dc_voices_ > 1), only the highest-priority voice
+  // controls the shared envelope's tremolo.
+  uint16_t RefreshEnvelope(uint16_t tremolo, bool voice_is_highest_priority) {
+    if (voice_is_highest_priority || num_dc_voices_ <= 1) {
+      envelope_bias_ = envelope_.tremolo(tremolo);
+    }
     return volts_dac_code(0) - envelope_value();
   }
   inline uint16_t envelope_value() {

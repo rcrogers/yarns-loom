@@ -729,6 +729,7 @@ void Part::AllNotesOff() {
       &active_note_[0],
       &active_note_[kNumMaxVoicesPerPart],
       VOICE_ALLOCATION_NOT_FOUND);
+  UpdateHighestPriorityVoice();
 }
 
 void Part::StopNotesBySustainStatus(HeldKeys &keys, bool sustain_status) {
@@ -916,6 +917,7 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
       midi_handler.OnInternalNoteOn(tx_channel(), note, velocity);
     }
   }
+  UpdateHighestPriorityVoice();
 }
 
 void Part::KillAllInstancesOfNote(uint8_t note) {
@@ -926,6 +928,14 @@ void Part::KillAllInstancesOfNote(uint8_t note) {
     } else {
       break;
     }
+  }
+}
+
+void Part::UpdateHighestPriorityVoice() {
+  uint8_t priority_pitch = mono_allocator_.size()
+      ? priority_note().note : VOICE_ALLOCATION_NOT_FOUND;
+  for (uint8_t v = 0; v < num_voices_; ++v) {
+    voice_[v]->set_highest_priority(active_note_[v] == priority_pitch);
   }
 }
 
@@ -985,6 +995,7 @@ void Part::InternalNoteOff(uint8_t note) {
        midi_handler.OnInternalNoteOff(tx_channel(), note);
     }
   }
+  UpdateHighestPriorityVoice();
 }
 
 void Part::TouchVoiceAllocation() {
