@@ -53,7 +53,8 @@ void Voice::Init() {
   note_ = -1;
   note_source_ = note_target_ = note_portamento_ = 60 << 7;
   gate_ = false;
-  
+  is_highest_priority_ = false;
+
   mod_velocity_ = 0x7f;
   ResetAllControllers();
   
@@ -234,10 +235,10 @@ void Voice::Refresh() {
 
   // Needed for LED display of envelope CV
   if (aux_1_envelope()) {
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo, is_highest_priority_);
   }
   if (aux_2_envelope()) {
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo, is_highest_priority_);
   }
 
   oscillator_.Refresh(note, timbre_15, tremolo);
