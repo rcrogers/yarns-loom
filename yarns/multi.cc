@@ -336,7 +336,7 @@ void Multi::Refresh() {
 
   if (can_advance_lfos_) {
     backup_clock_lfo_.Refresh();
-    uint32_t swing_phase = abs(settings_.clock_swing) << (32 - 6);
+    uint32_t swing_phase = abs(static_cast<int>(settings_.clock_swing)) << (32 - 6);
     for (uint8_t p = 0; p < num_active_parts_; ++p) {
       Part& part = part_[p];
 
@@ -407,25 +407,25 @@ void Multi::AssignVoicesToCVOutputs() {
   switch (settings_.layout) {
     case LAYOUT_MONO:
     case LAYOUT_DUAL_POLYCHAINED:
-      AssignOutputVoice(0, 0, DC_PITCH, 0);
-      AssignOutputVoice(1, 0, DC_VELOCITY, 0);
-      AssignOutputVoice(2, 0, DC_AUX_1, 0);
-      AssignOutputVoice(3, 0, DC_AUX_2, 1);
+      MapVoices(0, DC_PITCH, 0, 1, 0);
+      MapVoices(1, DC_VELOCITY, 0, 1, 0);
+      MapVoices(2, DC_AUX_1, 0, 1, 0);
+      MapVoices(3, DC_AUX_2, 0, 1, 1);
       break;
 
     case LAYOUT_DUAL_MONO:
-      AssignOutputVoice(0, 0, DC_PITCH, 0);
-      AssignOutputVoice(1, 1, DC_PITCH, 0);
-      AssignOutputVoice(2, 0, DC_AUX_1, 1);
-      AssignOutputVoice(3, 1, DC_AUX_1, 1);
+      MapVoices(0, DC_PITCH, 0, 1, 0);
+      MapVoices(1, DC_PITCH, 1, 1, 0);
+      MapVoices(2, DC_AUX_1, 0, 1, 1);
+      MapVoices(3, DC_AUX_1, 1, 1, 1);
       break;
 
     case LAYOUT_DUAL_POLY:
     case LAYOUT_QUAD_POLYCHAINED:
-      AssignOutputVoice(0, 0, DC_PITCH, 0);
-      AssignOutputVoice(1, 1, DC_PITCH, 0);
-      AssignOutputVoice(2, 0, DC_AUX_1, 1);
-      AssignOutputVoice(3, 1, DC_AUX_2, 1);
+      MapVoices(0, DC_PITCH, 0, 1, 0);
+      MapVoices(1, DC_PITCH, 1, 1, 0);
+      MapVoices(2, DC_AUX_1, 0, 1, 1);
+      MapVoices(3, DC_AUX_2, 1, 1, 1);
       break;
 
     case LAYOUT_QUAD_MONO:
@@ -434,47 +434,47 @@ void Multi::AssignVoicesToCVOutputs() {
     case LAYOUT_THREE_ONE:
     case LAYOUT_TWO_TWO:
       for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        AssignOutputVoice(i, i, DC_PITCH, 1);
+        MapVoices(i, DC_PITCH, i, 1, 1);
       }
       break;
     case LAYOUT_QUAD_VOLTAGES:
       for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        AssignOutputVoice(i, i, DC_AUX_1, 1);
+        MapVoices(i, DC_AUX_1, i, 1, 1);
       }
       break;
     case LAYOUT_QUAD_TRIGGERS:
       for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        AssignOutputVoice(i, i, DC_TRIGGER, 1);
+        MapVoices(i, DC_TRIGGER, i, 1, 1);
       }
       break;
 
     case LAYOUT_TWO_ONE:
-      AssignOutputVoice(0, 0, DC_PITCH, 1);
-      AssignOutputVoice(1, 1, DC_PITCH, 1);
-      AssignOutputVoice(2, 2, DC_PITCH, 1);
-      AssignOutputVoice(3, 2, DC_AUX_2, 0);
+      MapVoices(0, DC_PITCH, 0, 1, 1);
+      MapVoices(1, DC_PITCH, 1, 1, 1);
+      MapVoices(2, DC_PITCH, 2, 1, 1);
+      MapVoices(3, DC_AUX_2, 2, 1, 0);
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_TWO:
-      AssignOutputVoice(0, 0, DC_PITCH, kNumParaphonicVoices);
-      AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 1);
-      AssignOutputVoice(2, kNumParaphonicVoices, DC_AUX_1, 0);
-      AssignOutputVoice(3, kNumParaphonicVoices + 1, DC_PITCH, 1);
+      MapVoices(0, DC_PITCH, 0, 1, kNumParaphonicVoices);
+      MapVoices(1, DC_PITCH, kNumParaphonicVoices, 1, 1);
+      MapVoices(2, DC_AUX_1, kNumParaphonicVoices, 1, 0);
+      MapVoices(3, DC_PITCH, kNumParaphonicVoices + 1, 1, 1);
       // Do not assign the last voice to any CV output, since it only outputs gates
       break;
 
     case LAYOUT_TRI_MONO:
       for (uint8_t i = 0; i < 3; ++i) {
-        AssignOutputVoice(i, i, DC_PITCH, 1);
+        MapVoices(i, DC_PITCH, i, 1, 1);
       }
-      AssignOutputVoice(3, 0, DC_VELOCITY, 0); // Dummy, will be overwritten in GetCvGate
+      MapVoices(3, DC_VELOCITY, 0, 1, 0); // Dummy, will be overwritten in GetCvGate
       break;
 
     case LAYOUT_PARAPHONIC_PLUS_ONE:
-      AssignOutputVoice(0, 0, DC_PITCH, kNumParaphonicVoices);
-      AssignOutputVoice(1, kNumParaphonicVoices, DC_PITCH, 0);
-      AssignOutputVoice(2, 0, DC_AUX_1, 0);
-      AssignOutputVoice(3, kNumParaphonicVoices, DC_AUX_1, 1);
+      MapVoices(0, DC_PITCH, 0, 1, kNumParaphonicVoices);
+      MapVoices(1, DC_PITCH, kNumParaphonicVoices, 1, 0);
+      MapVoices(2, DC_AUX_1, 0, kNumParaphonicVoices, 0);
+      MapVoices(3, DC_AUX_1, kNumParaphonicVoices, 1, 1);
       break;
   }
 }
@@ -943,8 +943,7 @@ int16_t Multi::UpdateController(CCRouting cc, uint8_t value_7bits) {
       ? SaturatingIncrement(controller_values[controller], relative_increment)
       : value_7bits; // CONTROL_CHANGE_MODE_ABSOLUTE
     CONSTRAIN(controller_values[controller], 0, 127);
-    uint8_t delta = range.max - range.min + 1;
-    scaled_value = delta * controller_values[controller] >> 7;
+    scaled_value = range.delta() * controller_values[controller] >> 7;
     scaled_value += range.min;
   }
   return scaled_value;
@@ -1035,7 +1034,7 @@ uint8_t Multi::ScaleSettingToController(SettingRange range, int16_t scaled_value
   int32_t value =
     // Add 0.5 to scaled_value to place it in the middle of the range of absolute knob values allotted to this setting value
     (((scaled_value << 1) + 1 - (range.min << 1)) << 6) /
-    (range.max - range.min + 1);
+    range.delta();
   return static_cast<uint8_t>(value);
 }
 
@@ -1116,10 +1115,14 @@ SettingRange Multi::GetSettingRange(const Setting& setting, uint8_t part) const 
   return SettingRange(min_value, max_value);
 }
 
+int16_t Multi::ClampToSettingRange(const Setting& setting, uint8_t part, int16_t scaled_value) const {
+  SettingRange range = GetSettingRange(setting, part);
+  CONSTRAIN(scaled_value, range.min, range.max);
+  return scaled_value;
+}
+
 void Multi::ApplySetting(const Setting& setting, uint8_t part, int16_t scaled_value) {
-  // Apply dynamic min/max as needed
-  SettingRange setting_range = GetSettingRange(setting, part);
-  CONSTRAIN(scaled_value, setting_range.min, setting_range.max);
+  scaled_value = ClampToSettingRange(setting, part, scaled_value);
 
   int16_t prev_scaled_value = GetSettingValue(setting, part);
   if (prev_scaled_value == scaled_value) return;
@@ -1170,6 +1173,24 @@ int16_t Multi::GetSettingValue(const Setting& setting, uint8_t part) const {
   if (setting.min_value < 0) value = static_cast<int8_t>(value);
   return value;
 }
+
+const SettingIndex Multi::kTaggedSkippedSettings[] = {
+  SETTING_MENU_SETUP,
+  SETTING_MENU_OSCILLATOR,
+  SETTING_MENU_ENVELOPE,
+  SETTING_MIDI_NOTE,
+};
+const uint8_t Multi::kNumTaggedSkippedSettings =
+    sizeof(kTaggedSkippedSettings) / sizeof(kTaggedSkippedSettings[0]);
+
+STATIC_ASSERT(
+  SETTING_LAST == (
+    Multi::kNumTaggedMultiSettings +
+    Multi::kNumTaggedPartSettings +
+    Multi::kNumTaggedSkippedSettings
+  ),
+  all_settings_tagged_or_skipped
+);
 
 /* extern */
 Multi multi;

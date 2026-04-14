@@ -134,7 +134,7 @@ void Part::AllocateVoices(Voice* voice, uint8_t num_voices, bool polychain) {
   for (uint8_t i = 0; i < num_voices_; ++i) {
     voice_[i] = voice + i;
   }
-  poly_allocator_.Clear();
+  poly_allocator_.Reset();
   poly_allocator_.set_size(num_voices_ * (polychain ? 2 : 1));
   TouchVoices();
 }
@@ -318,7 +318,7 @@ void Part::PitchBend(uint8_t channel, uint16_t pitch_bend) {
   
   if (seq_recording_ &&
       (pitch_bend > 8192 + 2048 || pitch_bend < 8192 - 2048)) {
-    seq_.step[seq_rec_step_].set_slid(true);
+    seq_.step[seq_rec_step_].set_slide(true);
   }
 }
 
@@ -376,7 +376,7 @@ void Part::ClockStep() {
     uint8_t velocity = result.note.velocity();
     GeneratedNoteOff(pitch); // Simulate a human retriggering a key
     if (GeneratedNoteOn(pitch, velocity) && !manual_keys_.stack.Find(pitch)) {
-      InternalNoteOn(pitch, velocity, result.note.is_slid());
+      InternalNoteOn(pitch, velocity, result.note.is_slide());
     }
   }
 }
@@ -618,7 +618,7 @@ void Part::RecordStep(const SequencerStep& step) {
   SequencerStep* target = &seq_.step[seq_rec_step_];
   target->data[0] = step.data[0];
   target->data[1] |= step.data[1];
-  if (!target->has_note()) target->set_slid(false);
+  if (!target->has_note()) target->set_slide(false);
   ++seq_rec_step_;
   uint8_t last_step = seq_overdubbing_ ? seq_.num_steps : kNumSteps;
   // Extend sequence.
@@ -643,7 +643,7 @@ void Part::LooperPlayNoteOn(uint8_t looper_note_index, uint8_t pitch, uint8_t ve
     arpeggiator_ = result.arpeggiator;
     pitch = result.note.note();
     if (result.note.has_note()) {
-      bool slide = result.note.is_slid();
+      bool slide = result.note.is_slide();
       InternalNoteOn(pitch, result.note.velocity(), slide);
       if (slide) {
         // NB: currently impossible (see LooperPlayNoteOff)
@@ -715,7 +715,7 @@ void Part::ResetAllControllers() {
 }
 
 void Part::AllNotesOff() {
-  poly_allocator_.ClearNotes();
+  poly_allocator_.AllNotesOff();
   mono_allocator_.Clear();
 
   ResetAllKeys();
@@ -729,6 +729,7 @@ void Part::AllNotesOff() {
       &active_note_[0],
       &active_note_[kNumMaxVoicesPerPart],
       VOICE_ALLOCATION_NOT_FOUND);
+  UpdateHighestPriorityVoice();
 }
 
 void Part::StopNotesBySustainStatus(HeldKeys &keys, bool sustain_status) {
@@ -916,6 +917,7 @@ void Part::InternalNoteOn(uint8_t note, uint8_t velocity, bool force_legato) {
       midi_handler.OnInternalNoteOn(tx_channel(), note, velocity);
     }
   }
+  UpdateHighestPriorityVoice();
 }
 
 void Part::KillAllInstancesOfNote(uint8_t note) {
@@ -926,6 +928,14 @@ void Part::KillAllInstancesOfNote(uint8_t note) {
     } else {
       break;
     }
+  }
+}
+
+void Part::UpdateHighestPriorityVoice() {
+  uint8_t priority_pitch = mono_allocator_.size()
+      ? priority_note().note : VOICE_ALLOCATION_NOT_FOUND;
+  for (uint8_t v = 0; v < num_voices_; ++v) {
+    voice_[v]->set_highest_priority(active_note_[v] == priority_pitch);
   }
 }
 
@@ -985,6 +995,7 @@ void Part::InternalNoteOff(uint8_t note) {
        midi_handler.OnInternalNoteOff(tx_channel(), note);
     }
   }
+  UpdateHighestPriorityVoice();
 }
 
 void Part::TouchVoiceAllocation() {

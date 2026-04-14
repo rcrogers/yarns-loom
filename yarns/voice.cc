@@ -53,7 +53,8 @@ void Voice::Init() {
   note_ = -1;
   note_source_ = note_target_ = note_portamento_ = 60 << 7;
   gate_ = false;
-  
+  is_highest_priority_ = false;
+
   mod_velocity_ = 0x7f;
   ResetAllControllers();
   
@@ -100,6 +101,7 @@ void CVOutput::Init(bool reset_calibration) {
   dc_role_ = DC_PITCH;
   envelope_.Init(0);
   envelope_bias_ = 0;
+  num_dc_voices_ = 0;
 }
 
 void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
@@ -110,7 +112,7 @@ void CVOutput::Calibrate(uint16_t* calibrated_dac_code) {
 }
 
 uint16_t CVOutput::pitch_dac_code() {
-  int32_t note = dc_voice_->note();
+  int32_t note = dc_voices_[0]->note();
   if (dirty_ || note_ != note) dac_code_ = NoteToDacCode(note);
   dirty_ = false;
   note_ = note;
@@ -227,10 +229,10 @@ void Voice::Refresh() {
 
   // Needed for LED display of envelope CV
   if (aux_1_envelope()) {
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo);
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_1)->RefreshEnvelope(tremolo, is_highest_priority_);
   }
   if (aux_2_envelope()) {
-    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo);
+    mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo, is_highest_priority_);
   }
 
   oscillator_.Refresh(note, timbre_15, tremolo);
@@ -276,7 +278,7 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
     }
     dac.BufferSamples(block, channel, samples);
   } else {
-    dac.BufferStaticSample(block, channel, default_low_freq_cv);
+    dac.FillDCNoops(block, channel);
   }
 }
 
@@ -287,8 +289,8 @@ void Voice::NoteOn(
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
-      NoteOff();
     }
+    NoteOff(true);  // Force envelope release for retrigger
     trigger_pulse_ = trigger_duration_ * 2;
     trigger_phase_ = 0;
     trigger_phase_increment_ = lut_portamento_increments[trigger_duration_ >> 1];
@@ -324,11 +326,11 @@ void Voice::NoteOn(
   mod_velocity_ = velocity;
 }
 
-void Voice::NoteOff() {
+void Voice::NoteOff(bool force_envelope) {
   gate_ = false;
   if (uses_audio()) oscillator_.NoteOff();
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff();
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff();
+  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOff(force_envelope);
+  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOff(force_envelope);
 }
 
 void Voice::ControlChange(uint8_t controller, uint8_t value) {

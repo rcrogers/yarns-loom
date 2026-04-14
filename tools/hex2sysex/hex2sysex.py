@@ -52,7 +52,9 @@ def CreateMidifile(
     output_file,
     options):
   size = len(data)
+  free = MAX_PROGRAM_SIZE - size
   print('size', size)
+  print('free', free)
   page_size = options.page_size
 
   overflow = size - MAX_PROGRAM_SIZE

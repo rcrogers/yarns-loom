@@ -43,13 +43,13 @@ violent_overdrive = numpy.tanh(32.0 * x)
 # tri_fold = numpy.abs(4.0 * x - numpy.round(4.0 * x)) * numpy.sign(x)
 # sine_fold = numpy.sin(5 * numpy.pi * x)
 
-tri_fold = numpy.sin(numpy.pi * (3 * x + (2 * x) ** 3))
+# tri_fold = numpy.sin(numpy.pi * (3 * x + (2 * x) ** 3))
 
-# In v1.4 RC
-window = numpy.exp(-x * x * 4) ** 1.5
-sine = numpy.sin(16 * numpy.pi * x)
-sine_fold = sine * window + numpy.arctan(3 * x) * (1 - window)
-sine_fold /= numpy.abs(sine_fold).max()
+# # In v1.4 RC
+# window = numpy.exp(-x * x * 4) ** 1.5
+# sine = numpy.sin(16 * numpy.pi * x)
+# sine_fold = sine * window + numpy.arctan(3 * x) * (1 - window)
+# sine_fold /= numpy.abs(sine_fold).max()
 
 # Another curve for the sine wavefolder inspired by the uFold response
 # frequency = 4 / (1 + (1.5 * x) ** 2) ** 2
@@ -61,5 +61,5 @@ sine_fold /= numpy.abs(sine_fold).max()
 
 # waveshapers.append(('moderate_overdrive', scale(moderate_overdrive)))
 waveshapers.append(('violent_overdrive', scale(violent_overdrive)))
-waveshapers.append(('sine_fold', scale(sine_fold, center=False)))
-waveshapers.append(('tri_fold', scale(tri_fold)))
+# waveshapers.append(('sine_fold', scale(sine_fold, center=False)))
+# waveshapers.append(('tri_fold', scale(tri_fold)))

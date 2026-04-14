@@ -40,7 +40,7 @@
 using namespace yarns;
 using namespace stmlib;
 
-const char* const kVersion = "Loom 3_0_0";
+const char* const kVersion = "Loom 3_1_0";
 
 GateOutput gate_output;
 MidiIO midi_io;
@@ -129,6 +129,14 @@ void SysTick_Handler() {
       gate[2] = (factory_testing_counter % 266) < 133;
       gate[3] = (factory_testing_counter % 200) < 100;
       ++factory_testing_counter;
+    }
+
+    // Low-latency DC injection: write frame 0 of the fillable block and
+    // inject near the DMA cursor in the being-consumed block.
+    for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
+      if (!multi.cv_output(channel).is_high_freq()) {
+        dac.UpdateDC(channel, cv[channel]);
+      }
     }
   }
 }

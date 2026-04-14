@@ -921,6 +921,7 @@ class Part {
   );
   void VoiceNoteOff(uint8_t voice);
   void KillAllInstancesOfNote(uint8_t note);
+  void UpdateHighestPriorityVoice();
 
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = kC4) const;
   const SequencerStep BuildSeqStep(uint8_t step_index) const;

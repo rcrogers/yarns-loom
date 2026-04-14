@@ -117,7 +117,7 @@ class Voice {
     int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
     ADSR& adsr, int16_t timbre_envelope_target
   );
-  void NoteOff();
+  void NoteOff(bool force = false);
   void ControlChange(uint8_t controller, uint8_t value);
   void PitchBend(uint16_t pitch_bend) {
     mod_pitch_bend_ = pitch_bend;
@@ -165,6 +165,8 @@ class Voice {
   inline uint8_t aux_cv_2() const { return aux_cv_2_16bit() >> 8; }
   
   inline bool gate_on() const { return gate_; }
+  inline bool is_highest_priority() const { return is_highest_priority_; }
+  inline void set_highest_priority(bool v) { is_highest_priority_ = v; }
 
   inline bool gate() const { return gate_ && !retrigger_delay_; }
   inline bool trigger() const  {
@@ -233,7 +235,10 @@ class Voice {
   int32_t note_;
   int32_t tuning_;
   bool gate_;
-  
+
+  // Sets whether this voice can control a paraphonic CV envelope's tremolo
+  bool is_highest_priority_;
+
   int16_t mod_pitch_bend_;
   uint16_t mod_aux_[MOD_AUX_LAST];
   uint8_t mod_velocity_;
@@ -295,10 +300,13 @@ class CVOutput {
   void Calibrate(uint16_t* calibrated_dac_code);
 
   // NB: a voice can supply DC to many CV outputs, but audio to only one output
-  inline void assign(Voice* dc, DCRole dc_role, uint8_t num_audio) {
-    dc_voice_ = dc;
+  inline void AssignVoices(Voice* dc, DCRole dc_role, uint8_t num_dc, uint8_t num_audio) {
+    num_dc_voices_ = num_dc;
     dc_role_ = dc_role;
-    dc_voice_->set_dc_output(dc_role, this);
+    for (uint8_t i = 0; i < num_dc; ++i) {
+      dc_voices_[i] = dc + i;
+      dc_voices_[i]->set_dc_output(dc_role, this);
+    }
 
     num_audio_voices_ = num_audio;
     zero_dac_code_ = volts_dac_code(0);
@@ -306,21 +314,21 @@ class CVOutput {
     uint16_t scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
     scale /= num_audio_voices_;
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
-      Voice* audio_voice = audio_voices_[i] = dc_voice_ + i;
+      Voice* audio_voice = audio_voices_[i] = dc_voices_[0] + i;
       audio_voice->oscillator()->Init(scale);
       audio_voice->set_audio_output(this);
     }
   }
 
   inline bool gate() const {
-    if (!is_audio()) return dc_voice_->gate();
+    if (!is_audio()) return dc_voices_[0]->gate();
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
       if (audio_voices_[i]->gate()) return true;
     }
     return false;
   }
   inline bool trigger() const {
-    if (!is_audio()) return dc_voice_->trigger();
+    if (!is_audio()) return dc_voices_[0]->trigger();
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
       if (audio_voices_[i]->trigger()) return true;
     }
@@ -333,17 +341,28 @@ class CVOutput {
   }
   inline bool is_envelope() const {
     return !is_audio() && (
-      (dc_role_ == DC_AUX_1 && dc_voice_->aux_1_envelope()) ||
-      (dc_role_ == DC_AUX_2 && dc_voice_->aux_2_envelope())
+      (dc_role_ == DC_AUX_1 && dc_voices_[0]->aux_1_envelope()) ||
+      (dc_role_ == DC_AUX_2 && dc_voices_[0]->aux_2_envelope())
     );
   }
   inline void NoteOn(ADSR& adsr) {
     envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
   }
-  inline void NoteOff() { envelope_.NoteOff(); }
+  inline void NoteOff(bool force = false) {
+    if (!force) {
+      for (uint8_t i = 0; i < num_dc_voices_; ++i) {
+        if (dc_voices_[i]->gate_on()) return;
+      }
+    }
+    envelope_.NoteOff();
+  }
 
-  uint16_t RefreshEnvelope(uint16_t tremolo) {
-    envelope_bias_ = envelope_.tremolo(tremolo);
+  // When paraphonic (num_dc_voices_ > 1), only the highest-priority voice
+  // controls the shared envelope's tremolo.
+  uint16_t RefreshEnvelope(uint16_t tremolo, bool voice_is_highest_priority) {
+    if (voice_is_highest_priority || num_dc_voices_ <= 1) {
+      envelope_bias_ = envelope_.tremolo(tremolo);
+    }
     return volts_dac_code(0) - envelope_value();
   }
   inline uint16_t envelope_value() {
@@ -366,30 +385,30 @@ class CVOutput {
 
   uint16_t pitch_dac_code();
   inline uint16_t velocity_dac_code() {
-    return DacCodeFrom16BitValue(dc_voice_->velocity() << 9);
+    return DacCodeFrom16BitValue(dc_voices_[0]->velocity() << 9);
   }
   inline uint16_t aux_cv_dac_code() {
-    if (dc_voice_->aux_1_source() >= MOD_AUX_PITCH_1) {
+    if (dc_voices_[0]->aux_1_source() >= MOD_AUX_PITCH_1) {
       return NoteToDacCode(
-        dc_voice_->note() +
-        lut_fm_modulator_intervals[dc_voice_->aux_1_source() - MOD_AUX_PITCH_1]
+        dc_voices_[0]->note() +
+        lut_fm_modulator_intervals[dc_voices_[0]->aux_1_source() - MOD_AUX_PITCH_1]
       );
     }
-    return DacCodeFrom16BitValue(dc_voice_->aux_cv_16bit());
+    return DacCodeFrom16BitValue(dc_voices_[0]->aux_cv_16bit());
   }
   inline uint16_t aux_cv_dac_code_2() {
-    if (dc_voice_->aux_2_source() >= MOD_AUX_PITCH_1) {
+    if (dc_voices_[0]->aux_2_source() >= MOD_AUX_PITCH_1) {
       return NoteToDacCode(
-        dc_voice_->note() +
-        lut_fm_modulator_intervals[dc_voice_->aux_2_source() - MOD_AUX_PITCH_1]
+        dc_voices_[0]->note() +
+        lut_fm_modulator_intervals[dc_voices_[0]->aux_2_source() - MOD_AUX_PITCH_1]
       );
     }
-    return DacCodeFrom16BitValue(dc_voice_->aux_cv_2_16bit());
+    return DacCodeFrom16BitValue(dc_voices_[0]->aux_cv_2_16bit());
   }
   inline uint16_t trigger_dac_code() {
     int32_t max = volts_dac_code(5);
     int32_t min = volts_dac_code(0);
-    return min + ((max - min) * dc_voice_->trigger_value() >> 15);
+    return min + ((max - min) * dc_voices_[0]->trigger_value() >> 15);
   }
 
   inline uint16_t calibration_dac_code(uint8_t note) const {
@@ -408,8 +427,9 @@ class CVOutput {
  private:
   uint16_t NoteToDacCode(int32_t note) const;
 
-  Voice* dc_voice_;
+  Voice* dc_voices_[kNumMaxVoicesPerPart];  // dc_voices_[0] is primary, others for paraphonic envelope
   Voice* audio_voices_[kNumMaxVoicesPerPart];
+  uint8_t num_dc_voices_;
   uint8_t num_audio_voices_;
   DCRole dc_role_;
 

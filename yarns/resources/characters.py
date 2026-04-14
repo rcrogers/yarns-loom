@@ -97,7 +97,7 @@ characters = {
   'b': 'fedlp',
   'c': 'pked',
   'd': 'bcdnk',
-  'e': 'pkbafed',
+  'e': 'nped',
   'f': 'afpe',
   'g': 'agkbcd',
   'h': 'fpkec',
@@ -180,7 +180,7 @@ characters = {
   '\x88': 'efgl',  # Saw
   '\x89': 'pjb',   # CSaw
   '\x8A': 'ml',    # Baby saw
-  '\x8B': 'nl',    # Tri
+  '\x8B': 'nl',    # Triangle
   '\x8C': 'efabc', # Square
   '\x8D': 'epkc',   # Baby square
   '\x8E': 'dhm',   # Pulse
@@ -219,6 +219,11 @@ characters = {
 
   '\xC0': 'plcb', # sqrt
   '\xC1': 'fhak', # pi
+
+  # Rotated transfer function symbols (180 degrees)
+  '\xC2': 'agp',  # rotated 's' (sine)
+  '\xC3': 'gj',   # rotated '^' (tri)
+  '\xC4': 'abjk', # rotated 'e' (expo)
   
   '\xFF': 'abcdefghjklmnp',
   

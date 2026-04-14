@@ -49,6 +49,16 @@ const uint32_t kBufferSize = kNumBlocks * kDacWordsPerBlock;
 
 const uint32_t kFrameHz = 45000;
 const uint32_t kDacWordsHz = kFrameHz * kDacWordsPerFrame;
+const uint32_t kTotalFrames = kAudioBlockSize * kNumBlocks;
+
+// DAC8564 address-mismatch NOOP: setting DB23:DB22 to nonzero (vs A1=A0=GND)
+// causes the DAC to ignore the entire frame, holding its current output.
+const uint16_t kNoopHighWord = 0xC000;
+const uint16_t kNoopLowWord = 0x0000;
+
+// Frames ahead of the DMA cursor to place DC injections.
+// 1 frame = 8 DMA words = ~3200 CPU cycles of margin. Wildly conservative.
+const size_t kInjectGapFrames = 1;
 
 class Dac {
  public:
@@ -78,6 +88,13 @@ class Dac {
 
   void BufferSamples(uint8_t block, uint8_t channel, int16_t* samples);
   void BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample);
+
+  // Low-latency DC output path. SysTick calls UpdateDC to write this channel
+  // in frame 0 of the fillable block and inject near the DMA cursor. The main
+  // loop calls FillDCNoops to write NOOPs to frames 1-63 (erasing stale
+  // injections).
+  void UpdateDC(uint8_t channel, uint16_t sample);
+  void FillDCNoops(uint8_t block, uint8_t channel);
 
   uint32_t timer_base_freq(uint8_t apb) const;
   uint32_t timer_period() const;
