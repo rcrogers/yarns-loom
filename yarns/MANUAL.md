@@ -166,6 +166,9 @@ New global setting `CC (CONTROL CHANGE MODE)` sets how a CC's value is interpret
     - Rhythm is controlled by the [arpeggiator pattern setting](#arpeggiator-rhythm-settings)
 
 ### New layouts
+
+The `LA (LAYOUT)` setting is applied when exiting edit mode, rather than immediately when scrolling to a new value.
+
 1. `2+2` 3-part layout: 2-voice polyphonic part + two monophonic parts
 1. `2+1` 2-part layout: 2-voice polyphonic part + monophonic part with aux CV
 1. `*2` 3-part layout: 4-voice paraphonic part + monophonic part with aux CV + monophonic part without aux CV
@@ -555,6 +558,7 @@ Envelope adjusts to notes that begin/end while a stage or another note is in pro
 
 #### Modulation destinations for envelope output
 - Aux CV output: `ENVELOPE` (itself modulated by [tremolo LFO](#modulation-destinations-for-lfo-output))
+  - In [paraphonic layouts](#new-layouts), the part's envelope aux CV is gated on when any voice's gate is active, and retriggers whenever any voice triggers. Tremolo modulation of the envelope aux CV uses the highest-priority voice.
 - [Oscillator gain](#oscillator-audio-mode), when oscillator audio mode is `ENVELOPED`
 - [Oscillator timbre](#oscillator-timbre), when oscillator audio mode is not `OFF`
     - Timbre modulation by envelope has both a velocity-agnostic and a velocity-dependent component that are added together:
