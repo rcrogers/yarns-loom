@@ -45,6 +45,14 @@ RESOURCES      = yarns/resources
 
 TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
 
+# Frame-size checking. Must match stm32f10x_flash_md_application_small.ld
+# which reserves `. = . + 512;` between _sstack and _estack.
+# Uses -Wframe-larger-than (fixed frame only) rather than -Wstack-usage so
+# naked-asm functions in third-party CMSIS don't break the build with
+# "stack usage computation not supported" errors.
+STACK_SIZE     = 512
+STACK_CCFLAGS  = -Wframe-larger-than=$(STACK_SIZE)
+
 include stmlib/makefile.inc
 
 MAKEFLAGS += -j8
