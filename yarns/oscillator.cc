@@ -240,26 +240,25 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
   return phase_increment;
 }
 
+// Hot-path audio render. The three 128B sample buffers below are kept as
+// stack locals (not static) because stack-local access is measurably
+// faster in this tight loop across 4 simultaneously-triggered paraphonic
+// voices. The resulting 388B frame, plus the rest of the render call
+// chain, requires a stack reservation larger than the original 512B;
+// see yarns/stack_budget.h for the cumulative-stack accounting and
+// compile-time budget check.
 void Oscillator::Render(int16_t* audio_mix) {
-  // Scratch buffers live in .bss (384B) instead of on the stack. Stack
-  // budget is 512B; three 128B locals plus caller frames overflows into
-  // .data (corrupting e.g. Oscillator::fn_table_, Ui::modes_). Not
-  // reentrant: only called sequentially from the main loop render path.
-  static int16_t timbre_samples[kAudioBlockSize];
-  static int16_t audio_samples[kAudioBlockSize];
-  static int16_t gain_samples[kAudioBlockSize];
-
-  std::fill_n(timbre_samples, kAudioBlockSize, 0);
+  int16_t timbre_samples[kAudioBlockSize] = {0};
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
   timbre_envelope_.RenderSamples(timbre_samples, timbre_bias << 16);
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
-  std::fill_n(audio_samples, kAudioBlockSize, 0);
+  int16_t audio_samples[kAudioBlockSize] = {0};
   (this->*fn)(timbre_samples, audio_samples);
 
-  std::fill_n(gain_samples, kAudioBlockSize, 0);
+  int16_t gain_samples[kAudioBlockSize] = {0};
   int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
   gain_envelope_.RenderSamples(gain_samples, gain_bias << 16);
 

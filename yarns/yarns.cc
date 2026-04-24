@@ -34,6 +34,7 @@
 #include "yarns/midi_handler.h"
 #include "yarns/multi.h"
 #include "yarns/settings.h"
+#include "yarns/stack_budget.h"  // static_asserts render-path stack fits
 #include "yarns/storage_manager.h"
 #include "yarns/ui.h"
 
