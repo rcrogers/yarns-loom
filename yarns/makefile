@@ -51,7 +51,7 @@ TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
 # naked-asm functions in third-party CMSIS don't break the build with
 # "stack usage computation not supported" errors.
 STACK_SIZE     = 512
-STACK_CCFLAGS  = -Wframe-larger-than=$(STACK_SIZE)
+STACK_CCFLAGS  = -Wframe-larger-than=$(STACK_SIZE) -fstack-usage
 
 include stmlib/makefile.inc
 
