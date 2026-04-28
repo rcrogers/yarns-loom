@@ -106,12 +106,12 @@ STATIC_ASSERT(
 );
 
 void StateVariableFilter::Init() {
+  SVF::Init();
   damp.Init();
 }
 
-// 15-bit params
-void StateVariableFilter::RenderInit(int16_t resonance) {
-  damp.SetTarget(Interpolate824(lut_svf_damp, resonance << 17) >> 1);
+void StateVariableFilter::RenderInit(int16_t resonance_q_0_15) {
+  damp.SetTarget(DampFromResonance(resonance_q_0_15));
   damp.ComputeSlope();
 }
 
@@ -130,14 +130,14 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
   // Limit cutoff range for filtered noise
   if (shape >= OSC_SHAPE_NOISE_NOTCH && shape <= OSC_SHAPE_NOISE_HP) {
     int32_t cutoff_freq = 0x1000 + (timbre >> 1); // 1/8..5/8
-    return Interpolate824(lut_svf_cutoff, cutoff_freq << 17) >> 1;
+    return SVF::CutoffFromFreq(cutoff_freq);
   }
 
   // LP filter cutoff tracks pitch
   if (shape >= OSC_SHAPE_LP_PULSE && shape <= OSC_SHAPE_LP_SAW) {
     int32_t cutoff_freq = (pitch_ >> 1) + (timbre >> 1);
     CONSTRAIN(cutoff_freq, 0, 0x7fff);
-    return Interpolate824(lut_svf_cutoff, cutoff_freq << 17) >> 1;
+    return SVF::CutoffFromFreq(cutoff_freq);
   }
 
   // Phase distortion modulator tracks pitch
@@ -240,8 +240,14 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
   return phase_increment;
 }
 
+// Hot-path audio render. The three 128B sample buffers below are kept as
+// stack locals (not static) because stack-local access is measurably
+// faster in this tight loop across 4 simultaneously-triggered paraphonic
+// voices. The resulting 388B frame, plus the rest of the render call
+// chain, requires a stack reservation larger than the original 512B;
+// see yarns/stack_budget.h for the cumulative-stack accounting and
+// compile-time budget check.
 void Oscillator::Render(int16_t* audio_mix) {
-  
   int16_t timbre_samples[kAudioBlockSize] = {0};
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
   timbre_envelope_.RenderSamples(timbre_samples, timbre_bias << 16);
@@ -255,7 +261,7 @@ void Oscillator::Render(int16_t* audio_mix) {
   int16_t gain_samples[kAudioBlockSize] = {0};
   int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
   gain_envelope_.RenderSamples(gain_samples, gain_bias << 16);
-  
+
   q15_multiply_accumulate<kAudioBlockSize>(gain_samples, audio_samples, audio_mix);
 }
 

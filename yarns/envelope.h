@@ -81,6 +81,7 @@ class Envelope {
   }
 
   inline int16_t value() const { return value_ >> (31 - 16); }
+  inline EnvelopeStage stage() const { return stage_; }
 
   static inline uint8_t signed_clz(int32_t x) {
     const uint32_t x_for_clz = static_cast<uint32_t>(abs(x >= 0 ? x : x + 1));
