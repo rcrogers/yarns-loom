@@ -167,18 +167,18 @@ STATIC_ASSERT(
 );
 
 const char* const lfo_shape_values[LFO_SHAPE_LAST] = {
-  "/\\",
-  "|\\",
-  "/|",
-  "\x8C_",
+  "/\\ TRIANGLE",
+  "|\\ DOWN SAW",
+  "/| UP SAW",
+  "\x8C_ SQUARE",
+  "R\\ LINEAR RANDOM",
+  "Re EXPO SLEW RANDOM",
+  "R\xC5 STEPPED RANDOM",
+  "R* NOISE",
 };
 
 const char* const voicing_allocation_priority_values[] = {
   "LAST", "LOW", "HIGH", "FIRST"
-};
-
-const char* const trigger_shape_values[TRIGGER_SHAPE_LAST] = {
-  "SQ", "LINEAR", "EXPO", "RING", "STEP", "BURST"
 };
 
 const char* const note_values[12] = {
@@ -497,7 +497,7 @@ const Setting Settings::settings_[] = {
   {
     "TT", "TRANSPOSE",
     SETTING_DOMAIN_PART, { PART_VOICING_TUNING_TRANSPOSE, 0 },
-    SETTING_UNIT_INT8, -36, 36, NULL,
+    SETTING_UNIT_INT8, -32, 31, NULL,
     24, 15,
   },
   {
@@ -519,24 +519,10 @@ const Setting Settings::settings_[] = {
     tuning_system_values,
     27, 18,
   },
-  {
-    "T-", "TRIG DURATION",
-    SETTING_DOMAIN_PART, { PART_VOICING_TRIGGER_DURATION, 0 },
-    SETTING_UNIT_UINT8, 1, 99, NULL,
-    28, 19,
-  },
-  {
-    "T*", "TRIG VELOCITY SCALE",
-    SETTING_DOMAIN_PART, { PART_VOICING_TRIGGER_SCALE, 0 },
-    SETTING_UNIT_ENUMERATION, 0, 1, boolean_values,
-    29, 20,
-  },
-  {
-    "T\x88", "TRIG SHAPE",
-    SETTING_DOMAIN_PART, { PART_VOICING_TRIGGER_SHAPE, 0 },
-    SETTING_UNIT_ENUMERATION, 0, TRIGGER_SHAPE_LAST - 1, trigger_shape_values,
-    30, 21,
-  },
+  // Removed: trigger duration, scale, shape (superseded by envelope CV out)
+  { "", "", SETTING_DOMAIN_MULTI, { 0, 0 }, SETTING_UNIT_UINT8, 0, 0, NULL, 0xff, 0xff },
+  { "", "", SETTING_DOMAIN_MULTI, { 0, 0 }, SETTING_UNIT_UINT8, 0, 0, NULL, 0xff, 0xff },
+  { "", "", SETTING_DOMAIN_MULTI, { 0, 0 }, SETTING_UNIT_UINT8, 0, 0, NULL, 0xff, 0xff },
   {
     "CV", "CV OUT",
     SETTING_DOMAIN_PART, { PART_VOICING_AUX_CV, 0 },
@@ -592,7 +578,7 @@ const Setting Settings::settings_[] = {
     91, 0xff,
   },
   {
-    "PV", "PEAK VEL MOD",
+    "PE", "PEAK VEL MOD",
     SETTING_DOMAIN_PART, { PART_VOICING_ENV_PEAK_MOD_VELOCITY, 0 },
     SETTING_UNIT_INT8, -64, 63, NULL,
     92, 0xff,
@@ -748,7 +734,13 @@ const Setting Settings::settings_[] = {
     SETTING_UNIT_ENUMERATION, 0, 13,
     tuning_factor_values,
     0xff, 0xff,
-  }
+  },
+  {
+    "PV", "PORTAMENTO MOD VEL",
+    SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO_MOD_VELOCITY, 0 },
+    SETTING_UNIT_INT8, -64, 63, NULL,
+    0xff, 0xff,
+  },
 };
 
 void Settings::Init() {
@@ -839,7 +831,8 @@ char Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       
     case SETTING_UNIT_PORTAMENTO:
     {
-      uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
+      // Exclude Interpolate88 guard entry from split point.
+      const uint8_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE - 1;
       if (value == split_point) {
         strcpy(buffer, "OFF");
         return '\0';
