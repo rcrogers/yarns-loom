@@ -61,7 +61,8 @@ class Envelope {
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
-    int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
+    int32_t min_target, int32_t max_target, // Actual bounds, 16-bit signed
+    uint8_t chiff_amount
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target);
@@ -103,6 +104,13 @@ class Envelope {
   EnvelopeStage stage_;
 
   uint32_t phase_, phase_increment_;
+
+  // Chiff: noise added to attack to recreate aliased-envelope grit.
+  // High byte = K (right-shift on PRNG word, larger = quieter).
+  // Low byte  = p (dither threshold against 3 random bits, 0..7).
+  uint16_t chiff_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  uint32_t chiff_prng_state_;
+  uint8_t chiff_amount_; // 0 = off, up to 127
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

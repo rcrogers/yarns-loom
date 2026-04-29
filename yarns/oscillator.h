@@ -143,9 +143,9 @@ class Oscillator {
 
   void set_shape(OscillatorShape shape);
 
-  inline void NoteOn(ADSR& adsr, bool drone, int16_t raw_max_timbre) {
-    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
-    timbre_envelope_.NoteOn(adsr, 0, WarpTimbre(raw_max_timbre));
+  inline void NoteOn(ADSR& adsr, bool drone, int16_t raw_max_timbre, uint8_t chiff_amount) {
+    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1, chiff_amount);
+    timbre_envelope_.NoteOn(adsr, 0, WarpTimbre(raw_max_timbre), chiff_amount);
   }
   inline void NoteOff() {
     gain_envelope_.NoteOff();

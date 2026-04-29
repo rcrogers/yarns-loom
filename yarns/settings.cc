@@ -741,6 +741,12 @@ const Setting Settings::settings_[] = {
     SETTING_UNIT_INT8, -64, 63, NULL,
     0xff, 0xff,
   },
+  {
+    "CH", "CHIFF AMOUNT",
+    SETTING_DOMAIN_PART, { PART_VOICING_CHIFF_AMOUNT, 0 },
+    SETTING_UNIT_UINT8, 0, 127, NULL,
+    0xff, 0xff,
+  },
 };
 
 void Settings::Init() {

@@ -35,9 +35,13 @@ namespace yarns {
 
 using namespace stmlib;
 
+// Shift K large enough that (state >> K) contributes < 1 LSB to int16 output
+// after the value >> 14 step in OUTPUT. 2^(31-K) < 2^14 → K > 17. Use 24 for margin.
+static const uint8_t kChiffSilentShift = 24;
+
 void Envelope::Init(int16_t raw_zero_value) {
   phase_ = phase_increment_ = 0;
-  int32_t scaled_zero_value = raw_zero_value << (31 - 16);
+  int32_t scaled_zero_value = raw_zero_value << (31 - 16); // TODO should shift be by 16 ?
   value_ = scaled_zero_value;
   std::fill(
     &stage_target_[0],
@@ -49,6 +53,13 @@ void Envelope::Init(int16_t raw_zero_value) {
     &expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     0
   );
+  chiff_amount_ = 0;
+  chiff_prng_state_ = 0xCAFEBABE; // any nonzero seed
+  std::fill(
+    &chiff_lut_[0],
+    &chiff_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+    static_cast<uint16_t>(kChiffSilentShift) << 8
+  );
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -58,9 +69,11 @@ void Envelope::NoteOff() {
 
 void Envelope::NoteOn(
   ADSR& adsr,
-  int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
+  int32_t min_target, int32_t max_target, // Actual bounds, 16-bit signed
+  uint8_t chiff_amount
 ) {
   adsr_ = &adsr;
+  chiff_amount_ = chiff_amount;
   int16_t scale = max_target - min_target;
   min_target <<= 16;
   // NB: sustain level can be higher than peak
@@ -170,6 +183,27 @@ void Envelope::Trigger(EnvelopeStage stage) {
       }
     }
   }
+
+  // Populate chiff LUT: noise added to attack output, fading toward silence.
+  // K is right-shift on PRNG word (peak amp = 2^(31-K) ≈ |delta| for K=clz).
+  // p is dither threshold against 3 random bits (0..7).
+  if (stage == ENV_STAGE_ATTACK && chiff_amount_) {
+    const uint8_t inv = 127 - chiff_amount_;
+    uint8_t K_start = signed_clz(actual_delta) + (inv >> 3);
+    if (K_start > kChiffSilentShift) K_start = kChiffSilentShift;
+    const uint8_t p = inv & 7;
+    const uint8_t K_range = kChiffSilentShift - K_start;
+    for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
+      uint8_t K = K_start + ((K_range * i) >> 4);
+      chiff_lut_[i] = (static_cast<uint16_t>(K) << 8) | p;
+    }
+  } else {
+    std::fill(
+      &chiff_lut_[0],
+      &chiff_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+      static_cast<uint16_t>(kChiffSilentShift) << 8
+    );
+  }
 }
 
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target) {
@@ -196,11 +230,22 @@ void Envelope::RenderStageDispatch(
   (!POSITIVE_SLOPE && value <= x) \
 )
 
-#define OUTPUT \
+// Shift each operand first so the sum can't overflow int32. value ∈ [-2^30,
+// 2^30); perturbation ∈ [-2^31, 2^31); summing pre-shift would overflow at
+// peak chiff (chiff_shift can be 0 when actual_delta ≈ 2^30). Post-shift,
+// every term is < 2^17, sum fits comfortably.
+#define OUTPUT_PERTURBED(perturbation) \
   bias += bias_slope; \
-  int32_t overflowing_u16 = (value >> (30 - 16)) + (bias >> (31 - 16)); \
+  int32_t overflowing_u16 = (value >> (30 - 16)) + ((perturbation) >> (30 - 16)) + (bias >> (31 - 16)); \
   uint16_t clipped_u16 = ClipU16(overflowing_u16); \
   *sample_buffer++ = clipped_u16 >> 1; // 0..INT16_MAX
+
+#define OUTPUT OUTPUT_PERTURBED(0)
+
+#define CHIFF_DRAW \
+  chiff_state ^= chiff_state << 13; \
+  chiff_state ^= chiff_state >> 17; \
+  chiff_state ^= chiff_state << 5;
 
 template<bool MOVING, bool POSITIVE_SLOPE>
 void Envelope::RenderStage(
@@ -217,6 +262,17 @@ void Envelope::RenderStage(
     &expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     &expo_slope[0]
   );
+  // TODO chiff: chiff math runs on every MOVING sample (~14 cycles), even when
+  // chiff_lut_ is silent (non-attack stages, or chiff_amount==0). Could gate
+  // with a runtime flag set in Trigger() or a third template axis to skip the
+  // math entirely on stages that don't need it.
+  uint16_t chiff_lut[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  std::copy(
+    &chiff_lut_[0],
+    &chiff_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+    &chiff_lut[0]
+  );
+  uint32_t chiff_state = chiff_prng_state_;
   // int32_t nominal_start = nominal_start_;
   // bool nominal_start_reached = false;
 
@@ -234,7 +290,8 @@ void Envelope::RenderStage(
     if (phase < phase_increment) phase = UINT32_MAX;
     // }
 
-    int32_t slope = expo_slope[phase >> (32 - kLutExpoSlopeShiftSizeBits)];
+    uint8_t lut_index = phase >> (32 - kLutExpoSlopeShiftSizeBits);
+    int32_t slope = expo_slope[lut_index];
     value += slope;
     if (VALUE_PASSED(target)) {
       value = target; // Don't overshoot target
@@ -246,7 +303,16 @@ void Envelope::RenderStage(
       // Even if there are no samples left, this will save bias state for us
       return RenderStageDispatch(sample_buffer, samples_left, bias, bias_slope);
     } else {
-      OUTPUT;
+      // Chiff: noise applied to output (not integrated into value, to keep
+      // attack duration deterministic).  Direction-agnostic; Trigger() makes
+      // chiff_lut_ silent for non-attack stages.
+      uint16_t chiff_entry = chiff_lut[lut_index];
+      uint8_t chiff_K = chiff_entry >> 8;
+      uint8_t chiff_p = chiff_entry & 0xFF;
+      CHIFF_DRAW;
+      uint8_t chiff_shift = chiff_K + ((chiff_state & 7) < chiff_p ? 1 : 0);
+      int32_t chiff_noise = static_cast<int32_t>(chiff_state) >> chiff_shift;
+      OUTPUT_PERTURBED(chiff_noise);
     }
   }
 
@@ -254,6 +320,7 @@ void Envelope::RenderStage(
   value_ = value;
   phase_ = phase;
   phase_increment_ = phase_increment;
+  if (MOVING) chiff_prng_state_ = chiff_state;
 
   bias_ = bias;
 }
