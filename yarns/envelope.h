@@ -42,8 +42,8 @@ enum EnvelopeStage {
 };
 
 struct ADSR {
-  uint16_t peak, sustain; // Platonic, unscaled targets
-  uint32_t attack, decay, release; // Timing
+  uint16_t peak_u16, sustain_u16; // Platonic, unscaled targets
+  uint32_t attack_u32, decay_u32, release_u32; // Phase increments
 };
 
 const uint8_t kLutExpoSlopeShiftSizeBits = 4;
@@ -57,30 +57,33 @@ class Envelope {
   Envelope() { }
   ~Envelope() { }
 
-  void Init(int16_t zero_value);
+  void Init(int16_t zero_value_s16);
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
-    int32_t min_target, int32_t max_target // Actual bounds, 16-bit signed
+    // Bounds stored as s32 but semantically s16
+    int32_t min_target_s16, int32_t max_target_s16
   );
   void Trigger(EnvelopeStage stage);
-  void RenderSamples(int16_t* sample_buffer, int32_t bias_target);
+  void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
   void RenderStageDispatch(
-    int16_t* sample_buffer, size_t samples_left, int32_t bias, int32_t bias_slope
+    int16_t* sample_buffer, size_t samples_left,
+    int32_t bias_q31, int32_t bias_slope_q31
   );
   template<bool MOVING, bool POSITIVE_SLOPE>
   void RenderStage(
-    int16_t* sample_buffer, size_t samples_left, int32_t bias, int32_t bias_slope
+    int16_t* sample_buffer, size_t samples_left,
+    int32_t bias_q31, int32_t bias_slope_q31
   );
 
   void Rescale(float scaling_factor);
 
-  inline int16_t tremolo(uint16_t strength) const {
-    int32_t relative_value = (value_ - stage_target_[ENV_STAGE_RELEASE]) >> (31 - 16);
-    return relative_value * -strength >> 16;
+  inline int16_t tremolo(uint16_t strength_u16) const {
+    int32_t relative_value_q15 = (value_q30_ - stage_target_q30_[ENV_STAGE_RELEASE]) >> (30 - 15);
+    return relative_value_q15 * -strength_u16 >> 16;
   }
 
-  inline int16_t value() const { return value_ >> (31 - 16); }
+  inline int16_t value() const { return value_q30_ >> (30 - 15); }
   inline EnvelopeStage stage() const { return stage_; }
 
   static inline uint8_t signed_clz(int32_t x) {
@@ -91,18 +94,19 @@ class Envelope {
  private:
   ADSR* adsr_;
 
-  // 31-bit, so slope increment can skip overflow checks
-  int32_t stage_target_[ENV_NUM_STAGES];
-  int32_t target_, value_;
-  int32_t expo_slope_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  // Q30 in int32_t; the top integer bit is saturation headroom for
+  // `value += slope` overshoot and for SatSub deltas (range [-2, 2)).
+  int32_t stage_target_q30_[ENV_NUM_STAGES];
+  int32_t target_q30_, value_q30_;
+  int32_t expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
-  // 32-bit
-  int32_t bias_;
+  // Q31 (full s32; no overshoot, slope is pre-scaled by block size).
+  int32_t bias_q31_;
 
   // Current stage.
   EnvelopeStage stage_;
 
-  uint32_t phase_, phase_increment_;
+  uint32_t phase_u32_, phase_increment_u32_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

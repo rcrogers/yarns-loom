@@ -814,18 +814,18 @@ void Part::VoiceNoteOn(
   }
 
   ADSR adsr;
-  adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));
-  adsr.sustain = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
+  adsr.peak_u16 = UINT16_MAX - (damping_22 >> (22 - 16));
+  adsr.sustain_u16 = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
   // NB: this LUT only has 128 values, so we use a 15-bit index
-  adsr.attack   = Interpolate88(
+  adsr.attack_u32   = Interpolate88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << (15 - 13)
   );
-  adsr.decay    = Interpolate88(
+  adsr.decay_u32    = Interpolate88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << (15 - 13)
   );
-  adsr.release  = Interpolate88(
+  adsr.release_u32  = Interpolate88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
