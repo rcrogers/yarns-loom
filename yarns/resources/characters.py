@@ -224,6 +224,8 @@ characters = {
   '\xC2': 'agp',  # rotated 's' (sine)
   '\xC3': 'gj',   # rotated '^' (tri)
   '\xC4': 'abjk', # rotated 'e' (expo)
+
+  '\xC5': 'fpkc', # down stair-step
   
   '\xFF': 'abcdefghjklmnp',
   

@@ -17,6 +17,7 @@ This manual explains how Loom is different from the original firmware for Yarns.
     - [Control Change messages](#control-change-messages)
     - [Play mode](#play-mode)
     - [New layouts](#new-layouts)
+    - [Changed layouts](#changed-layouts)
     - [Note processing](#note-processing)
     - [Hold function](#hold-function)
 - [Clocking](#clocking)
@@ -185,6 +186,13 @@ The `LA (LAYOUT)` setting is applied when exiting edit mode, rather than immedia
         1. Part 2, monophonic CV/gate
         1. Part 1's aux CV, configurable via `CV`
         1. Part 2's aux CV, configurable via `CV`
+
+### Changed layouts
+
+#### `4T` Quad triggers
+CV output channels are now based on the general-purpose `CV` setting, instead of fixed trigger shapes (original firmware behavior).  Configuring this channel as an [envelope CV output](#modulation-destinations-for-envelope-output) or [enveloped audio output](#voice-oscillator) allows for flexible shaping, velocity modulation, and timbral control of the resulting trigger CV.
+
+The `T- (TRIG DURATION)`, `T* (TRIG VELOCITY SCALE)`, and `T|⟍ (TRIG SHAPE)` settings have been removed. Gate outputs are unchanged.
 
 ### Note processing
 
@@ -503,10 +511,13 @@ New and improved values for `VO (VOICING)` setting:
 - `PL (PORTAMENTO LEGATO ONLY)`: is portamento applied on all notes, or only on notes played legato?
 - Enables a new behavior: notes played legato are retriggered + portamento is applied only on notes played legato
 
-#### Portamento setting
-- `PO (PORTAMENTO)` setting remapped and extended from 51 to 64 values per side
+#### Portamento settings
+- `PO (PORTAMENTO)` setting remapped and extended from 51 to 63 values per side
 - Turning counter-clockwise: increases constant-time portamento from `T1` to `T63`
 - Turning clockwise: increases constant-rate portamento from `R1` to `R63`
+- Part setting `PV (PORTAMENTO MOD VEL)` sets bipolar modulation of each voice's portamento time by that voice's note velocity
+    - Turning clockwise (positive): higher velocity increases portamento time
+    - Turning counter-clockwise (negative): higher velocity decreases portamento time
 
 
 
@@ -522,7 +533,7 @@ New and improved values for `VO (VOICING)` setting:
     - `AI (ATTACK INIT)`, `DI (DECAY INIT)`, `SI (SUSTAIN INIT)`, `RI (RELEASE INIT)`
 - Part settings for the bipolar modulation of each voice's ADSR by that voice's note velocity:
     - `AM (ATTACK MOD VEL)`, `DM (DECAY MOD VEL)`, `SM (SUSTAIN MOD VEL)`, `RM (RELEASE MOD VEL)`
-- Part setting `PV (PEAK VEL MOD)` sets the velocity-sensitivity of the **peak level** for each voice's envelope
+- Part setting `PE (PEAK VEL MOD)` sets the velocity-sensitivity of the **peak level** for each voice's envelope
     - Peak level: height of the instantaneous point where attack ends and decay begins
     - Zero: peak level is always maximum (unity, i.e. equal to the maximum sustain level)
     - Turning clockwise (positive): peak level is increasingly damped by low note velocity

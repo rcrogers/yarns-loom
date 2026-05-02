@@ -36,8 +36,10 @@
 #include "stmlib/algorithms/voice_allocator.h"
 #include "stmlib/algorithms/note_stack.h"
 
+#include "yarns/constants.h"
 #include "yarns/resources.h"
 #include "yarns/drivers/dac.h"
+#include "yarns/dense_array.h"
 #include "yarns/looper.h"
 #include "yarns/sequencer_step.h"
 #include "yarns/arpeggiator.h"
@@ -134,7 +136,14 @@ enum SustainMode {
   SUSTAIN_MODE_LAST,
 };
 
-typedef SyncedLFO<15, 9> FastSyncedLFO; // Locks on in less than a second
+// The ~minimum that doesn't cause obvious LFO sampling error
+const uint32_t kLfoSampleHz = 125;
+const uint8_t kRefreshHzToLfoSampleHzRatioBits = 5;
+STATIC_ASSERT(
+  kRefreshHz / kLfoSampleHz == (1 << kRefreshHzToLfoSampleHzRatioBits),
+  refresh_to_lfo_sample_ratio_bits_mismatch
+);
+typedef SyncedLFO<15, 9, kRefreshHzToLfoSampleHzRatioBits> FastSyncedLFO;
 
 struct SequencerArpeggiatorResult { // Supports multiple return
   Arpeggiator arpeggiator; // Resulting arp state
@@ -142,28 +151,29 @@ struct SequencerArpeggiatorResult { // Supports multiple return
 };
 
 struct PackedPart {
-  // Currently has 7 bits to spare
+  // 33 bits to spare per part: up to 29 from the last bitfield word's padding,
+  // plus 4 more if a new bitfield group is added (at the cost of 28 bits of
+  // word-alignment overhead).  Dense pitch encoding accounts for 24 of these.
 
-  struct PackedSequencerStep {
-    unsigned int
-      pitch : 8, // values free: 126 (about 29 bits' worth across 30 steps)
-      velocity: 8; // values free: 0
-  }__attribute__((packed));
-  PackedSequencerStep sequencer_steps[kNumSteps];
+  // 128 MIDI notes + rest + tie
+  typedef DenseArray<kNumSteps, SEQUENCER_STEP_TIE + 1> StepPitchDenseArray;
+
+  uint8_t dense_step_pitches[StepPitchDenseArray::kNumBytes];
+  uint8_t step_velocity[kNumSteps];  // 7 bits velocity + 1 bit slide
 
   looper::PackedNote looper_notes[looper::kMaxNotes];
   unsigned int
     looper_oldest_index : looper::kBitsNoteIndex,
     looper_size         : looper::kBitsNoteIndex;
 
-  static const uint8_t kTimbreBits = 7;
-  static const uint8_t kLFOShapeBits = 2;
+  static const uint8_t kTimbreBits = 7; // values free: 0
+  static const uint8_t kLFOShapeBits = 3; // values free: 0
 
   signed int
     // MidiSettings
     transpose_octaves : 3, // values free: 0
     // VoicingSettings
-    tuning_transpose : 7, // values free: 55
+    tuning_transpose : 6, // values free: 0
     tuning_fine : 7, // values free: 0
     lfo_spread_types : kTimbreBits,
     lfo_spread_voices : kTimbreBits,
@@ -173,7 +183,8 @@ struct PackedPart {
     env_mod_attack : kTimbreBits,
     env_mod_decay : kTimbreBits,
     env_mod_sustain : kTimbreBits,
-    env_mod_release : kTimbreBits;
+    env_mod_release : kTimbreBits,
+    portamento_mod_velocity : kTimbreBits;
 
   // MidiSettings
   unsigned int
@@ -201,9 +212,6 @@ struct PackedPart {
     lfo_rate : 7, // values free: 0
     tuning_root : 4, // values free: 4
     tuning_system : 6, // values free: 30
-    trigger_duration : 7, // Breaking: probably excessive
-    trigger_scale : 1,
-    trigger_shape : 3, // values free: 2
     aux_cv : 4, // values free: 0
     aux_cv_2 : 4, // values free: 0
     tuning_factor : 4, // values free: 2
@@ -300,9 +308,6 @@ struct VoicingSettings {
   int8_t tuning_fine;
   int8_t tuning_root;
   uint8_t tuning_system;
-  uint8_t trigger_duration;
-  uint8_t trigger_scale;
-  uint8_t trigger_shape;
   uint8_t aux_cv;
   uint8_t aux_cv_2;
   uint8_t tuning_factor;
@@ -321,7 +326,7 @@ struct VoicingSettings {
   int8_t env_mod_decay;
   int8_t env_mod_sustain;
   int8_t env_mod_release;
-  // uint8_t padding[-2];
+  int8_t portamento_mod_velocity;
 
   void Pack(PackedPart& packed) const {
     packed.allocation_mode = allocation_mode;
@@ -343,9 +348,6 @@ struct VoicingSettings {
     packed.tuning_fine = tuning_fine;
     packed.tuning_root = tuning_root;
     packed.tuning_system = tuning_system;
-    packed.trigger_duration = trigger_duration;
-    packed.trigger_scale = trigger_scale;
-    packed.trigger_shape = trigger_shape;
     packed.aux_cv = aux_cv;
     packed.aux_cv_2 = aux_cv_2;
     packed.tuning_factor = tuning_factor;
@@ -364,6 +366,7 @@ struct VoicingSettings {
     packed.env_mod_decay = env_mod_decay;
     packed.env_mod_sustain = env_mod_sustain;
     packed.env_mod_release = env_mod_release;
+    packed.portamento_mod_velocity = portamento_mod_velocity;
   }
 
   void Unpack(PackedPart& packed) {
@@ -386,9 +389,6 @@ struct VoicingSettings {
     tuning_fine = packed.tuning_fine;
     tuning_root = packed.tuning_root;
     tuning_system = packed.tuning_system;
-    trigger_duration = packed.trigger_duration;
-    trigger_scale = packed.trigger_scale;
-    trigger_shape = packed.trigger_shape;
     aux_cv = packed.aux_cv;
     aux_cv_2 = packed.aux_cv_2;
     tuning_factor = packed.tuning_factor;
@@ -407,6 +407,7 @@ struct VoicingSettings {
     env_mod_decay = packed.env_mod_decay;
     env_mod_sustain = packed.env_mod_sustain;
     env_mod_release = packed.env_mod_release;
+    portamento_mod_velocity = packed.portamento_mod_velocity;
   }
 
 };
@@ -444,9 +445,6 @@ enum PartSetting {
   PART_VOICING_TUNING_FINE,
   PART_VOICING_TUNING_ROOT,
   PART_VOICING_TUNING_SYSTEM,
-  PART_VOICING_TRIGGER_DURATION,
-  PART_VOICING_TRIGGER_SCALE,
-  PART_VOICING_TRIGGER_SHAPE,
   PART_VOICING_AUX_CV,
   PART_VOICING_AUX_CV_2,
   PART_VOICING_TUNING_FACTOR,
@@ -465,6 +463,7 @@ enum PartSetting {
   PART_VOICING_ENV_MOD_DECAY,
   PART_VOICING_ENV_MOD_SUSTAIN,
   PART_VOICING_ENV_MOD_RELEASE,
+  PART_VOICING_PORTAMENTO_MOD_VELOCITY,
   PART_VOICING_LAST = PART_VOICING_ALLOCATION_MODE + sizeof(VoicingSettings) - 1,
   PART_SEQUENCER_CLOCK_DIVISION,
   PART_SEQUENCER_GATE_LENGTH,
@@ -498,10 +497,13 @@ struct SequencerSettings {
   uint8_t padding_steps[2];
 
   void Pack(PackedPart& packed) const {
+    std::fill(
+        &packed.dense_step_pitches[0],
+        &packed.dense_step_pitches[PackedPart::StepPitchDenseArray::kNumBytes],
+        0);
     for (uint8_t i = 0; i < kNumSteps; i++) {
-      PackedPart::PackedSequencerStep& packed_step = packed.sequencer_steps[i];
-      packed_step.pitch = step[i].data[0];
-      packed_step.velocity = step[i].data[1];
+      PackedPart::StepPitchDenseArray::Encode(packed.dense_step_pitches, step[i].data[0]);
+      packed.step_velocity[i] = step[i].data[1];
     }
 
     packed.clock_division = clock_division;
@@ -518,10 +520,9 @@ struct SequencerSettings {
   }
 
   void Unpack(PackedPart& packed) {
-    for (uint8_t i = 0; i < kNumSteps; i++) {
-      PackedPart::PackedSequencerStep& packed_step = packed.sequencer_steps[i];
-      step[i].data[0] = packed_step.pitch;
-      step[i].data[1] = packed_step.velocity;
+    for (int8_t i = kNumSteps - 1; i >= 0; i--) {
+      step[i].data[0] = PackedPart::StepPitchDenseArray::Decode(packed.dense_step_pitches);
+      step[i].data[1] = packed.step_velocity[i];
     }
 
     clock_division = packed.clock_division;

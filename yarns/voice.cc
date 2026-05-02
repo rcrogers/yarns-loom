@@ -29,8 +29,6 @@
 
 #include "yarns/voice.h"
 
-#include <cmath>
-
 #include "stmlib/midi/midi.h"
 #include "stmlib/utils/dsp.h"
 #include "stmlib/utils/random.h"
@@ -59,7 +57,7 @@ void Voice::Init() {
   ResetAllControllers();
   
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
-    lfos_[i].SetPhase(0);
+    lfos_[i].Init();
     lfos_[i].SetPhaseIncrement(lut_lfo_increments[50]);
   }
   pitch_bend_range_ = 2;
@@ -79,7 +77,6 @@ void Voice::Init() {
   portamento_phase_increment_ = 1U << 31;
   portamento_exponential_shape_ = false;
 
-  trigger_duration_ = 2;
 }
 
 /* static */
@@ -88,8 +85,10 @@ CVOutput::DCFn CVOutput::dc_fn_table_[] = {
   &CVOutput::velocity_dac_code,
   &CVOutput::aux_cv_dac_code,
   &CVOutput::aux_cv_dac_code_2,
-  &CVOutput::trigger_dac_code,
 };
+STATIC_ASSERT(
+    sizeof(CVOutput::dc_fn_table_) / sizeof(CVOutput::dc_fn_table_[0]) == DC_LAST,
+    dc_fn_table_matches_enum);
 
 void CVOutput::Init(bool reset_calibration) {
   if (reset_calibration) {
@@ -145,11 +144,6 @@ void Voice::ResetAllControllers() {
   std::fill(&mod_aux_[0], &mod_aux_[MOD_AUX_LAST - 1], 0);
 }
 
-void Voice::garbage(uint8_t x) {
-  uint32_t foo = pow(1.123f, (int) x);
-  (void) foo;
-}
-
 void Voice::Refresh() {
   if (retrigger_delay_) {
     --retrigger_delay_;
@@ -192,9 +186,14 @@ void Voice::Refresh() {
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
     lfos_[i].Refresh();
   }
-  int32_t vibrato_lfo = lfo_value(LFO_ROLE_PITCH);
 
   if (refresh_counter_ == 0) {
+    // Compute shape + SVF at 125Hz
+    for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
+      lfos_[i].RefreshShape(lfo_shapes_[i]);
+    }
+
+    int32_t vibrato_lfo = lfo_value(LFO_ROLE_PITCH);
     uint16_t tremolo_lfo = 32767 - lfo_value(LFO_ROLE_AMPLITUDE);
     // Fraction by which gain envelope should be damped
     uint16_t scaled_tremolo_lfo = tremolo_lfo * tremolo_mod_current_ >> 16;
@@ -211,7 +210,7 @@ void Voice::Refresh() {
     pitch_lfo_interpolator_.SetTarget(pitch_lfo_15);
     pitch_lfo_interpolator_.ComputeSlope();
   }
-  refresh_counter_ = (refresh_counter_ + 1) % (1 << kLowFreqRefreshBits);
+  refresh_counter_ = (refresh_counter_ + 1) % (1 << kRefreshHzToLfoSampleHzRatioBits);
 
   pitch_lfo_interpolator_.Tick();
   timbre_lfo_interpolator_.Tick();
@@ -241,16 +240,8 @@ void Voice::Refresh() {
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;
   mod_aux_[MOD_AUX_BEND] = static_cast<uint16_t>(mod_pitch_bend_) << 2;
   mod_aux_[MOD_AUX_VIBRATO_LFO] = (scaled_vibrato_lfo_interpolator_.value() << 1) + 32768;
-  mod_aux_[MOD_AUX_FULL_LFO] = vibrato_lfo + 32768;
+  mod_aux_[MOD_AUX_FULL_LFO] = lfo_value(LFO_ROLE_PITCH) + 32768;
   
-  if (trigger_phase_increment_) {
-    trigger_phase_ += trigger_phase_increment_;
-    if (trigger_phase_ < trigger_phase_increment_) {
-      trigger_phase_ = 0;
-      trigger_phase_increment_ = 0;
-    }
-  }
-
   note_ = note;
 }
 
@@ -283,17 +274,23 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
 }
 
 void Voice::NoteOn(
-  int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+  int16_t note, uint8_t velocity, uint8_t portamento,
+  int8_t portamento_mod_velocity, bool trigger,
   ADSR& adsr, int16_t timbre_envelope_target
 ) {
+  // Check if voice is still producing sound (gated or releasing).
+  // Only check envelopes that are actually active for this voice.
+  // Must check before NoteOn resets the envelope.
+  bool is_sounding_prev_note = gate_
+    || (uses_audio() && oscillator_.sounding())
+    || (aux_1_envelope() && dc_output(DC_AUX_1)->sounding())
+    || (aux_2_envelope() && dc_output(DC_AUX_2)->sounding());
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
     }
     NoteOff(true);  // Force envelope release for retrigger
-    trigger_pulse_ = trigger_duration_ * 2;
-    trigger_phase_ = 0;
-    trigger_phase_increment_ = lut_portamento_increments[trigger_duration_ >> 1];
+    trigger_pulse_ = kRefreshHz * 2 / 1000;  // 2ms
   }
   gate_ = true;
   adsr_ = adsr;
@@ -304,23 +301,46 @@ void Voice::NoteOn(
 
   if (!has_cv_output()) return;
 
-  note_source_ = note_portamento_;  
+  note_source_ = note_portamento_;
   note_target_ = note;
-  if (!portamento) {
+
+  // No portamento when: programmatically suppressed, or voice was silent
+  if (!portamento || !is_sounding_prev_note) {
     note_source_ = note_target_;
   }
 
   portamento_phase_ = 0;
-  uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE;
-  if (portamento < split_point) {
-    portamento_phase_increment_ = lut_portamento_increments[(split_point - portamento)];
+  // Exclude Interpolate88 guard entry from split point.
+  const uint32_t split_point = LUT_PORTAMENTO_INCREMENTS_SIZE - 1;
+
+  // Distance from OFF. 0 at OFF, 1..63 toward extremes on each side.
+  uint8_t distance_6;
+  if (portamento <= split_point) {
+    distance_6 = split_point - portamento;
     portamento_exponential_shape_ = true;
   } else {
-    uint32_t base_increment = lut_portamento_increments[(portamento - split_point)];
+    distance_6 = portamento - split_point;
+    portamento_exponential_shape_ = false;
+  }
+
+  // Velocity-modulated LUT index via modulate_7_13.
+  // distance_6 is 6-bit; << 1 adapts to 7-bit init so full mod (±64)
+  // spans the full distance_6 range.  13-bit result << 1 gives a 6.8
+  // index for Interpolate88 over the 64-entry (+guard) portamento LUT.
+  uint32_t base_increment = Interpolate88(
+    lut_portamento_increments,
+    modulate_7_13(
+      static_cast<uint8_t>(distance_6 << 1),
+      portamento_mod_velocity, velocity
+    ) << (14 - 13)
+  );
+
+  if (portamento > split_point) {
     uint32_t delta = abs(note_target_ - note_source_) + 1;
     portamento_phase_increment_ = (1536 * (base_increment >> 11) / delta) << 11;
     CONSTRAIN(portamento_phase_increment_, 1, 0x7FFFFFFF);
-    portamento_exponential_shape_ = false;
+  } else {
+    portamento_phase_increment_ = base_increment;
   }
 
   mod_velocity_ = velocity;
@@ -342,32 +362,6 @@ void Voice::ControlChange(uint8_t controller, uint8_t value) {
     case kCCFootPedalMsb:
       mod_aux_[MOD_AUX_PEDAL] = value << 9;
       break;
-  }
-}
-
-uint16_t Voice::trigger_value() const {
-  if (trigger_phase_ <= trigger_phase_increment_) {
-    return 0;
-  } else {
-    int32_t velocity_coefficient = trigger_scale_ ? mod_velocity_ << 8 : 32768;
-    int32_t value = 0;
-    switch(trigger_shape_) {
-      case TRIGGER_SHAPE_SQUARE:
-        value = 32767;
-        break;
-      case TRIGGER_SHAPE_LINEAR:
-        value = 32767 - (trigger_phase_ >> 17);
-        break;
-      default:
-        {
-          const int16_t* table = waveform_table[
-              trigger_shape_ - TRIGGER_SHAPE_EXPONENTIAL];
-          value = Interpolate824(table, trigger_phase_);
-        }
-        break;
-    }
-    value = value * velocity_coefficient >> 15;
-    return value;
   }
 }
 

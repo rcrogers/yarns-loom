@@ -34,6 +34,7 @@
 #include "yarns/midi_handler.h"
 #include "yarns/multi.h"
 #include "yarns/settings.h"
+#include "yarns/stack_budget.h"  // static_asserts render-path stack fits
 #include "yarns/storage_manager.h"
 #include "yarns/ui.h"
 
@@ -155,7 +156,7 @@ void DMA1_Channel6_IRQHandler(void) {
 
 void Init() {
   sys.Init();
-  
+
   setting_defs.Init();
   multi.Init(true);
   ui.Init();
@@ -163,7 +164,7 @@ void Init() {
   // Load multi 0 on boot.
   storage_manager.LoadMulti(0);
   storage_manager.LoadCalibration(); // Can disable to reset calibration
-  
+
   system_clock.Init();
   gate_output.Init();
   channel_leds.Init();
