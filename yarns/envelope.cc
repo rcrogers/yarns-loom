@@ -30,14 +30,16 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/drivers/dac.h"
+#include "yarns/fast_prng.h"
 
 namespace yarns {
 
 using namespace stmlib;
 
-// Shift K large enough that (state >> K) contributes < 1 LSB to int16 output
-// after the value >> 14 step in OUTPUT. 2^(31-K) < 2^14 → K > 17. Use 24 for margin.
-static const uint8_t kChiffSilentShift = 24;
+// Downshift large enough that (state >> downshift) contributes < 1 LSB to
+// the int16 output after the value >> 14 step in OUTPUT. 2^(31 - downshift)
+// < 2^14 → downshift > 17. Use 24 for margin.
+static const uint8_t kChiffSilentDownshift_u8 = 24;
 
 void Envelope::Init(int16_t zero_value_s16) {
   phase_u32_ = phase_increment_u32_ = 0;
@@ -55,10 +57,11 @@ void Envelope::Init(int16_t zero_value_s16) {
   );
   chiff_amount_ = 0;
   chiff_prng_state_ = 0xCAFEBABE; // any nonzero seed
+  chiff_dither_threshold_u3_ = 0;
   std::fill(
-    &chiff_lut_[0],
-    &chiff_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-    static_cast<uint16_t>(kChiffSilentShift) << 8
+    &chiff_downshift_lut_u8_[0],
+    &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+    kChiffSilentDownshift_u8
   );
   Trigger(ENV_STAGE_DEAD);
 }
@@ -186,23 +189,29 @@ void Envelope::Trigger(EnvelopeStage stage) {
   }
 
   // Populate chiff LUT: noise added to attack output, fading toward silence.
-  // K is right-shift on PRNG word (peak amp = 2^(31-K) ≈ |delta| for K=clz).
-  // p is dither threshold against 3 random bits (0..7).
+  // Downshift varies per entry: peak amp = 2^(31 - downshift) ≈ |delta|
+  // for downshift = clz(|delta|), ramping up to silent across the LUT.
+  // Dither threshold is constant across the LUT (it controls fractional
+  // amplitude continuity for a given setting, not fade shape).
   if (stage == ENV_STAGE_ATTACK && chiff_amount_) {
-    const uint8_t inv = 127 - chiff_amount_;
-    uint8_t K_start = signed_clz(actual_delta_q30) + (inv >> 3);
-    if (K_start > kChiffSilentShift) K_start = kChiffSilentShift;
-    const uint8_t p = inv & 7;
-    const uint8_t K_range = kChiffSilentShift - K_start;
+    const uint8_t inverted_amount = 127 - chiff_amount_;
+    uint8_t downshift_start_u8 =
+      signed_clz(actual_delta_q30) + (inverted_amount >> 3);
+    if (downshift_start_u8 > kChiffSilentDownshift_u8) {
+      downshift_start_u8 = kChiffSilentDownshift_u8;
+    }
+    chiff_dither_threshold_u3_ = inverted_amount & 7;
+    const uint8_t downshift_range_u8 =
+      kChiffSilentDownshift_u8 - downshift_start_u8;
     for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-      uint8_t K = K_start + ((K_range * i) >> 4);
-      chiff_lut_[i] = (static_cast<uint16_t>(K) << 8) | p;
+      chiff_downshift_lut_u8_[i] =
+        downshift_start_u8 + ((downshift_range_u8 * i) >> 4);
     }
   } else {
     std::fill(
-      &chiff_lut_[0],
-      &chiff_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-      static_cast<uint16_t>(kChiffSilentShift) << 8
+      &chiff_downshift_lut_u8_[0],
+      &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+      kChiffSilentDownshift_u8
     );
   }
 }
@@ -244,11 +253,6 @@ void Envelope::RenderStageDispatch(
 
 #define OUTPUT OUTPUT_PERTURBED(0)
 
-#define CHIFF_DRAW \
-  chiff_state ^= chiff_state << 13; \
-  chiff_state ^= chiff_state >> 17; \
-  chiff_state ^= chiff_state << 5;
-
 template<bool MOVING, bool POSITIVE_SLOPE>
 void Envelope::RenderStage(
   int16_t* sample_buffer, size_t samples_left,
@@ -265,16 +269,17 @@ void Envelope::RenderStage(
     &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     &expo_slope_q30[0]
   );
-  // TODO chiff: chiff math runs on every MOVING sample (~14 cycles), even when
-  // chiff_lut_ is silent (non-attack stages, or chiff_amount==0). Could gate
-  // with a runtime flag set in Trigger() or a third template axis to skip the
-  // math entirely on stages that don't need it.
-  uint16_t chiff_lut[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  // TODO chiff: chiff math runs on every MOVING sample (~14 cycles), even
+  // when the LUT is silent (non-attack stages, or chiff_amount==0). Could
+  // gate via a runtime flag set in Trigger() or a third template axis to
+  // skip the math entirely on stages that don't need it.
+  uint8_t chiff_downshift_lut_u8[LUT_EXPO_SLOPE_SHIFT_SIZE];
   std::copy(
-    &chiff_lut_[0],
-    &chiff_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-    &chiff_lut[0]
+    &chiff_downshift_lut_u8_[0],
+    &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+    &chiff_downshift_lut_u8[0]
   );
+  uint8_t chiff_dither_threshold_u3 = chiff_dither_threshold_u3_;
   uint32_t chiff_state = chiff_prng_state_;
   // int32_t nominal_start = nominal_start_;
   // bool nominal_start_reached = false;
@@ -309,12 +314,9 @@ void Envelope::RenderStage(
       // Chiff: noise applied to output (not integrated into value, to keep
       // attack duration deterministic).  Direction-agnostic; Trigger() makes
       // chiff_lut_ silent for non-attack stages.
-      uint16_t chiff_entry = chiff_lut[lut_index];
-      uint8_t chiff_K = chiff_entry >> 8;
-      uint8_t chiff_p = chiff_entry & 0xFF;
-      CHIFF_DRAW;
-      uint8_t chiff_shift = chiff_K + ((chiff_state & 7) < chiff_p ? 1 : 0);
-      int32_t chiff_noise = static_cast<int32_t>(chiff_state) >> chiff_shift;
+      uint8_t chiff_downshift_u8 = chiff_downshift_lut_u8[lut_index];
+      int32_t chiff_noise = FastPrngDitheredSample<3>(
+        chiff_state, chiff_downshift_u8, chiff_dither_threshold_u3);
       OUTPUT_PERTURBED(chiff_noise);
     }
   }

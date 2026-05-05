@@ -110,9 +110,10 @@ class Envelope {
   uint32_t phase_u32_, phase_increment_u32_;
 
   // Chiff: noise added to attack to recreate aliased-envelope grit.
-  // High byte = K (right-shift on PRNG word, larger = quieter).
-  // Low byte  = p (dither threshold against 3 random bits, 0..7).
-  uint16_t chiff_lut_[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  // Downshift varies per LUT entry (fades amplitude across attack);
+  // dither threshold is invariant across the LUT.
+  uint8_t chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  uint8_t chiff_dither_threshold_u3_;
   uint32_t chiff_prng_state_;
   uint8_t chiff_amount_; // 0 = off, up to 127
 
