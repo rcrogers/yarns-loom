@@ -41,7 +41,8 @@ using namespace stmlib;
 // < 2^14 → downshift > 17. Use 24 for margin.
 static const uint8_t kChiffSilentDownshift_u8 = 24;
 
-void Envelope::Init(int16_t zero_value_s16) {
+void Envelope::Init(int16_t zero_value_s16, bool chiff_enabled) {
+  chiff_enabled_ = chiff_enabled;
   phase_u32_ = phase_increment_u32_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
@@ -193,7 +194,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // for downshift = clz(|delta|), ramping up to silent across the LUT.
   // Dither threshold is constant across the LUT (it controls fractional
   // amplitude continuity for a given setting, not fade shape).
-  if (stage == ENV_STAGE_ATTACK && chiff_amount_) {
+  if (!chiff_enabled_) {
+    // Render path is compile-time elided; LUT contents are unread.
+  } else if (stage == ENV_STAGE_ATTACK && chiff_amount_) {
     const uint8_t inverted_amount = 127 - chiff_amount_;
     uint8_t downshift_start_u8 =
       signed_clz(actual_delta_q30) + (inverted_amount >> 3);
@@ -227,12 +230,22 @@ void Envelope::RenderStageDispatch(
   int16_t* sample_buffer, size_t samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
-  if (phase_increment_u32_ == 0) {
-    RenderStage<false , false >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-  } else if (expo_slope_lut_q30_[0] > 0) {
-    RenderStage<true  , true  >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+  if (chiff_enabled_) {
+    if (phase_increment_u32_ == 0) {
+      RenderStage<false , false , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    } else if (expo_slope_lut_q30_[0] > 0) {
+      RenderStage<true  , true  , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    } else {
+      RenderStage<true  , false , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    }
   } else {
-    RenderStage<true  , false >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    if (phase_increment_u32_ == 0) {
+      RenderStage<false , false , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    } else if (expo_slope_lut_q30_[0] > 0) {
+      RenderStage<true  , true  , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    } else {
+      RenderStage<true  , false , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    }
   }
 }
 
@@ -253,7 +266,7 @@ void Envelope::RenderStageDispatch(
 
 #define OUTPUT OUTPUT_PERTURBED(0)
 
-template<bool MOVING, bool POSITIVE_SLOPE>
+template<bool MOVING, bool POSITIVE_SLOPE, bool CHIFF>
 void Envelope::RenderStage(
   int16_t* sample_buffer, size_t samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
@@ -269,18 +282,19 @@ void Envelope::RenderStage(
     &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     &expo_slope_q30[0]
   );
-  // TODO chiff: chiff math runs on every MOVING sample (~14 cycles), even
-  // when the LUT is silent (non-attack stages, or chiff_amount==0). Could
-  // gate via a runtime flag set in Trigger() or a third template axis to
-  // skip the math entirely on stages that don't need it.
+  // Chiff state, only loaded when this instantiation actually uses it.
   uint8_t chiff_downshift_lut_u8[LUT_EXPO_SLOPE_SHIFT_SIZE];
-  std::copy(
-    &chiff_downshift_lut_u8_[0],
-    &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-    &chiff_downshift_lut_u8[0]
-  );
-  uint8_t chiff_dither_threshold_u3 = chiff_dither_threshold_u3_;
-  uint32_t chiff_state = chiff_prng_state_;
+  uint8_t chiff_dither_threshold_u3 = 0;
+  uint32_t chiff_state = 0;
+  if (CHIFF) {
+    std::copy(
+      &chiff_downshift_lut_u8_[0],
+      &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+      &chiff_downshift_lut_u8[0]
+    );
+    chiff_dither_threshold_u3 = chiff_dither_threshold_u3_;
+    chiff_state = chiff_prng_state_;
+  }
   // int32_t nominal_start = nominal_start_;
   // bool nominal_start_reached = false;
 
@@ -310,7 +324,7 @@ void Envelope::RenderStage(
 
       // Even if there are no samples left, this will save bias state for us
       return RenderStageDispatch(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    } else {
+    } else if (CHIFF) {
       // Chiff: noise applied to output (not integrated into value, to keep
       // attack duration deterministic).  Direction-agnostic; Trigger() makes
       // chiff_lut_ silent for non-attack stages.
@@ -318,6 +332,8 @@ void Envelope::RenderStage(
       int32_t chiff_noise = FastPrngDitheredSample<3>(
         chiff_state, chiff_downshift_u8, chiff_dither_threshold_u3);
       OUTPUT_PERTURBED(chiff_noise);
+    } else {
+      OUTPUT;
     }
   }
 
@@ -325,7 +341,7 @@ void Envelope::RenderStage(
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
   phase_increment_u32_ = phase_increment_u32;
-  if (MOVING) chiff_prng_state_ = chiff_state;
+  if (MOVING && CHIFF) chiff_prng_state_ = chiff_state;
 
   bias_q31_ = bias_q31;
 }

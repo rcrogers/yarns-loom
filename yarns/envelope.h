@@ -57,7 +57,7 @@ class Envelope {
   Envelope() { }
   ~Envelope() { }
 
-  void Init(int16_t zero_value_s16);
+  void Init(int16_t zero_value_s16, bool chiff_enabled);
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
@@ -71,7 +71,7 @@ class Envelope {
     int16_t* sample_buffer, size_t samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
-  template<bool MOVING, bool POSITIVE_SLOPE>
+  template<bool MOVING, bool POSITIVE_SLOPE, bool CHIFF>
   void RenderStage(
     int16_t* sample_buffer, size_t samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
@@ -110,8 +110,11 @@ class Envelope {
   uint32_t phase_u32_, phase_increment_u32_;
 
   // Chiff: noise added to attack to recreate aliased-envelope grit.
+  // chiff_enabled_ is per-instance (set at Init); when false, the chiff
+  // template axis dispatches to a specialization with no chiff math.
   // Downshift varies per LUT entry (fades amplitude across attack);
   // dither threshold is invariant across the LUT.
+  bool chiff_enabled_;
   uint8_t chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE];
   uint8_t chiff_dither_threshold_u3_;
   uint32_t chiff_prng_state_;
