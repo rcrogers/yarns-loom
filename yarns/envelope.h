@@ -114,8 +114,12 @@ class Envelope {
   // template axis dispatches to a specialization with no chiff math.
   // Downshift varies per LUT entry (fades amplitude across attack);
   // dither threshold is invariant across the LUT.
+  //
+  // LUT has one phantom trailing entry holding kChiffSilentDownshift_u8 so
+  // the per-sample LUT-index bump (lut_index + 0|1) never needs a bounds
+  // check.
   bool chiff_enabled_;
-  uint8_t chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  uint8_t chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE + 1];
   uint8_t chiff_dither_threshold_u3_;
   uint32_t chiff_prng_state_;
   uint8_t chiff_amount_; // 0 = off, up to 127

@@ -61,7 +61,7 @@ void Envelope::Init(int16_t zero_value_s16, bool chiff_enabled) {
   chiff_dither_threshold_u3_ = 0;
   std::fill(
     &chiff_downshift_lut_u8_[0],
-    &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+    &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE + 1],
     kChiffSilentDownshift_u8
   );
   Trigger(ENV_STAGE_DEAD);
@@ -210,10 +210,13 @@ void Envelope::Trigger(EnvelopeStage stage) {
       chiff_downshift_lut_u8_[i] =
         downshift_start_u8 + ((downshift_range_u8 * i) >> 4);
     }
+    // Phantom trailing entry: lets the per-sample LUT-index bump skip a
+    // bounds check.
+    chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE] = kChiffSilentDownshift_u8;
   } else {
     std::fill(
       &chiff_downshift_lut_u8_[0],
-      &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+      &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE + 1],
       kChiffSilentDownshift_u8
     );
   }
@@ -283,13 +286,14 @@ void Envelope::RenderStage(
     &expo_slope_q30[0]
   );
   // Chiff state, only loaded when this instantiation actually uses it.
-  uint8_t chiff_downshift_lut_u8[LUT_EXPO_SLOPE_SHIFT_SIZE];
+  // LUT size is +1 for the phantom silent trailing entry.
+  uint8_t chiff_downshift_lut_u8[LUT_EXPO_SLOPE_SHIFT_SIZE + 1];
   uint8_t chiff_dither_threshold_u3 = 0;
   uint32_t chiff_state = 0;
   if (CHIFF) {
     std::copy(
       &chiff_downshift_lut_u8_[0],
-      &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE],
+      &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE + 1],
       &chiff_downshift_lut_u8[0]
     );
     chiff_dither_threshold_u3 = chiff_dither_threshold_u3_;
@@ -326,11 +330,26 @@ void Envelope::RenderStage(
       return RenderStageDispatch(sample_buffer, samples_left, bias_q31, bias_slope_q31);
     } else if (CHIFF) {
       // Chiff: noise applied to output (not integrated into value, to keep
-      // attack duration deterministic).  Direction-agnostic; Trigger() makes
-      // chiff_lut_ silent for non-attack stages.
-      uint8_t chiff_downshift_u8 = chiff_downshift_lut_u8[lut_index];
-      int32_t chiff_noise = FastPrngDitheredSample<3>(
-        chiff_state, chiff_downshift_u8, chiff_dither_threshold_u3);
+      // attack duration deterministic).  Direction-agnostic; Trigger()
+      // makes chiff_downshift_lut_ silent for non-attack stages.
+      //
+      // Two dither axes, both fed from disjoint bit fields of a single
+      // PRNG word:
+      //   - LUT-index bump (bits 3..6): smooths K-rung transitions across
+      //     the attack's duration so long attacks don't reveal a stair
+      //     at the entry boundaries.
+      //   - downshift bump (bits 0..2): setting-driven continuous amplitude
+      //     inside a K rung.
+      uint32_t chiff_word = FastPrngDraw(chiff_state);
+      uint8_t entry_position_q4 = (phase_u32 >> 24) & 15;
+      uint8_t chiff_lut_index = lut_index +
+        FastPrngDitherBit<4>(chiff_word >> 3, entry_position_q4);
+      // chiff_downshift_lut_u8 has a phantom trailing entry, so the +1
+      // bump above is always in-bounds — no cap needed.
+      uint8_t chiff_downshift_u8 = chiff_downshift_lut_u8[chiff_lut_index];
+      uint8_t chiff_shift = chiff_downshift_u8 +
+        FastPrngDitherBit<3>(chiff_word, chiff_dither_threshold_u3);
+      int32_t chiff_noise = static_cast<int32_t>(chiff_word) >> chiff_shift;
       OUTPUT_PERTURBED(chiff_noise);
     } else {
       OUTPUT;

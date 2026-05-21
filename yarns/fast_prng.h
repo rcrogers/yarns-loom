@@ -46,6 +46,18 @@ inline uint32_t FastPrngDraw(uint32_t& state) {
   return state;
 }
 
+// Returns 1 with probability threshold / 2^kBits, else 0. Compares the low
+// kBits of `random_bits` against `threshold`. The caller supplies the bits
+// (typically a slice of a FastPrngDraw word), so multiple independent
+// dithers can share a single draw — pass disjoint bit fields of the same
+// word for each axis.
+//
+// threshold valid range: [0, (1 << kBits)].
+template<uint8_t kBits>
+inline uint8_t FastPrngDitherBit(uint32_t random_bits, uint8_t threshold) {
+  return (random_bits & ((1u << kBits) - 1)) < threshold ? 1 : 0;
+}
+
 // Signed noise sample, ~white. Peak amplitude is 2^(31 - downshift_u8),
 // halved when the one-bit dither fires (shift becomes downshift_u8 + 1).
 // Dither probability is dither_threshold / 2^kDitherBits; sweeping the
@@ -59,7 +71,7 @@ inline int32_t FastPrngDitheredSample(
     uint32_t& state, uint8_t downshift_u8, uint8_t dither_threshold) {
   uint32_t word = FastPrngDraw(state);
   uint8_t shift = downshift_u8 +
-    ((word & ((1u << kDitherBits) - 1)) < dither_threshold ? 1 : 0);
+    FastPrngDitherBit<kDitherBits>(word, dither_threshold);
   return static_cast<int32_t>(word) >> shift;
 }
 
