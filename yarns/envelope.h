@@ -115,13 +115,13 @@ class Envelope {
   // on chiff_amount_ > 0 and stage == ATTACK so non-attack/off paths pay
   // zero chiff cost.
   //
-  // chiff_phase wraps at rate proportional to chiff_increment; on wrap,
-  // chiff_held_value latches the current envelope value, and a small
-  // xorshift PRNG perturbs chiff_phase to scatter the next wrap in time
-  // ("flam"). Variable intensity comes from variable interval × slope.
+  // Counter-based ticks: chiff_countdown decrements each sample; on hit,
+  // chiff_held_value latches the current envelope value and the counter
+  // refills with chiff_base_period + symmetric jitter (xorshift-driven).
+  // Variable intensity comes from variable interval × slope.
   bool chiff_enabled_;
-  uint32_t chiff_phase_u32_;
-  uint32_t chiff_increment_u32_;
+  int32_t chiff_countdown_s32_;
+  int32_t chiff_base_period_s32_;
   uint32_t chiff_prng_state_;
   int32_t chiff_held_value_q30_;
   uint8_t chiff_amount_; // 0 = off, up to 127

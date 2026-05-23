@@ -51,8 +51,8 @@ void Envelope::Init(int16_t zero_value_s16, bool chiff_enabled) {
     0
   );
   chiff_amount_ = 0;
-  chiff_phase_u32_ = 0;
-  chiff_increment_u32_ = UINT32_MAX;
+  chiff_countdown_s32_ = 0;
+  chiff_base_period_s32_ = 1;
   chiff_held_value_q30_ = zero_value_q30;
   chiff_prng_state_ = 0xCAFEBABE; // nonzero seed for xorshift32
   Trigger(ENV_STAGE_DEAD);
@@ -180,26 +180,21 @@ void Envelope::Trigger(EnvelopeStage stage) {
     }
   }
 
-  // Chiff: pick the sample-and-hold tick rate. UINT32_MAX wraps every
-  // sample (held value mirrors value_q30, no audible chiff). Smaller
-  // increments wrap less often, holding the value across more samples,
-  // creating the aliased "step" character.
-  //
-  // chiff_amount runs through lut_env_expo to warp the dial — the linear
-  // map was perceptually compressed (audible chiff only in the top ~10%).
-  // The expo curve front-loads the response so mid-dial gives clear chiff.
-  // Step chosen so the expo-warped amount at max lands at chiff_increment
-  // ≈ 2^20 (~10 Hz tick rate, hold span ≈ 4096 samples at 45 kHz).
-  static const uint32_t kChiffMinIncrement_u32 = 1u << 20;
+  // Chiff: pick the sample-and-hold tick period. chiff_amount runs through
+  // lut_env_expo to warp the dial — the linear map was perceptually
+  // compressed (audible chiff only in the top ~10%). The expo curve
+  // front-loads the response so mid-dial gives clear chiff. Step chosen
+  // so the expo-warped amount at max lands at chiff_increment ≈ 2^16
+  // (~0.7 Hz tick rate, hold span ≈ 64k samples ≈ 1.5 s at 45 kHz).
+  static const uint32_t kChiffMinIncrement_u32 = 1u << 16;
   static const uint32_t kChiffStepPerExpoUnit_u32 =
     (UINT32_MAX - kChiffMinIncrement_u32) / UINT16_MAX;
   if (chiff_enabled_ && stage == ENV_STAGE_ATTACK && chiff_amount_) {
     uint32_t expo_amount = lut_env_expo[chiff_amount_ << 1];
-    chiff_increment_u32_ = UINT32_MAX - expo_amount * kChiffStepPerExpoUnit_u32;
+    uint32_t increment = UINT32_MAX - expo_amount * kChiffStepPerExpoUnit_u32;
+    chiff_base_period_s32_ = static_cast<int32_t>(UINT32_MAX / increment);
+    chiff_countdown_s32_ = chiff_base_period_s32_;
     chiff_held_value_q30_ = value_q30_;
-    chiff_phase_u32_ = 0;
-  } else {
-    chiff_increment_u32_ = UINT32_MAX;
   }
 }
 
@@ -268,13 +263,13 @@ void Envelope::RenderStage(
     &expo_slope_q30[0]
   );
   // Chiff state, only loaded when this instantiation actually uses it.
-  uint32_t chiff_phase_u32 = 0;
-  uint32_t chiff_increment_u32 = UINT32_MAX;
+  int32_t chiff_countdown_s32 = 0;
+  int32_t chiff_base_period_s32 = 1;
   uint32_t chiff_prng_state = 0;
   int32_t chiff_held_value_q30 = 0;
   if (CHIFF) {
-    chiff_phase_u32 = chiff_phase_u32_;
-    chiff_increment_u32 = chiff_increment_u32_;
+    chiff_countdown_s32 = chiff_countdown_s32_;
+    chiff_base_period_s32 = chiff_base_period_s32_;
     chiff_prng_state = chiff_prng_state_;
     chiff_held_value_q30 = chiff_held_value_q30_;
   }
@@ -308,21 +303,25 @@ void Envelope::RenderStage(
       // Even if there are no samples left, this will save bias state for us
       return RenderStageDispatch(sample_buffer, samples_left, bias_q31, bias_slope_q31);
     } else if (CHIFF) {
-      // Chiff: variable-rate sample-and-hold with jittered tick timing.
-      // chiff_phase advances every sample; on wrap, the held value
-      // refreshes from value_q30 (click) and an xorshift step perturbs
-      // the next wrap timing for a "flam"-like irregular click train.
-      // Variable click intensity comes naturally from interval × slope:
-      // longer gap → bigger jump on refresh.
-      chiff_phase_u32 += chiff_increment_u32;
-      if (chiff_phase_u32 < chiff_increment_u32) {
+      // Chiff: counter-based sample-and-hold with jittered tick timing.
+      // Countdown decrements each sample; on hit, the held value
+      // refreshes (click), and the counter refills with base_period + a
+      // symmetric jitter in [-base/2, +base/2] (±50% of period). This
+      // gives a true "flam" — intervals scattered around the base period
+      // rather than always faster than it. Variable click intensity comes
+      // from interval × slope: longer gap → bigger jump on refresh.
+      chiff_countdown_s32--;
+      if (chiff_countdown_s32 <= 0) {
         chiff_held_value_q30 = value_q30;
         chiff_prng_state ^= chiff_prng_state << 13;
         chiff_prng_state ^= chiff_prng_state >> 17;
         chiff_prng_state ^= chiff_prng_state << 5;
-        // Symmetric ±25% jitter on the next-wrap timing: shift the draw
-        // to [0, 2^31), recenter to [-2^30, 2^30).
-        chiff_phase_u32 += (chiff_prng_state >> 1) - (1u << 30);
+        // Signed prng * base_period, take high 32 bits → jitter in
+        // [-base/2, +base/2).
+        int64_t prng_signed = static_cast<int32_t>(chiff_prng_state);
+        int32_t jitter_s32 =
+          static_cast<int32_t>((prng_signed * chiff_base_period_s32) >> 32);
+        chiff_countdown_s32 += chiff_base_period_s32 + jitter_s32;
       }
       OUTPUT_VALUE(chiff_held_value_q30);
     } else {
@@ -335,7 +334,7 @@ void Envelope::RenderStage(
   phase_u32_ = phase_u32;
   phase_increment_u32_ = phase_increment_u32;
   if (CHIFF) {
-    chiff_phase_u32_ = chiff_phase_u32;
+    chiff_countdown_s32_ = chiff_countdown_s32;
     chiff_held_value_q30_ = chiff_held_value_q30;
     chiff_prng_state_ = chiff_prng_state;
   }
