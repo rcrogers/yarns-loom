@@ -109,19 +109,21 @@ class Envelope {
 
   uint32_t phase_u32_, phase_increment_u32_;
 
-  // Chiff: noise added to attack to recreate aliased-envelope grit.
-  // chiff_enabled_ is per-instance (set at Init); when false, the chiff
-  // template axis dispatches to a specialization with no chiff math.
-  // Downshift varies per LUT entry (fades amplitude across attack);
-  // dither threshold is invariant across the LUT.
+  // Chiff: variable-rate sample-and-hold during attack, recreating the
+  // aliased grit of the original too-low-envelope-sample-rate bug.
+  // chiff_enabled_ is per-instance (set at Init); the dispatch also gates
+  // on chiff_amount_ > 0 and stage == ATTACK so non-attack/off paths pay
+  // zero chiff cost.
   //
-  // LUT has one phantom trailing entry holding kChiffSilentDownshift_u8 so
-  // the per-sample LUT-index bump (lut_index + 0|1) never needs a bounds
-  // check.
+  // chiff_phase wraps at rate proportional to chiff_increment; on wrap,
+  // chiff_held_value latches the current envelope value, and a small
+  // xorshift PRNG perturbs chiff_phase to scatter the next wrap in time
+  // ("flam"). Variable intensity comes from variable interval × slope.
   bool chiff_enabled_;
-  uint8_t chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE + 1];
-  uint8_t chiff_dither_threshold_u3_;
+  uint32_t chiff_phase_u32_;
+  uint32_t chiff_increment_u32_;
   uint32_t chiff_prng_state_;
+  int32_t chiff_held_value_q30_;
   uint8_t chiff_amount_; // 0 = off, up to 127
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);

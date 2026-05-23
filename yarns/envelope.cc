@@ -30,16 +30,10 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/drivers/dac.h"
-#include "yarns/fast_prng.h"
 
 namespace yarns {
 
 using namespace stmlib;
-
-// Downshift large enough that (state >> downshift) contributes < 1 LSB to
-// the int16 output after the value >> 14 step in OUTPUT. 2^(31 - downshift)
-// < 2^14 → downshift > 17. Use 24 for margin.
-static const uint8_t kChiffSilentDownshift_u8 = 24;
 
 void Envelope::Init(int16_t zero_value_s16, bool chiff_enabled) {
   chiff_enabled_ = chiff_enabled;
@@ -57,13 +51,10 @@ void Envelope::Init(int16_t zero_value_s16, bool chiff_enabled) {
     0
   );
   chiff_amount_ = 0;
-  chiff_prng_state_ = 0xCAFEBABE; // any nonzero seed
-  chiff_dither_threshold_u3_ = 0;
-  std::fill(
-    &chiff_downshift_lut_u8_[0],
-    &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE + 1],
-    kChiffSilentDownshift_u8
-  );
+  chiff_phase_u32_ = 0;
+  chiff_increment_u32_ = UINT32_MAX;
+  chiff_held_value_q30_ = zero_value_q30;
+  chiff_prng_state_ = 0xCAFEBABE; // nonzero seed for xorshift32
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -189,36 +180,26 @@ void Envelope::Trigger(EnvelopeStage stage) {
     }
   }
 
-  // Populate chiff LUT: noise added to attack output, fading toward silence.
-  // Downshift varies per entry: peak amp = 2^(31 - downshift) ≈ |delta|
-  // for downshift = clz(|delta|), ramping up to silent across the LUT.
-  // Dither threshold is constant across the LUT (it controls fractional
-  // amplitude continuity for a given setting, not fade shape).
-  if (!chiff_enabled_) {
-    // Render path is compile-time elided; LUT contents are unread.
-  } else if (stage == ENV_STAGE_ATTACK && chiff_amount_) {
-    const uint8_t inverted_amount = 127 - chiff_amount_;
-    uint8_t downshift_start_u8 =
-      signed_clz(actual_delta_q30) + (inverted_amount >> 3);
-    if (downshift_start_u8 > kChiffSilentDownshift_u8) {
-      downshift_start_u8 = kChiffSilentDownshift_u8;
-    }
-    chiff_dither_threshold_u3_ = inverted_amount & 7;
-    const uint8_t downshift_range_u8 =
-      kChiffSilentDownshift_u8 - downshift_start_u8;
-    for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-      chiff_downshift_lut_u8_[i] =
-        downshift_start_u8 + ((downshift_range_u8 * i) >> 4);
-    }
-    // Phantom trailing entry: lets the per-sample LUT-index bump skip a
-    // bounds check.
-    chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE] = kChiffSilentDownshift_u8;
+  // Chiff: pick the sample-and-hold tick rate. UINT32_MAX wraps every
+  // sample (held value mirrors value_q30, no audible chiff). Smaller
+  // increments wrap less often, holding the value across more samples,
+  // creating the aliased "step" character.
+  //
+  // chiff_amount runs through lut_env_expo to warp the dial — the linear
+  // map was perceptually compressed (audible chiff only in the top ~10%).
+  // The expo curve front-loads the response so mid-dial gives clear chiff.
+  // Step chosen so the expo-warped amount at max lands at chiff_increment
+  // ≈ 2^20 (~10 Hz tick rate, hold span ≈ 4096 samples at 45 kHz).
+  static const uint32_t kChiffMinIncrement_u32 = 1u << 20;
+  static const uint32_t kChiffStepPerExpoUnit_u32 =
+    (UINT32_MAX - kChiffMinIncrement_u32) / UINT16_MAX;
+  if (chiff_enabled_ && stage == ENV_STAGE_ATTACK && chiff_amount_) {
+    uint32_t expo_amount = lut_env_expo[chiff_amount_ << 1];
+    chiff_increment_u32_ = UINT32_MAX - expo_amount * kChiffStepPerExpoUnit_u32;
+    chiff_held_value_q30_ = value_q30_;
+    chiff_phase_u32_ = 0;
   } else {
-    std::fill(
-      &chiff_downshift_lut_u8_[0],
-      &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE + 1],
-      kChiffSilentDownshift_u8
-    );
+    chiff_increment_u32_ = UINT32_MAX;
   }
 }
 
@@ -233,7 +214,12 @@ void Envelope::RenderStageDispatch(
   int16_t* sample_buffer, size_t samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
-  if (chiff_enabled_) {
+  // Chiff costs are paid only when actually rendering chiff: enabled,
+  // amount > 0, and during ATTACK. Off/non-attack paths use CHIFF=false
+  // so the per-sample math is compiled out.
+  const bool use_chiff = chiff_enabled_ &&
+    chiff_amount_ > 0 && stage_ == ENV_STAGE_ATTACK;
+  if (use_chiff) {
     if (phase_increment_u32_ == 0) {
       RenderStage<false , false , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
     } else if (expo_slope_lut_q30_[0] > 0) {
@@ -257,17 +243,13 @@ void Envelope::RenderStageDispatch(
   (!POSITIVE_SLOPE && value_q30 <= x) \
 )
 
-// Shift each operand first so the sum can't overflow int32. value_q30 ∈
-// [-2^30, 2^30); perturbation ∈ [-2^31, 2^31); summing pre-shift would
-// overflow at peak chiff (chiff_shift can be 0 when actual_delta ≈ 2^30).
-// Post-shift, every term is < 2^17, sum fits comfortably.
-#define OUTPUT_PERTURBED(perturbation) \
+#define OUTPUT_VALUE(v) \
   bias_q31 += bias_slope_q31; \
-  int32_t overflowing_u16 = (value_q30 >> (30 - 16)) + ((perturbation) >> (30 - 16)) + (bias_q31 >> (31 - 16)); \
+  int32_t overflowing_u16 = ((v) >> (30 - 16)) + (bias_q31 >> (31 - 16)); \
   uint16_t clipped_u16 = ClipU16(overflowing_u16); \
   *sample_buffer++ = clipped_u16 >> 1; // 0..INT16_MAX
 
-#define OUTPUT OUTPUT_PERTURBED(0)
+#define OUTPUT OUTPUT_VALUE(value_q30)
 
 template<bool MOVING, bool POSITIVE_SLOPE, bool CHIFF>
 void Envelope::RenderStage(
@@ -286,18 +268,15 @@ void Envelope::RenderStage(
     &expo_slope_q30[0]
   );
   // Chiff state, only loaded when this instantiation actually uses it.
-  // LUT size is +1 for the phantom silent trailing entry.
-  uint8_t chiff_downshift_lut_u8[LUT_EXPO_SLOPE_SHIFT_SIZE + 1];
-  uint8_t chiff_dither_threshold_u3 = 0;
-  uint32_t chiff_state = 0;
+  uint32_t chiff_phase_u32 = 0;
+  uint32_t chiff_increment_u32 = UINT32_MAX;
+  uint32_t chiff_prng_state = 0;
+  int32_t chiff_held_value_q30 = 0;
   if (CHIFF) {
-    std::copy(
-      &chiff_downshift_lut_u8_[0],
-      &chiff_downshift_lut_u8_[LUT_EXPO_SLOPE_SHIFT_SIZE + 1],
-      &chiff_downshift_lut_u8[0]
-    );
-    chiff_dither_threshold_u3 = chiff_dither_threshold_u3_;
-    chiff_state = chiff_prng_state_;
+    chiff_phase_u32 = chiff_phase_u32_;
+    chiff_increment_u32 = chiff_increment_u32_;
+    chiff_prng_state = chiff_prng_state_;
+    chiff_held_value_q30 = chiff_held_value_q30_;
   }
   // int32_t nominal_start = nominal_start_;
   // bool nominal_start_reached = false;
@@ -329,28 +308,23 @@ void Envelope::RenderStage(
       // Even if there are no samples left, this will save bias state for us
       return RenderStageDispatch(sample_buffer, samples_left, bias_q31, bias_slope_q31);
     } else if (CHIFF) {
-      // Chiff: noise applied to output (not integrated into value, to keep
-      // attack duration deterministic).  Direction-agnostic; Trigger()
-      // makes chiff_downshift_lut_ silent for non-attack stages.
-      //
-      // Two dither axes, both fed from disjoint bit fields of a single
-      // PRNG word:
-      //   - LUT-index bump (bits 3..6): smooths K-rung transitions across
-      //     the attack's duration so long attacks don't reveal a stair
-      //     at the entry boundaries.
-      //   - downshift bump (bits 0..2): setting-driven continuous amplitude
-      //     inside a K rung.
-      uint32_t chiff_word = FastPrngDraw(chiff_state);
-      uint8_t entry_position_q4 = (phase_u32 >> 24) & 15;
-      uint8_t chiff_lut_index = lut_index +
-        FastPrngDitherBit<4>(chiff_word >> 3, entry_position_q4);
-      // chiff_downshift_lut_u8 has a phantom trailing entry, so the +1
-      // bump above is always in-bounds — no cap needed.
-      uint8_t chiff_downshift_u8 = chiff_downshift_lut_u8[chiff_lut_index];
-      uint8_t chiff_shift = chiff_downshift_u8 +
-        FastPrngDitherBit<3>(chiff_word, chiff_dither_threshold_u3);
-      int32_t chiff_noise = static_cast<int32_t>(chiff_word) >> chiff_shift;
-      OUTPUT_PERTURBED(chiff_noise);
+      // Chiff: variable-rate sample-and-hold with jittered tick timing.
+      // chiff_phase advances every sample; on wrap, the held value
+      // refreshes from value_q30 (click) and an xorshift step perturbs
+      // the next wrap timing for a "flam"-like irregular click train.
+      // Variable click intensity comes naturally from interval × slope:
+      // longer gap → bigger jump on refresh.
+      chiff_phase_u32 += chiff_increment_u32;
+      if (chiff_phase_u32 < chiff_increment_u32) {
+        chiff_held_value_q30 = value_q30;
+        chiff_prng_state ^= chiff_prng_state << 13;
+        chiff_prng_state ^= chiff_prng_state >> 17;
+        chiff_prng_state ^= chiff_prng_state << 5;
+        // Symmetric ±25% jitter on the next-wrap timing: shift the draw
+        // to [0, 2^31), recenter to [-2^30, 2^30).
+        chiff_phase_u32 += (chiff_prng_state >> 1) - (1u << 30);
+      }
+      OUTPUT_VALUE(chiff_held_value_q30);
     } else {
       OUTPUT;
     }
@@ -360,7 +334,11 @@ void Envelope::RenderStage(
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
   phase_increment_u32_ = phase_increment_u32;
-  if (MOVING && CHIFF) chiff_prng_state_ = chiff_state;
+  if (CHIFF) {
+    chiff_phase_u32_ = chiff_phase_u32;
+    chiff_held_value_q30_ = chiff_held_value_q30;
+    chiff_prng_state_ = chiff_prng_state;
+  }
 
   bias_q31_ = bias_q31;
 }
