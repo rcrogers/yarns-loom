@@ -109,21 +109,17 @@ class Envelope {
 
   uint32_t phase_u32_, phase_increment_u32_;
 
-  // Chiff: variable-rate sample-and-hold during attack, recreating the
-  // aliased grit of the original too-low-envelope-sample-rate bug.
+  // Chiff: probabilistic spike insertion during attack — a fraction of
+  // samples (0..50%) gets pushed a fraction toward stage target. Both
+  // probability and magnitude scale with chiff_amount; the held delta to
+  // target fades naturally as the attack progresses.
   // chiff_enabled_ is per-instance (set at Init); the dispatch also gates
   // on chiff_amount_ > 0 and stage == ATTACK so non-attack/off paths pay
   // zero chiff cost.
-  //
-  // Counter-based ticks: chiff_countdown decrements each sample; on hit,
-  // chiff_held_value latches the current envelope value and the counter
-  // refills with chiff_base_period + symmetric jitter (xorshift-driven).
-  // Variable intensity comes from variable interval × slope.
   bool chiff_enabled_;
-  int32_t chiff_countdown_s32_;
-  int32_t chiff_base_period_s32_;
+  uint32_t chiff_spike_probability_u32_; // threshold vs PRNG draw, max ~2^31 (50%)
   uint32_t chiff_prng_state_;
-  int32_t chiff_held_value_q30_;
+  uint16_t chiff_spike_alpha_q15_; // (target - value) * alpha >> 15
   uint8_t chiff_amount_; // 0 = off, up to 127
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
