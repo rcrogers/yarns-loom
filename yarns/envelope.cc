@@ -181,8 +181,8 @@ void Envelope::Trigger(EnvelopeStage stage) {
 
   // Chiff: precompute spike probability and magnitude downshift from
   // chiff_amount. Probability is expo-warped (mid-dial gives clear
-  // chiff). NOTE: probability comparison divides the PRNG draw range by
-  // 2, so the effective max here is ~100% rather than the intended 50%.
+  // chiff) and caps at ~50%: threshold = expo << 15 lands at ~2^31 at
+  // max, compared against the full uint32 PRNG draw range [0, 2^32).
   // Magnitude downshift is a coarser linear ladder; 16 steps spans 0%
   // to ~0.003% of (target − value).
   if (chiff_enabled_ && stage == ENV_STAGE_ATTACK && chiff_amount_) {
@@ -304,7 +304,7 @@ void Envelope::RenderStage(
       chiff_prng_state ^= chiff_prng_state << 5;
       int32_t spike_value_q30 = value_q30 +
         ((target_q30 - value_q30) >> chiff_spike_downshift_u8);
-      int32_t output_q30 = (chiff_prng_state >> 1) < chiff_spike_probability_u32
+      int32_t output_q30 = chiff_prng_state < chiff_spike_probability_u32
         ? spike_value_q30 : value_q30;
       OUTPUT_VALUE(output_q30);
     } else {
