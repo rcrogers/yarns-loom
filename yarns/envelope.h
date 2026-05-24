@@ -119,7 +119,7 @@ class Envelope {
   bool chiff_enabled_;
   uint32_t chiff_spike_probability_u32_; // threshold vs PRNG draw, max ~2^31 (50%)
   uint32_t chiff_prng_state_;
-  uint8_t chiff_spike_downshift_u8_; // right-shift on (target - value), 0=full
+  uint16_t chiff_spike_alpha_q15_; // (target - value) * alpha >> 15
   uint8_t chiff_amount_; // 0 = off, up to 127
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);

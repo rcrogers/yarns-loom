@@ -52,8 +52,11 @@ void Envelope::Init(int16_t zero_value_s16, bool chiff_enabled) {
   );
   chiff_amount_ = 0;
   chiff_spike_probability_u32_ = 0;
-  chiff_spike_downshift_u8_ = 31;
-  chiff_prng_state_ = 0xCAFEBABE; // nonzero seed for xorshift32
+  chiff_spike_alpha_q15_ = 0;
+  // Per-instance seed so gain/timbre/CV envelopes in a voice produce
+  // uncorrelated chiff streams.
+  chiff_prng_state_ =
+    static_cast<uint32_t>(reinterpret_cast<size_t>(this)) ^ 0xCAFEBABE;
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -179,16 +182,20 @@ void Envelope::Trigger(EnvelopeStage stage) {
     }
   }
 
-  // Chiff: precompute spike probability and magnitude downshift from
-  // chiff_amount. Probability is expo-warped (mid-dial gives clear
-  // chiff) and caps at ~50%: threshold = expo << 15 lands at ~2^31 at
-  // max, compared against the full uint32 PRNG draw range [0, 2^32).
-  // Magnitude downshift is a coarser linear ladder; 16 steps spans 0%
-  // to ~0.003% of (target − value).
+  // Chiff: precompute spike probability and magnitude alpha from
+  // chiff_amount.
+  //   - Probability is expo-warped through lut_env_expo for fast onset
+  //     (concave-down) so spikes start firing early in the dial. Caps
+  //     at ~50%: threshold = expo << 15 lands at ~2^31 at max,
+  //     compared against the full uint32 PRNG draw.
+  //   - Alpha is linear in chiff_amount: chiff_amount * 258 maps
+  //     0..127 → 0..32766 (~Q15 max). Pre-shifting delta to Q15 before
+  //     the multiply avoids int32 overflow (delta up to 2^30, alpha up
+  //     to 2^15, naive product would be 2^45 → low 32 bits ≈ 0).
   if (chiff_enabled_ && stage == ENV_STAGE_ATTACK && chiff_amount_) {
     const uint16_t expo_amount = lut_env_expo[chiff_amount_ << 1];
     chiff_spike_probability_u32_ = static_cast<uint32_t>(expo_amount) << 15;
-    chiff_spike_downshift_u8_ = (127 - chiff_amount_) >> 3;
+    chiff_spike_alpha_q15_ = static_cast<uint16_t>(chiff_amount_) * 258u;
   }
 }
 
@@ -258,11 +265,11 @@ void Envelope::RenderStage(
   );
   // Chiff state, only loaded when this instantiation actually uses it.
   uint32_t chiff_spike_probability_u32 = 0;
-  uint8_t chiff_spike_downshift_u8 = 31;
+  uint16_t chiff_spike_alpha_q15 = 0;
   uint32_t chiff_prng_state = 0;
   if (CHIFF) {
     chiff_spike_probability_u32 = chiff_spike_probability_u32_;
-    chiff_spike_downshift_u8 = chiff_spike_downshift_u8_;
+    chiff_spike_alpha_q15 = chiff_spike_alpha_q15_;
     chiff_prng_state = chiff_prng_state_;
   }
   // int32_t nominal_start = nominal_start_;
@@ -297,13 +304,15 @@ void Envelope::RenderStage(
     } else if (CHIFF) {
       // Chiff: probabilistic spike toward target. Each sample, a PRNG
       // draw decides (with chiff_spike_probability) whether to perturb
-      // the output. The spike adds (target − value) >> downshift, so its
-      // amplitude shrinks naturally as the attack approaches the target.
+      // the output. Spike = value + (target − value) × alpha, with
+      // delta pre-shifted to Q15 to keep the int32 product in range.
+      // Spike amplitude shrinks naturally as value approaches target.
       chiff_prng_state ^= chiff_prng_state << 13;
       chiff_prng_state ^= chiff_prng_state >> 17;
       chiff_prng_state ^= chiff_prng_state << 5;
-      int32_t spike_value_q30 = value_q30 +
-        ((target_q30 - value_q30) >> chiff_spike_downshift_u8);
+      int32_t delta_q15 = (target_q30 - value_q30) >> 15;
+      int32_t spike_offset_q30 = delta_q15 * chiff_spike_alpha_q15;
+      int32_t spike_value_q30 = value_q30 + spike_offset_q30;
       int32_t output_q30 = chiff_prng_state < chiff_spike_probability_u32
         ? spike_value_q30 : value_q30;
       OUTPUT_VALUE(output_q30);

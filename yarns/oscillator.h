@@ -123,7 +123,7 @@ class Oscillator {
     scale_ = scale;
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0, true);
-    timbre_envelope_.Init(0, false);
+    timbre_envelope_.Init(0, true);
     svf_.Init();
     pitch_ = 60 << 7;
     phase_ = 0;
