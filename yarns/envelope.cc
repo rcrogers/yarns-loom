@@ -51,8 +51,8 @@ void Envelope::Init(int16_t zero_value_s16) {
   );
   chiff_probability_u32_ = 0;
   chiff_prob_decrement_u32_ = 0;
-  chiff_start_q30_ = zero_value_q30;
-  chiff_target_q30_ = zero_value_q30;
+  chiff_start_s16_ = 0;
+  chiff_target_s16_ = 0;
   // Per-instance seed so gain/timbre/CV envelopes in a voice produce
   // uncorrelated chiff streams.
   chiff_prng_state_ =
@@ -94,11 +94,13 @@ void Envelope::NoteOn(
     case ENV_STAGE_DEAD:
     case ENV_NUM_STAGES:
       // Fresh attack: capture chiff bounds (current value as "start", attack
-      // target as "target") and arm the probability ramp. Decrement chosen
-      // so the ramp decays from base to 0 over chiff_increment's worth of
-      // samples (= attack stage duration).
-      chiff_start_q30_ = value_q30_;
-      chiff_target_q30_ = stage_target_q30_[ENV_STAGE_ATTACK];
+      // target as "target") in int16 form (ignoring bias contribution; the
+      // post-pass writes them directly into the int16 sample buffer). Arm
+      // probability ramp: decrement makes prob hit 0 in ~attack-duration
+      // samples.
+      chiff_start_s16_ = ClipU16(value_q30_ >> (30 - 16)) >> 1;
+      chiff_target_s16_ =
+        ClipU16(stage_target_q30_[ENV_STAGE_ATTACK] >> (30 - 16)) >> 1;
       chiff_probability_u32_ = static_cast<uint32_t>(chiff_amount) << 25;
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(chiff_probability_u32_) * adsr.attack_u32) >> 32);
@@ -200,6 +202,26 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
+
+  // Chiff post-process: probabilistic sample replacement, branchless via
+  // cmov. Runs every block (uniform worst-case cost). When the prob
+  // ramp has hit zero, the comparison just leaves the buffer untouched.
+  uint32_t prob = chiff_probability_u32_;
+  const uint32_t dec = chiff_prob_decrement_u32_;
+  uint32_t prng = chiff_prng_state_;
+  const int16_t start = chiff_start_s16_;
+  const int16_t target = chiff_target_s16_;
+  for (size_t i = 0; i < kAudioBlockSize; ++i) {
+    prng ^= prng << 13;
+    prng ^= prng >> 17;
+    prng ^= prng << 5;
+    int16_t replacement = (prng & 1u) ? target : start;
+    int16_t orig = sample_buffer[i];
+    sample_buffer[i] = prng < prob ? replacement : orig;
+    prob = prob > dec ? prob - dec : 0;
+  }
+  chiff_probability_u32_ = prob;
+  chiff_prng_state_ = prng;
 }
 
 void Envelope::RenderStageDispatch(
@@ -244,14 +266,6 @@ void Envelope::RenderStage(
     &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     &expo_slope_q30[0]
   );
-  // Chiff state loaded unconditionally — math runs every MOVING sample
-  // for uniform worst-case cost. Probability ramps down to 0 over the
-  // attack's duration; once at 0, no further spikes fire.
-  uint32_t chiff_probability_u32 = chiff_probability_u32_;
-  uint32_t chiff_prob_decrement_u32 = chiff_prob_decrement_u32_;
-  uint32_t chiff_prng_state = chiff_prng_state_;
-  int32_t chiff_start_q30 = chiff_start_q30_;
-  int32_t chiff_target_q30 = chiff_target_q30_;
   // int32_t nominal_start = nominal_start_;
   // bool nominal_start_reached = false;
 
@@ -282,24 +296,7 @@ void Envelope::RenderStage(
       // Even if there are no samples left, this will save bias state for us
       return RenderStageDispatch(sample_buffer, samples_left, bias_q31, bias_slope_q31);
     } else {
-      // Chiff: probabilistic sample replacement. PRNG draw decides:
-      //   - High bits (vs probability threshold): does a spike fire?
-      //   - Low bit: pick chiff_start or chiff_target as replacement.
-      // The two uses are bit-disjoint enough to be effectively
-      // independent (bit 0 is ~50/50 conditional on `state < threshold`).
-      // Probability ramps to 0 via per-sample decrement.
-      chiff_prng_state ^= chiff_prng_state << 13;
-      chiff_prng_state ^= chiff_prng_state >> 17;
-      chiff_prng_state ^= chiff_prng_state << 5;
-      int32_t replacement_q30 =
-        (chiff_prng_state & 1u) ? chiff_target_q30 : chiff_start_q30;
-      int32_t output_q30 = chiff_prng_state < chiff_probability_u32
-        ? replacement_q30 : value_q30;
-      // Saturating decrement on probability.
-      chiff_probability_u32 = chiff_probability_u32 > chiff_prob_decrement_u32
-        ? chiff_probability_u32 - chiff_prob_decrement_u32
-        : 0;
-      OUTPUT_VALUE(output_q30);
+      OUTPUT;
     }
   }
 
@@ -307,8 +304,6 @@ void Envelope::RenderStage(
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
   phase_increment_u32_ = phase_increment_u32;
-  chiff_prng_state_ = chiff_prng_state;
-  chiff_probability_u32_ = chiff_probability_u32;
 
   bias_q31_ = bias_q31;
 }

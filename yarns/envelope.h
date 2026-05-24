@@ -109,18 +109,19 @@ class Envelope {
 
   uint32_t phase_u32_, phase_increment_u32_;
 
-  // Chiff: probabilistic sample replacement. A fraction of samples (0..100%
-  // initially) gets replaced by either the captured attack-start value or
-  // the captured attack-target value (50/50 via a PRNG bit). The
-  // probability ramps linearly down to 0 over a duration equal to the
-  // attack stage; chiff persists past the end of attack (so a released
-  // note still gets chiff in its tail) and stops once the ramp hits 0.
-  // Per-sample cost is uniform across all MOVING stages.
+  // Chiff: probabilistic sample replacement applied as a post-process pass
+  // over the rendered int16 buffer. A fraction of samples (0..100%
+  // initially) gets replaced by either the attack-start value or the
+  // attack-target value (50/50 via a PRNG bit), cached as int16 at
+  // attack-trigger time. Probability ramps linearly to 0 over a duration
+  // equal to the attack stage; chiff persists past attack so a released
+  // note still gets chiff in its tail. Post-pass runs unconditionally
+  // each block for uniform worst-case cost.
   uint32_t chiff_probability_u32_;        // current ramping prob, max ~UINT32_MAX
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
   uint32_t chiff_prng_state_;
-  int32_t chiff_start_q30_;               // captured value at attack trigger
-  int32_t chiff_target_q30_;              // captured stage_target_q30[ATTACK]
+  int16_t chiff_start_s16_;               // captured start value as int16
+  int16_t chiff_target_s16_;              // captured attack target as int16
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
