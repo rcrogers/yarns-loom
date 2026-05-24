@@ -183,18 +183,15 @@ void Envelope::Trigger(EnvelopeStage stage) {
   }
 
   // Chiff: precompute spike probability and magnitude alpha from
-  // chiff_amount.
-  //   - Probability is expo-warped through lut_env_expo for fast onset
-  //     (concave-down) so spikes start firing early in the dial. Caps
-  //     at ~50%: threshold = expo << 15 lands at ~2^31 at max,
-  //     compared against the full uint32 PRNG draw.
-  //   - Alpha is linear in chiff_amount: chiff_amount * 258 maps
-  //     0..127 → 0..32766 (~Q15 max). Pre-shifting delta to Q15 before
-  //     the multiply avoids int32 overflow (delta up to 2^30, alpha up
-  //     to 2^15, naive product would be 2^45 → low 32 bits ≈ 0).
+  // chiff_amount, both linear over 0..127.
+  //   - Probability: chiff_amount << 24 caps at ~0x7F000000 ≈ 49.6% of
+  //     2^32 at max, compared against the full uint32 PRNG draw.
+  //   - Alpha: chiff_amount * 258 maps 0..127 → 0..32766 (~Q15 max).
+  //     Pre-shifting delta to Q15 before the multiply avoids int32
+  //     overflow (delta up to 2^30, alpha up to 2^15, naive product
+  //     would be 2^45 → low 32 bits ≈ 0).
   if (chiff_enabled_ && stage == ENV_STAGE_ATTACK && chiff_amount_) {
-    const uint16_t expo_amount = lut_env_expo[chiff_amount_ << 1];
-    chiff_spike_probability_u32_ = static_cast<uint32_t>(expo_amount) << 15;
+    chiff_spike_probability_u32_ = static_cast<uint32_t>(chiff_amount_) << 24;
     chiff_spike_alpha_q15_ = static_cast<uint16_t>(chiff_amount_) * 258u;
   }
 }
