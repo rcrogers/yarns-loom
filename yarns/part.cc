@@ -111,7 +111,7 @@ void Part::Init() {
   voicing_.env_mod_decay = -32;
   voicing_.env_mod_sustain = 0;
   voicing_.env_mod_release = 32;
-  voicing_.chiff_amount = 64;
+  voicing_.chiff_amount = 32;
 
   seq_.clock_division = 20;
   seq_.gate_length = 3;

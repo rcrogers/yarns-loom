@@ -72,7 +72,7 @@ void Envelope::NoteOn(
   // Chiff state derived from chiff_amount. Probability: chiff_amount << 24
   // caps at ~49.6% at max. Alpha: chiff_amount * 258 maps to ~Q15 max.
   // See per-sample code for the (target-value)*alpha mechanics.
-  chiff_spike_probability_u32_ = static_cast<uint32_t>(chiff_amount) << 24;
+  chiff_spike_probability_u32_ = static_cast<uint32_t>(chiff_amount) << (32 - 7 - 1);
   chiff_spike_alpha_q15_ = static_cast<uint16_t>(chiff_amount) * 258u;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
   int32_t min_target_q31 = min_target_s16 << 16;
