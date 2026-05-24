@@ -35,8 +35,7 @@ namespace yarns {
 
 using namespace stmlib;
 
-void Envelope::Init(int16_t zero_value_s16, bool chiff_enabled) {
-  chiff_enabled_ = chiff_enabled;
+void Envelope::Init(int16_t zero_value_s16) {
   phase_u32_ = phase_increment_u32_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
@@ -50,7 +49,6 @@ void Envelope::Init(int16_t zero_value_s16, bool chiff_enabled) {
     &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     0
   );
-  chiff_amount_ = 0;
   chiff_spike_probability_u32_ = 0;
   chiff_spike_alpha_q15_ = 0;
   // Per-instance seed so gain/timbre/CV envelopes in a voice produce
@@ -71,7 +69,11 @@ void Envelope::NoteOn(
   uint8_t chiff_amount
 ) {
   adsr_ = &adsr;
-  chiff_amount_ = chiff_amount;
+  // Chiff state derived from chiff_amount. Probability: chiff_amount << 24
+  // caps at ~49.6% at max. Alpha: chiff_amount * 258 maps to ~Q15 max.
+  // See per-sample code for the (target-value)*alpha mechanics.
+  chiff_spike_probability_u32_ = static_cast<uint32_t>(chiff_amount) << 24;
+  chiff_spike_alpha_q15_ = static_cast<uint16_t>(chiff_amount) * 258u;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
   int32_t min_target_q31 = min_target_s16 << 16;
   // NB: sustain level can be higher than peak
@@ -182,18 +184,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
     }
   }
 
-  // Chiff: precompute spike probability and magnitude alpha from
-  // chiff_amount, both linear over 0..127.
-  //   - Probability: chiff_amount << 24 caps at ~0x7F000000 ≈ 49.6% of
-  //     2^32 at max, compared against the full uint32 PRNG draw.
-  //   - Alpha: chiff_amount * 258 maps 0..127 → 0..32766 (~Q15 max).
-  //     Pre-shifting delta to Q15 before the multiply avoids int32
-  //     overflow (delta up to 2^30, alpha up to 2^15, naive product
-  //     would be 2^45 → low 32 bits ≈ 0).
-  if (chiff_enabled_ && stage == ENV_STAGE_ATTACK && chiff_amount_) {
-    chiff_spike_probability_u32_ = static_cast<uint32_t>(chiff_amount_) << 24;
-    chiff_spike_alpha_q15_ = static_cast<uint16_t>(chiff_amount_) * 258u;
-  }
 }
 
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
@@ -207,11 +197,7 @@ void Envelope::RenderStageDispatch(
   int16_t* sample_buffer, size_t samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
-  // Chiff costs are paid only when actually rendering chiff: enabled,
-  // amount > 0, and during ATTACK. Off/non-attack paths use CHIFF=false
-  // so the per-sample math is compiled out.
-  const bool use_chiff = chiff_enabled_ &&
-    chiff_amount_ > 0 && stage_ == ENV_STAGE_ATTACK;
+  const bool use_chiff = stage_ == ENV_STAGE_ATTACK;
   if (use_chiff) {
     if (phase_increment_u32_ == 0) {
       RenderStage<false , false , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);

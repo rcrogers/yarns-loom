@@ -57,7 +57,7 @@ class Envelope {
   Envelope() { }
   ~Envelope() { }
 
-  void Init(int16_t zero_value_s16, bool chiff_enabled);
+  void Init(int16_t zero_value_s16);
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
@@ -110,17 +110,13 @@ class Envelope {
   uint32_t phase_u32_, phase_increment_u32_;
 
   // Chiff: probabilistic spike insertion during attack — a fraction of
-  // samples (0..50%) gets pushed a fraction toward stage target. Both
-  // probability and magnitude scale with chiff_amount; the held delta to
-  // target fades naturally as the attack progresses.
-  // chiff_enabled_ is per-instance (set at Init); the dispatch also gates
-  // on chiff_amount_ > 0 and stage == ATTACK so non-attack/off paths pay
-  // zero chiff cost.
-  bool chiff_enabled_;
+  // samples (0..50%) gets pushed a fraction toward stage target. The
+  // dispatch gates the CHIFF template axis on stage == ATTACK so non-
+  // attack stages pay zero per-sample chiff cost. State is precomputed
+  // in NoteOn from the chiff_amount param.
   uint32_t chiff_spike_probability_u32_; // threshold vs PRNG draw, max ~2^31 (50%)
   uint32_t chiff_prng_state_;
   uint16_t chiff_spike_alpha_q15_; // (target - value) * alpha >> 15
-  uint8_t chiff_amount_; // 0 = off, up to 127
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
