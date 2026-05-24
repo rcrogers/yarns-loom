@@ -110,6 +110,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
   stage_ = stage;
   phase_u32_ = 0;
   target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
+  // Chiff state persists across stage transitions. Spike amplitude is
+  // delta * alpha (delta = target − value), so chiff fades naturally as
+  // the envelope approaches each stage's target — including release
+  // tails after NoteOff cuts attack short, avoiding an abrupt cutoff.
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
     case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
@@ -197,23 +201,12 @@ void Envelope::RenderStageDispatch(
   int16_t* sample_buffer, size_t samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
-  const bool use_chiff = stage_ == ENV_STAGE_ATTACK;
-  if (use_chiff) {
-    if (phase_increment_u32_ == 0) {
-      RenderStage<false , false , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    } else if (expo_slope_lut_q30_[0] > 0) {
-      RenderStage<true  , true  , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    } else {
-      RenderStage<true  , false , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    }
+  if (phase_increment_u32_ == 0) {
+    RenderStage<false , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+  } else if (expo_slope_lut_q30_[0] > 0) {
+    RenderStage<true  , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
   } else {
-    if (phase_increment_u32_ == 0) {
-      RenderStage<false , false , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    } else if (expo_slope_lut_q30_[0] > 0) {
-      RenderStage<true  , true  , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    } else {
-      RenderStage<true  , false , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    }
+    RenderStage<true  , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
   }
 }
 
@@ -230,7 +223,7 @@ void Envelope::RenderStageDispatch(
 
 #define OUTPUT OUTPUT_VALUE(value_q30)
 
-template<bool MOVING, bool POSITIVE_SLOPE, bool CHIFF>
+template<bool MOVING, bool POSITIVE_SLOPE>
 void Envelope::RenderStage(
   int16_t* sample_buffer, size_t samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
@@ -246,15 +239,12 @@ void Envelope::RenderStage(
     &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     &expo_slope_q30[0]
   );
-  // Chiff state, only loaded when this instantiation actually uses it.
-  uint32_t chiff_spike_probability_u32 = 0;
-  uint16_t chiff_spike_alpha_q15 = 0;
-  uint32_t chiff_prng_state = 0;
-  if (CHIFF) {
-    chiff_spike_probability_u32 = chiff_spike_probability_u32_;
-    chiff_spike_alpha_q15 = chiff_spike_alpha_q15_;
-    chiff_prng_state = chiff_prng_state_;
-  }
+  // Chiff state loaded unconditionally — math runs every MOVING sample
+  // for uniform worst-case cost. Probability/alpha are zeroed by Trigger
+  // outside attack, so non-attack samples evaluate to value_q30.
+  uint32_t chiff_spike_probability_u32 = chiff_spike_probability_u32_;
+  uint16_t chiff_spike_alpha_q15 = chiff_spike_alpha_q15_;
+  uint32_t chiff_prng_state = chiff_prng_state_;
   // int32_t nominal_start = nominal_start_;
   // bool nominal_start_reached = false;
 
@@ -284,12 +274,10 @@ void Envelope::RenderStage(
 
       // Even if there are no samples left, this will save bias state for us
       return RenderStageDispatch(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    } else if (CHIFF) {
-      // Chiff: probabilistic spike toward target. Each sample, a PRNG
-      // draw decides (with chiff_spike_probability) whether to perturb
-      // the output. Spike = value + (target − value) × alpha, with
-      // delta pre-shifted to Q15 to keep the int32 product in range.
-      // Spike amplitude shrinks naturally as value approaches target.
+    } else {
+      // Chiff: probabilistic spike toward target. Always runs (uniform
+      // worst case); non-attack stages have probability=0, so the spike
+      // never fires and output collapses to value_q30.
       chiff_prng_state ^= chiff_prng_state << 13;
       chiff_prng_state ^= chiff_prng_state >> 17;
       chiff_prng_state ^= chiff_prng_state << 5;
@@ -299,8 +287,6 @@ void Envelope::RenderStage(
       int32_t output_q30 = chiff_prng_state < chiff_spike_probability_u32
         ? spike_value_q30 : value_q30;
       OUTPUT_VALUE(output_q30);
-    } else {
-      OUTPUT;
     }
   }
 
@@ -308,9 +294,7 @@ void Envelope::RenderStage(
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
   phase_increment_u32_ = phase_increment_u32;
-  if (CHIFF) {
-    chiff_prng_state_ = chiff_prng_state;
-  }
+  chiff_prng_state_ = chiff_prng_state;
 
   bias_q31_ = bias_q31;
 }

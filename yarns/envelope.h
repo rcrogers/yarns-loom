@@ -71,7 +71,7 @@ class Envelope {
     int16_t* sample_buffer, size_t samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
-  template<bool MOVING, bool POSITIVE_SLOPE, bool CHIFF>
+  template<bool MOVING, bool POSITIVE_SLOPE>
   void RenderStage(
     int16_t* sample_buffer, size_t samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
@@ -109,11 +109,13 @@ class Envelope {
 
   uint32_t phase_u32_, phase_increment_u32_;
 
-  // Chiff: probabilistic spike insertion during attack — a fraction of
-  // samples (0..50%) gets pushed a fraction toward stage target. The
-  // dispatch gates the CHIFF template axis on stage == ATTACK so non-
-  // attack stages pay zero per-sample chiff cost. State is precomputed
-  // in NoteOn from the chiff_amount param.
+  // Chiff: probabilistic spike insertion — a fraction of samples (0..50%)
+  // gets pushed a fraction toward the current stage target. State is
+  // precomputed in NoteOn from chiff_amount and persists across stage
+  // transitions; spike amplitude naturally fades via (target − value)
+  // shrinking, so chiff trails into the release tail rather than
+  // cutting off abruptly. Per-sample cost is uniform across all MOVING
+  // stages (realtime-budget discipline).
   uint32_t chiff_spike_probability_u32_; // threshold vs PRNG draw, max ~2^31 (50%)
   uint32_t chiff_prng_state_;
   uint16_t chiff_spike_alpha_q15_; // (target - value) * alpha >> 15
