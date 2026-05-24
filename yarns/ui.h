@@ -265,6 +265,8 @@ class Ui {
   uint32_t tap_tempo_press_time_;
   bool encoder_long_press_event_sent_;
   uint32_t encoder_press_time_;
+  uint32_t encoder_last_increment_ms_;
+  int8_t encoder_last_increment_sign_; // -1, 0, +1; 0 = no prior increment
   
   UiMode mode_;
   UiMode previous_mode_;

@@ -370,12 +370,16 @@ class Menu {
   }
 
   void increment_index(int32_t n) {
-    pos_ += n;
-    if (pos_ < 0) {
-      pos_ = 0;
-    } else if (setting_list()[pos_] == SETTING_LAST) {
-      --pos_;
+    int32_t new_pos = pos_ + n;
+    if (new_pos < 0) {
+      new_pos = 0;
+    } else {
+      const SettingIndex* list = setting_list();
+      int32_t end = 0;
+      while (list[end] != SETTING_LAST) ++end;
+      if (new_pos >= end) new_pos = end - 1;
     }
+    pos_ = static_cast<int8_t>(new_pos);
   }
 
  private:

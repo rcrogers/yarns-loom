@@ -154,6 +154,8 @@ void Ui::Init() {
   tap_tempo_resolved_ = true;
   
   start_stop_press_time_ = 0;
+  encoder_last_increment_ms_ = 0;
+  encoder_last_increment_sign_ = 0;
   
   push_it_note_ = kC4;
   command_index_ = 0;
@@ -193,10 +195,25 @@ void Ui::Poll() {
     }
   }
   
-  // Encoder increment.
+  // Encoder increment, with tiered acceleration when scrolling rapidly in
+  // the same direction. Skipped in calibration adjustment because the
+  // handler already multiplies by 32 and fine control is wanted.
   int32_t increment = encoder_.increment();
   if (increment != 0) {
-    queue_.AddEvent(CONTROL_ENCODER, 0, increment);
+    const uint32_t now = system_clock.milliseconds();
+    const uint32_t dt = now - encoder_last_increment_ms_;
+    const int8_t sign = increment > 0 ? 1 : -1;
+    // 32-ms buckets: dt ∈ [0,32) ×16, [32,64) ×8, [64,96) ×4, [96,128) ×2,
+    // else ×1.
+    int32_t accel_shift = 0;
+    if (sign == encoder_last_increment_sign_ &&
+        mode_ != UI_MODE_CALIBRATION_ADJUST_LEVEL) {
+      const int32_t s = 4 - static_cast<int32_t>(dt >> 5);
+      if (s > 0) accel_shift = s;
+    }
+    encoder_last_increment_ms_ = now;
+    encoder_last_increment_sign_ = sign;
+    queue_.AddEvent(CONTROL_ENCODER, 0, increment << accel_shift);
   }
 
   // Switch press and long press.

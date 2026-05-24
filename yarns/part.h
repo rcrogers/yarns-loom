@@ -897,9 +897,10 @@ class Part {
   inline uint8_t recording_step() const { return seq_rec_step_; }
   inline uint8_t playing_step() const { return step_counter_ % seq_.num_steps; }
   inline uint8_t num_steps() const { return seq_.num_steps; }
-  inline void increment_recording_step_index(uint8_t n) {
-    seq_rec_step_ += n;
-    seq_rec_step_ = stmlib::modulo(seq_rec_step_, overdubbing() ? seq_.num_steps : kNumSteps);
+  inline void increment_recording_step_index(int32_t n) {
+    int32_t modulus = overdubbing() ? seq_.num_steps : kNumSteps;
+    seq_rec_step_ = stmlib::modulo(
+      static_cast<int32_t>(seq_rec_step_) + n, modulus);
   }
 
   void Pack(PackedPart& packed) const;
