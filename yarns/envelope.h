@@ -109,16 +109,18 @@ class Envelope {
 
   uint32_t phase_u32_, phase_increment_u32_;
 
-  // Chiff: probabilistic spike insertion — a fraction of samples (0..50%)
-  // gets pushed a fraction toward the current stage target. State is
-  // precomputed in NoteOn from chiff_amount and persists across stage
-  // transitions; spike amplitude naturally fades via (target − value)
-  // shrinking, so chiff trails into the release tail rather than
-  // cutting off abruptly. Per-sample cost is uniform across all MOVING
-  // stages (realtime-budget discipline).
-  uint32_t chiff_spike_probability_u32_; // threshold vs PRNG draw, max ~2^31 (50%)
+  // Chiff: probabilistic sample replacement. A fraction of samples (0..100%
+  // initially) gets replaced by either the captured attack-start value or
+  // the captured attack-target value (50/50 via a PRNG bit). The
+  // probability ramps linearly down to 0 over a duration equal to the
+  // attack stage; chiff persists past the end of attack (so a released
+  // note still gets chiff in its tail) and stops once the ramp hits 0.
+  // Per-sample cost is uniform across all MOVING stages.
+  uint32_t chiff_probability_u32_;        // current ramping prob, max ~UINT32_MAX
+  uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
   uint32_t chiff_prng_state_;
-  uint16_t chiff_spike_alpha_q15_; // (target - value) * alpha >> 15
+  int32_t chiff_start_q30_;               // captured value at attack trigger
+  int32_t chiff_target_q30_;              // captured stage_target_q30[ATTACK]
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
