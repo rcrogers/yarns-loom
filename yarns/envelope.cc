@@ -78,7 +78,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   );
   chiff_probability_u31_ = 0;
   chiff_prob_decrement_u32_ = 0;
-  chiff_lp_q15_ = 0;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -120,12 +119,10 @@ void Envelope::NoteOn(
     case ENV_STAGE_RELEASE:
     case ENV_STAGE_DEAD:
     case ENV_NUM_STAGES:
-      // Fresh attack: arm noise amplitude ramp. Probability lives in
-      // top-31-bit unsigned space [0, 2^31) so the USAT #31 saturating
-      // decrement in the post-pass works on the signed SUBS result.
+      // Fresh attack: arm chiff fire-probability ramp. Probability lives
+      // in top-31-bit unsigned space [0, 2^31) so the USAT #31 saturating
+      // decrement in RenderStage works on the signed SUBS result.
       // chiff_amount in [0, 127], so <<24 caps prob at 0x7F000000.
-      // LPF state is NOT reset here — it carries from any prior chiff
-      // tail, ensuring continuity if a re-trigger overlaps a fade-out.
       chiff_probability_u31_ = static_cast<uint32_t>(chiff_amount) << 24;
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(chiff_probability_u31_) * adsr.attack_u32) >> 32);
@@ -227,53 +224,7 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
-
-  // Chiff post-process: bandlimited noise additively mixed into the
-  // envelope output. Per sample, generate ±noise_amp (sign from PRNG
-  // bit, magnitude from prob), smooth through a 1-pole LPF, add to the
-  // sample saturating to [0, 32767]. The LPF cutoff sweeps per block
-  // (wider at attack onset → narrower as chiff fades) by deriving its
-  // shift from clz(prob). The decay of prob naturally fades the noise.
-  uint32_t prob = chiff_probability_u31_;
-  const uint32_t dec = chiff_prob_decrement_u32_;
-  const uint32_t prng_xor = chiff_prng_xor_u32_;
-  int32_t lp = chiff_lp_q15_;
-  // Per-block LPF cutoff sweep. clz(prob) is small at note onset (broad
-  // cutoff) and grows as prob decays (narrow cutoff = breath-like tail).
-  // |1 avoids clz(0)=undefined; >>3 maps clz∈[1,32] to shift∈[0,4];
-  // +2 anchors the floor; clamp to 6 caps the ceiling.
-  uint8_t lpf_shift = 2 + (__builtin_clz(prob | 1) >> 3);
-  if (lpf_shift > 6) lpf_shift = 6;
-  for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    // XOR with per-envelope mask decorrelates noise timing across
-    // simultaneously-triggered envelopes sharing the PRNG buffer.
-    uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
-    // Noise magnitude derived from prob (decays as prob decays).
-    // prob in [0, 2^31); >> 18 gives ~Q13 amplitude in [0, 8191] —
-    // 1/4 the prior level to avoid hard-clipping the envelope sum.
-    int32_t noise_amp = static_cast<int32_t>(prob >> 18);
-    int32_t noise = (prng & 1u) ? noise_amp : -noise_amp;
-    // 1-pole LPF with per-block variable shift.
-    lp += (noise - lp) >> lpf_shift;
-    // Add lp to sample, saturate to [0, 32767] (envelope is non-negative).
-    int32_t out;
-    __asm__ ("usat %0, #15, %1"
-             : "=r"(out)
-             : "r"(static_cast<int32_t>(sample_buffer[i]) + lp));
-    sample_buffer[i] = static_cast<int16_t>(out);
-    // Saturating decrement via SUBS + USAT: USAT clamps the signed
-    // result of (prob − dec) to [0, 2^31), giving 0 on underflow.
-    int32_t signed_prob;
-    __asm__ (
-        "subs %0, %1, %2\n\t"
-        "usat %0, #31, %0"
-        : "=r"(signed_prob)
-        : "r"(prob), "r"(dec)
-        : "cc");
-    prob = static_cast<uint32_t>(signed_prob);
-  }
-  chiff_probability_u31_ = prob;
-  chiff_lp_q15_ = lp;
+  // Chiff is folded into RenderStage's main loop — no post-pass.
 }
 
 void Envelope::RenderStageDispatch(
@@ -331,8 +282,18 @@ void Envelope::RenderStage(
   // Drive the loop by buffer-end pointer instead of a samples_left
   // counter, freeing a register for the LUT base hoist.
   int16_t* const buffer_end = sample_buffer + samples_left;
-  // int32_t nominal_start = nominal_start_;
-  // bool nominal_start_reached = false;
+
+  // Chiff: double-or-nothing slope perturbation. Per sample, if
+  // (prng >> 1) < prob, replace slope with either 2*slope or 0 (50/50
+  // via prng bit 0). Mean preserved → envelope still reaches target;
+  // variance ∝ slope² → long attacks auto-scale to subtler grit. Only
+  // meaningful for MOVING stages (slope is 0 in !MOVING). PRNG index
+  // tracks block position via the samples-already-processed offset, so
+  // mid-block stage transitions don't restart from buffer[0].
+  uint32_t prob = chiff_probability_u31_;
+  const uint32_t dec = chiff_prob_decrement_u32_;
+  const uint32_t prng_xor = chiff_prng_xor_u32_;
+  const uint32_t* prng_ptr = &shared_prng_buffer[kAudioBlockSize - samples_left];
 
   while (sample_buffer < buffer_end) {
     if (!MOVING) {
@@ -349,12 +310,48 @@ void Envelope::RenderStage(
 
     uint8_t lut_index = phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits);
     int32_t slope_q30 = slope_lut[lut_index];
+
+    // Chiff slope perturbation with margin-derived intensity. When the
+    // roll fires (roll < prob), the *depth* below prob picks the
+    // multiplier strength: large margin → high shift → aggressive,
+    // small margin → low shift → gentle. Auto-tapers as prob decays
+    // (margin is bounded by prob, so shrinking prob means smaller
+    // margins → lower-shift fires on average).
+    //
+    // shift = max(0, 6 - clz(margin)/4) in [0, 6]
+    // 50/50 between slope×(2^shift + 1) and slope×−(2^shift − 1)
+    // → mean = slope at every shift; variance per fire = 2^(2·shift),
+    //   ranging from 1 to 4096 (vs prior fixed 1024).
+    uint32_t prng = *prng_ptr++ ^ prng_xor;
+    uint32_t roll = prng >> 1;
+    if (roll < prob) {
+      uint32_t margin = prob - roll;
+      int32_t shift_signed = 6 -
+          static_cast<int32_t>(__builtin_clz(margin) >> 2);
+      uint32_t shift = shift_signed < 0 ? 0u :
+          static_cast<uint32_t>(shift_signed);
+      int32_t scaled = slope_q30 << shift;
+      slope_q30 = (prng & 1u) ? (slope_q30 + scaled)
+                              : (slope_q30 - scaled);
+    }
+    // Saturating decrement via SUBS + USAT: clamps signed (prob − dec)
+    // to [0, 2^31), giving 0 on underflow.
+    int32_t signed_prob;
+    __asm__ (
+        "subs %0, %1, %2\n\t"
+        "usat %0, #31, %0"
+        : "=r"(signed_prob)
+        : "r"(prob), "r"(dec)
+        : "cc");
+    prob = static_cast<uint32_t>(signed_prob);
+
     value_q30 += slope_q30;
     if (VALUE_PASSED(target_q30)) {
       value_q30 = target_q30; // Don't overshoot target
       OUTPUT;
 
       value_q30_ = value_q30; // So Trigger knows actual start value
+      chiff_probability_u31_ = prob;  // Save chiff state before re-dispatch
       Trigger(static_cast<EnvelopeStage>(stage + 1));
 
       // Even if there are no samples left, this will save bias state for us
@@ -368,6 +365,7 @@ void Envelope::RenderStage(
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
   phase_increment_u32_ = phase_increment_u32;
+  chiff_probability_u31_ = prob;
 
   bias_q31_ = bias_q31;
 }
