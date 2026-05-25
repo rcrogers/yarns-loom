@@ -337,22 +337,23 @@ void Envelope::RenderStage(
     uint32_t roll = prng >> 1;
     if (roll < prob) {
       uint32_t margin = prob - roll;
-      int32_t shift_signed = 5 -
+      int32_t shift_signed = 7 -
           static_cast<int32_t>(__builtin_clz(margin) >> 2);
       uint32_t shift = shift_signed < 0 ? 0u :
           static_cast<uint32_t>(shift_signed);
-      // SSAT #24 caps |slope_for_chiff| ≤ 2^23 before the shift, so
-      // (slope << 7) fits int31 — no overflow into bit 31. For fast
-      // attacks where slope > 2^23, perturbation magnitude is capped
-      // at 2^30 (sufficient since short attacks don't need huge kicks).
-      // For typical slopes (< 2^23), SSAT is a no-op.
+      // Slope SSAT keeps (slope << shift_max) ≤ box/2 so per-kick
+      // magnitude can't pin the random walk to its wall.
+      //   slope_max * 2^7 ≤ 2^27   →   slope_max ≤ 2^20   →   SSAT #21
+      // For typical attack slopes (< 2^20) this is a no-op. Fast
+      // attacks get clamped — fine, they don't need huge kicks.
       int32_t slope_for_chiff;
-      __asm__ ("ssat %0, #24, %1"
+      __asm__ ("ssat %0, #21, %1"
                : "=r"(slope_for_chiff) : "r"(slope_q30));
       int32_t scaled = slope_for_chiff << shift;
       int32_t perturbed = (prng & 1u) ? (chiff_offset + scaled)
                                       : (chiff_offset - scaled);
-      // Clamp chiff_offset magnitude to ±2^28 (SSAT #29 → signed 29-bit).
+      // Safety SSAT in case of transient spikes; main amplitude
+      // bounding is via the leaky integrator above.
       __asm__ ("ssat %0, #29, %1"
                : "=r"(chiff_offset) : "r"(perturbed));
     }
