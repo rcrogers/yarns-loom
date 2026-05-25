@@ -114,7 +114,10 @@ enum OscillatorShape {
 
 class Oscillator {
  public:
-  typedef void (Oscillator::*RenderFn)(int16_t* timbre_samples, int16_t* audio_samples);
+  // Wave render: multiply-accumulate each sample (* gain >> 15) into audio_mix.
+  // Saves a 128B intermediate buffer and the per-sample LDR/MUL/STR round-trip
+  // that q15_multiply_accumulate would otherwise need.
+  typedef void (Oscillator::*RenderFn)(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
 
   Oscillator() { }
   ~Oscillator() { }
@@ -160,25 +163,25 @@ class Oscillator {
   static RenderFn fn_table_[];
   
  private:
-  void RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderLPSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  // void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
-  // void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderTransfer(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderFM(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderFilteredNoise(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderLPPulse(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderLPSaw(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderVariablePulse(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderVariableSaw(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderSawPulseMorph(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderSyncSine(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderSyncTriangle(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderSyncPulse(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderSyncSaw(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  // void RenderFoldSine(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  // void RenderFoldTriangle(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderDiracComb(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderTanhSine(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderExponentialSine(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderTransfer(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
+  void RenderFM(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
