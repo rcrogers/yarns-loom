@@ -115,7 +115,12 @@ void Envelope::NoteOn(
       chiff_start_s16_ = ClipU16(value_q30_ >> (30 - 16)) >> 1;
       chiff_target_s16_ =
         ClipU16(stage_target_q30_[ENV_STAGE_ATTACK] >> (30 - 16)) >> 1;
-      chiff_probability_u32_ = static_cast<uint32_t>(chiff_amount) << 25;
+      // Probability lives in the top-31-bit unsigned space [0, 2^31). With
+      // chiff_amount in [0, 127], <<24 caps prob at 0x7F000000 so the SUBS
+      // result stays non-negative when interpreted as int32 — required for
+      // the USAT #31 saturating decrement below. The post-pass compares
+      // against (prng >> 1), preserving the same 0..~99% trigger range.
+      chiff_probability_u32_ = static_cast<uint32_t>(chiff_amount) << 24;
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(chiff_probability_u32_) * adsr.attack_u32) >> 32);
       Trigger(ENV_STAGE_ATTACK);
@@ -228,10 +233,13 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
     uint32_t prng = shared_prng_buffer[i];
     int16_t replacement = (prng & 1u) ? target : start;
-    if (prng < prob) sample_buffer[i] = replacement;
+    // Compare against (prng >> 1) so prob lives in the top-31-bit space
+    // [0, 2^31) — required by the USAT #31 saturating decrement below.
+    if ((prng >> 1) < prob) sample_buffer[i] = replacement;
     // Saturating decrement via SUBS + USAT: 2 cycles vs ~3 for the
     // cmp/cmov idiom. USAT clamps the signed result of (prob − dec) to
-    // [0, 2^31), giving 0 on underflow.
+    // [0, 2^31), giving 0 on underflow. Safe because prob is bounded to
+    // [0, 2^31) by the <<24 in NoteOn.
     int32_t signed_prob;
     __asm__ (
         "subs %0, %1, %2\n\t"

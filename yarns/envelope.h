@@ -123,7 +123,7 @@ class Envelope {
   // unconditionally each block for uniform worst-case cost. All envelopes
   // share one PRNG buffer per block (filled in FillSharedPrngBuffer); the
   // resulting cross-envelope correlation is acceptable for this effect.
-  uint32_t chiff_probability_u32_;        // current ramping prob, max ~UINT32_MAX
+  uint32_t chiff_probability_u32_;        // current ramping prob, max ~2^31-1 (compared against prng>>1)
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
   int16_t chiff_start_s16_;               // captured start value as int16
   int16_t chiff_target_s16_;              // captured attack target as int16
