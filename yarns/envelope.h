@@ -132,6 +132,7 @@ class Envelope {
   uint32_t chiff_probability_u31_;        // current ramping fire prob, max ~2^31-1
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
   uint32_t chiff_prng_xor_u32_;           // per-instance PRNG decorrelation mask, set in Init()
+  int32_t  chiff_offset_q30_;             // additive random-walk offset, bounded by SSAT
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
