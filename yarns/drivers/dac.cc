@@ -166,11 +166,12 @@ void Dac::Init() {
   TIM_Cmd(TIM1, ENABLE);
 }
 
-// Write a packed high:low command word pair to a buffer position
+// Write a packed high:low command word pair via one 32-bit store. ptr must
+// be 4-byte aligned (the SPI buffer is, and channel pairs sit on 4-byte
+// boundaries since kDacWordsPerSample = 2). The 32-bit store is atomic
+// w.r.t. the DMA's half-word reads.
 #define WRITE_WORDS(ptr, words_exp) do { \
-  uint32_t w_ = (words_exp); \
-  (ptr)[0] = (w_ >> 16) & 0xFFFF; \
-  (ptr)[1] = w_ & 0xFFFF; \
+  *reinterpret_cast<volatile uint32_t*>(ptr) = (words_exp); \
 } while(0)
 
 // Write interleaved DAC words starting at start_frame
@@ -187,11 +188,11 @@ void Dac::Init() {
   }
 
 void Dac::BufferSamples(uint8_t block, uint8_t channel, int16_t* samples) {
-  BUFFER_SAMPLES(channel, FormatCommandWords(channel, samples[i]), 0)
+  BUFFER_SAMPLES(channel, FormatCommandWord(channel, samples[i]), 0)
 }
 
 void Dac::BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample) {
-  uint32_t static_words = FormatCommandWords(channel, sample);
+  uint32_t static_words = FormatCommandWord(channel, sample);
   BUFFER_SAMPLES(channel, static_words, 0)
 }
 
@@ -213,7 +214,7 @@ void Dac::BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample) {
 //    Stale injections in the consumed block are erased when the main loop
 //    fills that block with NOOPs on its next cycle.
 void Dac::UpdateDC(uint8_t channel, uint16_t sample) {
-  uint32_t words = FormatCommandWords(channel, sample);
+  uint32_t words = FormatCommandWord(channel, sample);
 
   // (1) Frame 0 of fillable block
   size_t frame0_offset = (fillable_block_ ? kDacWordsPerBlock : 0)
@@ -230,8 +231,7 @@ void Dac::UpdateDC(uint8_t channel, uint16_t sample) {
 
 void Dac::FillDCNoops(uint8_t block, uint8_t channel) {
   // Skip frame 0 (owned by SysTick's UpdateDC)
-  static const uint32_t noop = (static_cast<uint32_t>(kNoopHighWord) << 16) | kNoopLowWord;
-  BUFFER_SAMPLES(channel, noop, 1)
+  BUFFER_SAMPLES(channel, kNoopPacked, 1)
 }
 
 uint32_t Dac::timer_base_freq(uint8_t apb) const {
