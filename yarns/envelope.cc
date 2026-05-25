@@ -231,23 +231,30 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Chiff post-process: bandlimited noise additively mixed into the
   // envelope output. Per sample, generate ±noise_amp (sign from PRNG
   // bit, magnitude from prob), smooth through a 1-pole LPF, add to the
-  // sample saturating to [0, 32767]. The LPF (alpha = 1/16, cutoff
-  // ~450 Hz at 45 kHz SR) shapes the noise spectrum toward "breath"
-  // rather than "hiss". The decay of prob naturally fades the noise.
+  // sample saturating to [0, 32767]. The LPF cutoff sweeps per block
+  // (wider at attack onset → narrower as chiff fades) by deriving its
+  // shift from clz(prob). The decay of prob naturally fades the noise.
   uint32_t prob = chiff_probability_u31_;
   const uint32_t dec = chiff_prob_decrement_u32_;
   const uint32_t prng_xor = chiff_prng_xor_u32_;
   int32_t lp = chiff_lp_q15_;
+  // Per-block LPF cutoff sweep. clz(prob) is small at note onset (broad
+  // cutoff) and grows as prob decays (narrow cutoff = breath-like tail).
+  // |1 avoids clz(0)=undefined; >>3 maps clz∈[1,32] to shift∈[0,4];
+  // +2 anchors the floor; clamp to 6 caps the ceiling.
+  uint8_t lpf_shift = 2 + (__builtin_clz(prob | 1) >> 3);
+  if (lpf_shift > 6) lpf_shift = 6;
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
     // XOR with per-envelope mask decorrelates noise timing across
     // simultaneously-triggered envelopes sharing the PRNG buffer.
     uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
     // Noise magnitude derived from prob (decays as prob decays).
-    // prob in [0, 2^31); >> 16 gives ~Q15 amplitude in [0, 32767].
-    int32_t noise_amp = static_cast<int32_t>(prob >> 16);
+    // prob in [0, 2^31); >> 18 gives ~Q13 amplitude in [0, 8191] —
+    // 1/4 the prior level to avoid hard-clipping the envelope sum.
+    int32_t noise_amp = static_cast<int32_t>(prob >> 18);
     int32_t noise = (prng & 1u) ? noise_amp : -noise_amp;
-    // 1-pole LPF: lp += (noise - lp) >> 4
-    lp += (noise - lp) >> 4;
+    // 1-pole LPF with per-block variable shift.
+    lp += (noise - lp) >> lpf_shift;
     // Add lp to sample, saturate to [0, 32767] (envelope is non-negative).
     int32_t out;
     __asm__ ("usat %0, #15, %1"
