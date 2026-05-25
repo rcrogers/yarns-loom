@@ -67,7 +67,7 @@ void Envelope::Init(int16_t zero_value_s16) {
     &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     0
   );
-  chiff_probability_u32_ = 0;
+  chiff_probability_u31_ = 0;
   chiff_prob_decrement_u32_ = 0;
   chiff_start_s16_ = 0;
   chiff_target_s16_ = 0;
@@ -120,9 +120,9 @@ void Envelope::NoteOn(
       // result stays non-negative when interpreted as int32 — required for
       // the USAT #31 saturating decrement below. The post-pass compares
       // against (prng >> 1), preserving the same 0..~99% trigger range.
-      chiff_probability_u32_ = static_cast<uint32_t>(chiff_amount) << 24;
+      chiff_probability_u31_ = static_cast<uint32_t>(chiff_amount) << 24;
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
-        (static_cast<uint64_t>(chiff_probability_u32_) * adsr.attack_u32) >> 32);
+        (static_cast<uint64_t>(chiff_probability_u31_) * adsr.attack_u32) >> 32);
       Trigger(ENV_STAGE_ATTACK);
       break;
   }
@@ -226,7 +226,7 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // store (STRHcc) avoids a per-sample ldrh of the original — when no
   // spike fires we just don't write. Reads from the system-shared PRNG
   // buffer filled once per block.
-  uint32_t prob = chiff_probability_u32_;
+  uint32_t prob = chiff_probability_u31_;
   const uint32_t dec = chiff_prob_decrement_u32_;
   const int16_t start = chiff_start_s16_;
   const int16_t target = chiff_target_s16_;
@@ -249,7 +249,7 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
         : "cc");
     prob = static_cast<uint32_t>(signed_prob);
   }
-  chiff_probability_u32_ = prob;
+  chiff_probability_u31_ = prob;
 }
 
 void Envelope::RenderStageDispatch(
