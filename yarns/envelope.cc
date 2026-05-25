@@ -37,6 +37,15 @@ using namespace stmlib;
 
 // System-wide PRNG buffer shared by all envelopes' chiff post-passes.
 // Filled once per audio block by FillSharedPrngBuffer().
+//
+// NB: the perf benefit of sharing this buffer (vs each envelope running
+// inline xorshift32) is marginal once the per-envelope decorrelation EOR
+// is factored in — roughly 1 cycle/sample/envelope saved, offset by the
+// ~448-cycle one-time fill. Breaks even around N=4-5 envelopes per block;
+// at the worst-case 8 (unison-paraphonic gain+timbre × 4 voices) saves
+// only ~70 cycles per block. The design is kept because shared state
+// makes the decorrelation mask + chiff timing reasoning local to one
+// place and avoids per-envelope PRNG state in RAM.
 namespace {
   uint32_t shared_prng_buffer[kAudioBlockSize];
   uint32_t shared_prng_state = 0xCAFEBABE;
