@@ -184,6 +184,7 @@ int main(void) {
     uint8_t* block_num_ptr = dac.PtrToFillableBlockNum();
     if (block_num_ptr) {
       uint8_t block = *block_num_ptr;
+      Envelope::FillSharedPrngBuffer();
       for (uint8_t channel = 0; channel < kNumCVOutputs; ++channel) {
         multi.mutable_cv_output(channel)->RenderSamples(
           block, channel, cv[channel]
