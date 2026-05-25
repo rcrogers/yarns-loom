@@ -71,6 +71,11 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_prob_decrement_u32_ = 0;
   chiff_start_s16_ = 0;
   chiff_target_s16_ = 0;
+  // Address-derived mask: every Envelope instance lives at a distinct
+  // address, so each gets a unique XOR mask. Low bits of the address
+  // differ across instances within the same parent struct, which is all
+  // that's needed to decorrelate sample positions.
+  chiff_prng_xor_u32_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -230,8 +235,11 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   const uint32_t dec = chiff_prob_decrement_u32_;
   const int16_t start = chiff_start_s16_;
   const int16_t target = chiff_target_s16_;
+  const uint32_t prng_xor = chiff_prng_xor_u32_;
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    uint32_t prng = shared_prng_buffer[i];
+    // XOR with per-envelope mask decorrelates this envelope's chiff
+    // positions from other envelopes sharing the same PRNG buffer.
+    uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
     int16_t replacement = (prng & 1u) ? target : start;
     // Compare against (prng >> 1) so prob lives in the top-31-bit space
     // [0, 2^31) — required by the USAT #31 saturating decrement below.

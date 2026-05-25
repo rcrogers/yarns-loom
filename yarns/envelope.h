@@ -125,6 +125,13 @@ class Envelope {
   // resulting cross-envelope correlation is acceptable for this effect.
   uint32_t chiff_probability_u31_;        // current ramping prob, max ~2^31-1 (compared against prng>>1)
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
+  // Per-instance decorrelation mask XORed into the shared PRNG draw each
+  // sample. Identical chiff_amount + identical ADSR yield identical prob
+  // trajectories across all envelopes triggered together; without this
+  // mask, all such envelopes would fire chiff on the exact same sample
+  // positions every block, producing an impulsive correlated burst at
+  // multi-NoteOn. Mask is derived from `this` once in Init().
+  uint32_t chiff_prng_xor_u32_;
   int16_t chiff_start_s16_;               // captured start value as int16
   int16_t chiff_target_s16_;              // captured attack target as int16
 
