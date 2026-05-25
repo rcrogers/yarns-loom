@@ -251,7 +251,8 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
-  int16_t samples[kAudioBlockSize] = {0};
+  // Buffer is fully overwritten by both branches below — skip zero-init.
+  int16_t samples[kAudioBlockSize];
   if (is_envelope()) {
     envelope_.RenderSamples(samples, envelope_bias_ << 16);
     for (size_t i = 0; i < kAudioBlockSize; ++i) {

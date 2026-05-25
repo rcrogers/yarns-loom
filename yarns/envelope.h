@@ -58,6 +58,10 @@ class Envelope {
   ~Envelope() { }
 
   void Init(int16_t zero_value_s16);
+  // Refill the system-wide chiff PRNG buffer; must be called once per
+  // audio block (before any envelope renders) so all envelopes share the
+  // same random words this block.
+  static void FillSharedPrngBuffer();
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
@@ -112,14 +116,15 @@ class Envelope {
   // Chiff: probabilistic sample replacement applied as a post-process pass
   // over the rendered int16 buffer. A fraction of samples (0..100%
   // initially) gets replaced by either the attack-start value or the
-  // attack-target value (50/50 via a PRNG bit), cached as int16 at
-  // attack-trigger time. Probability ramps linearly to 0 over a duration
-  // equal to the attack stage; chiff persists past attack so a released
-  // note still gets chiff in its tail. Post-pass runs unconditionally
-  // each block for uniform worst-case cost.
+  // attack-target value (50/50 via a bit of the shared PRNG draw), cached
+  // as int16 at attack-trigger time. Probability ramps linearly to 0 over
+  // a duration equal to the attack stage; chiff persists past attack so a
+  // released note still gets chiff in its tail. Post-pass runs
+  // unconditionally each block for uniform worst-case cost. All envelopes
+  // share one PRNG buffer per block (filled in FillSharedPrngBuffer); the
+  // resulting cross-envelope correlation is acceptable for this effect.
   uint32_t chiff_probability_u32_;        // current ramping prob, max ~UINT32_MAX
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
-  uint32_t chiff_prng_state_;
   int16_t chiff_start_s16_;               // captured start value as int16
   int16_t chiff_target_s16_;              // captured attack target as int16
 

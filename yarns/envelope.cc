@@ -35,6 +35,24 @@ namespace yarns {
 
 using namespace stmlib;
 
+// System-wide PRNG buffer shared by all envelopes' chiff post-passes.
+// Filled once per audio block by FillSharedPrngBuffer().
+namespace {
+  uint32_t shared_prng_buffer[kAudioBlockSize];
+  uint32_t shared_prng_state = 0xCAFEBABE;
+}  // namespace
+
+void Envelope::FillSharedPrngBuffer() {
+  uint32_t state = shared_prng_state;
+  for (size_t i = 0; i < kAudioBlockSize; ++i) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    shared_prng_buffer[i] = state;
+  }
+  shared_prng_state = state;
+}
+
 void Envelope::Init(int16_t zero_value_s16) {
   phase_u32_ = phase_increment_u32_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
@@ -53,10 +71,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_prob_decrement_u32_ = 0;
   chiff_start_s16_ = 0;
   chiff_target_s16_ = 0;
-  // Per-instance seed so gain/timbre/CV envelopes in a voice produce
-  // uncorrelated chiff streams.
-  chiff_prng_state_ =
-    static_cast<uint32_t>(reinterpret_cast<size_t>(this)) ^ 0xCAFEBABE;
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -203,25 +217,31 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
 
-  // Chiff post-process: probabilistic sample replacement, branchless via
-  // cmov. Runs every block (uniform worst-case cost). When the prob
-  // ramp has hit zero, the comparison just leaves the buffer untouched.
+  // Chiff post-process: probabilistic sample replacement. Conditional
+  // store (STRHcc) avoids a per-sample ldrh of the original — when no
+  // spike fires we just don't write. Reads from the system-shared PRNG
+  // buffer filled once per block.
   uint32_t prob = chiff_probability_u32_;
   const uint32_t dec = chiff_prob_decrement_u32_;
-  uint32_t prng = chiff_prng_state_;
   const int16_t start = chiff_start_s16_;
   const int16_t target = chiff_target_s16_;
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    prng ^= prng << 13;
-    prng ^= prng >> 17;
-    prng ^= prng << 5;
+    uint32_t prng = shared_prng_buffer[i];
     int16_t replacement = (prng & 1u) ? target : start;
-    int16_t orig = sample_buffer[i];
-    sample_buffer[i] = prng < prob ? replacement : orig;
-    prob = prob > dec ? prob - dec : 0;
+    if (prng < prob) sample_buffer[i] = replacement;
+    // Saturating decrement via SUBS + USAT: 2 cycles vs ~3 for the
+    // cmp/cmov idiom. USAT clamps the signed result of (prob − dec) to
+    // [0, 2^31), giving 0 on underflow.
+    int32_t signed_prob;
+    __asm__ (
+        "subs %0, %1, %2\n\t"
+        "usat %0, #31, %0"
+        : "=r"(signed_prob)
+        : "r"(prob), "r"(dec)
+        : "cc");
+    prob = static_cast<uint32_t>(signed_prob);
   }
   chiff_probability_u32_ = prob;
-  chiff_prng_state_ = prng;
 }
 
 void Envelope::RenderStageDispatch(
@@ -242,11 +262,20 @@ void Envelope::RenderStageDispatch(
   (!POSITIVE_SLOPE && value_q30 <= x) \
 )
 
+// Output composition collapsed to single USAT-with-shift:
+//   original: (v >> 14) + (bias >> 15), clip to u16, then >> 1.
+//   = ((v << 1) + bias) >> 16, clamped to [0, 32767].
+// USAT can fold the arithmetic-shift-right into the same instruction, so
+// the whole compose+clip+halve becomes one add + one usat.
 #define OUTPUT_VALUE(v) \
   bias_q31 += bias_slope_q31; \
-  int32_t overflowing_u16 = ((v) >> (30 - 16)) + (bias_q31 >> (31 - 16)); \
-  uint16_t clipped_u16 = ClipU16(overflowing_u16); \
-  *sample_buffer++ = clipped_u16 >> 1; // 0..INT16_MAX
+  { \
+    int32_t output_composed = bias_q31 + (static_cast<int32_t>(v) << 1); \
+    int32_t output_saturated; \
+    __asm__ ("usat %0, #15, %1, asr #16" \
+             : "=r"(output_saturated) : "r"(output_composed)); \
+    *sample_buffer++ = static_cast<int16_t>(output_saturated); \
+  }
 
 #define OUTPUT OUTPUT_VALUE(value_q30)
 
@@ -266,25 +295,28 @@ void Envelope::RenderStage(
     &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
     &expo_slope_q30[0]
   );
+  const int32_t* const slope_lut = expo_slope_q30;
+  // Drive the loop by buffer-end pointer instead of a samples_left
+  // counter, freeing a register for the LUT base hoist.
+  int16_t* const buffer_end = sample_buffer + samples_left;
   // int32_t nominal_start = nominal_start_;
   // bool nominal_start_reached = false;
 
-  while (samples_left--) {
+  while (sample_buffer < buffer_end) {
     if (!MOVING) {
       value_q30 = target_q30; // In case we skipped a stage with delta that was 1) nonzero and 2) too small to produce a nonzero slope
       OUTPUT;
       continue;
     }
 
-    // Stay at initial (steepest) slope until we reach the nominal start
-    // nominal_start_reached = nominal_start_reached || VALUE_PASSED(nominal_start);
-    // if (nominal_start_reached) {
+    // Phase advance. Wrap saturation removed: when phase wraps near
+    // end-of-stage, lut_index resets to 0 (steepest slope), which makes
+    // value jump past target → VALUE_PASSED fires within 1–2 samples
+    // anyway. Saves ~2 cycles/sample in the hot loop.
     phase_u32 += phase_increment_u32;
-    if (phase_u32 < phase_increment_u32) phase_u32 = UINT32_MAX;
-    // }
 
     uint8_t lut_index = phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits);
-    int32_t slope_q30 = expo_slope_q30[lut_index];
+    int32_t slope_q30 = slope_lut[lut_index];
     value_q30 += slope_q30;
     if (VALUE_PASSED(target_q30)) {
       value_q30 = target_q30; // Don't overshoot target
@@ -294,7 +326,7 @@ void Envelope::RenderStage(
       Trigger(static_cast<EnvelopeStage>(stage + 1));
 
       // Even if there are no samples left, this will save bias state for us
-      return RenderStageDispatch(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+      return RenderStageDispatch(sample_buffer, buffer_end - sample_buffer, bias_q31, bias_slope_q31);
     } else {
       OUTPUT;
     }

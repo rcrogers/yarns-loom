@@ -248,17 +248,20 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
 // see yarns/stack_budget.h for the cumulative-stack accounting and
 // compile-time budget check.
 void Oscillator::Render(int16_t* audio_mix) {
-  int16_t timbre_samples[kAudioBlockSize] = {0};
+  // Buffers are stack locals (faster than statics here per measurement)
+  // and fully overwritten by the calls that follow, so we skip the
+  // zero-init that the original {0} aggregate-init triggered.
+  int16_t timbre_samples[kAudioBlockSize];
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
   timbre_envelope_.RenderSamples(timbre_samples, timbre_bias << 16);
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
-  int16_t audio_samples[kAudioBlockSize] = {0};
+  int16_t audio_samples[kAudioBlockSize];
   (this->*fn)(timbre_samples, audio_samples);
 
-  int16_t gain_samples[kAudioBlockSize] = {0};
+  int16_t gain_samples[kAudioBlockSize];
   int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
   gain_envelope_.RenderSamples(gain_samples, gain_bias << 16);
 
