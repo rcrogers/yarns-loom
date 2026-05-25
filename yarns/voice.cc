@@ -255,8 +255,13 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
   int16_t samples[kAudioBlockSize];
   if (is_envelope()) {
     envelope_.RenderSamples(samples, envelope_bias_ << 16);
-    for (size_t i = 0; i < kAudioBlockSize; ++i) {
-      samples[i] <<= 1;
+    // Q15 (0..32767) → Q16 (0..65534): both int16s in each 32-bit word
+    // are < 0x8000, so packing two per iteration via uint32 shift is
+    // exact (no cross-half carry). Halves the loop count.
+    typedef uint32_t __attribute__((may_alias)) u32_alias;
+    u32_alias* p = reinterpret_cast<u32_alias*>(samples);
+    for (size_t i = 0; i < kAudioBlockSize / 2; ++i) {
+      p[i] <<= 1;
     }
     dac.BufferSamples(block, channel, samples);
   } else if (is_audio()) {
