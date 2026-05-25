@@ -230,8 +230,17 @@ void Dac::UpdateDC(uint8_t channel, uint16_t sample) {
 }
 
 void Dac::FillDCNoops(uint8_t block, uint8_t channel) {
-  // Skip frame 0 (owned by SysTick's UpdateDC)
-  BUFFER_SAMPLES(channel, kNoopPacked, 1)
+  // Skip frame 0 (owned by SysTick's UpdateDC).
+  //
+  // GCC otherwise re-materializes kNoopPacked inside the loop body
+  // (MOV.W per iter, ~63 wasted cycles/call) because it reuses the
+  // constant's register for an earlier ptr-base computation. The
+  // empty-asm "+r" blackbox below makes noop opaque to the optimizer's
+  // constant-folding pass, forcing it into a stable register before
+  // the loop and hoisting the materialization out.
+  uint32_t noop = kNoopPacked;
+  asm volatile ("" : "+r"(noop));
+  BUFFER_SAMPLES(channel, noop, 1)
 }
 
 uint32_t Dac::timer_base_freq(uint8_t apb) const {
