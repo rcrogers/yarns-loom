@@ -78,7 +78,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   );
   chiff_probability_u31_ = 0;
   chiff_prob_decrement_u32_ = 0;
-  chiff_offset_q30_ = 0;
+  chiff_lp_q15_ = 0;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -120,11 +120,13 @@ void Envelope::NoteOn(
     case ENV_STAGE_RELEASE:
     case ENV_STAGE_DEAD:
     case ENV_NUM_STAGES:
-      // Fresh attack: arm chiff fire-probability ramp and reset the
-      // chiff offset random walk. chiff_amount in [0, 127], so <<24
-      // caps prob at 0x7F000000 (fits top-31-bit unsigned space).
+      // Fresh attack: arm noise amplitude ramp. Probability lives in
+      // top-31-bit unsigned space [0, 2^31) so the USAT #31 saturating
+      // decrement in the post-pass works on the signed SUBS result.
+      // chiff_amount in [0, 127], so <<24 caps prob at 0x7F000000.
+      // LPF state is NOT reset here — it carries from any prior chiff
+      // tail, ensuring continuity if a re-trigger overlaps a fade-out.
       chiff_probability_u31_ = static_cast<uint32_t>(chiff_amount) << 24;
-      chiff_offset_q30_ = 0;
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(chiff_probability_u31_) * adsr.attack_u32) >> 32);
       Trigger(ENV_STAGE_ATTACK);
@@ -225,7 +227,55 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
-  // Chiff is folded into RenderStage's main loop — no post-pass.
+
+  // Chiff post-process: bandlimited noise additively mixed into the
+  // envelope output. Per sample, generate ±noise_amp (sign from PRNG
+  // bit, magnitude from prob), smooth through a 1-pole LPF, add to the
+  // sample saturating to [0, 32767]. The LPF cutoff sweeps per block
+  // (wider at attack onset → narrower as chiff fades) by deriving its
+  // shift from clz(prob). The decay of prob naturally fades the noise.
+  uint32_t prob = chiff_probability_u31_;
+  const uint32_t dec = chiff_prob_decrement_u32_;
+  const uint32_t prng_xor = chiff_prng_xor_u32_;
+  int32_t lp = chiff_lp_q15_;
+  // Per-block LPF cutoff sweep. clz(prob) is small at note onset (broad
+  // cutoff) and grows as prob decays (narrow cutoff = breath-like tail).
+  // |1 avoids clz(0)=undefined; >>3 maps clz∈[1,32] to shift∈[0,4];
+  // +2 anchors the floor; clamp to 6 caps the ceiling.
+  uint8_t lpf_shift = 2 + (__builtin_clz(prob | 1) >> 3);
+  if (lpf_shift > 6) lpf_shift = 6;
+  for (size_t i = 0; i < kAudioBlockSize; ++i) {
+    // XOR with per-envelope mask decorrelates noise timing across
+    // simultaneously-triggered envelopes sharing the PRNG buffer.
+    uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
+    // Noise magnitude derived from prob (decays as prob decays).
+    // prob in [0, 2^31); >> 18 gives ~Q13 amplitude in [0, 8191].
+    int32_t noise_amp = static_cast<int32_t>(prob >> 18);
+    int32_t noise = (prng & 1u) ? noise_amp : -noise_amp;
+    // 1-pole LPF with per-block variable shift.
+    lp += (noise - lp) >> lpf_shift;
+    // Position-aware scaling: scale lp by the available headroom in
+    // its direction so (sample + lp_scaled) stays in [0, 32767] by
+    // construction — no USAT clip needed, no rectification artifact.
+    // At envelope endpoints headroom→0 so chiff naturally tapers; at
+    // mid-envelope headroom is large so chiff is at full magnitude.
+    int32_t sample = sample_buffer[i];
+    int32_t headroom = lp >= 0 ? (32767 - sample) : sample;
+    int32_t lp_scaled = (lp * headroom) >> 15;
+    sample_buffer[i] = static_cast<int16_t>(sample + lp_scaled);
+    // Saturating decrement via SUBS + USAT: USAT clamps the signed
+    // result of (prob − dec) to [0, 2^31), giving 0 on underflow.
+    int32_t signed_prob;
+    __asm__ (
+        "subs %0, %1, %2\n\t"
+        "usat %0, #31, %0"
+        : "=r"(signed_prob)
+        : "r"(prob), "r"(dec)
+        : "cc");
+    prob = static_cast<uint32_t>(signed_prob);
+  }
+  chiff_probability_u31_ = prob;
+  chiff_lp_q15_ = lp;
 }
 
 void Envelope::RenderStageDispatch(
@@ -251,24 +301,17 @@ void Envelope::RenderStageDispatch(
 //   = ((v << 1) + bias) >> 16, clamped to [0, 32767].
 // USAT can fold the arithmetic-shift-right into the same instruction, so
 // the whole compose+clip+halve becomes one add + one usat.
-//
-// The SSAT #31 on v before the <<1 is defensive: chiff may push v
-// beyond the natural Q30 range. SSAT clamps to [-2^30, 2^30-1] so the
-// <<1 fits int32 without wrap. No-op for non-chiff paths (v already in
-// range). 1 cycle.
 #define OUTPUT_VALUE(v) \
   bias_q31 += bias_slope_q31; \
   { \
-    int32_t v_sat; \
-    __asm__ ("ssat %0, #31, %1" : "=r"(v_sat) : "r"(static_cast<int32_t>(v))); \
-    int32_t output_composed = bias_q31 + (v_sat << 1); \
+    int32_t output_composed = bias_q31 + (static_cast<int32_t>(v) << 1); \
     int32_t output_saturated; \
     __asm__ ("usat %0, #15, %1, asr #16" \
              : "=r"(output_saturated) : "r"(output_composed)); \
     *sample_buffer++ = static_cast<int16_t>(output_saturated); \
   }
 
-#define OUTPUT OUTPUT_VALUE(value_q30 + chiff_offset)
+#define OUTPUT OUTPUT_VALUE(value_q30)
 
 template<bool MOVING, bool POSITIVE_SLOPE>
 void Envelope::RenderStage(
@@ -290,33 +333,10 @@ void Envelope::RenderStage(
   // Drive the loop by buffer-end pointer instead of a samples_left
   // counter, freeing a register for the LUT base hoist.
   int16_t* const buffer_end = sample_buffer + samples_left;
-
-  // Chiff: additive random-walk offset (chiff_offset), independent of
-  // the envelope's clean trajectory. Per sample in MOVING, when the
-  // roll fires (roll < prob), perturb chiff_offset by ±(slope << shift),
-  // then SSAT-clamp to ±2^28 to bound the walk. Output = value +
-  // chiff_offset (further SSAT-clamped in OUTPUT_VALUE). VALUE_PASSED
-  // sees the clean value, so trajectory and stage transitions are
-  // unaffected by chiff. In !MOVING, chiff_offset is decayed toward 0
-  // (1-pole, alpha=1/16) so a non-zero walk left over from attack/decay
-  // settles smoothly into clean sustain output.
-  //
-  // shift = max(0, 7 - clz(margin)/4) in [0, 7]
-  // perturbation = ±(slope << shift); variance per fire = 2^(2·shift),
-  // up to 16384 ({-127, +129} multipliers).
-  uint32_t prob = chiff_probability_u31_;
-  const uint32_t dec = chiff_prob_decrement_u32_;
-  const uint32_t prng_xor = chiff_prng_xor_u32_;
-  int32_t chiff_offset = chiff_offset_q30_;
-  const uint32_t* prng_ptr = &shared_prng_buffer[kAudioBlockSize - samples_left];
+  // int32_t nominal_start = nominal_start_;
+  // bool nominal_start_reached = false;
 
   while (sample_buffer < buffer_end) {
-    // Leaky integrator on chiff_offset: decay every sample (1-pole LPF,
-    // alpha=1/16, time constant ~16 samples). Bounds the random walk
-    // by variance rather than by walls — prior SSAT-only design pinned
-    // the walk to ±2^28 because kicks were comparable to the box size.
-    chiff_offset -= chiff_offset >> 4;
-
     if (!MOVING) {
       value_q30 = target_q30; // In case we skipped a stage with delta that was 1) nonzero and 2) too small to produce a nonzero slope
       OUTPUT;
@@ -331,52 +351,12 @@ void Envelope::RenderStage(
 
     uint8_t lut_index = phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits);
     int32_t slope_q30 = slope_lut[lut_index];
-
-    // Chiff perturbation with margin-derived intensity.
-    uint32_t prng = *prng_ptr++ ^ prng_xor;
-    uint32_t roll = prng >> 1;
-    if (roll < prob) {
-      uint32_t margin = prob - roll;
-      int32_t shift_signed = 7 -
-          static_cast<int32_t>(__builtin_clz(margin) >> 2);
-      uint32_t shift = shift_signed < 0 ? 0u :
-          static_cast<uint32_t>(shift_signed);
-      // Slope SSAT keeps (slope << shift_max) ≤ box/2 so per-kick
-      // magnitude can't pin the random walk to its wall.
-      //   slope_max * 2^7 ≤ 2^27   →   slope_max ≤ 2^20   →   SSAT #21
-      // For typical attack slopes (< 2^20) this is a no-op. Fast
-      // attacks get clamped — fine, they don't need huge kicks.
-      int32_t slope_for_chiff;
-      __asm__ ("ssat %0, #21, %1"
-               : "=r"(slope_for_chiff) : "r"(slope_q30));
-      int32_t scaled = slope_for_chiff << shift;
-      int32_t perturbed = (prng & 1u) ? (chiff_offset + scaled)
-                                      : (chiff_offset - scaled);
-      // Safety SSAT in case of transient spikes; main amplitude
-      // bounding is via the leaky integrator above.
-      __asm__ ("ssat %0, #29, %1"
-               : "=r"(chiff_offset) : "r"(perturbed));
-    }
-    // Saturating decrement via SUBS + USAT: clamps signed (prob − dec)
-    // to [0, 2^31), giving 0 on underflow.
-    int32_t signed_prob;
-    __asm__ (
-        "subs %0, %1, %2\n\t"
-        "usat %0, #31, %0"
-        : "=r"(signed_prob)
-        : "r"(prob), "r"(dec)
-        : "cc");
-    prob = static_cast<uint32_t>(signed_prob);
-
-    // Clean trajectory: value advances on the unperturbed slope.
     value_q30 += slope_q30;
     if (VALUE_PASSED(target_q30)) {
       value_q30 = target_q30; // Don't overshoot target
       OUTPUT;
 
       value_q30_ = value_q30; // So Trigger knows actual start value
-      chiff_probability_u31_ = prob;
-      chiff_offset_q30_ = chiff_offset;
       Trigger(static_cast<EnvelopeStage>(stage + 1));
 
       // Even if there are no samples left, this will save bias state for us
@@ -390,8 +370,6 @@ void Envelope::RenderStage(
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
   phase_increment_u32_ = phase_increment_u32;
-  chiff_probability_u31_ = prob;
-  chiff_offset_q30_ = chiff_offset;
 
   bias_q31_ = bias_q31;
 }

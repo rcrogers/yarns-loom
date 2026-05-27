@@ -113,26 +113,25 @@ class Envelope {
 
   uint32_t phase_u32_, phase_increment_u32_;
 
-  // Chiff: probabilistic slope perturbation applied inside the main
-  // render loop (RenderStage), not a post-pass. When (prng >> 1) < prob,
-  // the per-sample envelope slope is multiplied by either 2 or 0 (50/50
-  // via prng bit 0). Mean is preserved (envelope still reaches target on
-  // schedule), variance per sample is slope² — so longer attacks (smaller
-  // nominal slope) auto-scale to subtler chiff. Position spectrum is 1/f²
-  // (red noise) because slope-jitter integrates to brownian envelope
-  // displacement. Downstream gain*carrier multiplication smears the
-  // carrier with that LF noise, KS-like (carrier = resonator, this =
-  // excitation).
+  // Chiff: bandlimited noise additively mixed into the envelope output as
+  // a post-process pass. Per-sample ±noise of decaying magnitude is
+  // smoothed by a 1-pole LPF, then added to the sample (saturated).
+  // The downstream gain*carrier multiply turns this into AM noise around
+  // the carrier — broadband-decaying-to-pitched character (the carrier is
+  // the resonator; this is the excitation). Replaces the older
+  // value-replacement chiff, which was too click-like on long attacks.
   //
-  // Probability ramps linearly to 0 over attack duration; chiff persists
-  // past attack so a released note still gets perturbation in its tail.
-  // All envelopes share one PRNG buffer per block (filled in
-  // FillSharedPrngBuffer); the per-instance XOR mask decorrelates sample
-  // timing across simultaneously-triggered envelopes.
-  uint32_t chiff_probability_u31_;        // current ramping fire prob, max ~2^31-1
+  // Amplitude is derived from chiff_probability_u31_, which still ramps
+  // linearly to 0 over a duration equal to the attack stage. The LPF
+  // state continues filtering past attack so the noise tail decays
+  // smoothly rather than cutting off. Post-pass runs unconditionally
+  // each block for uniform worst-case cost. All envelopes share one
+  // PRNG buffer per block (filled in FillSharedPrngBuffer); the per-
+  // instance XOR mask decorrelates sample timing across envelopes.
+  uint32_t chiff_probability_u31_;        // current ramping noise amplitude scale, max ~2^31-1
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
   uint32_t chiff_prng_xor_u32_;           // per-instance PRNG decorrelation mask, set in Init()
-  int32_t  chiff_offset_q30_;             // additive random-walk offset, bounded by SSAT
+  int32_t  chiff_lp_q15_;                 // 1-pole LPF state in Q15 (same scale as sample buffer)
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
