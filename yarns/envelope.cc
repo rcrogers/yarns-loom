@@ -79,7 +79,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_probability_u31_ = 0;
   chiff_prob_decrement_u32_ = 0;
   chiff_lp_q15_ = 0;
-  chiff_lpf_shifts_packed_ = dirty_filter::kDefaultShiftsPacked;
+  set_chiff_lpf_shifts(noisy_multiplier::kDefaultShiftsPacked);
   chiff_noise_shift_offset_ = 0;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
@@ -253,25 +253,39 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   const uint32_t dec = chiff_prob_decrement_u32_;
   const uint32_t prng_xor = chiff_prng_xor_u32_;
   int32_t lp = chiff_lp_q15_;
-  // Per-block dithered LPF shifts (4 nibbles, indexed per-sample via PRNG).
-  const uint32_t shifts_packed = chiff_lpf_shifts_packed_;
-  // Per-block noise shift: reinterpret PRNG as int32 and ASR by this
-  // shift to get uniform ±noise in the right magnitude. Held constant
-  // within the block (prob ramp is gentle over 64 samples); LPF averages
-  // away the slight stepwise quantization across blocks. Saves the
-  // per-sample noise_amp shift + conditional negate (~3 cycles/sample
-  // vs the prior binary ±noise_amp design). Acoustically near-identical
-  // after LPF.
-  uint32_t noise_shift = __builtin_clz(prob | 1u) + 17u + chiff_noise_shift_offset_;
-  if (noise_shift > 31u) noise_shift = 31u;  // ARM asr-with-reg UB above 31
+  // Per-block dithered LPF shifts (4-byte array, indexed per-sample via PRNG).
+  const uint8_t* const shifts = chiff_lpf_shifts_;
+  // Noise amplitude: reinterpret PRNG as int32 and ASR by noise_shift to
+  // get uniform ±noise in the right magnitude. base = clz(prob)+14+offset
+  // gives amp = 2^-(base), which steps 6 dB at each prob octave boundary.
+  // Per-sample 2-shift dither between base and base+1 smooths the step:
+  // mean amp = 2^-(base+1) * (1 + mantissa_frac), which is continuous
+  // across boundaries (top-of-octave mean = bottom-of-next-octave mean).
+  // Threshold uses bits 4-19 of prng vs top 16 bits of mantissa_frac,
+  // decorrelated from the sign bit (bit 31) and lpf_shift bits (2-3).
+  //
+  // Loudness calibration: base=14 (8× louder than the theoretical
+  // conservative base=17) produces no audible clipping in practice —
+  // the LUT rarely reaches alpha=1/2 for musical pitches and 3σ
+  // outliers are brief enough to be imperceptible. Dial back toward
+  // 15/16 if glitching returns at extreme corner cases.
+  const uint32_t clz_prob = __builtin_clz(prob | 1u);
+  const uint32_t mantissa_frac = prob << (clz_prob + 1u);  // Q32 within octave
+  const uint32_t mantissa_top16 = mantissa_frac >> 16;
+  uint32_t noise_shift_base = clz_prob + 14u + chiff_noise_shift_offset_;
+  if (noise_shift_base > 30u) noise_shift_base = 30u;  // +1 dither stays ≤31
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
     // XOR with per-envelope mask decorrelates noise timing across
     // simultaneously-triggered envelopes sharing the PRNG buffer.
     uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
+    const uint32_t dither = (prng >> 4) & 0xFFFFu;
+    const uint32_t noise_shift =
+        noise_shift_base + (dither >= mantissa_top16 ? 1u : 0u);
     int32_t noise = static_cast<int32_t>(prng) >> noise_shift;
     // 1-pole LPF with per-sample dithered shift (pitch-tracked).
-    dirty_filter::update(lp, noise,
-        dirty_filter::extract_shift(shifts_packed, prng));
+    const uint32_t lpf_shift = shifts[(prng >> noisy_multiplier::kSlotIdxBits)
+        & ((1u << noisy_multiplier::kSlotIdxBits) - 1u)];
+    lp += (noise - lp) >> lpf_shift;
     // Add lp to sample, saturate to [0, 32767]. NoteOn reserves
     // headroom in the envelope's peak target so the top doesn't clip
     // in practice; safety USAT handles the bottom (rare) plus any

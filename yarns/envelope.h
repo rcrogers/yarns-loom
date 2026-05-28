@@ -26,7 +26,7 @@
 #ifndef YARNS_ENVELOPE_H_
 #define YARNS_ENVELOPE_H_
 
-#include "yarns/dirty_filter.h"
+#include "yarns/noisy_multiplier.h"
 #include "yarns/resources.h"
 
 namespace yarns {
@@ -53,7 +53,7 @@ STATIC_ASSERT(
   expo_slope_shift_size
 );
 
-// Chiff LPF constants and dither helpers live in dirty_filter.h.
+// Chiff LPF constants and dither helpers live in noisy_multiplier.h.
 
 class Envelope {
  public:
@@ -94,10 +94,15 @@ class Envelope {
   inline int16_t value() const { return value_q30_ >> (30 - 15); }
   inline EnvelopeStage stage() const { return stage_; }
 
-  // Per-block setter: install the packed LPF shifts entry (typically
-  // lut_chiff_lpf_shifts[dirty_filter::pitch_bin(phase_inc)]).
+  // Per-block setter: install the LPF shifts entry (typically
+  // lut_chiff_lpf_shifts[noisy_multiplier::pitch_bin(phase_inc)]). Unpacks
+  // nibbles into the byte array so the per-sample extraction is a single
+  // ldrb instead of lsr-reg + and.
   inline void set_chiff_lpf_shifts(uint16_t packed) {
-    chiff_lpf_shifts_packed_ = packed;
+    chiff_lpf_shifts_[0] = packed & 0xFu;
+    chiff_lpf_shifts_[1] = (packed >> 4) & 0xFu;
+    chiff_lpf_shifts_[2] = (packed >> 8) & 0xFu;
+    chiff_lpf_shifts_[3] = (packed >> 12) & 0xFu;
   }
 
   static inline uint8_t signed_clz(int32_t x) {
@@ -141,7 +146,7 @@ class Envelope {
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
   uint32_t chiff_prng_xor_u32_;           // per-instance PRNG decorrelation mask, set in Init()
   int32_t  chiff_lp_q15_;                 // 1-pole LPF state in Q15 (same scale as sample buffer)
-  uint16_t chiff_lpf_shifts_packed_;      // 4 × 4-bit LPF shifts (from lut_chiff_lpf_shifts)
+  uint8_t  chiff_lpf_shifts_[noisy_multiplier::kSlotCount];  // unpacked LPF shifts, byte-addressable
   uint8_t  chiff_noise_shift_offset_;     // additional ASR to scale noise to envelope's actual range
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);

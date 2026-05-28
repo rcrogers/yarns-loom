@@ -22,25 +22,28 @@
 //
 // -----------------------------------------------------------------------------
 //
-// 1-pole LPF with PRNG-dithered shift coefficients ("dirty" because the
-// per-sample alpha is intentionally noisy; it averages to a target cutoff).
+// PRNG-dithered multiplier-by-1/2^shift. Per pitch bin, an LUT entry holds
+// a small set of integer shifts whose mean inverse-power-of-2 equals a
+// target fractional alpha. Per sample, a PRNG draw selects one shift; the
+// time-average over many samples lands the effective alpha at the target
+// with sub-octave precision — a "noisy multiplier" whose mean is the
+// desired fractional coefficient.
 //
-// Design: each pitch bin in lut_chiff_lpf_shifts holds N=4 LPF shift values
-// (4 bits each) packed into a uint16. Per sample, a PRNG draw selects one of
-// the 4 via masked bits; the mean(1/2^shift) over time approximates the
-// pitch-tracked target cutoff with sub-octave precision. Used by chiff noise
-// modulation in Envelope to bandlimit the noise to a pitch-tracked region.
+// The shift can drive whatever the caller needs (LPF coefficient, gain
+// scaler, decay rate). The actual multiplication/shift operation is the
+// caller's concern; this header only exposes the LUT layout and the
+// per-sample extract.
 //
 // Constants below MUST match yarns/resources/lookup_tables.py:chiff_lpf_shifts().
 
-#ifndef YARNS_DIRTY_FILTER_H_
-#define YARNS_DIRTY_FILTER_H_
+#ifndef YARNS_NOISY_MULTIPLIER_H_
+#define YARNS_NOISY_MULTIPLIER_H_
 
 #include "stmlib/stmlib.h"
 
 namespace yarns {
 
-namespace dirty_filter {
+namespace noisy_multiplier {
 
 // --- Packed-shift LUT entry layout -------------------------------------------
 
@@ -53,16 +56,14 @@ const uint8_t kSlotIdxBits   = 2;   // log2(SlotCount)
 // needed when extracting).
 STATIC_ASSERT(
   (1 << kSlotIdxBits) == kSlotBits,
-  dirty_filter_slot_layout
+  noisy_multiplier_slot_layout
 );
 
-const uint32_t kShiftBitPosMask =
-    ((1u << kSlotIdxBits) - 1u) << kSlotIdxBits;
 const uint32_t kShiftValMask = (1u << kSlotBits) - 1u;
 
 // Default packed entry: all slots = 3 → alpha = 1/8, cutoff ~900 Hz at
-// SR = 45 kHz. Used by Envelope::Init until a caller installs a pitch-
-// tracked entry.
+// SR = 45 kHz when used as a 1-pole LPF. Used until a caller installs a
+// pitch-tracked entry.
 const uint16_t kDefaultShiftsPacked = 0x3333u;
 
 // --- Pitch bin index -----------------------------------------------------------
@@ -89,23 +90,15 @@ inline uint8_t pitch_bin(uint32_t phase_increment) {
   return static_cast<uint8_t>(raw);
 }
 
-// --- LPF update --------------------------------------------------------------
+// Callers are expected to unpack the LUT entry into a uint8_t[kSlotCount]
+// array (member or local), then per sample index by:
+//   shifts[(prng >> kSlotIdxBits) & ((1 << kSlotIdxBits) - 1)]
+// The ldrb's load-use stall is hidden by the immediately-following ALU op
+// (typically `sub noise, lp`) so the per-sample cost is effectively 2
+// cycles vs 3 for a shift+mask on packed nibbles.
 
-// Extract one shift from a packed entry, indexed by prng_word's relevant
-// bits. The extracted value is in [0, kShiftValMask].
-inline uint32_t extract_shift(uint16_t shifts_packed, uint32_t prng_word) {
-  return (shifts_packed >> (prng_word & kShiftBitPosMask)) & kShiftValMask;
-}
-
-// One-pole LPF update step with externally-provided shift. Caller is
-// responsible for picking a shift (typically via extract_shift above).
-//   lp += (input - lp) >> shift
-inline void update(int32_t& lp, int32_t input, uint32_t shift) {
-  lp += (input - lp) >> shift;
-}
-
-}  // namespace dirty_filter
+}  // namespace noisy_multiplier
 
 }  // namespace yarns
 
-#endif  // YARNS_DIRTY_FILTER_H_
+#endif  // YARNS_NOISY_MULTIPLIER_H_

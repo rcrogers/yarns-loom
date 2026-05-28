@@ -127,7 +127,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
   // Set both envelopes' chiff LPF shifts from a pitch-bin lookup so the
   // chiff cutoff tracks the carrier pitch.
   const uint16_t chiff_lpf_packed =
-      lut_chiff_lpf_shifts[dirty_filter::pitch_bin(phase_increment_)];
+      lut_chiff_lpf_shifts[noisy_multiplier::pitch_bin(phase_increment_)];
   gain_envelope_.set_chiff_lpf_shifts(chiff_lpf_packed);
   timbre_envelope_.set_chiff_lpf_shifts(chiff_lpf_packed);
 }

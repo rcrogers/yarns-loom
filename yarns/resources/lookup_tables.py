@@ -854,12 +854,12 @@ clamped to [0, 127]. BASE_CLZ chosen so musically useful pitches fall mid-LUT.
 
 def chiff_lpf_shifts():
   # These must match the constants in yarns/dirty_filter.h.
-  N = 4              # dirty_filter::kSlotCount
-  SLOT_BITS = 4      # dirty_filter::kSlotBits
+  N = 4              # noisy_multiplier::kSlotCount
+  SLOT_BITS = 4      # noisy_multiplier::kSlotBits
   K = 12             # shift pool size (must be <= 1 << SLOT_BITS)
-  NUM_BINS = 128     # dirty_filter::kBinCount
-  FRAC_BITS = 3      # dirty_filter::kBinFracBits
-  BASE_CLZ = 13      # dirty_filter::kBinBaseClz
+  NUM_BINS = 128     # noisy_multiplier::kBinCount
+  FRAC_BITS = 3      # noisy_multiplier::kBinFracBits
+  BASE_CLZ = 13      # noisy_multiplier::kBinBaseClz
   # Coverage stats only for bins where target alpha is reachable by our
   # multiset (K=12 -> alpha in ~[1/2048, 1] -> cutoff ~3.5 Hz to ~7 kHz).
   # MIDI 21..96 (A0..C7) maps to bins ~12..86.
