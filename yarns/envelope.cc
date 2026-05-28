@@ -80,6 +80,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_prob_decrement_u32_ = 0;
   chiff_lp_q15_ = 0;
   chiff_lpf_shifts_packed_ = dirty_filter::kDefaultShiftsPacked;
+  chiff_noise_shift_offset_ = 0;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -99,16 +100,20 @@ void Envelope::NoteOn(
   uint8_t chiff_amount
 ) {
   adsr_ = &adsr;
-  // Chiff headroom: scale max down by ~chiff_amount * 48 so attack/sustain
-  // peaks leave room for chiff's lp_max (~8600 at chiff=127). At chiff=127,
-  // ~19% peak reduction (covers ~2σ of lp distribution → ~95% no-clip).
-  // Linear in chiff_amount so small chiff settings barely affect range.
-  // RELEASE/DEAD targets stay at the un-adjusted min so notes still go
-  // fully silent. Bottom clipping (envelope value near min + negative lp)
-  // can still occur briefly at attack onset; rare enough to tolerate.
-  int32_t chiff_headroom_s16 = static_cast<int32_t>(chiff_amount) * 48;
-  int32_t adjusted_max_s16 = max_target_s16 - chiff_headroom_s16;
-  int32_t scale_s16 = adjusted_max_s16 - min_target_s16;
+  // Chiff noise is scaled to fit within the envelope's actual range
+  // (max_target - min_target), not the int15 sample buffer's [0, 32767].
+  // This matters because audio voices pre-scale envelope max to scale_/2
+  // (typically 4096 for unison-4); chiff that filled the int15 buffer
+  // would overflow the per-voice budget and wrap audio_mix on accumulation.
+  // Offset = clz(range) - 16: maps full int15 range → 1 extra ASR,
+  // unison-4 range (4096) → 4 extra ASR, scaling noise proportionally.
+  {
+    int32_t range_s16 = max_target_s16 - min_target_s16;
+    if (range_s16 < 1) range_s16 = 1;
+    chiff_noise_shift_offset_ =
+        static_cast<uint8_t>(__builtin_clz(range_s16) - 16);
+  }
+  int32_t scale_s16 = max_target_s16 - min_target_s16;
   int32_t min_target_q31 = min_target_s16 << 16;
   // NB: sustain level can be higher than peak
   stage_target_q30_[ENV_STAGE_ATTACK] =
@@ -248,19 +253,22 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   const uint32_t dec = chiff_prob_decrement_u32_;
   const uint32_t prng_xor = chiff_prng_xor_u32_;
   int32_t lp = chiff_lp_q15_;
-  // Per-sample LPF shift: 2 prng bits index into 4 packed shifts whose
-  // mean alpha = pitch-tracked target cutoff. Bits 2-3 of prng used
-  // (bit 0 = noise sign, bit 1 unused-here). Averaging across many
-  // samples lands cutoff at desired value with sub-octave precision.
+  // Per-block dithered LPF shifts (4 nibbles, indexed per-sample via PRNG).
   const uint32_t shifts_packed = chiff_lpf_shifts_packed_;
+  // Per-block noise shift: reinterpret PRNG as int32 and ASR by this
+  // shift to get uniform ±noise in the right magnitude. Held constant
+  // within the block (prob ramp is gentle over 64 samples); LPF averages
+  // away the slight stepwise quantization across blocks. Saves the
+  // per-sample noise_amp shift + conditional negate (~3 cycles/sample
+  // vs the prior binary ±noise_amp design). Acoustically near-identical
+  // after LPF.
+  uint32_t noise_shift = __builtin_clz(prob | 1u) + 17u + chiff_noise_shift_offset_;
+  if (noise_shift > 31u) noise_shift = 31u;  // ARM asr-with-reg UB above 31
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
     // XOR with per-envelope mask decorrelates noise timing across
     // simultaneously-triggered envelopes sharing the PRNG buffer.
     uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
-    // Noise magnitude derived from prob (decays as prob decays).
-    // prob in [0, 2^31); >> 18 gives ~Q13 amplitude in [0, 8191].
-    int32_t noise_amp = static_cast<int32_t>(prob >> 18);
-    int32_t noise = (prng & 1u) ? noise_amp : -noise_amp;
+    int32_t noise = static_cast<int32_t>(prng) >> noise_shift;
     // 1-pole LPF with per-sample dithered shift (pitch-tracked).
     dirty_filter::update(lp, noise,
         dirty_filter::extract_shift(shifts_packed, prng));

@@ -142,6 +142,7 @@ class Envelope {
   uint32_t chiff_prng_xor_u32_;           // per-instance PRNG decorrelation mask, set in Init()
   int32_t  chiff_lp_q15_;                 // 1-pole LPF state in Q15 (same scale as sample buffer)
   uint16_t chiff_lpf_shifts_packed_;      // 4 × 4-bit LPF shifts (from lut_chiff_lpf_shifts)
+  uint8_t  chiff_noise_shift_offset_;     // additional ASR to scale noise to envelope's actual range
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
