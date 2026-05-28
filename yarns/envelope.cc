@@ -79,6 +79,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_probability_u31_ = 0;
   chiff_prob_decrement_u32_ = 0;
   chiff_lp_q15_ = 0;
+  chiff_lpf_shifts_packed_ = kChiffLpfDefaultShiftsPacked;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -98,7 +99,16 @@ void Envelope::NoteOn(
   uint8_t chiff_amount
 ) {
   adsr_ = &adsr;
-  int16_t scale_s16 = max_target_s16 - min_target_s16;
+  // Chiff headroom: scale max down by ~chiff_amount * 48 so attack/sustain
+  // peaks leave room for chiff's lp_max (~8600 at chiff=127). At chiff=127,
+  // ~19% peak reduction (covers ~2σ of lp distribution → ~95% no-clip).
+  // Linear in chiff_amount so small chiff settings barely affect range.
+  // RELEASE/DEAD targets stay at the un-adjusted min so notes still go
+  // fully silent. Bottom clipping (envelope value near min + negative lp)
+  // can still occur briefly at attack onset; rare enough to tolerate.
+  int32_t chiff_headroom_s16 = static_cast<int32_t>(chiff_amount) * 48;
+  int32_t adjusted_max_s16 = max_target_s16 - chiff_headroom_s16;
+  int32_t scale_s16 = adjusted_max_s16 - min_target_s16;
   int32_t min_target_q31 = min_target_s16 << 16;
   // NB: sustain level can be higher than peak
   stage_target_q30_[ENV_STAGE_ATTACK] =
@@ -238,12 +248,11 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   const uint32_t dec = chiff_prob_decrement_u32_;
   const uint32_t prng_xor = chiff_prng_xor_u32_;
   int32_t lp = chiff_lp_q15_;
-  // Per-block LPF cutoff sweep. clz(prob) is small at note onset (broad
-  // cutoff) and grows as prob decays (narrow cutoff = breath-like tail).
-  // |1 avoids clz(0)=undefined; >>3 maps clz∈[1,32] to shift∈[0,4];
-  // +2 anchors the floor; clamp to 6 caps the ceiling.
-  uint8_t lpf_shift = 2 + (__builtin_clz(prob | 1) >> 3);
-  if (lpf_shift > 6) lpf_shift = 6;
+  // Per-sample LPF shift: 2 prng bits index into 4 packed shifts whose
+  // mean alpha = pitch-tracked target cutoff. Bits 2-3 of prng used
+  // (bit 0 = noise sign, bit 1 unused-here). Averaging across many
+  // samples lands cutoff at desired value with sub-octave precision.
+  const uint32_t shifts_packed = chiff_lpf_shifts_packed_;
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
     // XOR with per-envelope mask decorrelates noise timing across
     // simultaneously-triggered envelopes sharing the PRNG buffer.
@@ -252,17 +261,24 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
     // prob in [0, 2^31); >> 18 gives ~Q13 amplitude in [0, 8191].
     int32_t noise_amp = static_cast<int32_t>(prob >> 18);
     int32_t noise = (prng & 1u) ? noise_amp : -noise_amp;
-    // 1-pole LPF with per-block variable shift.
+    // Per-sample shift selection: extract slot_idx bits already at the
+    // right magnitude to be a bit position into shifts_packed. For our
+    // config (4-bit slots, 2-bit idx) prng bits [2:1] mask to {0,4,8,12}.
+    const uint32_t kShiftBitPosMask =
+        ((1u << kChiffLpfShiftSlotIdxBits) - 1u) << kChiffLpfShiftSlotIdxBits;
+    const uint32_t kShiftValMask = (1u << kChiffLpfShiftSlotBits) - 1u;
+    uint32_t lpf_shift = (shifts_packed >> (prng & kShiftBitPosMask)) & kShiftValMask;
+    // 1-pole LPF with per-sample variable shift.
     lp += (noise - lp) >> lpf_shift;
-    // Position-aware scaling: scale lp by the available headroom in
-    // its direction so (sample + lp_scaled) stays in [0, 32767] by
-    // construction — no USAT clip needed, no rectification artifact.
-    // At envelope endpoints headroom→0 so chiff naturally tapers; at
-    // mid-envelope headroom is large so chiff is at full magnitude.
-    int32_t sample = sample_buffer[i];
-    int32_t headroom = lp >= 0 ? (32767 - sample) : sample;
-    int32_t lp_scaled = (lp * headroom) >> 15;
-    sample_buffer[i] = static_cast<int16_t>(sample + lp_scaled);
+    // Add lp to sample, saturate to [0, 32767]. NoteOn reserves
+    // headroom in the envelope's peak target so the top doesn't clip
+    // in practice; safety USAT handles the bottom (rare) plus any
+    // headroom-budget overruns at peak.
+    int32_t out;
+    __asm__ ("usat %0, #15, %1"
+             : "=r"(out)
+             : "r"(static_cast<int32_t>(sample_buffer[i]) + lp));
+    sample_buffer[i] = static_cast<int16_t>(out);
     // Saturating decrement via SUBS + USAT: USAT clamps the signed
     // result of (prob − dec) to [0, 2^31), giving 0 on underflow.
     int32_t signed_prob;

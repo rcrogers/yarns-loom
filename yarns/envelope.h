@@ -52,6 +52,23 @@ STATIC_ASSERT(
   expo_slope_shift_size
 );
 
+// Chiff LPF cutoff dither — these constants MUST match the formulas in
+// yarns/resources/lookup_tables.py:chiff_lpf_shifts(). Keep in sync.
+const uint8_t kChiffLpfShiftSlotCount     = 4;   // N: shifts per pitch bin
+const uint8_t kChiffLpfShiftSlotBits      = 4;   // bits per packed shift slot
+const uint8_t kChiffLpfShiftSlotIdxBits   = 2;   // log2(SlotCount)
+const uint8_t kChiffLpfBinFracBits        = 3;   // 8 sub-octave bins per clz step
+const uint8_t kChiffLpfBinBaseClz         = 13;  // bin 0 ≈ 5 Hz pitch at SR=45 kHz
+const uint8_t kChiffLpfBinCount           = 128; // total bins (= LUT length)
+const uint16_t kChiffLpfDefaultShiftsPacked = 0x3333u;  // all shifts=3, α≈1/8
+// Inner-loop fast path requires slot_bits == 1 << slot_idx_bits so a
+// single masked PRNG already yields the bit-position into the packed
+// shifts (no multiply needed).
+STATIC_ASSERT(
+  (1 << kChiffLpfShiftSlotIdxBits) == kChiffLpfShiftSlotBits,
+  chiff_lpf_slot_layout
+);
+
 class Envelope {
  public:
   Envelope() { }
@@ -90,6 +107,31 @@ class Envelope {
 
   inline int16_t value() const { return value_q30_ >> (30 - 15); }
   inline EnvelopeStage stage() const { return stage_; }
+
+  // Per-block setter: packs 4 × 4-bit LPF shifts from
+  // lut_chiff_lpf_shifts[pitch_bin]. Chiff post-pass picks one shift
+  // uniformly per sample via 2 PRNG bits, averaging to a pitch-tracked
+  // cutoff. Caller computes pitch_bin from phase_increment.
+  inline void set_chiff_lpf_shifts(uint16_t packed) {
+    chiff_lpf_shifts_packed_ = packed;
+  }
+  // Helper: compute pitch_bin index for lut_chiff_lpf_shifts from a
+  // phase_increment. Encoding: (BaseClz - clz(pinc)) << FracBits |
+  // top FracBits below MSB, clamped to [0, BinCount-1]. Must mirror the
+  // formula in lookup_tables.py:chiff_lpf_shifts().
+  static inline uint8_t chiff_pitch_bin(uint32_t phase_increment) {
+    const uint32_t pinc = phase_increment | 1u;     // avoid clz(0)
+    const uint32_t clz_val = __builtin_clz(pinc);
+    const uint32_t mantissa = pinc << (clz_val + 1);
+    const uint32_t frac = mantissa >> (32 - kChiffLpfBinFracBits);
+    int32_t raw =
+        (static_cast<int32_t>(kChiffLpfBinBaseClz) - static_cast<int32_t>(clz_val))
+            * (1 << kChiffLpfBinFracBits)
+        + static_cast<int32_t>(frac);
+    if (raw < 0) raw = 0;
+    if (raw >= kChiffLpfBinCount) raw = kChiffLpfBinCount - 1;
+    return static_cast<uint8_t>(raw);
+  }
 
   static inline uint8_t signed_clz(int32_t x) {
     const uint32_t x_for_clz = static_cast<uint32_t>(abs(x >= 0 ? x : x + 1));
@@ -132,6 +174,7 @@ class Envelope {
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
   uint32_t chiff_prng_xor_u32_;           // per-instance PRNG decorrelation mask, set in Init()
   int32_t  chiff_lp_q15_;                 // 1-pole LPF state in Q15 (same scale as sample buffer)
+  uint16_t chiff_lpf_shifts_packed_;      // 4 × 4-bit LPF shifts (from lut_chiff_lpf_shifts)
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

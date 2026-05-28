@@ -70,6 +70,7 @@ extern const uint16_t lut_clock_ratio_ticks[];
 extern const uint16_t lut_svf_cutoff[];
 extern const uint16_t lut_svf_damp[];
 extern const uint16_t lut_svf_scale[];
+extern const uint16_t lut_chiff_lpf_shifts[];
 extern const int16_t lut_scale_pythagorean[];
 extern const int16_t lut_scale_1_4_eb[];
 extern const int16_t lut_scale_1_4_e[];
@@ -150,6 +151,8 @@ extern const uint16_t chr_characters[];
 #define LUT_SVF_DAMP_SIZE 257
 #define LUT_SVF_SCALE 8
 #define LUT_SVF_SCALE_SIZE 257
+#define LUT_CHIFF_LPF_SHIFTS 9
+#define LUT_CHIFF_LPF_SHIFTS_SIZE 128
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12
 #define LUT_SCALE_1_4_EB 1

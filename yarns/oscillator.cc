@@ -124,6 +124,12 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
   phase_increment_ = ComputePhaseIncrement(pitch_);
   raw_gain_bias_ = gain_bias;
   raw_timbre_bias_ = timbre_bias;
+  // Set both envelopes' chiff LPF shifts from a pitch-bin lookup so the
+  // chiff cutoff tracks the carrier pitch.
+  const uint16_t chiff_lpf_packed =
+      lut_chiff_lpf_shifts[Envelope::chiff_pitch_bin(phase_increment_)];
+  gain_envelope_.set_chiff_lpf_shifts(chiff_lpf_packed);
+  timbre_envelope_.set_chiff_lpf_shifts(chiff_lpf_packed);
 }
 
 int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
