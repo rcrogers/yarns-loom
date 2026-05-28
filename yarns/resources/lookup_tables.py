@@ -853,13 +853,13 @@ clamped to [0, 127]. BASE_CLZ chosen so musically useful pitches fall mid-LUT.
 ----------------------------------------------------------------------------"""
 
 def chiff_lpf_shifts():
-  # These must match the kChiffLpf* constants in yarns/envelope.h.
-  N = 4              # kChiffLpfShiftSlotCount
-  SLOT_BITS = 4      # kChiffLpfShiftSlotBits
+  # These must match the constants in yarns/dirty_filter.h.
+  N = 4              # dirty_filter::kSlotCount
+  SLOT_BITS = 4      # dirty_filter::kSlotBits
   K = 12             # shift pool size (must be <= 1 << SLOT_BITS)
-  NUM_BINS = 128     # kChiffLpfBinCount
-  FRAC_BITS = 3      # kChiffLpfBinFracBits (8 sub-octave bins per clz step)
-  BASE_CLZ = 13      # kChiffLpfBinBaseClz (bin 0 ~ 5 Hz pitch at SR=45 kHz)
+  NUM_BINS = 128     # dirty_filter::kBinCount
+  FRAC_BITS = 3      # dirty_filter::kBinFracBits
+  BASE_CLZ = 13      # dirty_filter::kBinBaseClz
   # Coverage stats only for bins where target alpha is reachable by our
   # multiset (K=12 -> alpha in ~[1/2048, 1] -> cutoff ~3.5 Hz to ~7 kHz).
   # MIDI 21..96 (A0..C7) maps to bins ~12..86.

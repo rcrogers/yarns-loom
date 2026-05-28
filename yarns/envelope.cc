@@ -79,7 +79,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_probability_u31_ = 0;
   chiff_prob_decrement_u32_ = 0;
   chiff_lp_q15_ = 0;
-  chiff_lpf_shifts_packed_ = kChiffLpfDefaultShiftsPacked;
+  chiff_lpf_shifts_packed_ = dirty_filter::kDefaultShiftsPacked;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -261,15 +261,9 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
     // prob in [0, 2^31); >> 18 gives ~Q13 amplitude in [0, 8191].
     int32_t noise_amp = static_cast<int32_t>(prob >> 18);
     int32_t noise = (prng & 1u) ? noise_amp : -noise_amp;
-    // Per-sample shift selection: extract slot_idx bits already at the
-    // right magnitude to be a bit position into shifts_packed. For our
-    // config (4-bit slots, 2-bit idx) prng bits [2:1] mask to {0,4,8,12}.
-    const uint32_t kShiftBitPosMask =
-        ((1u << kChiffLpfShiftSlotIdxBits) - 1u) << kChiffLpfShiftSlotIdxBits;
-    const uint32_t kShiftValMask = (1u << kChiffLpfShiftSlotBits) - 1u;
-    uint32_t lpf_shift = (shifts_packed >> (prng & kShiftBitPosMask)) & kShiftValMask;
-    // 1-pole LPF with per-sample variable shift.
-    lp += (noise - lp) >> lpf_shift;
+    // 1-pole LPF with per-sample dithered shift (pitch-tracked).
+    dirty_filter::update(lp, noise,
+        dirty_filter::extract_shift(shifts_packed, prng));
     // Add lp to sample, saturate to [0, 32767]. NoteOn reserves
     // headroom in the envelope's peak target so the top doesn't clip
     // in practice; safety USAT handles the bottom (rare) plus any
