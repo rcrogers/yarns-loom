@@ -78,7 +78,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   );
   chiff_probability_u31_ = 0;
   chiff_prob_decrement_u32_ = 0;
-  chiff_lp_q15_ = 0;
+  chiff_lp_state_q15_ = 0;
   set_chiff_lpf_shifts(noisy_multiplier::kDefaultShiftsPacked);
   chiff_noise_shift_offset_ = 0;
   // Address-derived mask: every Envelope instance lives at a distinct
@@ -252,9 +252,9 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   uint32_t prob = chiff_probability_u31_;
   const uint32_t dec = chiff_prob_decrement_u32_;
   const uint32_t prng_xor = chiff_prng_xor_u32_;
-  int32_t lp = chiff_lp_q15_;
+  int32_t lp_state = chiff_lp_state_q15_;
   // Per-block dithered LPF shifts (4-byte array, indexed per-sample via PRNG).
-  const uint8_t* const shifts = chiff_lpf_shifts_;
+  const uint8_t* const chiff_lp_cutoff_shifts = chiff_lp_cutoff_shifts_;
   // Noise amplitude: reinterpret PRNG as int32 and ASR by noise_shift to
   // get uniform ±noise in the right magnitude. base = clz(prob)+14+offset
   // gives amp = 2^-(base), which steps 6 dB at each prob octave boundary.
@@ -262,7 +262,7 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // mean amp = 2^-(base+1) * (1 + mantissa_frac), which is continuous
   // across boundaries (top-of-octave mean = bottom-of-next-octave mean).
   // Threshold uses bits 4-19 of prng vs top 16 bits of mantissa_frac,
-  // decorrelated from the sign bit (bit 31) and lpf_shift bits (2-3).
+  // decorrelated from the sign bit (bit 31) and dithered_cutoff_shift bits (2-3).
   //
   // Loudness calibration: base=14 (8× louder than the theoretical
   // conservative base=17) produces no audible clipping in practice —
@@ -279,21 +279,29 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
     // simultaneously-triggered envelopes sharing the PRNG buffer.
     uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
     const uint32_t dither = (prng >> 4) & 0xFFFFu;
-    const uint32_t noise_shift =
-        noise_shift_base + (dither >= mantissa_top16 ? 1u : 0u);
+    // Branchless dither-select via CMP+ADC: CMP sets C=1 iff
+    // dither >= mantissa_top16, then ADC base, #0 adds C to base in one
+    // instruction. The ternary form below would compile to CMP+ITE +
+    // two conditional MOVs (4 cycles); this is 2.
+    uint32_t noise_shift;
+    __asm__ ("cmp %1, %2\n\t"
+             "adc %0, %3, #0"
+             : "=r"(noise_shift)
+             : "r"(dither), "r"(mantissa_top16), "r"(noise_shift_base)
+             : "cc");
     int32_t noise = static_cast<int32_t>(prng) >> noise_shift;
     // 1-pole LPF with per-sample dithered shift (pitch-tracked).
-    const uint32_t lpf_shift = shifts[(prng >> noisy_multiplier::kSlotIdxBits)
+    const uint32_t dithered_cutoff_shift = chiff_lp_cutoff_shifts[(prng >> noisy_multiplier::kSlotIdxBits)
         & ((1u << noisy_multiplier::kSlotIdxBits) - 1u)];
-    lp += (noise - lp) >> lpf_shift;
-    // Add lp to sample, saturate to [0, 32767]. NoteOn reserves
+    lp_state += (noise - lp_state) >> dithered_cutoff_shift;
+    // Add lp_state to sample, saturate to [0, 32767]. NoteOn reserves
     // headroom in the envelope's peak target so the top doesn't clip
     // in practice; safety USAT handles the bottom (rare) plus any
     // headroom-budget overruns at peak.
     int32_t out;
     __asm__ ("usat %0, #15, %1"
              : "=r"(out)
-             : "r"(static_cast<int32_t>(sample_buffer[i]) + lp));
+             : "r"(static_cast<int32_t>(sample_buffer[i]) + lp_state));
     sample_buffer[i] = static_cast<int16_t>(out);
     // Saturating decrement via SUBS + USAT: USAT clamps the signed
     // result of (prob − dec) to [0, 2^31), giving 0 on underflow.
@@ -307,7 +315,7 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
     prob = static_cast<uint32_t>(signed_prob);
   }
   chiff_probability_u31_ = prob;
-  chiff_lp_q15_ = lp;
+  chiff_lp_state_q15_ = lp_state;
 }
 
 void Envelope::RenderStageDispatch(

@@ -99,10 +99,10 @@ class Envelope {
   // nibbles into the byte array so the per-sample extraction is a single
   // ldrb instead of lsr-reg + and.
   inline void set_chiff_lpf_shifts(uint16_t packed) {
-    chiff_lpf_shifts_[0] = packed & 0xFu;
-    chiff_lpf_shifts_[1] = (packed >> 4) & 0xFu;
-    chiff_lpf_shifts_[2] = (packed >> 8) & 0xFu;
-    chiff_lpf_shifts_[3] = (packed >> 12) & 0xFu;
+    chiff_lp_cutoff_shifts_[0] = packed & 0xFu;
+    chiff_lp_cutoff_shifts_[1] = (packed >> 4) & 0xFu;
+    chiff_lp_cutoff_shifts_[2] = (packed >> 8) & 0xFu;
+    chiff_lp_cutoff_shifts_[3] = (packed >> 12) & 0xFu;
   }
 
   static inline uint8_t signed_clz(int32_t x) {
@@ -145,8 +145,8 @@ class Envelope {
   uint32_t chiff_probability_u31_;        // current ramping noise amplitude scale, max ~2^31-1
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
   uint32_t chiff_prng_xor_u32_;           // per-instance PRNG decorrelation mask, set in Init()
-  int32_t  chiff_lp_q15_;                 // 1-pole LPF state in Q15 (same scale as sample buffer)
-  uint8_t  chiff_lpf_shifts_[noisy_multiplier::kSlotCount];  // unpacked LPF shifts, byte-addressable
+  int32_t  chiff_lp_state_q15_;                 // 1-pole LPF state in Q15 (same scale as sample buffer)
+  uint8_t  chiff_lp_cutoff_shifts_[noisy_multiplier::kSlotCount];  // unpacked LPF shifts, byte-addressable
   uint8_t  chiff_noise_shift_offset_;     // additional ASR to scale noise to envelope's actual range
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
