@@ -65,7 +65,7 @@ enum MacroPlayMode {
 const uint8_t kBackupClockLFOPeriodTicksBits = 4;
 
 // Converts BPM to the Refresh phase increment of an LFO that cycles at 24 PPQN
-const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / 4000) * 24 / 60;
+const uint32_t kTempoToTickPhaseIncrement = (UINT32_MAX / kRefreshHz) * 24 / 60;
 
 void Multi::PrintDebugByte(uint8_t byte) { ui.PrintDebugByte(byte); }
 void Multi::PrintInt32E(int32_t value) { ui.PrintInt32E(value); }
@@ -444,7 +444,7 @@ void Multi::AssignVoicesToCVOutputs() {
       break;
     case LAYOUT_QUAD_TRIGGERS:
       for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        MapVoices(i, DC_TRIGGER, i, 1, 1);
+        MapVoices(i, DC_AUX_1, i, 1, 1);
       }
       break;
 
@@ -1175,10 +1175,17 @@ int16_t Multi::GetSettingValue(const Setting& setting, uint8_t part) const {
 }
 
 const SettingIndex Multi::kTaggedSkippedSettings[] = {
+  // Not settings, just a menu header
   SETTING_MENU_SETUP,
   SETTING_MENU_OSCILLATOR,
   SETTING_MENU_ENVELOPE,
+
+  // UI-only alias for combined control of SETTING_MIDI_MIN_NOTE and SETTING_MIDI_MAX_NOTE
   SETTING_MIDI_NOTE,
+  
+  LEGACY_SETTING_VOICING_TRIGGER_DURATION,
+  LEGACY_SETTING_VOICING_TRIGGER_SCALE,
+  LEGACY_SETTING_VOICING_TRIGGER_SHAPE,
 };
 const uint8_t Multi::kNumTaggedSkippedSettings =
     sizeof(kTaggedSkippedSettings) / sizeof(kTaggedSkippedSettings[0]);

@@ -30,6 +30,8 @@
 #ifndef YARNS_MULTI_H_
 #define YARNS_MULTI_H_
 
+#include <cstring>
+
 #include "stmlib/stmlib.h"
 
 #include "yarns/drivers/dac.h"
@@ -522,26 +524,36 @@ class Multi {
   void GetCvGate(uint16_t* cv, bool* gate);
   void GetLedsBrightness(uint8_t* brightness);
 
+  // Writes directly into the stream buffer's underlying storage to avoid a
+  // ~1KB stack-local PackedMulti, which overflows the 512-byte stack region
+  // into .data on f10x. Callers must Rewind() first; STATIC_ASSERT in
+  // storage_manager.cc guarantees the buffer is large enough.
   template<typename T>
   void SerializePacked(T* stream_buffer) {
-    PackedMulti packed;
+    if (stream_buffer->position() != 0) while (1);
+    PackedMulti* packed = reinterpret_cast<PackedMulti*>(stream_buffer->mutable_bytes());
+    // Zero the full region: PackedMulti and its nested PackedParts both have
+    // spare bitfield bits that Pack() doesn't touch, so without this the
+    // serialized byte stream would depend on prior buffer contents.
+    std::memset(packed, 0, sizeof(PackedMulti));
     for (uint8_t i = 0; i < kNumParts; i++) {
-      part_[i].Pack(packed.parts[i]);
+      part_[i].Pack(packed->parts[i]);
     }
-    settings_.Pack(packed);
-    stream_buffer->Write(packed);
+    settings_.Pack(*packed);
+    stream_buffer->Seek(sizeof(PackedMulti));
   };
-  
+
   template<typename T>
   void DeserializePacked(T* stream_buffer) {
     StopRecording(recording_part_);
     Stop();
-    PackedMulti packed;
-    stream_buffer->Read(&packed);
+    if (stream_buffer->position() != 0) while (1);
+    PackedMulti* packed = reinterpret_cast<PackedMulti*>(stream_buffer->mutable_bytes());
+    stream_buffer->Seek(sizeof(PackedMulti));
     for (uint8_t i = 0; i < kNumParts; i++) {
-      part_[i].Unpack(packed.parts[i]);
+      part_[i].Unpack(packed->parts[i]);
     }
-    settings_.Unpack(packed);
+    settings_.Unpack(*packed);
     AfterDeserialize();
   };
 
@@ -629,7 +641,7 @@ class Multi {
 
   // Setting counts per domain.  Validated by STATIC_ASSERTs in multi.cc.
   static const uint16_t kNumTaggedMultiSettings = 12;
-  static const uint16_t kNumTaggedPartSettings = 63;
+  static const uint16_t kNumTaggedPartSettings = 61;
 
   // Complete wire layout of a tagged payload.  Not used for actual I/O
   // (we stream element-by-element to avoid a large stack allocation), but

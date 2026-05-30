@@ -42,20 +42,6 @@ namespace yarns {
 
 const uint16_t kNumOctaves = 11;
 
-// 4 kHz / 32 = 125 Hz (the ~minimum that doesn't cause obvious LFO sampling error)
-const uint8_t kLowFreqRefreshBits = 5;
-
-enum TriggerShape {
-  TRIGGER_SHAPE_SQUARE,
-  TRIGGER_SHAPE_LINEAR,
-  TRIGGER_SHAPE_EXPONENTIAL,
-  TRIGGER_SHAPE_RING,
-  TRIGGER_SHAPE_STEPS,
-  TRIGGER_SHAPE_NOISE_BURST,
-
-  TRIGGER_SHAPE_LAST
-};
-
 enum OscillatorMode {
   OSCILLATOR_MODE_OFF,
   OSCILLATOR_MODE_DRONE,
@@ -91,7 +77,6 @@ enum DCRole {
   DC_VELOCITY,
   DC_AUX_1,
   DC_AUX_2,
-  DC_TRIGGER,
   DC_LAST
 };
 
@@ -114,7 +99,8 @@ class Voice {
 
   void Refresh();
   void NoteOn(
-    int16_t note, uint8_t velocity, uint8_t portamento, bool trigger,
+    int16_t note, uint8_t velocity, uint8_t portamento,
+    int8_t portamento_mod_velocity, bool trigger,
     ADSR& adsr, int16_t timbre_envelope_target
   );
   void NoteOff(bool force = false);
@@ -126,7 +112,6 @@ class Voice {
     mod_aux_[MOD_AUX_AFTERTOUCH] = velocity << 9;
   }
 
-  void garbage(uint8_t x);
   inline void set_pitch_bend_range(uint8_t pitch_bend_range) {
     pitch_bend_range_ = pitch_bend_range;
   }
@@ -144,15 +129,6 @@ class Voice {
     return lfos_[role].shape(lfo_shapes_[role]);
   }
 
-  inline void set_trigger_duration(uint8_t trigger_duration) {
-    trigger_duration_ = trigger_duration;
-  }
-  inline void set_trigger_scale(uint8_t trigger_scale) {
-    trigger_scale_ = trigger_scale;
-  }
-  inline void set_trigger_shape(uint8_t trigger_shape) {
-    trigger_shape_ = trigger_shape;
-  }
   inline void set_aux_cv(uint8_t i) { aux_cv_source_ = i; }
   inline void set_aux_cv_2(uint8_t i) { aux_cv_source_2_ = i; }
   
@@ -172,8 +148,6 @@ class Voice {
   inline bool trigger() const  {
     return gate_ && trigger_pulse_;
   }
-  
-  uint16_t trigger_value() const;
   
   inline void set_oscillator_mode(uint8_t m) {
     oscillator_mode_ = m;
@@ -247,10 +221,6 @@ class Voice {
   uint8_t vibrato_range_;
   uint8_t vibrato_mod_;
   
-  uint8_t trigger_duration_;
-  uint8_t trigger_shape_;
-  bool trigger_scale_;
-
   uint8_t oscillator_mode_;
   LFOShape lfo_shapes_[LFO_ROLE_LAST];
   uint8_t aux_cv_source_;
@@ -267,11 +237,9 @@ class Voice {
   uint16_t retrigger_delay_;
   
   uint16_t trigger_pulse_;
-  uint32_t trigger_phase_increment_;
-  uint32_t trigger_phase_;
 
   uint8_t refresh_counter_;
-  Interpolator<kLowFreqRefreshBits> pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
+  Interpolator<kRefreshHzToLfoSampleHzRatioBits> pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
 
   uint16_t tremolo_mod_target_;
   uint16_t tremolo_mod_current_;
@@ -345,6 +313,9 @@ class CVOutput {
       (dc_role_ == DC_AUX_2 && dc_voices_[0]->aux_2_envelope())
     );
   }
+  inline bool sounding() const {
+    return envelope_.stage() != ENV_STAGE_DEAD;
+  }
   inline void NoteOn(ADSR& adsr) {
     envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
   }
@@ -405,12 +376,6 @@ class CVOutput {
     }
     return DacCodeFrom16BitValue(dc_voices_[0]->aux_cv_2_16bit());
   }
-  inline uint16_t trigger_dac_code() {
-    int32_t max = volts_dac_code(5);
-    int32_t min = volts_dac_code(0);
-    return min + ((max - min) * dc_voices_[0]->trigger_value() >> 15);
-  }
-
   inline uint16_t calibration_dac_code(uint8_t note) const {
     return calibrated_dac_code_[note];
   }

@@ -37,6 +37,7 @@
 #include "yarns/envelope.h"
 #include "yarns/resources.h"
 #include "yarns/interpolator.h"
+#include "yarns/svf.h"
 #include "yarns/drivers/dac.h"
 
 #include <cstring>
@@ -44,24 +45,16 @@
 
 namespace yarns {
 
-class StateVariableFilter {
+class StateVariableFilter : public SVF {
  public:
   void Init();
   void RenderInit(int16_t resonance);
 
   inline void RenderSample(int32_t in, int16_t cutoff) {
     damp.Tick();
-    notch = in - (bp * damp.value() >> 14);
-    notch = Clip16(notch);
-    lp += cutoff * bp >> 14;
-    lp = Clip16(lp);
-    hp = notch - lp;
-    hp = Clip16(hp);
-    bp += cutoff * hp >> 14;
-    bp = Clip16(bp);
+    Process(in, cutoff, damp.value());
   }
 
-  int32_t bp, lp, notch, hp;
  private:
   Interpolator<kAudioBlockSizeBits> damp;
 };
@@ -158,7 +151,10 @@ class Oscillator {
     gain_envelope_.NoteOff();
     timbre_envelope_.NoteOff();
   }
-  
+  inline bool sounding() const {
+    return gain_envelope_.stage() != ENV_STAGE_DEAD;
+  }
+
   void Render(int16_t* audio_mix);
 
   static RenderFn fn_table_[];

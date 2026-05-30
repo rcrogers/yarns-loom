@@ -45,6 +45,24 @@ RESOURCES      = yarns/resources
 
 TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
 
+# Stack budget bookkeeping.
+#
+# STACK_FRAME_WARN: per-function frame threshold for -Wframe-larger-than. This
+# is a ceiling on a SINGLE function's stack frame, not total stack. Any
+# individual frame larger than this is a smell worth explicit sign-off.
+# -Wframe-larger-than (not -Wstack-usage) is used because naked-asm functions
+# in third-party CMSIS error out under -Wstack-usage + -Werror.
+#
+# STACK_RESERVATION: total bytes between _sstack and _estack in the linker
+# script. Must match stm32f10x_flash_md_application_small.ld; that file has
+# the cumulative-stack math behind the 2048 figure. This value is passed into
+# C++ as STACK_RESERVATION_BYTES for the static_assert in yarns/stack_budget.h
+# that cross-checks the sum of known large stack locals against the reservation.
+STACK_FRAME_WARN    = 512
+STACK_RESERVATION   = 2048
+STACK_CCFLAGS       = -Wframe-larger-than=$(STACK_FRAME_WARN) -fstack-usage \
+                      -DSTACK_RESERVATION_BYTES=$(STACK_RESERVATION)
+
 include stmlib/makefile.inc
 
 MAKEFLAGS += -j8

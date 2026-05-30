@@ -79,14 +79,14 @@ void Part::Init() {
   voicing_.allocation_mode = POLY_MODE_OFF;
   voicing_.legato_retrigger = true;
   voicing_.portamento_legato_only = false;
-  voicing_.portamento = 0;
+  voicing_.portamento = 36;  // T28
+  voicing_.portamento_mod_velocity = -24;
   voicing_.pitch_bend_range = 2;
   voicing_.vibrato_range = 1;
   voicing_.vibrato_mod = 0;
   voicing_.lfo_rate = 70;
   voicing_.lfo_spread_types = 0;
   voicing_.lfo_spread_voices = 0;
-  voicing_.trigger_duration = 2;
   voicing_.aux_cv = MOD_AUX_ENVELOPE;
   voicing_.aux_cv_2 = MOD_AUX_ENVELOPE;
   voicing_.tuning_transpose = 0;
@@ -814,23 +814,24 @@ void Part::VoiceNoteOn(
   }
 
   ADSR adsr;
-  adsr.peak = UINT16_MAX - (damping_22 >> (22 - 16));
-  adsr.sustain = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
+  adsr.peak_u16 = UINT16_MAX - (damping_22 >> (22 - 16));
+  adsr.sustain_u16 = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
   // NB: this LUT only has 128 values, so we use a 15-bit index
-  adsr.attack   = Interpolate88(
+  adsr.attack_u32   = Interpolate88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << (15 - 13)
   );
-  adsr.decay    = Interpolate88(
+  adsr.decay_u32    = Interpolate88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << (15 - 13)
   );
-  adsr.release  = Interpolate88(
+  adsr.release_u32  = Interpolate88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
 
-  voice->NoteOn(Tune(pitch), vel, portamento, trigger, adsr, timbre_14 << 2);
+  voice->NoteOn(Tune(pitch), vel, portamento,
+    voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {
@@ -1007,7 +1008,6 @@ void Part::TouchVoices() {
   CONSTRAIN(voicing_.aux_cv, 0, MOD_AUX_LAST - 1);
   CONSTRAIN(voicing_.aux_cv_2, 0, MOD_AUX_LAST - 1);
   for (uint8_t i = 0; i < num_voices_; ++i) {
-    voice_[i]->garbage(0);
     voice_[i]->set_pitch_bend_range(voicing_.pitch_bend_range);
     voice_[i]->set_vibrato_range(voicing_.vibrato_range);
     voice_[i]->set_vibrato_mod(voicing_.vibrato_mod);
@@ -1015,9 +1015,6 @@ void Part::TouchVoices() {
     voice_[i]->set_lfo_shape(LFO_ROLE_PITCH, voicing_.vibrato_shape);
     voice_[i]->set_lfo_shape(LFO_ROLE_TIMBRE, voicing_.timbre_lfo_shape);
     voice_[i]->set_lfo_shape(LFO_ROLE_AMPLITUDE, voicing_.tremolo_shape);
-    voice_[i]->set_trigger_duration(voicing_.trigger_duration);
-    voice_[i]->set_trigger_scale(voicing_.trigger_scale);
-    voice_[i]->set_trigger_shape(voicing_.trigger_shape);
     voice_[i]->set_aux_cv(voicing_.aux_cv);
     voice_[i]->set_aux_cv_2(voicing_.aux_cv_2);
     voice_[i]->set_oscillator_mode(voicing_.oscillator_mode);
@@ -1066,9 +1063,6 @@ bool Part::Set(uint8_t address, uint8_t value) {
     case PART_VOICING_VIBRATO_SHAPE:
     case PART_VOICING_TIMBRE_LFO_SHAPE:
     case PART_VOICING_TREMOLO_SHAPE:
-    case PART_VOICING_TRIGGER_DURATION:
-    case PART_VOICING_TRIGGER_SHAPE:
-    case PART_VOICING_TRIGGER_SCALE:
     case PART_VOICING_AUX_CV:
     case PART_VOICING_AUX_CV_2:
     case PART_VOICING_OSCILLATOR_SHAPE:
