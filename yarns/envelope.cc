@@ -78,9 +78,8 @@ void Envelope::Init(int16_t zero_value_s16) {
   );
   chiff_probability_u31_ = 0;
   chiff_prob_decrement_u32_ = 0;
-  chiff_lp_state_q15_ = 0;
-  set_chiff_lpf_shifts(noisy_multiplier::kDefaultShiftsPacked);
-  chiff_noise_shift_offset_ = 0;
+  chiff_start_s16_ = 0;
+  chiff_target_s16_ = 0;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -100,20 +99,7 @@ void Envelope::NoteOn(
   uint8_t chiff_amount
 ) {
   adsr_ = &adsr;
-  // Chiff noise is scaled to fit within the envelope's actual range
-  // (max_target - min_target), not the int15 sample buffer's [0, 32767].
-  // This matters because audio voices pre-scale envelope max to scale_/2
-  // (typically 4096 for unison-4); chiff that filled the int15 buffer
-  // would overflow the per-voice budget and wrap audio_mix on accumulation.
-  // Offset = clz(range) - 16: maps full int15 range → 1 extra ASR,
-  // unison-4 range (4096) → 4 extra ASR, scaling noise proportionally.
-  {
-    int32_t range_s16 = max_target_s16 - min_target_s16;
-    if (range_s16 < 1) range_s16 = 1;
-    chiff_noise_shift_offset_ =
-        static_cast<uint8_t>(__builtin_clz(range_s16) - 16);
-  }
-  int32_t scale_s16 = max_target_s16 - min_target_s16;
+  int16_t scale_s16 = max_target_s16 - min_target_s16;
   int32_t min_target_q31 = min_target_s16 << 16;
   // NB: sustain level can be higher than peak
   stage_target_q30_[ENV_STAGE_ATTACK] =
@@ -243,68 +229,27 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
 
-  // Chiff post-process: bandlimited noise additively mixed into the
-  // envelope output. Per sample, generate ±noise_amp (sign from PRNG
-  // bit, magnitude from prob), smooth through a 1-pole LPF, add to the
-  // sample saturating to [0, 32767]. The LPF cutoff sweeps per block
-  // (wider at attack onset → narrower as chiff fades) by deriving its
-  // shift from clz(prob). The decay of prob naturally fades the noise.
+  // Chiff post-process: probabilistic sample replacement. Conditional
+  // store (STRHcc) avoids a per-sample ldrh of the original — when no
+  // spike fires we just don't write. Reads from the system-shared PRNG
+  // buffer filled once per block.
   uint32_t prob = chiff_probability_u31_;
   const uint32_t dec = chiff_prob_decrement_u32_;
+  const int16_t start = chiff_start_s16_;
+  const int16_t target = chiff_target_s16_;
   const uint32_t prng_xor = chiff_prng_xor_u32_;
-  int32_t lp_state = chiff_lp_state_q15_;
-  // Per-block dithered LPF shifts (4-byte array, indexed per-sample via PRNG).
-  const uint8_t* const chiff_lp_cutoff_shifts = chiff_lp_cutoff_shifts_;
-  // Noise amplitude: reinterpret PRNG as int32 and ASR by noise_shift to
-  // get uniform ±noise in the right magnitude. base = clz(prob)+14+offset
-  // gives amp = 2^-(base), which steps 6 dB at each prob octave boundary.
-  // Per-sample 2-shift dither between base and base+1 smooths the step:
-  // mean amp = 2^-(base+1) * (1 + mantissa_frac), which is continuous
-  // across boundaries (top-of-octave mean = bottom-of-next-octave mean).
-  // Threshold uses bits 4-19 of prng vs top 16 bits of mantissa_frac,
-  // decorrelated from the sign bit (bit 31) and dithered_cutoff_shift bits (2-3).
-  //
-  // Loudness calibration: base=14 (8× louder than the theoretical
-  // conservative base=17) produces no audible clipping in practice —
-  // the LUT rarely reaches alpha=1/2 for musical pitches and 3σ
-  // outliers are brief enough to be imperceptible. Dial back toward
-  // 15/16 if glitching returns at extreme corner cases.
-  const uint32_t clz_prob = __builtin_clz(prob | 1u);
-  const uint32_t mantissa_frac = prob << (clz_prob + 1u);  // Q32 within octave
-  const uint32_t mantissa_top16 = mantissa_frac >> 16;
-  uint32_t noise_shift_base = clz_prob + 14u + chiff_noise_shift_offset_;
-  if (noise_shift_base > 30u) noise_shift_base = 30u;  // +1 dither stays ≤31
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    // XOR with per-envelope mask decorrelates noise timing across
-    // simultaneously-triggered envelopes sharing the PRNG buffer.
+    // XOR with per-envelope mask decorrelates this envelope's chiff
+    // positions from other envelopes sharing the same PRNG buffer.
     uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
-    const uint32_t dither = (prng >> 4) & 0xFFFFu;
-    // Branchless dither-select via CMP+ADC: CMP sets C=1 iff
-    // dither >= mantissa_top16, then ADC base, #0 adds C to base in one
-    // instruction. The ternary form below would compile to CMP+ITE +
-    // two conditional MOVs (4 cycles); this is 2.
-    uint32_t noise_shift;
-    __asm__ ("cmp %1, %2\n\t"
-             "adc %0, %3, #0"
-             : "=r"(noise_shift)
-             : "r"(dither), "r"(mantissa_top16), "r"(noise_shift_base)
-             : "cc");
-    int32_t noise = static_cast<int32_t>(prng) >> noise_shift;
-    // 1-pole LPF with per-sample dithered shift (pitch-tracked).
-    const uint32_t dithered_cutoff_shift = chiff_lp_cutoff_shifts[(prng >> noisy_multiplier::kSlotIdxBits)
-        & ((1u << noisy_multiplier::kSlotIdxBits) - 1u)];
-    lp_state += (noise - lp_state) >> dithered_cutoff_shift;
-    // Add lp_state to sample, saturate to [0, 32767]. NoteOn reserves
-    // headroom in the envelope's peak target so the top doesn't clip
-    // in practice; safety USAT handles the bottom (rare) plus any
-    // headroom-budget overruns at peak.
-    int32_t out;
-    __asm__ ("usat %0, #15, %1"
-             : "=r"(out)
-             : "r"(static_cast<int32_t>(sample_buffer[i]) + lp_state));
-    sample_buffer[i] = static_cast<int16_t>(out);
-    // Saturating decrement via SUBS + USAT: USAT clamps the signed
-    // result of (prob − dec) to [0, 2^31), giving 0 on underflow.
+    int16_t replacement = (prng & 1u) ? target : start;
+    // Compare against (prng >> 1) so prob lives in the top-31-bit space
+    // [0, 2^31) — required by the USAT #31 saturating decrement below.
+    if ((prng >> 1) < prob) sample_buffer[i] = replacement;
+    // Saturating decrement via SUBS + USAT: 2 cycles vs ~3 for the
+    // cmp/cmov idiom. USAT clamps the signed result of (prob − dec) to
+    // [0, 2^31), giving 0 on underflow. Safe because prob is bounded to
+    // [0, 2^31) by the <<24 in NoteOn.
     int32_t signed_prob;
     __asm__ (
         "subs %0, %1, %2\n\t"
@@ -315,7 +260,6 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
     prob = static_cast<uint32_t>(signed_prob);
   }
   chiff_probability_u31_ = prob;
-  chiff_lp_state_q15_ = lp_state;
 }
 
 void Envelope::RenderStageDispatch(

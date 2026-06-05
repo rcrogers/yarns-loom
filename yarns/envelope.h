@@ -26,7 +26,6 @@
 #ifndef YARNS_ENVELOPE_H_
 #define YARNS_ENVELOPE_H_
 
-#include "yarns/noisy_multiplier.h"
 #include "yarns/resources.h"
 
 namespace yarns {
@@ -52,8 +51,6 @@ STATIC_ASSERT(
   1 << kLutExpoSlopeShiftSizeBits == LUT_EXPO_SLOPE_SHIFT_SIZE,
   expo_slope_shift_size
 );
-
-// Chiff LPF constants and dither helpers live in noisy_multiplier.h.
 
 class Envelope {
  public:
@@ -94,17 +91,6 @@ class Envelope {
   inline int16_t value() const { return value_q30_ >> (30 - 15); }
   inline EnvelopeStage stage() const { return stage_; }
 
-  // Per-block setter: install the LPF shifts entry (typically
-  // lut_chiff_lpf_shifts[noisy_multiplier::pitch_bin(phase_inc)]). Unpacks
-  // nibbles into the byte array so the per-sample extraction is a single
-  // ldrb instead of lsr-reg + and.
-  inline void set_chiff_lpf_shifts(uint16_t packed) {
-    chiff_lp_cutoff_shifts_[0] = packed & 0xFu;
-    chiff_lp_cutoff_shifts_[1] = (packed >> 4) & 0xFu;
-    chiff_lp_cutoff_shifts_[2] = (packed >> 8) & 0xFu;
-    chiff_lp_cutoff_shifts_[3] = (packed >> 12) & 0xFu;
-  }
-
   static inline uint8_t signed_clz(int32_t x) {
     const uint32_t x_for_clz = static_cast<uint32_t>(abs(x >= 0 ? x : x + 1));
     return __builtin_clzl(x_for_clz) - 1;
@@ -127,27 +113,27 @@ class Envelope {
 
   uint32_t phase_u32_, phase_increment_u32_;
 
-  // Chiff: bandlimited noise additively mixed into the envelope output as
-  // a post-process pass. Per-sample ±noise of decaying magnitude is
-  // smoothed by a 1-pole LPF, then added to the sample (saturated).
-  // The downstream gain*carrier multiply turns this into AM noise around
-  // the carrier — broadband-decaying-to-pitched character (the carrier is
-  // the resonator; this is the excitation). Replaces the older
-  // value-replacement chiff, which was too click-like on long attacks.
-  //
-  // Amplitude is derived from chiff_probability_u31_, which still ramps
-  // linearly to 0 over a duration equal to the attack stage. The LPF
-  // state continues filtering past attack so the noise tail decays
-  // smoothly rather than cutting off. Post-pass runs unconditionally
-  // each block for uniform worst-case cost. All envelopes share one
-  // PRNG buffer per block (filled in FillSharedPrngBuffer); the per-
-  // instance XOR mask decorrelates sample timing across envelopes.
-  uint32_t chiff_probability_u31_;        // current ramping noise amplitude scale, max ~2^31-1
+  // Chiff: probabilistic sample replacement applied as a post-process pass
+  // over the rendered int16 buffer. A fraction of samples (0..100%
+  // initially) gets replaced by either the attack-start value or the
+  // attack-target value (50/50 via a bit of the shared PRNG draw), cached
+  // as int16 at attack-trigger time. Probability ramps linearly to 0 over
+  // a duration equal to the attack stage; chiff persists past attack so a
+  // released note still gets chiff in its tail. Post-pass runs
+  // unconditionally each block for uniform worst-case cost. All envelopes
+  // share one PRNG buffer per block (filled in FillSharedPrngBuffer); the
+  // resulting cross-envelope correlation is acceptable for this effect.
+  uint32_t chiff_probability_u31_;        // current ramping prob, max ~2^31-1 (compared against prng>>1)
   uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
-  uint32_t chiff_prng_xor_u32_;           // per-instance PRNG decorrelation mask, set in Init()
-  int32_t  chiff_lp_state_q15_;                 // 1-pole LPF state in Q15 (same scale as sample buffer)
-  uint8_t  chiff_lp_cutoff_shifts_[noisy_multiplier::kSlotCount];  // unpacked LPF shifts, byte-addressable
-  uint8_t  chiff_noise_shift_offset_;     // additional ASR to scale noise to envelope's actual range
+  // Per-instance decorrelation mask XORed into the shared PRNG draw each
+  // sample. Identical chiff_amount + identical ADSR yield identical prob
+  // trajectories across all envelopes triggered together; without this
+  // mask, all such envelopes would fire chiff on the exact same sample
+  // positions every block, producing an impulsive correlated burst at
+  // multi-NoteOn. Mask is derived from `this` once in Init().
+  uint32_t chiff_prng_xor_u32_;
+  int16_t chiff_start_s16_;               // captured start value as int16
+  int16_t chiff_target_s16_;              // captured attack target as int16
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
