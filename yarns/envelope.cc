@@ -83,7 +83,10 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_lp_state_q15_ = 0;
   chiff_lp_coeff_q15_ = 32767;  // passthrough until oscillator pushes a coeff
   chiff_hold_s16_ = 0;
-  chiff_decimate_count_ = 0;
+  chiff_decimate_accum_ = 0;
+  // Default to near-passthrough (wraps ~every sample) for envelopes whose
+  // rate is never set by an oscillator (e.g. CV outputs).
+  chiff_decimate_increment_ = 0xFFFFFFFFu;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -134,7 +137,9 @@ void Envelope::NoteOn(
       chiff_probability_u31_ = static_cast<uint32_t>(chiff_amount) << 24;
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(chiff_probability_u31_) * adsr.attack_u32) >> 32);
-      chiff_decimate_count_ = 0;  // re-sample on the first attack sample
+      // Prime the accumulator to wrap on the first attack sample (any
+      // nonzero increment), latching a fresh hold immediately.
+      chiff_decimate_accum_ = 0xFFFFFFFFu;
       Trigger(ENV_STAGE_ATTACK);
       break;
   }
@@ -234,24 +239,23 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
 
-  // Chiff post-process: decimate the output to ~2.25 kHz (one new sample
-  // latched every kChiffDecimateFactor samples, held in between) — a
-  // zero-order-hold downsample with no PRNG or filtering. Runs every block
-  // unconditionally.
-  const uint8_t kChiffDecimateFactor = 20;  // 45 kHz / 20 ≈ 2.25 kHz
+  // Chiff post-process: zero-order-hold decimation whose rate tracks the
+  // voice pitch. A phase accumulator advances by chiff_decimate_increment_
+  // (= f/fs · 2^32) each sample; every wrap latches a fresh output sample,
+  // so latches land one voice period apart on average and the accumulator
+  // carries the sub-sample placement error. No PRNG or filtering; runs
+  // every block unconditionally.
+  uint32_t accum = chiff_decimate_accum_;
+  const uint32_t increment = chiff_decimate_increment_;
   int16_t held = chiff_hold_s16_;
-  uint8_t count = chiff_decimate_count_;
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    if (count == 0) {
-      held = sample_buffer[i];
-      count = kChiffDecimateFactor - 1;
-    } else {
-      --count;
-    }
+    uint32_t prev = accum;
+    accum += increment;
+    if (accum < prev) held = sample_buffer[i];  // wrapped → one period elapsed
     sample_buffer[i] = held;
   }
   chiff_hold_s16_ = held;
-  chiff_decimate_count_ = count;
+  chiff_decimate_accum_ = accum;
 }
 
 void Envelope::RenderStageDispatch(

@@ -125,10 +125,9 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
   raw_gain_bias_ = gain_bias;
   raw_timbre_bias_ = timbre_bias;
 
-  // Chiff LPF cutoff uses voice pitch
-  uint16_t chiff_lp_coeff = SVF::CutoffFromFreq(pitch_);
-  gain_envelope_.set_chiff_lp_coeff(chiff_lp_coeff);
-  timbre_envelope_.set_chiff_lp_coeff(chiff_lp_coeff);
+  // Chiff decimation rate tracks voice pitch (one hold per voice period).
+  gain_envelope_.set_chiff_decimate_increment(phase_increment_);
+  timbre_envelope_.set_chiff_decimate_increment(phase_increment_);
 }
 
 int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {

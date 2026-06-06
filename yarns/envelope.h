@@ -91,11 +91,12 @@ class Envelope {
   inline int16_t value() const { return value_q30_ >> (30 - 15); }
   inline EnvelopeStage stage() const { return stage_; }
 
-  // Per-block setter: install the chiff LPF coefficient (Q15 alpha). The
-  // oscillator derives this from voice pitch so the chiff's band-limiting
-  // tracks the carrier.
-  inline void set_chiff_lp_coeff(uint16_t coeff_q15) {
-    chiff_lp_coeff_q15_ = coeff_q15;
+  // Per-block setter: install the chiff decimation rate as a per-sample
+  // phase increment (= f/fs · 2^32, i.e. the oscillator's phase_increment_).
+  // The decimator latches one new sample per accumulator wrap, placing
+  // latches one voice period apart on average.
+  inline void set_chiff_decimate_increment(uint32_t increment) {
+    chiff_decimate_increment_ = increment;
   }
 
   static inline uint8_t signed_clz(int32_t x) {
@@ -147,12 +148,14 @@ class Envelope {
   // for tail continuity; coeff is pushed per-block by the oscillator.
   int32_t  chiff_lp_state_q15_;           // 1-pole LPF state (Q15, same scale as buffer)
   uint16_t chiff_lp_coeff_q15_;           // 1-pole alpha (Q15); 32767 ≈ passthrough
-  // Decimation chiff: while prob > 0, the output is held at chiff_hold_s16_
-  // and re-sampled every kChiffDecimateFactor samples, downsampling to a
-  // lower rate (zero-order hold). State carries across blocks so the hold
-  // grid is continuous.
+  // Decimation chiff: the output is held at chiff_hold_s16_ and re-sampled
+  // each time the phase accumulator wraps, so the hold rate tracks the voice
+  // pitch (one latch per voice period on average; the accumulator carries
+  // the sub-sample placement error Bresenham-style). State carries across
+  // blocks so the grid is continuous.
   int16_t  chiff_hold_s16_;               // held output sample
-  uint8_t  chiff_decimate_count_;         // samples remaining until re-sample
+  uint32_t chiff_decimate_accum_;         // phase accumulator; wrap → re-sample
+  uint32_t chiff_decimate_increment_;     // per-sample phase advance (f/fs · 2^32)
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
