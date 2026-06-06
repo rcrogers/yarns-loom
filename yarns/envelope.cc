@@ -82,6 +82,8 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_target_s16_ = 0;
   chiff_lp_state_q15_ = 0;
   chiff_lp_coeff_q15_ = 32767;  // passthrough until oscillator pushes a coeff
+  chiff_hold_s16_ = 0;
+  chiff_decimate_count_ = 0;
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -132,6 +134,7 @@ void Envelope::NoteOn(
       chiff_probability_u31_ = static_cast<uint32_t>(chiff_amount) << 24;
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(chiff_probability_u31_) * adsr.attack_u32) >> 32);
+      chiff_decimate_count_ = 0;  // re-sample on the first attack sample
       Trigger(ENV_STAGE_ATTACK);
       break;
   }
@@ -231,54 +234,24 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
 
-  // Chiff post-process: probabilistic sample replacement, band-limited by
-  // a 1-pole LPF whose cutoff tracks voice pitch. Per sample, a PRNG-gated
-  // fraction picks a replacement (attack-start or -target); the
-  // perturbation (replacement − original) is run through the LPF and added
-  // back to the original. Filtering the delta — not the buffer — leaves
-  // the envelope signal itself unfiltered. Reads from the system-shared
-  // PRNG buffer filled once per block.
-  uint32_t prob = chiff_probability_u31_;
-  const uint32_t dec = chiff_prob_decrement_u32_;
-  const int16_t start = chiff_start_s16_;
-  const int16_t target = chiff_target_s16_;
-  const uint32_t prng_xor = chiff_prng_xor_u32_;
-  int32_t lp_q15 = chiff_lp_state_q15_;
-  const int32_t coeff_q15 = chiff_lp_coeff_q15_;
+  // Chiff post-process: decimate the output to ~2.25 kHz (one new sample
+  // latched every kChiffDecimateFactor samples, held in between) — a
+  // zero-order-hold downsample with no PRNG or filtering. Runs every block
+  // unconditionally.
+  const uint8_t kChiffDecimateFactor = 20;  // 45 kHz / 20 ≈ 2.25 kHz
+  int16_t held = chiff_hold_s16_;
+  uint8_t count = chiff_decimate_count_;
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    // XOR with per-envelope mask decorrelates this envelope's chiff
-    // positions from other envelopes sharing the same PRNG buffer.
-    uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
-    int16_t original = sample_buffer[i];
-    int16_t replacement = (prng & 1u) ? target : start;
-    // Compare against (prng >> 1) so prob lives in the top-31-bit space
-    // [0, 2^31) — required by the USAT #31 saturating decrement below.
-    int16_t fired = (prng >> 1) < prob ? replacement : original;
-    // 1-pole LPF on the perturbation: lp += alpha * (delta − lp). Plain
-    // Q15 multiply (no shift tricks). |delta − lp| < 2^16 and coeff ≤ 2^15
-    // so the product fits int32.
-    int32_t delta = fired - original;
-    lp_q15 += ((delta - lp_q15) * coeff_q15) >> 15;
-    int32_t out;
-    __asm__ ("usat %0, #15, %1"
-             : "=r"(out)
-             : "r"(original + lp_q15));
-    sample_buffer[i] = static_cast<int16_t>(out);
-    // Saturating decrement via SUBS + USAT: 2 cycles vs ~3 for the
-    // cmp/cmov idiom. USAT clamps the signed result of (prob − dec) to
-    // [0, 2^31), giving 0 on underflow. Safe because prob is bounded to
-    // [0, 2^31) by the <<24 in NoteOn.
-    int32_t signed_prob;
-    __asm__ (
-        "subs %0, %1, %2\n\t"
-        "usat %0, #31, %0"
-        : "=r"(signed_prob)
-        : "r"(prob), "r"(dec)
-        : "cc");
-    prob = static_cast<uint32_t>(signed_prob);
+    if (count == 0) {
+      held = sample_buffer[i];
+      count = kChiffDecimateFactor - 1;
+    } else {
+      --count;
+    }
+    sample_buffer[i] = held;
   }
-  chiff_probability_u31_ = prob;
-  chiff_lp_state_q15_ = lp_q15;
+  chiff_hold_s16_ = held;
+  chiff_decimate_count_ = count;
 }
 
 void Envelope::RenderStageDispatch(

@@ -147,6 +147,12 @@ class Envelope {
   // for tail continuity; coeff is pushed per-block by the oscillator.
   int32_t  chiff_lp_state_q15_;           // 1-pole LPF state (Q15, same scale as buffer)
   uint16_t chiff_lp_coeff_q15_;           // 1-pole alpha (Q15); 32767 ≈ passthrough
+  // Decimation chiff: while prob > 0, the output is held at chiff_hold_s16_
+  // and re-sampled every kChiffDecimateFactor samples, downsampling to a
+  // lower rate (zero-order hold). State carries across blocks so the hold
+  // grid is continuous.
+  int16_t  chiff_hold_s16_;               // held output sample
+  uint8_t  chiff_decimate_count_;         // samples remaining until re-sample
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
