@@ -91,6 +91,13 @@ class Envelope {
   inline int16_t value() const { return value_q30_ >> (30 - 15); }
   inline EnvelopeStage stage() const { return stage_; }
 
+  // Per-block setter: install the chiff LPF coefficient (Q15 alpha). The
+  // oscillator derives this from voice pitch so the chiff's band-limiting
+  // tracks the carrier.
+  inline void set_chiff_lp_coeff(uint16_t coeff_q15) {
+    chiff_lp_coeff_q15_ = coeff_q15;
+  }
+
   static inline uint8_t signed_clz(int32_t x) {
     const uint32_t x_for_clz = static_cast<uint32_t>(abs(x >= 0 ? x : x + 1));
     return __builtin_clzl(x_for_clz) - 1;
@@ -134,6 +141,12 @@ class Envelope {
   uint32_t chiff_prng_xor_u32_;
   int16_t chiff_start_s16_;               // captured start value as int16
   int16_t chiff_target_s16_;              // captured attack target as int16
+  // 1-pole LPF on the chiff perturbation (the replacement delta), cutoff
+  // tracked to voice pitch. Filtering the delta — not the buffer — leaves
+  // the underlying envelope signal unfiltered. State carries across blocks
+  // for tail continuity; coeff is pushed per-block by the oscillator.
+  int32_t  chiff_lp_state_q15_;           // 1-pole LPF state (Q15, same scale as buffer)
+  uint16_t chiff_lp_coeff_q15_;           // 1-pole alpha (Q15); 32767 ≈ passthrough
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
