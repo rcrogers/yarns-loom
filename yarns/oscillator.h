@@ -160,8 +160,16 @@ class Oscillator {
 
   void Render(int16_t* audio_mix);
 
+  // Copy the sine quarter-wave LUT from flash into SRAM. Must be called
+  // once at boot (before any Render). SRAM reads skip flash wait-states
+  // and bus contention with instruction prefetch, speeding the per-sample
+  // sine() lookups in the hot render path.
+  static void InitGlobalTables();
+
   static RenderFn fn_table_[];
-  
+  // RAM mirror of lut_sine_quadrant, populated by InitGlobalTables().
+  static uint16_t lut_sine_quadrant_ram_[LUT_SINE_QUADRANT_SIZE];
+
  private:
   void RenderFilteredNoise(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
   void RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix);
@@ -213,7 +221,7 @@ class Oscillator {
   }
 
   inline int16_t sine(uint32_t phase) const {
-    return quadrant_lookup(lut_sine_quadrant, phase);
+    return quadrant_lookup(lut_sine_quadrant_ram_, phase);
   }
 
   inline int16_t expo(uint32_t phase) const {
