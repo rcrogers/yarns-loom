@@ -63,6 +63,11 @@ STACK_RESERVATION   = 2048
 STACK_CCFLAGS       = -Wframe-larger-than=$(STACK_FRAME_WARN) -fstack-usage \
                       -DSTACK_RESERVATION_BYTES=$(STACK_RESERVATION)
 
+# Total on-chip SRAM. Must match the RAM region LENGTH in
+# stm32f10x_flash_md_application_small.ld (20K for STM32F10x MD). Used by the
+# `syx` rule to report free RAM = RAM_SIZE - (data + bss) - STACK_RESERVATION.
+RAM_SIZE            = 20480
+
 include stmlib/makefile.inc
 
 MAKEFLAGS += -j8
@@ -76,3 +81,7 @@ $(BUILD_DIR)%.syx: $(BUILD_DIR)%.bin
 	$(HEX2SYSEX) $(SYSEX_FLAGS) --syx -o $@ $<
 
 syx: $(BUILD_DIR)$(TARGET).syx
+	@$(SIZE) $(TARGET_ELF) | awk 'NR==2 { \
+	  used = $$2 + $$3; \
+	  free = $(RAM_SIZE) - used - $(STACK_RESERVATION); \
+	  printf "(%cram_used%c, %d)\n(%cram_free%c, %d)\n", 39, 39, used, 39, 39, free }'
