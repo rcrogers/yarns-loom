@@ -33,7 +33,6 @@
 #include "yarns/drivers/system.h"
 #include "yarns/midi_handler.h"
 #include "yarns/multi.h"
-#include "yarns/oscillator.h"
 #include "yarns/settings.h"
 #include "yarns/stack_budget.h"  // static_asserts render-path stack fits
 #include "yarns/storage_manager.h"
@@ -158,7 +157,6 @@ void DMA1_Channel6_IRQHandler(void) {
 void Init() {
   sys.Init();
 
-  Oscillator::InitGlobalTables();  // copy sine LUT to SRAM before any render
   setting_defs.Init();
   multi.Init(true);
   ui.Init();

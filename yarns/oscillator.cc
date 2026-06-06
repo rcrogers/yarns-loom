@@ -105,18 +105,6 @@ STATIC_ASSERT(
   oscillator_fn_table_size_mismatch
 );
 
-/* static */
-uint16_t Oscillator::lut_sine_quadrant_ram_[LUT_SINE_QUADRANT_SIZE];
-
-/* static */
-void Oscillator::InitGlobalTables() {
-  std::copy(
-    &lut_sine_quadrant[0],
-    &lut_sine_quadrant[LUT_SINE_QUADRANT_SIZE],
-    &lut_sine_quadrant_ram_[0]
-  );
-}
-
 void StateVariableFilter::Init() {
   SVF::Init();
   damp.Init();
