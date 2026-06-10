@@ -148,13 +148,16 @@ class Envelope {
   // for tail continuity; coeff is pushed per-block by the oscillator.
   int32_t  chiff_lp_state_q15_;           // 1-pole LPF state (Q15, same scale as buffer)
   uint16_t chiff_lp_coeff_q15_;           // 1-pole alpha (Q15); 32767 ≈ passthrough
-  // Decimation chiff: the output is held at chiff_hold_s16_ and re-sampled
-  // each time the phase accumulator wraps, so the hold rate tracks the voice
-  // pitch (one latch per voice period on average; the accumulator carries
-  // the sub-sample placement error Bresenham-style). State carries across
-  // blocks so the grid is continuous.
-  int16_t  chiff_hold_s16_;               // held output sample
-  uint32_t chiff_decimate_accum_;         // phase accumulator; wrap → re-sample
+  // Serration chiff: a phase accumulator (rate = voice pitch) marks decimate
+  // clocks ~one voice period apart. Each region ramps linearly from the
+  // latched value by serr_delta · (accum/2^32); serr_delta = (region rise) ·
+  // factor, with factor in [−1, +1] Q15 set from AMOUNT (+1 transparent,
+  // 0 flat hold, −1 inverted teeth). State carries across blocks so the grid
+  // and ramp are continuous.
+  int16_t  chiff_hold_s16_;               // latched value at the current clock
+  int16_t  chiff_serr_delta_s16_;         // this region's serration excursion
+  int16_t  chiff_serr_factor_q15_;        // AMOUNT slope factor (1 − 2k), Q15
+  uint32_t chiff_decimate_accum_;         // phase accumulator; wrap → clock
   uint32_t chiff_decimate_increment_;     // per-sample phase advance (f/fs · 2^32)
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);

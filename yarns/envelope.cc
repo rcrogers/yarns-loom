@@ -83,6 +83,8 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_lp_state_q15_ = 0;
   chiff_lp_coeff_q15_ = 32767;  // passthrough until oscillator pushes a coeff
   chiff_hold_s16_ = 0;
+  chiff_serr_delta_s16_ = 0;
+  chiff_serr_factor_q15_ = 32767;  // +1.0: transparent until a note arms it
   chiff_decimate_accum_ = 0;
   // Default to near-passthrough (wraps ~every sample) for envelopes whose
   // rate is never set by an oscillator (e.g. CV outputs).
@@ -106,6 +108,11 @@ void Envelope::NoteOn(
   uint8_t chiff_amount
 ) {
   adsr_ = &adsr;
+  // Serration slope factor (1 − 2k) in Q15, k = chiff_amount/127. AMOUNT 0
+  // → +32767 (slope = +orig, transparent); 127 → −32767 (slope = −orig,
+  // inverted teeth); midpoint → ~0 (flat hold / decimation).
+  chiff_serr_factor_q15_ =
+      (32767 * (127 - 2 * static_cast<int32_t>(chiff_amount))) / 127;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
   int32_t min_target_q31 = min_target_s16 << 16;
   // NB: sustain level can be higher than peak
@@ -138,8 +145,13 @@ void Envelope::NoteOn(
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(chiff_probability_u31_) * adsr.attack_u32) >> 32);
       // Prime the accumulator to wrap on the first attack sample (any
-      // nonzero increment), latching a fresh hold immediately.
+      // nonzero increment), latching a fresh hold immediately. Seed the
+      // serration base at the current value (the attack-start floor) with
+      // zero excursion, so the first tooth's delta is just the first
+      // region's rise — it can't dip below the start value.
       chiff_decimate_accum_ = 0xFFFFFFFFu;
+      chiff_hold_s16_ = value();
+      chiff_serr_delta_s16_ = 0;
       Trigger(ENV_STAGE_ATTACK);
       break;
   }
@@ -239,22 +251,42 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   size_t samples_left = kAudioBlockSize;
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
 
-  // Chiff post-process: zero-order-hold decimation whose rate tracks the
-  // voice pitch. A phase accumulator advances by chiff_decimate_increment_
-  // (= f/fs · 2^32) each sample; every wrap latches a fresh output sample,
-  // so latches land one voice period apart on average and the accumulator
-  // carries the sub-sample placement error. No PRNG or filtering; runs
-  // every block unconditionally.
+  // Chiff post-process: pitch-tracked serration. A phase accumulator
+  // advances by chiff_decimate_increment_ (= f/fs · 2^32) each sample;
+  // every wrap is a decimate clock, ~one voice period apart. At each clock
+  // we measure the region's rise (delta = orig − previous clock value) and
+  // scale it by the AMOUNT factor to get this region's serration excursion.
+  // Between clocks the output ramps linearly from the latched value by
+  // serr_delta · (fraction through region), where the fraction is the
+  // accumulator itself (accum / 2^32) — so no per-sample slope or division.
+  //
+  // Excursion is bounded by the actual region delta, so a full −orig tooth
+  // only retraces the last region's rise: output stays in
+  // [previous clock value, current clock value] and can't underflow the
+  // stage's start. The USAT #15 is belt-and-suspenders for rounding.
   uint32_t accum = chiff_decimate_accum_;
   const uint32_t increment = chiff_decimate_increment_;
+  const int32_t factor_q15 = chiff_serr_factor_q15_;
   int16_t held = chiff_hold_s16_;
+  int32_t serr_delta = chiff_serr_delta_s16_;
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
     uint32_t prev = accum;
     accum += increment;
-    if (accum < prev) held = sample_buffer[i];  // wrapped → one period elapsed
-    sample_buffer[i] = held;
+    if (accum < prev) {  // wrapped → decimate clock
+      int16_t orig = sample_buffer[i];
+      serr_delta = (static_cast<int32_t>(orig - held) * factor_q15) >> 15;
+      held = orig;
+    }
+    // offset = serr_delta · (accum / 2^32), via the top 16 fraction bits.
+    int32_t offset = (serr_delta * static_cast<int32_t>(accum >> 16)) >> 16;
+    int32_t out;
+    __asm__ ("usat %0, #15, %1"
+             : "=r"(out)
+             : "r"(held + offset));
+    sample_buffer[i] = static_cast<int16_t>(out);
   }
   chiff_hold_s16_ = held;
+  chiff_serr_delta_s16_ = static_cast<int16_t>(serr_delta);
   chiff_decimate_accum_ = accum;
 }
 
