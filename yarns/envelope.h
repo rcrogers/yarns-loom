@@ -148,17 +148,22 @@ class Envelope {
   // for tail continuity; coeff is pushed per-block by the oscillator.
   int32_t  chiff_lp_state_q15_;           // 1-pole LPF state (Q15, same scale as buffer)
   uint16_t chiff_lp_coeff_q15_;           // 1-pole alpha (Q15); 32767 ≈ passthrough
-  // Serration chiff: a phase accumulator (rate = voice pitch) marks decimate
-  // clocks ~one voice period apart. Each region ramps linearly from the
-  // latched value by serr_delta · (accum/2^32); serr_delta = (region rise) ·
-  // factor, with factor in [−1, +1] Q15 set from AMOUNT (+1 transparent,
-  // 0 flat hold, −1 inverted teeth). State carries across blocks so the grid
-  // and ramp are continuous.
-  int16_t  chiff_hold_s16_;               // latched value at the current clock
-  int16_t  chiff_serr_delta_s16_;         // this region's serration excursion
-  int16_t  chiff_serr_factor_q15_;        // AMOUNT slope factor (1 − 2k), Q15
-  uint32_t chiff_decimate_accum_;         // phase accumulator; wrap → clock
+  // Serration chiff (applied inside the core render loop, where the true
+  // per-sample envelope slope is available in Q30 — no buffer differencing,
+  // no quantization). A phase accumulator (rate = voice pitch) marks decimate
+  // clocks ~one voice period apart. At each clock the serration value
+  // re-latches to the live envelope value and its slope is set to
+  // (envelope slope) · factor; between clocks it forward-differences by that
+  // slope. factor in [−1, +1] Q15 from AMOUNT: +1 tracks the envelope
+  // (transparent), 0 flat hold, −1 inverted teeth. The serration value is
+  // clamped to [DEAD target, note peak] so it can't pass the stage's
+  // start/target. State carries across blocks.
+  int32_t  chiff_serr_factor_q15_;        // AMOUNT slope multiplier (1−2k)/(1−k), Q15
+  uint32_t chiff_decimate_accum_;         // phase accumulator; wrap → clock (re-latch)
   uint32_t chiff_decimate_increment_;     // per-sample phase advance (f/fs · 2^32)
+  int32_t  chiff_serr_value_q30_;         // serration output value (Q30, pre-bias)
+  int32_t  chiff_serr_step_q30_;          // per-sample serration slope (Q30)
+  int32_t  chiff_serr_ceil_q30_;          // upper clamp (note peak); floor = DEAD target
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
