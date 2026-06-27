@@ -82,14 +82,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_target_s16_ = 0;
   chiff_lp_state_q15_ = 0;
   chiff_lp_coeff_q15_ = 32767;  // passthrough until oscillator pushes a coeff
-  chiff_serr_factor_q15_ = 32767;  // +1.0: transparent until a note arms it
-  chiff_decimate_accum_ = 0;
-  // Default to near-passthrough (wraps ~every sample) for envelopes whose
-  // rate is never set by an oscillator (e.g. CV outputs).
-  chiff_decimate_increment_ = 0xFFFFFFFFu;
-  chiff_serr_value_q30_ = 0;
-  chiff_serr_step_q30_ = 0;
-  chiff_serr_ceil_q30_ = 0x3FFFFFFF;  // wide until a note sets the peak
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
@@ -109,15 +101,6 @@ void Envelope::NoteOn(
   uint8_t chiff_amount
 ) {
   adsr_ = &adsr;
-  // Serration slope multiplier (1−2k)/(1−k) in Q15, k = chiff_amount/127.
-  // AMOUNT 0 → +1 (slope = +env, transparent); ~63 → 0 (flat hold); ~85
-  // (k=2/3) → −1 (mirror); max → −∞ (near-vertical drop). The per-sample
-  // serr_step is range-clamped downstream so the large top-end magnitude
-  // can't overflow. Denominator floored at 1 to avoid /0 at AMOUNT 127.
-  int32_t serr_denom = 127 - static_cast<int32_t>(chiff_amount);
-  if (serr_denom < 1) serr_denom = 1;  // avoid /0 at AMOUNT 127
-  chiff_serr_factor_q15_ =
-      (32767 * (127 - 2 * static_cast<int32_t>(chiff_amount))) / serr_denom;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
   int32_t min_target_q31 = min_target_s16 << 16;
   // NB: sustain level can be higher than peak
@@ -127,11 +110,6 @@ void Envelope::NoteOn(
     (min_target_q31 + scale_s16 * adsr.sustain_u16) >> 1;
   stage_target_q30_[ENV_STAGE_RELEASE] = stage_target_q30_[ENV_STAGE_DEAD] =
     min_target_q31 >> 1;
-
-  // Serration upper clamp = the note's peak (max of attack/sustain targets;
-  // sustain can exceed peak). Floor for the clamp is the DEAD target.
-  chiff_serr_ceil_q30_ = std::max(
-    stage_target_q30_[ENV_STAGE_ATTACK], stage_target_q30_[ENV_STAGE_SUSTAIN]);
 
   switch (stage_) {
     case ENV_STAGE_ATTACK:
@@ -154,14 +132,6 @@ void Envelope::NoteOn(
       chiff_probability_u31_ = static_cast<uint32_t>(chiff_amount) << 24;
       chiff_prob_decrement_u32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(chiff_probability_u31_) * adsr.attack_u32) >> 32);
-      // Prime the accumulator to wrap on the first attack sample (any
-      // nonzero increment), latching a fresh hold immediately. Seed the
-      // serration base at the current value (the attack-start floor) with
-      // zero excursion, so the first tooth's delta is just the first
-      // region's rise — it can't dip below the start value.
-      chiff_decimate_accum_ = 0xFFFFFFFFu;
-      chiff_serr_value_q30_ = value_q30_;
-      chiff_serr_step_q30_ = 0;
       Trigger(ENV_STAGE_ATTACK);
       break;
   }
@@ -259,9 +229,56 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
   size_t samples_left = kAudioBlockSize;
-  // Chiff serration is applied inside RenderStage (it needs the per-sample
-  // Q30 envelope slope), so there is no separate post-pass here.
   RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
+
+  // Chiff post-process: probabilistic sample replacement, band-limited by
+  // a 1-pole LPF whose cutoff tracks voice pitch. Per sample, a PRNG-gated
+  // fraction picks a replacement (attack-start or -target); the
+  // perturbation (replacement − original) is run through the LPF and added
+  // back to the original. Filtering the delta — not the buffer — leaves
+  // the envelope signal itself unfiltered. Reads from the system-shared
+  // PRNG buffer filled once per block.
+  uint32_t prob = chiff_probability_u31_;
+  const uint32_t dec = chiff_prob_decrement_u32_;
+  const int16_t start = chiff_start_s16_;
+  const int16_t target = chiff_target_s16_;
+  const uint32_t prng_xor = chiff_prng_xor_u32_;
+  int32_t lp_q15 = chiff_lp_state_q15_;
+  const int32_t coeff_q15 = chiff_lp_coeff_q15_;
+  for (size_t i = 0; i < kAudioBlockSize; ++i) {
+    // XOR with per-envelope mask decorrelates this envelope's chiff
+    // positions from other envelopes sharing the same PRNG buffer.
+    uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
+    int16_t original = sample_buffer[i];
+    int16_t replacement = (prng & 1u) ? target : start;
+    // Compare against (prng >> 1) so prob lives in the top-31-bit space
+    // [0, 2^31) — required by the USAT #31 saturating decrement below.
+    int16_t fired = (prng >> 1) < prob ? replacement : original;
+    // 1-pole LPF on the perturbation: lp += alpha * (delta − lp). Plain
+    // Q15 multiply (no shift tricks). |delta − lp| < 2^16 and coeff ≤ 2^15
+    // so the product fits int32.
+    int32_t delta = fired - original;
+    lp_q15 += ((delta - lp_q15) * coeff_q15) >> 15;
+    int32_t out;
+    __asm__ ("usat %0, #15, %1"
+             : "=r"(out)
+             : "r"(original + lp_q15));
+    sample_buffer[i] = static_cast<int16_t>(out);
+    // Saturating decrement via SUBS + USAT: 2 cycles vs ~3 for the
+    // cmp/cmov idiom. USAT clamps the signed result of (prob − dec) to
+    // [0, 2^31), giving 0 on underflow. Safe because prob is bounded to
+    // [0, 2^31) by the <<24 in NoteOn.
+    int32_t signed_prob;
+    __asm__ (
+        "subs %0, %1, %2\n\t"
+        "usat %0, #31, %0"
+        : "=r"(signed_prob)
+        : "r"(prob), "r"(dec)
+        : "cc");
+    prob = static_cast<uint32_t>(signed_prob);
+  }
+  chiff_probability_u31_ = prob;
+  chiff_lp_state_q15_ = lp_q15;
 }
 
 void Envelope::RenderStageDispatch(
@@ -319,77 +336,36 @@ void Envelope::RenderStage(
   // Drive the loop by buffer-end pointer instead of a samples_left
   // counter, freeing a register for the LUT base hoist.
   int16_t* const buffer_end = sample_buffer + samples_left;
-
-  // Chiff serration state (see header). The output emitted each sample is
-  // the serration value, not value_q30 itself; value_q30 still advances
-  // normally so stage logic is unaffected.
-  uint32_t chiff_accum = chiff_decimate_accum_;
-  const uint32_t chiff_increment = chiff_decimate_increment_;
-  const int32_t chiff_factor_q15 = chiff_serr_factor_q15_;
-  int32_t serr_q30 = chiff_serr_value_q30_;
-  int32_t serr_step_q30 = chiff_serr_step_q30_;
-  const int32_t serr_floor_q30 = stage_target_q30_[ENV_STAGE_DEAD];
-  const int32_t serr_ceil_q30 = chiff_serr_ceil_q30_;
-  const int32_t serr_span_q30 = serr_ceil_q30 - serr_floor_q30;
+  // int32_t nominal_start = nominal_start_;
+  // bool nominal_start_reached = false;
 
   while (sample_buffer < buffer_end) {
-    int32_t slope_q30;
     if (!MOVING) {
       value_q30 = target_q30; // In case we skipped a stage with delta that was 1) nonzero and 2) too small to produce a nonzero slope
-      slope_q30 = 0;
-    } else {
-      // Phase advance. Wrap saturation removed: when phase wraps near
-      // end-of-stage, lut_index resets to 0 (steepest slope), which makes
-      // value jump past target → VALUE_PASSED fires within 1–2 samples
-      // anyway. Saves ~2 cycles/sample in the hot loop.
-      phase_u32 += phase_increment_u32;
-      uint8_t lut_index = phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits);
-      slope_q30 = slope_lut[lut_index];
-      value_q30 += slope_q30;
+      OUTPUT;
+      continue;
     }
 
-    // Serration. On a decimate clock (accumulator wrap) re-latch to the live
-    // value and set the tooth slope = envelope slope · AMOUNT factor, capped
-    // to ±span (a one-sample full-range drop; steeper is wasted after the
-    // value clamp, and the cap keeps serr_step in int32). Otherwise
-    // forward-difference, accumulating in int64 and clamping to the note's
-    // [floor, peak] so the accumulator can't overflow.
-    uint32_t prev_accum = chiff_accum;
-    chiff_accum += chiff_increment;
-    if (chiff_accum < prev_accum) {
-      serr_q30 = value_q30;
-      int64_t step = (static_cast<int64_t>(slope_q30) * chiff_factor_q15) >> 15;
-      if (step > serr_span_q30) step = serr_span_q30;
-      else if (step < -serr_span_q30) step = -serr_span_q30;
-      serr_step_q30 = static_cast<int32_t>(step);
-    } else {
-      int64_t next = static_cast<int64_t>(serr_q30) + serr_step_q30;
-      if (next < serr_floor_q30) next = serr_floor_q30;
-      else if (next > serr_ceil_q30) next = serr_ceil_q30;
-      serr_q30 = static_cast<int32_t>(next);
-    }
-    // Once bottomed at the floor AND past the half-period, abandon the tooth
-    // and emit the live curve until the next clock — keeps the notch from
-    // collapsing to an inaudible sliver at steep (near-vertical) settings.
-    int32_t emit_q30 =
-        (serr_q30 == serr_floor_q30 && (chiff_accum & 0x80000000u))
-        ? value_q30 : serr_q30;
+    // Phase advance. Wrap saturation removed: when phase wraps near
+    // end-of-stage, lut_index resets to 0 (steepest slope), which makes
+    // value jump past target → VALUE_PASSED fires within 1–2 samples
+    // anyway. Saves ~2 cycles/sample in the hot loop.
+    phase_u32 += phase_increment_u32;
 
-    if (MOVING && VALUE_PASSED(target_q30)) {
+    uint8_t lut_index = phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits);
+    int32_t slope_q30 = slope_lut[lut_index];
+    value_q30 += slope_q30;
+    if (VALUE_PASSED(target_q30)) {
       value_q30 = target_q30; // Don't overshoot target
-      OUTPUT_VALUE(emit_q30);
+      OUTPUT;
 
       value_q30_ = value_q30; // So Trigger knows actual start value
-      // Save chiff state before the recursive dispatch re-enters RenderStage.
-      chiff_decimate_accum_ = chiff_accum;
-      chiff_serr_value_q30_ = serr_q30;
-      chiff_serr_step_q30_ = serr_step_q30;
       Trigger(static_cast<EnvelopeStage>(stage + 1));
 
       // Even if there are no samples left, this will save bias state for us
       return RenderStageDispatch(sample_buffer, buffer_end - sample_buffer, bias_q31, bias_slope_q31);
     } else {
-      OUTPUT_VALUE(emit_q30);
+      OUTPUT;
     }
   }
 
@@ -397,9 +373,6 @@ void Envelope::RenderStage(
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
   phase_increment_u32_ = phase_increment_u32;
-  chiff_decimate_accum_ = chiff_accum;
-  chiff_serr_value_q30_ = serr_q30;
-  chiff_serr_step_q30_ = serr_step_q30;
 
   bias_q31_ = bias_q31;
 }

@@ -91,12 +91,11 @@ class Envelope {
   inline int16_t value() const { return value_q30_ >> (30 - 15); }
   inline EnvelopeStage stage() const { return stage_; }
 
-  // Per-block setter: install the chiff decimation rate as a per-sample
-  // phase increment (= f/fs · 2^32, i.e. the oscillator's phase_increment_).
-  // The decimator latches one new sample per accumulator wrap, placing
-  // latches one voice period apart on average.
-  inline void set_chiff_decimate_increment(uint32_t increment) {
-    chiff_decimate_increment_ = increment;
+  // Per-block setter: install the chiff LPF coefficient (Q15 alpha). The
+  // oscillator derives this from voice pitch so the chiff's band-limiting
+  // tracks the carrier.
+  inline void set_chiff_lp_coeff(uint16_t coeff_q15) {
+    chiff_lp_coeff_q15_ = coeff_q15;
   }
 
   static inline uint8_t signed_clz(int32_t x) {
@@ -148,22 +147,6 @@ class Envelope {
   // for tail continuity; coeff is pushed per-block by the oscillator.
   int32_t  chiff_lp_state_q15_;           // 1-pole LPF state (Q15, same scale as buffer)
   uint16_t chiff_lp_coeff_q15_;           // 1-pole alpha (Q15); 32767 ≈ passthrough
-  // Serration chiff (applied inside the core render loop, where the true
-  // per-sample envelope slope is available in Q30 — no buffer differencing,
-  // no quantization). A phase accumulator (rate = voice pitch) marks decimate
-  // clocks ~one voice period apart. At each clock the serration value
-  // re-latches to the live envelope value and its slope is set to
-  // (envelope slope) · factor; between clocks it forward-differences by that
-  // slope. factor in [−1, +1] Q15 from AMOUNT: +1 tracks the envelope
-  // (transparent), 0 flat hold, −1 inverted teeth. The serration value is
-  // clamped to [DEAD target, note peak] so it can't pass the stage's
-  // start/target. State carries across blocks.
-  int32_t  chiff_serr_factor_q15_;        // AMOUNT slope multiplier (1−2k)/(1−k), Q15
-  uint32_t chiff_decimate_accum_;         // phase accumulator; wrap → clock (re-latch)
-  uint32_t chiff_decimate_increment_;     // per-sample phase advance (f/fs · 2^32)
-  int32_t  chiff_serr_value_q30_;         // serration output value (Q30, pre-bias)
-  int32_t  chiff_serr_step_q30_;          // per-sample serration slope (Q30)
-  int32_t  chiff_serr_ceil_q30_;          // upper clamp (note peak); floor = DEAD target
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
