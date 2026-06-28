@@ -198,33 +198,43 @@ void Envelope::RenderStageDispatch(
   }
 }
 
-#define VALUE_PASSED(x) ( \
-  ( POSITIVE_SLOPE && value_q30 >= x) || \
-  (!POSITIVE_SLOPE && value_q30 <= x) \
-)
+// Mix the envelope value (Q30) and the already-advanced bias (Q31) into a
+// 0..INT16_MAX output sample. ClipU16(x) >> 1 equals ClipUShifted(x, 15, 1) at
+// both saturation boundaries, but folds the final right-shift into the USAT.
+static inline int16_t EnvelopeSample(int32_t value_q30, int32_t bias_q31) {
+  int32_t sum_s16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16));
+  return ClipUShifted(sum_s16, 15, 1);
+}
 
-// ClipU16(x) >> 1 is identical to ClipUShifted(x, 15, 1) at both saturation
-// boundaries, but folds the final right-shift into the USAT, saving one
-// instruction per sample.
-#define OUTPUT \
-  bias_q31 += bias_slope_q31; \
-  int32_t overflowing_s16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16)); \
-  *sample_buffer++ = ClipUShifted(overflowing_s16, 15, 1); // 0..INT16_MAX
+// Advance one sample of a moving stage: step value by the slope (clamping at
+// target), advance bias, and emit the sample. Returns true once value reaches
+// target, signalling the caller to hand off to the next stage.
+template<bool POSITIVE_SLOPE>
+static inline bool StepSample(
+  int32_t slope_q30, int32_t target_q30, int32_t bias_slope_q31,
+  int32_t& value_q30, int32_t& bias_q31, int16_t*& sample_buffer
+) {
+  value_q30 += slope_q30;
+  bool reached_target =
+      POSITIVE_SLOPE ? value_q30 >= target_q30 : value_q30 <= target_q30;
+  if (reached_target) value_q30 = target_q30; // Don't overshoot
+  bias_q31 += bias_slope_q31;
+  *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+  return reached_target;
+}
 
-// One envelope step: advance value by the current slope, emit a sample, and
-// hand off to the next stage once we reach the target. `slope_q30` and
-// `block_samples_left` must be live at the point of use.
-#define STEP_AND_OUTPUT \
-  value_q30 += slope_q30; \
-  if (VALUE_PASSED(target_q30)) { \
-    value_q30 = target_q30; /* Don't overshoot target */ \
-    OUTPUT; \
-    value_q30_ = value_q30; /* So Trigger knows actual start value */ \
-    Trigger(static_cast<EnvelopeStage>(stage + 1)); \
-    /* Even with no samples left, this saves bias state for us */ \
-    return RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31); \
-  } \
-  OUTPUT;
+// Value reached target: snapshot it (so the re-entrant Trigger sees the real
+// start value), advance to the next stage, and resume rendering this block's
+// remaining samples there. Tail-called from RenderStage; even with no samples
+// left, the re-entry saves bias state for us.
+void Envelope::HandOffToNextStage(
+  int16_t* sample_buffer, size_t block_samples_left,
+  int32_t value_q30, int32_t bias_q31, int32_t bias_slope_q31
+) {
+  value_q30_ = value_q30;
+  Trigger(static_cast<EnvelopeStage>(stage_ + 1));
+  RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+}
 
 template<bool MOVING, bool POSITIVE_SLOPE>
 void Envelope::RenderStage(
@@ -233,7 +243,6 @@ void Envelope::RenderStage(
 ) {
   int32_t value_q30 = value_q30_;
   int32_t target_q30 = target_q30_;
-  EnvelopeStage stage = stage_;
   // Read the slope LUT straight from the member array via a loop-invariant
   // base pointer. No local snapshot is needed: the only writer is Trigger(),
   // which only runs on a stage transition -- and that path exits this loop.
@@ -243,7 +252,10 @@ void Envelope::RenderStage(
     // Skipped a stage whose delta was too small to produce a nonzero slope:
     // hold at target for the whole block.
     value_q30 = target_q30;
-    while (block_samples_left--) { OUTPUT; }
+    while (block_samples_left--) {
+      bias_q31 += bias_slope_q31;
+      *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+    }
     value_q30_ = value_q30;
     bias_q31_ = bias_q31;
     return;
@@ -256,18 +268,20 @@ void Envelope::RenderStage(
   // Before saturation: phase_u32 cannot overflow until it saturates, so the
   // per-sample overflow guard is gone -- we just run the precomputed countdown
   // (clamped to this block). block_samples_left advances in lockstep so it
-  // stays correct for the stage-transition handoff in STEP_AND_OUTPUT.
+  // stays correct for the stage-transition handoff.
   uint32_t block_phase_samples_left =
-      phase_samples_left < block_samples_left
-      ? phase_samples_left
-      : block_samples_left;
+      std::min<size_t>(phase_samples_left, block_samples_left);
   phase_samples_left -= block_phase_samples_left;
   while (block_phase_samples_left) {
     --block_phase_samples_left;
     --block_samples_left;
     phase_u32 += phase_increment_u32;
     int32_t slope_q30 = expo_slope_q30[phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits)];
-    STEP_AND_OUTPUT
+    if (StepSample<POSITIVE_SLOPE>(slope_q30, target_q30, bias_slope_q31,
+                                   value_q30, bias_q31, sample_buffer)) {
+      return HandOffToNextStage(sample_buffer, block_samples_left,
+                                value_q30, bias_q31, bias_slope_q31);
+    }
   }
 
   if (block_samples_left) {
@@ -278,7 +292,11 @@ void Envelope::RenderStage(
         expo_slope_q30[(1 << kLutExpoSlopeShiftSizeBits) - 1];
     while (block_samples_left) {
       --block_samples_left;
-      STEP_AND_OUTPUT
+      if (StepSample<POSITIVE_SLOPE>(slope_q30, target_q30, bias_slope_q31,
+                                     value_q30, bias_q31, sample_buffer)) {
+        return HandOffToNextStage(sample_buffer, block_samples_left,
+                                  value_q30, bias_q31, bias_slope_q31);
+      }
     }
   }
 

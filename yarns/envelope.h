@@ -75,6 +75,10 @@ class Envelope {
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
+  void HandOffToNextStage(
+    int16_t* sample_buffer, size_t block_samples_left,
+    int32_t value_q30, int32_t bias_q31, int32_t bias_slope_q31
+  );
 
   void Rescale(float scaling_factor);
 
