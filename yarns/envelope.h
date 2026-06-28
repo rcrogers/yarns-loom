@@ -67,12 +67,12 @@ class Envelope {
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
   void RenderStageDispatch(
-    int16_t* sample_buffer, size_t samples_left,
+    int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
   template<bool MOVING, bool POSITIVE_SLOPE>
   void RenderStage(
-    int16_t* sample_buffer, size_t samples_left,
+    int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
 
@@ -113,6 +113,11 @@ class Envelope {
   EnvelopeStage stage_;
 
   uint32_t phase_u32_, phase_increment_u32_;
+
+  // Samples remaining before phase_u32_ saturates at UINT32_MAX. Computed once
+  // per stage in Trigger() (UINT32_MAX / phase_increment_u32_, from phase 0)
+  // and counted down per block, so RenderStage doesn't divide on the hot path.
+  uint32_t phase_samples_left_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

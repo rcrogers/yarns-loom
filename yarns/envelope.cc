@@ -37,6 +37,7 @@ using namespace stmlib;
 
 void Envelope::Init(int16_t zero_value_s16) {
   phase_u32_ = phase_increment_u32_ = 0;
+  phase_samples_left_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   std::fill(
@@ -150,6 +151,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
   }
   if (!linear_slope_q30) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
 
+  // phase_u32_ starts at 0, so it stays below UINT32_MAX for this many sample
+  // increments. RenderStage counts this down per block instead of dividing.
+  phase_samples_left_ = UINT32_MAX / phase_increment_u32_;
+
   // Populate dynamic LUT for phase-dependent slope
   const uint32_t max_expo_phase_increment_u32 = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
   if (phase_increment_u32_ > max_expo_phase_increment_u32) {
@@ -181,15 +186,15 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
 }
 
 void Envelope::RenderStageDispatch(
-  int16_t* sample_buffer, size_t samples_left,
+  int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   if (phase_increment_u32_ == 0) {
-    RenderStage<false , false >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    RenderStage<false , false >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   } else if (expo_slope_lut_q30_[0] > 0) {
-    RenderStage<true  , true  >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    RenderStage<true  , true  >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   } else {
-    RenderStage<true  , false >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    RenderStage<true  , false >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   }
 }
 
@@ -206,60 +211,85 @@ void Envelope::RenderStageDispatch(
   int32_t overflowing_s16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16)); \
   *sample_buffer++ = ClipUShifted(overflowing_s16, 15, 1); // 0..INT16_MAX
 
+// One envelope step: advance value by the current slope, emit a sample, and
+// hand off to the next stage once we reach the target. `slope_q30` and
+// `block_samples_left` must be live at the point of use.
+#define STEP_AND_OUTPUT \
+  value_q30 += slope_q30; \
+  if (VALUE_PASSED(target_q30)) { \
+    value_q30 = target_q30; /* Don't overshoot target */ \
+    OUTPUT; \
+    value_q30_ = value_q30; /* So Trigger knows actual start value */ \
+    Trigger(static_cast<EnvelopeStage>(stage + 1)); \
+    /* Even with no samples left, this saves bias state for us */ \
+    return RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31); \
+  } \
+  OUTPUT;
+
 template<bool MOVING, bool POSITIVE_SLOPE>
 void Envelope::RenderStage(
-  int16_t* sample_buffer, size_t samples_left,
+  int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   int32_t value_q30 = value_q30_;
   int32_t target_q30 = target_q30_;
-  uint32_t phase_u32 = phase_u32_;
-  uint32_t phase_increment_u32 = phase_increment_u32_;
   EnvelopeStage stage = stage_;
   // Read the slope LUT straight from the member array via a loop-invariant
   // base pointer. No local snapshot is needed: the only writer is Trigger(),
   // which only runs on a stage transition -- and that path exits this loop.
   const int32_t* const expo_slope_q30 = expo_slope_lut_q30_;
-  // int32_t nominal_start = nominal_start_;
-  // bool nominal_start_reached = false;
 
-  while (samples_left--) {
-    if (!MOVING) {
-      value_q30 = target_q30; // In case we skipped a stage with delta that was 1) nonzero and 2) too small to produce a nonzero slope
-      OUTPUT;
-      continue;
-    }
+  if (!MOVING) {
+    // Skipped a stage whose delta was too small to produce a nonzero slope:
+    // hold at target for the whole block.
+    value_q30 = target_q30;
+    while (block_samples_left--) { OUTPUT; }
+    value_q30_ = value_q30;
+    bias_q31_ = bias_q31;
+    return;
+  }
 
-    // Stay at initial (steepest) slope until we reach the nominal start
-    // nominal_start_reached = nominal_start_reached || VALUE_PASSED(nominal_start);
-    // if (nominal_start_reached) {
+  uint32_t phase_u32 = phase_u32_;
+  const uint32_t phase_increment_u32 = phase_increment_u32_; // nonzero (MOVING)
+  uint32_t phase_samples_left = phase_samples_left_;
+
+  // Before saturation: phase_u32 cannot overflow until it saturates, so the
+  // per-sample overflow guard is gone -- we just run the precomputed countdown
+  // (clamped to this block). block_samples_left advances in lockstep so it
+  // stays correct for the stage-transition handoff in STEP_AND_OUTPUT.
+  uint32_t block_phase_samples_left =
+      phase_samples_left < block_samples_left
+      ? phase_samples_left
+      : block_samples_left;
+  phase_samples_left -= block_phase_samples_left;
+  while (block_phase_samples_left) {
+    --block_phase_samples_left;
+    --block_samples_left;
     phase_u32 += phase_increment_u32;
-    if (phase_u32 < phase_increment_u32) phase_u32 = UINT32_MAX;
-    // }
-
     int32_t slope_q30 = expo_slope_q30[phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits)];
-    value_q30 += slope_q30;
-    if (VALUE_PASSED(target_q30)) {
-      value_q30 = target_q30; // Don't overshoot target
-      OUTPUT;
+    STEP_AND_OUTPUT
+  }
 
-      value_q30_ = value_q30; // So Trigger knows actual start value
-      Trigger(static_cast<EnvelopeStage>(stage + 1));
-
-      // Even if there are no samples left, this will save bias state for us
-      return RenderStageDispatch(sample_buffer, samples_left, bias_q31, bias_slope_q31);
-    } else {
-      OUTPUT;
+  if (block_samples_left) {
+    // After phase saturates it pins at UINT32_MAX, so the slope is fixed at the
+    // steepest (last) LUT entry -- no phase increment or LUT lookup per sample.
+    phase_u32 = UINT32_MAX;
+    const int32_t slope_q30 =
+        expo_slope_q30[(1 << kLutExpoSlopeShiftSizeBits) - 1];
+    while (block_samples_left) {
+      --block_samples_left;
+      STEP_AND_OUTPUT
     }
   }
 
   // Render is complete, but stage is not -- save state for next render
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
-  phase_increment_u32_ = phase_increment_u32;
-
+  phase_samples_left_ = phase_samples_left;
   bias_q31_ = bias_q31;
 }
+
+#undef STEP_AND_OUTPUT
 
 void Envelope::Rescale(float factor) {
   bias_q31_ = static_cast<int32_t>(bias_q31_ * factor);
