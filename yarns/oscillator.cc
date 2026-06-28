@@ -41,7 +41,6 @@ using namespace stmlib;
 
 static const size_t kNumZones = 15;
 
-static const uint16_t kHighestNote = 128 * 128;
 static const uint16_t kPitchTableStart = 116 * 128;
 static const uint16_t kOctave = 12 * 128;
 static const int kTransferMaxGainBits = 4; // 16x max gain
@@ -126,7 +125,8 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
   raw_timbre_bias_ = timbre_bias;
 }
 
-int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
+int16_t Oscillator::WarpTimbre(
+    int16_t timbre, OscillatorShape shape, int16_t pitch) const {
   // Limit cutoff range for filtered noise
   if (shape >= OSC_SHAPE_NOISE_NOTCH && shape <= OSC_SHAPE_NOISE_HP) {
     int32_t cutoff_freq = 0x1000 + (timbre >> 1); // 1/8..5/8
@@ -135,7 +135,7 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
 
   // LP filter cutoff tracks pitch
   if (shape >= OSC_SHAPE_LP_PULSE && shape <= OSC_SHAPE_LP_SAW) {
-    int32_t cutoff_freq = (pitch_ >> 1) + (timbre >> 1);
+    int32_t cutoff_freq = (pitch >> 1) + (timbre >> 1);
     CONSTRAIN(cutoff_freq, 0, 0x7fff);
     return SVF::CutoffFromFreq(cutoff_freq);
   }
@@ -143,14 +143,14 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
   // Phase distortion modulator tracks pitch
   if (shape >= OSC_SHAPE_CZ_PULSE_LP && shape <= OSC_SHAPE_CZ_SAW_HP) {
     int16_t timbre_offset = timbre - 2048;
-    int32_t shifted_pitch = pitch_ + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8);
+    int32_t shifted_pitch = pitch + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8);
     if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1;
     return ComputePhaseIncrement(shifted_pitch) >> (32 - 15);
   }
 
   // Sync modulator tracks pitch
   if (shape >= OSC_SHAPE_SYNC_SINE && shape <= OSC_SHAPE_SYNC_SAW) {
-    int32_t modulator_pitch = pitch_ + (timbre >> 3);
+    int32_t modulator_pitch = pitch + (timbre >> 3);
     CONSTRAIN(modulator_pitch, 0, kHighestNote - 1);
     return ComputePhaseIncrement(modulator_pitch) >> (32 - 15);
   }
@@ -176,7 +176,7 @@ int16_t Oscillator::WarpTimbre(int16_t timbre, OscillatorShape shape) const {
     } else {
       crest_factor = 1;  // FM
     }
-    uint32_t max_folds = 0x80000000u / phase_increment_ / crest_factor;
+    uint32_t max_folds = 0x80000000u / ComputePhaseIncrement(pitch) / crest_factor;
     if (max_folds > 0x80000u) return timbre;
     int32_t knee = static_cast<int32_t>(max_folds << (15 - kTransferMaxGainBits));
     if (knee <= 0) return 0;

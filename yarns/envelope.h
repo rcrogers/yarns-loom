@@ -78,6 +78,12 @@ class Envelope {
 
   void Rescale(float scaling_factor);
 
+  // Step the running bias state directly, bypassing the per-block slew that
+  // RenderSamples applies. Used to absorb an instantaneous bias jump (e.g. a
+  // pitch-driven timbre step at NoteOn) so it doesn't get smoothed into an
+  // audible glide, while continuous (LFO) bias motion stays slewed.
+  inline void AdjustBias(int32_t delta_q31) { bias_q31_ += delta_q31; }
+
   inline int16_t tremolo(uint16_t strength_u16) const {
     int32_t relative_value_q15 = (value_q30_ - stage_target_q30_[ENV_STAGE_RELEASE]) >> (30 - 15);
     return relative_value_q15 * -strength_u16 >> 16;
