@@ -198,11 +198,13 @@ void Envelope::RenderStageDispatch(
   (!POSITIVE_SLOPE && value_q30 <= x) \
 )
 
+// ClipU16(x) >> 1 is identical to ClipUShifted(x, 15, 1) at both saturation
+// boundaries, but folds the final right-shift into the USAT, saving one
+// instruction per sample.
 #define OUTPUT \
   bias_q31 += bias_slope_q31; \
-  int32_t overflowing_u16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16)); \
-  uint16_t clipped_u16 = ClipU16(overflowing_u16); \
-  *sample_buffer++ = clipped_u16 >> 1; // 0..INT16_MAX
+  int32_t overflowing_s16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16)); \
+  *sample_buffer++ = ClipUShifted(overflowing_s16, 15, 1); // 0..INT16_MAX
 
 template<bool MOVING, bool POSITIVE_SLOPE>
 void Envelope::RenderStage(
@@ -214,12 +216,10 @@ void Envelope::RenderStage(
   uint32_t phase_u32 = phase_u32_;
   uint32_t phase_increment_u32 = phase_increment_u32_;
   EnvelopeStage stage = stage_;
-  int32_t expo_slope_q30[LUT_EXPO_SLOPE_SHIFT_SIZE];
-  std::copy(
-    &expo_slope_lut_q30_[0],
-    &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-    &expo_slope_q30[0]
-  );
+  // Read the slope LUT straight from the member array via a loop-invariant
+  // base pointer. No local snapshot is needed: the only writer is Trigger(),
+  // which only runs on a stage transition -- and that path exits this loop.
+  const int32_t* const expo_slope_q30 = expo_slope_lut_q30_;
   // int32_t nominal_start = nominal_start_;
   // bool nominal_start_reached = false;
 
