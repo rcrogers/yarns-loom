@@ -223,15 +223,14 @@ static inline bool StepSample(
   return reached_target;
 }
 
-// Value reached target: snapshot it (so the re-entrant Trigger sees the real
-// start value), advance to the next stage, and resume rendering this block's
-// remaining samples there. Tail-called from RenderStage; even with no samples
-// left, the re-entry saves bias state for us.
+// Advance to the next stage and resume rendering this block's remaining samples
+// there. The caller snapshots value_q30_ first (so the re-entrant Trigger sees
+// the real start value). Even with no samples left, the re-entry saves bias
+// state for us.
 void Envelope::HandOffToNextStage(
   int16_t* sample_buffer, size_t block_samples_left,
-  int32_t value_q30, int32_t bias_q31, int32_t bias_slope_q31
+  int32_t bias_q31, int32_t bias_slope_q31
 ) {
-  value_q30_ = value_q30;
   Trigger(static_cast<EnvelopeStage>(stage_ + 1));
   RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
 }
@@ -279,8 +278,9 @@ void Envelope::RenderStage(
     int32_t slope_q30 = expo_slope_q30[phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits)];
     if (StepSample<POSITIVE_SLOPE>(slope_q30, target_q30, bias_slope_q31,
                                    value_q30, bias_q31, sample_buffer)) {
+      value_q30_ = value_q30; // So the re-entrant Trigger sees the real start
       return HandOffToNextStage(sample_buffer, block_samples_left,
-                                value_q30, bias_q31, bias_slope_q31);
+                                bias_q31, bias_slope_q31);
     }
   }
 
@@ -294,8 +294,9 @@ void Envelope::RenderStage(
       --block_samples_left;
       if (StepSample<POSITIVE_SLOPE>(slope_q30, target_q30, bias_slope_q31,
                                      value_q30, bias_q31, sample_buffer)) {
+        value_q30_ = value_q30; // So the re-entrant Trigger sees the real start
         return HandOffToNextStage(sample_buffer, block_samples_left,
-                                  value_q30, bias_q31, bias_slope_q31);
+                                  bias_q31, bias_slope_q31);
       }
     }
   }
