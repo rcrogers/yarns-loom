@@ -739,7 +739,7 @@ const Setting Settings::settings_[] = {
     "PV", "PORTAMENTO MOD VEL",
     SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO_MOD_VELOCITY, 0 },
     SETTING_UNIT_INT8, -64, 63, NULL,
-    0xff, 0xff,
+    33, 0xff,
   },
   {
     "CH", "CHIFF AMOUNT",

@@ -199,6 +199,18 @@ class Voice {
   inline FastSyncedLFO* lfo(LFORole l) { return &lfos_[l]; }
   
  private:
+  // Assemble the oscillator pitch from a base note exactly as Refresh does:
+  // pitch bend + tuning/transpose + pitch LFO. Shared so NoteOn can prime the
+  // oscillator against the same pitch the next Refresh/Render will warp
+  // against, keeping the timbre-bias bump consistent (a held bend or active
+  // vibrato would otherwise reappear as a per-note chirp).
+  inline int32_t ApplyPitchMods(int32_t note) const {
+    note += static_cast<int32_t>(mod_pitch_bend_ - 8192) * pitch_bend_range_ >> 6;
+    note += tuning_;
+    note += pitch_lfo_interpolator_.value();
+    return note;
+  }
+
   FastSyncedLFO lfos_[LFO_ROLE_LAST];
   Oscillator oscillator_;
   ADSR adsr_;

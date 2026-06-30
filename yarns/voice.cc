@@ -175,13 +175,7 @@ void Voice::Refresh() {
       ((note_target_ - note_source_) * portamento_level >> 16);
 
   note_portamento_ = note;
-  
-  // Add pitch-bend.
-  note += static_cast<int32_t>(mod_pitch_bend_ - 8192) * pitch_bend_range_ >> 6;
-  
-  // Add transposition/fine tuning.
-  note += tuning_;
-  
+
   // Render modulation sources
   for (uint8_t i = 0; i < LFO_ROLE_LAST; i++) {
     lfos_[i].Refresh();
@@ -217,7 +211,7 @@ void Voice::Refresh() {
   amplitude_lfo_interpolator_.Tick();
   scaled_vibrato_lfo_interpolator_.Tick();
 
-  note += pitch_lfo_interpolator_.value();
+  note = ApplyPitchMods(note_portamento_);
 
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
@@ -301,19 +295,32 @@ void Voice::NoteOn(
   gate_ = true;
   adsr_ = adsr;
 
-  if (uses_audio()) oscillator_.NoteOn(adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE, timbre_envelope_target, chiff_amount);
+  // Resolve the portamento endpoints before the oscillator NoteOn so it can
+  // warp/prime against the correct pitch: note_source_ is the note's onset
+  // pitch (where a glide starts, or the note itself when portamento is off),
+  // note_target_ its destination. Both are known here, ahead of Refresh
+  // updating the oscillator's live pitch.
+  if (has_cv_output()) {
+    note_source_ = note_portamento_;
+    note_target_ = note;
+    // No portamento when: programmatically suppressed, or voice was silent
+    if (!portamento || !is_sounding_prev_note) {
+      note_source_ = note_target_;
+    }
+  }
+
+  // start_pitch is the onset pitch assembled exactly as Refresh will (so the
+  // bias bump cancels the pitch jump with no residual chirp under bend/
+  // vibrato); target_pitch is the destination note's nominal pitch, used for
+  // the envelope's frozen warped target.
+  if (uses_audio()) oscillator_.NoteOn(
+    adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE,
+    ApplyPitchMods(note_source_), note_target_ + tuning_, timbre_envelope_target,
+    chiff_amount);
   if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_, chiff_amount);
   if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_, chiff_amount);
 
   if (!has_cv_output()) return;
-
-  note_source_ = note_portamento_;
-  note_target_ = note;
-
-  // No portamento when: programmatically suppressed, or voice was silent
-  if (!portamento || !is_sounding_prev_note) {
-    note_source_ = note_target_;
-  }
 
   portamento_phase_ = 0;
   // Exclude Interpolate88 guard entry from split point.

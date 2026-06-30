@@ -64,6 +64,7 @@ void Envelope::FillSharedPrngBuffer() {
 
 void Envelope::Init(int16_t zero_value_s16) {
   phase_u32_ = phase_increment_u32_ = 0;
+  phase_samples_left_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   std::fill(
@@ -140,6 +141,42 @@ void Envelope::NoteOn(
 #define TRIGGER_NEXT_STAGE \
   return Trigger(static_cast<EnvelopeStage>(stage + 1));
 
+// Exact unsigned division of a 64-bit dividend (hi:lo) by a 32-bit divisor,
+// valid when the quotient fits 32 bits (hi < divisor; the caller saturates
+// otherwise). 32-bit hardware ops only -- no 64-bit divide library, no
+// soft-float. Hacker's Delight "divlu" (Knuth Algorithm D, base 2^16): the
+// num_hi*b and q*divisor intermediates overflow 32 bits but cancel under
+// modular wraparound, and the two correction loops each run at most twice.
+static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor) {
+  const uint32_t b = 1u << 16;
+  int shift = __builtin_clz(divisor);
+  divisor <<= shift;
+  uint32_t divisor_hi = divisor >> 16;
+  uint32_t divisor_lo = divisor & 0xFFFF;
+  uint32_t num_hi = (hi << shift) | (shift == 0 ? 0 : (lo >> (32 - shift)));
+  uint32_t num_lo = lo << shift;
+  uint32_t num_lo_hi = num_lo >> 16;
+  uint32_t num_lo_lo = num_lo & 0xFFFF;
+
+  uint32_t q1 = num_hi / divisor_hi;
+  uint32_t rhat = num_hi - q1 * divisor_hi;
+  while (q1 >= b || q1 * divisor_lo > b * rhat + num_lo_hi) {
+    --q1;
+    rhat += divisor_hi;
+    if (rhat >= b) break;
+  }
+
+  uint32_t num_mid = num_hi * b + num_lo_hi - q1 * divisor;
+  uint32_t q0 = num_mid / divisor_hi;
+  rhat = num_mid - q0 * divisor_hi;
+  while (q0 >= b || q0 * divisor_lo > b * rhat + num_lo_lo) {
+    --q0;
+    rhat += divisor_hi;
+    if (rhat >= b) break;
+  }
+  return q1 * b + q0;
+}
+
 // Update current stage and its state
 void Envelope::Trigger(EnvelopeStage stage) {
   stage_ = stage;
@@ -188,18 +225,28 @@ void Envelope::Trigger(EnvelopeStage stage) {
     // Closer to target than expected -- shorten stage duration proportionally, keeping nominal slope
     // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
     linear_slope_q30 = MulS32(nominal_delta_q30, phase_increment_u32_);
-    phase_increment_u32_ = static_cast<uint32_t>(
-      static_cast<float>(phase_increment_u32_) * abs(
-        static_cast<float>(nominal_delta_q30) /
-        static_cast<float>(actual_delta_q30)
-      )
-    );
+    // Shorten the stage: scale the increment by |nominal / actual| (> 1 here),
+    // exact and entirely in 32-bit hardware ops. A hardware umull forms the
+    // 64-bit product, which DivU64ByU32 then divides by |actual| -- no
+    // soft-float and no 64-bit divide library. Saturates if a near-instant
+    // stage would overflow the 32-bit increment.
+    uint32_t abs_nominal = abs(nominal_delta_q30);
+    uint32_t abs_actual = abs(actual_delta_q30);
+    uint32_t product_hi = MulU32(phase_increment_u32_, abs_nominal);
+    uint32_t product_lo = phase_increment_u32_ * abs_nominal;
+    phase_increment_u32_ = product_hi >= abs_actual
+        ? UINT32_MAX
+        : DivU64ByU32(product_hi, product_lo, abs_actual);
   } else {
     // Distance is GTE expected -- keep nominal stage duration, but steepen the slope
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
     linear_slope_q30 = MulS32(actual_delta_q30, phase_increment_u32_);
   }
   if (!linear_slope_q30) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
+
+  // phase_u32_ starts at 0, so it stays below UINT32_MAX for this many sample
+  // increments. RenderStage counts this down per block instead of dividing.
+  phase_samples_left_ = UINT32_MAX / phase_increment_u32_;
 
   // Populate dynamic LUT for phase-dependent slope
   const uint32_t max_expo_phase_increment_u32 = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
@@ -282,110 +329,163 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
 }
 
 void Envelope::RenderStageDispatch(
-  int16_t* sample_buffer, size_t samples_left,
+  int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   if (phase_increment_u32_ == 0) {
-    RenderStage<false , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    RenderStage<false , false >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   } else if (expo_slope_lut_q30_[0] > 0) {
-    RenderStage<true  , true >(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    RenderStage<true  , true  >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   } else {
-    RenderStage<true  , false>(sample_buffer, samples_left, bias_q31, bias_slope_q31);
+    RenderStage<true  , false >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   }
 }
 
-#define VALUE_PASSED(x) ( \
-  ( POSITIVE_SLOPE && value_q30 >= x) || \
-  (!POSITIVE_SLOPE && value_q30 <= x) \
-)
+// Mix the envelope value (Q30) and the already-advanced bias (Q31) into a
+// 0..INT16_MAX output sample. ClipU16(x) >> 1 equals ClipUShifted(x, 15, 1) at
+// both saturation boundaries, but folds the final right-shift into the USAT.
+static inline int16_t EnvelopeSample(int32_t value_q30, int32_t bias_q31) {
+  int32_t sum_s16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16));
+  return ClipUShifted(sum_s16, 15, 1);
+}
 
-// Output composition collapsed to single USAT-with-shift:
-//   original: (v >> 14) + (bias >> 15), clip to u16, then >> 1.
-//   = ((v << 1) + bias) >> 16, clamped to [0, 32767].
-// USAT can fold the arithmetic-shift-right into the same instruction, so
-// the whole compose+clip+halve becomes one add + one usat.
-#define OUTPUT_VALUE(v) \
-  bias_q31 += bias_slope_q31; \
-  { \
-    int32_t output_composed = bias_q31 + (static_cast<int32_t>(v) << 1); \
-    int32_t output_saturated; \
-    __asm__ ("usat %0, #15, %1, asr #16" \
-             : "=r"(output_saturated) : "r"(output_composed)); \
-    *sample_buffer++ = static_cast<int16_t>(output_saturated); \
-  }
+// Advance one sample of a moving stage: step value by the slope (clamping at
+// target), advance bias, and emit the sample. Returns true once value reaches
+// target, signalling the caller to hand off to the next stage.
+template<bool POSITIVE_SLOPE>
+static inline bool StepSample(
+  int32_t slope_q30, int32_t target_q30, int32_t bias_slope_q31,
+  int32_t& value_q30, int32_t& bias_q31, int16_t*& sample_buffer
+) {
+  value_q30 += slope_q30;
+  bool reached_target =
+      POSITIVE_SLOPE ? value_q30 >= target_q30 : value_q30 <= target_q30;
+  if (reached_target) value_q30 = target_q30; // Don't overshoot
+  bias_q31 += bias_slope_q31;
+  *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+  return reached_target;
+}
 
-#define OUTPUT OUTPUT_VALUE(value_q30)
+// Advance to the next stage and resume rendering this block's remaining samples
+// there. The caller snapshots value_q30_ first (so the re-entrant Trigger sees
+// the real start value). Even with no samples left, the re-entry saves bias
+// state for us.
+void Envelope::HandOffToNextStage(
+  int16_t* sample_buffer, size_t block_samples_left,
+  int32_t bias_q31, int32_t bias_slope_q31
+) {
+  Trigger(static_cast<EnvelopeStage>(stage_ + 1));
+  RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+}
 
 template<bool MOVING, bool POSITIVE_SLOPE>
 void Envelope::RenderStage(
-  int16_t* sample_buffer, size_t samples_left,
+  int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   int32_t value_q30 = value_q30_;
   int32_t target_q30 = target_q30_;
-  uint32_t phase_u32 = phase_u32_;
-  uint32_t phase_increment_u32 = phase_increment_u32_;
-  EnvelopeStage stage = stage_;
-  int32_t expo_slope_q30[LUT_EXPO_SLOPE_SHIFT_SIZE];
-  std::copy(
-    &expo_slope_lut_q30_[0],
-    &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-    &expo_slope_q30[0]
-  );
-  const int32_t* const slope_lut = expo_slope_q30;
-  // Drive the loop by buffer-end pointer instead of a samples_left
-  // counter, freeing a register for the LUT base hoist.
-  int16_t* const buffer_end = sample_buffer + samples_left;
-  // int32_t nominal_start = nominal_start_;
-  // bool nominal_start_reached = false;
+  // Read the slope LUT straight from the member array via a loop-invariant
+  // base pointer. No local snapshot is needed: the only writer is Trigger(),
+  // which only runs on a stage transition -- and that path exits this loop.
+  const int32_t* const expo_slope_q30 = expo_slope_lut_q30_;
 
-  while (sample_buffer < buffer_end) {
-    if (!MOVING) {
-      value_q30 = target_q30; // In case we skipped a stage with delta that was 1) nonzero and 2) too small to produce a nonzero slope
-      OUTPUT;
-      continue;
+  if (!MOVING) {
+    // Skipped a stage whose delta was too small to produce a nonzero slope:
+    // hold at target for the whole block.
+    value_q30 = target_q30;
+    while (block_samples_left--) {
+      bias_q31 += bias_slope_q31;
+      *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
     }
+    value_q30_ = value_q30;
+    bias_q31_ = bias_q31;
+    return;
+  }
 
-    // Phase advance. Wrap saturation removed: when phase wraps near
-    // end-of-stage, lut_index resets to 0 (steepest slope), which makes
-    // value jump past target → VALUE_PASSED fires within 1–2 samples
-    // anyway. Saves ~2 cycles/sample in the hot loop.
+  uint32_t phase_u32 = phase_u32_;
+  const uint32_t phase_increment_u32 = phase_increment_u32_; // nonzero (MOVING)
+  uint32_t phase_samples_left = phase_samples_left_;
+
+  // Before saturation: phase_u32 cannot overflow until it saturates, so the
+  // per-sample overflow guard is gone -- we just run the precomputed countdown
+  // (clamped to this block). block_samples_left advances in lockstep so it
+  // stays correct for the stage-transition handoff.
+  uint32_t block_phase_samples_left =
+      std::min<size_t>(phase_samples_left, block_samples_left);
+  phase_samples_left -= block_phase_samples_left;
+  while (block_phase_samples_left) {
+    --block_phase_samples_left;
+    --block_samples_left;
     phase_u32 += phase_increment_u32;
+    int32_t slope_q30 = expo_slope_q30[phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits)];
+    if (StepSample<POSITIVE_SLOPE>(slope_q30, target_q30, bias_slope_q31,
+                                   value_q30, bias_q31, sample_buffer)) {
+      value_q30_ = value_q30; // So the re-entrant Trigger sees the real start
+      return HandOffToNextStage(sample_buffer, block_samples_left,
+                                bias_q31, bias_slope_q31);
+    }
+  }
 
-    uint8_t lut_index = phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits);
-    int32_t slope_q30 = slope_lut[lut_index];
-    value_q30 += slope_q30;
-    if (VALUE_PASSED(target_q30)) {
-      value_q30 = target_q30; // Don't overshoot target
-      OUTPUT;
-
-      value_q30_ = value_q30; // So Trigger knows actual start value
-      Trigger(static_cast<EnvelopeStage>(stage + 1));
-
-      // Even if there are no samples left, this will save bias state for us
-      return RenderStageDispatch(sample_buffer, buffer_end - sample_buffer, bias_q31, bias_slope_q31);
-    } else {
-      OUTPUT;
+  if (block_samples_left) {
+    // After phase saturates it pins at UINT32_MAX, so the slope is fixed at the
+    // steepest (last) LUT entry -- no phase increment or LUT lookup per sample.
+    phase_u32 = UINT32_MAX;
+    const int32_t slope_q30 =
+        expo_slope_q30[(1 << kLutExpoSlopeShiftSizeBits) - 1];
+    while (block_samples_left) {
+      --block_samples_left;
+      if (StepSample<POSITIVE_SLOPE>(slope_q30, target_q30, bias_slope_q31,
+                                     value_q30, bias_q31, sample_buffer)) {
+        value_q30_ = value_q30; // So the re-entrant Trigger sees the real start
+        return HandOffToNextStage(sample_buffer, block_samples_left,
+                                  bias_q31, bias_slope_q31);
+      }
     }
   }
 
   // Render is complete, but stage is not -- save state for next render
   value_q30_ = value_q30;
   phase_u32_ = phase_u32;
-  phase_increment_u32_ = phase_increment_u32;
-
+  phase_samples_left_ = phase_samples_left;
   bias_q31_ = bias_q31;
 }
 
-void Envelope::Rescale(float factor) {
-  bias_q31_ = static_cast<int32_t>(bias_q31_ * factor);
-  value_q30_ = static_cast<int32_t>(value_q30_ * factor);
-  target_q30_ = static_cast<int32_t>(target_q30_ * factor);
+#undef STEP_AND_OUTPUT
+
+// Scale value by numerator/denominator, exact and in 32-bit hardware ops only.
+// A hardware umull forms the 64-bit product, which DivU64ByU32 divides; the
+// result is saturated into the signed 32-bit range. Unlike a fixed-point
+// factor, this keeps full precision even for extreme scale ratios (where a
+// small numerator or denominator would collapse a Q15 factor to a few bits).
+static int32_t ScaleRatio(int32_t value, uint32_t numerator, uint32_t denominator) {
+  uint32_t magnitude = value < 0
+      ? 0u - static_cast<uint32_t>(value)
+      : static_cast<uint32_t>(value);
+  uint32_t product_hi = MulU32(magnitude, numerator);
+  uint32_t product_lo = magnitude * numerator;
+  uint32_t quotient = product_hi >= denominator
+      ? UINT32_MAX
+      : DivU64ByU32(product_hi, product_lo, denominator);
+  if (quotient > static_cast<uint32_t>(INT32_MAX)) quotient = INT32_MAX;
+  return value < 0 ? -static_cast<int32_t>(quotient)
+                   : static_cast<int32_t>(quotient);
+}
+
+// Rescale all envelope levels by numerator/denominator (both non-negative, from
+// WarpTimbre). Cold path (shape change), so exact per-field division is fine.
+void Envelope::Rescale(int32_t numerator, int32_t denominator) {
+  if (denominator <= 0) return; // Degenerate scale; leave levels unchanged
+  uint32_t num = static_cast<uint32_t>(numerator);
+  uint32_t den = static_cast<uint32_t>(denominator);
+  bias_q31_ = ScaleRatio(bias_q31_, num, den);
+  value_q30_ = ScaleRatio(value_q30_, num, den);
+  target_q30_ = ScaleRatio(target_q30_, num, den);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
-    stage_target_q30_[i] = static_cast<int32_t>(stage_target_q30_[i] * factor);
+    stage_target_q30_[i] = ScaleRatio(stage_target_q30_[i], num, den);
   }
   for (int i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-    expo_slope_lut_q30_[i] = static_cast<int32_t>(expo_slope_lut_q30_[i] * factor);
+    expo_slope_lut_q30_[i] = ScaleRatio(expo_slope_lut_q30_[i], num, den);
   }
 }
 

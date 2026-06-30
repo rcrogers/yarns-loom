@@ -675,7 +675,8 @@ class Part {
   }
 
   inline bool arp_should_reset_on_step(uint32_t step_counter) const {
-    return steps_per_arp_reset() && !(step_counter % steps_per_arp_reset());
+    uint16_t reset_period = steps_per_arp_reset();
+    return reset_period && !(step_counter % reset_period);
   }
 
   void StopRecording();

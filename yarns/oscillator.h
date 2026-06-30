@@ -45,6 +45,8 @@
 
 namespace yarns {
 
+static const uint16_t kHighestNote = 128 * 128;
+
 class StateVariableFilter : public SVF {
  public:
   void Init();
@@ -139,16 +141,49 @@ class Oscillator {
   }
 
   void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias);
-  int16_t WarpTimbre(int16_t timbre, OscillatorShape shape) const;
+  // Pitch-tracking shapes warp against an explicit pitch so callers can
+  // evaluate the warp at a pitch other than the live carrier (e.g. a new
+  // note's pitch before Refresh has updated pitch_). Called at most once per
+  // block, so the soft-knee branch recomputes its phase increment locally.
+  int16_t WarpTimbre(int16_t timbre, OscillatorShape shape, int16_t pitch) const;
+  int16_t WarpTimbre(int16_t timbre, OscillatorShape shape) const {
+    return WarpTimbre(timbre, shape, pitch_);
+  }
   int16_t WarpTimbre(int16_t timbre) const {
     return WarpTimbre(timbre, shape_);
   }
 
   void set_shape(OscillatorShape shape);
 
-  inline void NoteOn(ADSR& adsr, bool drone, int16_t raw_max_timbre, uint8_t chiff_amount) {
+  // start_pitch is the new note's pitch at onset (the portamento glide's
+  // start); target_pitch is its destination. Both arrive before Refresh has
+  // updated pitch_, so we warp explicitly against them here.
+  inline void NoteOn(
+      ADSR& adsr, bool drone,
+      int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
+      uint8_t chiff_amount) {
     gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1, chiff_amount);
-    timbre_envelope_.NoteOn(adsr, 0, WarpTimbre(raw_max_timbre), chiff_amount);
+
+    // Snap the pitch-driven jump in timbre bias out of RenderSamples' slew so
+    // warped timbre tracks the new pitch instantly; only LFO bias motion stays
+    // smoothed. start_pitch ~= old pitch_ when portamento glides, so the bump
+    // is ~0 then and the glide is left to slew normally.
+    int16_t old_warped_bias = WarpTimbre(raw_timbre_bias_, shape_);
+    pitch_ = start_pitch;
+    CONSTRAIN(pitch_, 0, kHighestNote - 1);
+    // Prime the carrier so the first audio block renders at the new pitch
+    // instead of lagging up to one block behind the next Refresh.
+    phase_increment_ = ComputePhaseIncrement(pitch_);
+    int16_t new_warped_bias = WarpTimbre(raw_timbre_bias_, shape_);
+    timbre_envelope_.AdjustBias(
+        static_cast<int32_t>(new_warped_bias - old_warped_bias) << 16);
+
+    // The envelope's warped target is frozen at the destination pitch
+    // (steady-state correct). It can't track the glide cheaply, so the bias
+    // above is where pitch tracking is made accurate; the envelope's transient
+    // pitch dependence during a glide is accepted as-is.
+    int16_t warped_max_timbre = WarpTimbre(raw_max_timbre, shape_, target_pitch);
+    timbre_envelope_.NoteOn(adsr, 0, warped_max_timbre, chiff_amount);
   }
   inline void NoteOff() {
     gain_envelope_.NoteOff();

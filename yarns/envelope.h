@@ -72,16 +72,28 @@ class Envelope {
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
   void RenderStageDispatch(
-    int16_t* sample_buffer, size_t samples_left,
+    int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
   template<bool MOVING, bool POSITIVE_SLOPE>
   void RenderStage(
-    int16_t* sample_buffer, size_t samples_left,
+    int16_t* sample_buffer, size_t block_samples_left,
+    int32_t bias_q31, int32_t bias_slope_q31
+  );
+  // Trimmed to the same arg footprint as RenderStageDispatch so the
+  // transition tail-call stays flat (sibling call, no per-transition frame).
+  void HandOffToNextStage(
+    int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
 
-  void Rescale(float scaling_factor);
+  void Rescale(int32_t numerator, int32_t denominator);
+
+  // Step the running bias state directly, bypassing the per-block slew that
+  // RenderSamples applies. Used to absorb an instantaneous bias jump (e.g. a
+  // pitch-driven timbre step at NoteOn) so it doesn't get smoothed into an
+  // audible glide, while continuous (LFO) bias motion stays slewed.
+  inline void AdjustBias(int32_t delta_q31) { bias_q31_ += delta_q31; }
 
   inline int16_t tremolo(uint16_t strength_u16) const {
     int32_t relative_value_q15 = (value_q30_ - stage_target_q30_[ENV_STAGE_RELEASE]) >> (30 - 15);
@@ -119,6 +131,11 @@ class Envelope {
   EnvelopeStage stage_;
 
   uint32_t phase_u32_, phase_increment_u32_;
+
+  // Samples remaining before phase_u32_ saturates at UINT32_MAX. Computed once
+  // per stage in Trigger() (UINT32_MAX / phase_increment_u32_, from phase 0)
+  // and counted down per block, so RenderStage doesn't divide on the hot path.
+  uint32_t phase_samples_left_;
 
   // Chiff: probabilistic sample replacement applied as a post-process pass
   // over the rendered int16 buffer. A fraction of samples (0..100%
