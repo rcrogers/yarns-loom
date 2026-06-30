@@ -94,6 +94,42 @@ void Envelope::NoteOn(
 #define TRIGGER_NEXT_STAGE \
   return Trigger(static_cast<EnvelopeStage>(stage + 1));
 
+// Exact unsigned division of a 64-bit dividend (hi:lo) by a 32-bit divisor,
+// valid when the quotient fits 32 bits (hi < divisor; the caller saturates
+// otherwise). 32-bit hardware ops only -- no 64-bit divide library, no
+// soft-float. Hacker's Delight "divlu" (Knuth Algorithm D, base 2^16): the
+// num_hi*b and q*divisor intermediates overflow 32 bits but cancel under
+// modular wraparound, and the two correction loops each run at most twice.
+static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor) {
+  const uint32_t b = 1u << 16;
+  int shift = __builtin_clz(divisor);
+  divisor <<= shift;
+  uint32_t divisor_hi = divisor >> 16;
+  uint32_t divisor_lo = divisor & 0xFFFF;
+  uint32_t num_hi = (hi << shift) | (shift == 0 ? 0 : (lo >> (32 - shift)));
+  uint32_t num_lo = lo << shift;
+  uint32_t num_lo_hi = num_lo >> 16;
+  uint32_t num_lo_lo = num_lo & 0xFFFF;
+
+  uint32_t q1 = num_hi / divisor_hi;
+  uint32_t rhat = num_hi - q1 * divisor_hi;
+  while (q1 >= b || q1 * divisor_lo > b * rhat + num_lo_hi) {
+    --q1;
+    rhat += divisor_hi;
+    if (rhat >= b) break;
+  }
+
+  uint32_t num_mid = num_hi * b + num_lo_hi - q1 * divisor;
+  uint32_t q0 = num_mid / divisor_hi;
+  rhat = num_mid - q0 * divisor_hi;
+  while (q0 >= b || q0 * divisor_lo > b * rhat + num_lo_lo) {
+    --q0;
+    rhat += divisor_hi;
+    if (rhat >= b) break;
+  }
+  return q1 * b + q0;
+}
+
 // Update current stage and its state
 void Envelope::Trigger(EnvelopeStage stage) {
   stage_ = stage;
@@ -138,12 +174,18 @@ void Envelope::Trigger(EnvelopeStage stage) {
     // Closer to target than expected -- shorten stage duration proportionally, keeping nominal slope
     // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
     linear_slope_q30 = MulS32(nominal_delta_q30, phase_increment_u32_);
-    phase_increment_u32_ = static_cast<uint32_t>(
-      static_cast<float>(phase_increment_u32_) * abs(
-        static_cast<float>(nominal_delta_q30) /
-        static_cast<float>(actual_delta_q30)
-      )
-    );
+    // Shorten the stage: scale the increment by |nominal / actual| (> 1 here),
+    // exact and entirely in 32-bit hardware ops. A hardware umull forms the
+    // 64-bit product, which DivU64ByU32 then divides by |actual| -- no
+    // soft-float and no 64-bit divide library. Saturates if a near-instant
+    // stage would overflow the 32-bit increment.
+    uint32_t abs_nominal = abs(nominal_delta_q30);
+    uint32_t abs_actual = abs(actual_delta_q30);
+    uint32_t product_hi = MulU32(phase_increment_u32_, abs_nominal);
+    uint32_t product_lo = phase_increment_u32_ * abs_nominal;
+    phase_increment_u32_ = product_hi >= abs_actual
+        ? UINT32_MAX
+        : DivU64ByU32(product_hi, product_lo, abs_actual);
   } else {
     // Distance is GTE expected -- keep nominal stage duration, but steepen the slope
     // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
@@ -310,15 +352,39 @@ void Envelope::RenderStage(
 
 #undef STEP_AND_OUTPUT
 
-void Envelope::Rescale(float factor) {
-  bias_q31_ = static_cast<int32_t>(bias_q31_ * factor);
-  value_q30_ = static_cast<int32_t>(value_q30_ * factor);
-  target_q30_ = static_cast<int32_t>(target_q30_ * factor);
+// Scale value by numerator/denominator, exact and in 32-bit hardware ops only.
+// A hardware umull forms the 64-bit product, which DivU64ByU32 divides; the
+// result is saturated into the signed 32-bit range. Unlike a fixed-point
+// factor, this keeps full precision even for extreme scale ratios (where a
+// small numerator or denominator would collapse a Q15 factor to a few bits).
+static int32_t ScaleRatio(int32_t value, uint32_t numerator, uint32_t denominator) {
+  uint32_t magnitude = value < 0
+      ? 0u - static_cast<uint32_t>(value)
+      : static_cast<uint32_t>(value);
+  uint32_t product_hi = MulU32(magnitude, numerator);
+  uint32_t product_lo = magnitude * numerator;
+  uint32_t quotient = product_hi >= denominator
+      ? UINT32_MAX
+      : DivU64ByU32(product_hi, product_lo, denominator);
+  if (quotient > static_cast<uint32_t>(INT32_MAX)) quotient = INT32_MAX;
+  return value < 0 ? -static_cast<int32_t>(quotient)
+                   : static_cast<int32_t>(quotient);
+}
+
+// Rescale all envelope levels by numerator/denominator (both non-negative, from
+// WarpTimbre). Cold path (shape change), so exact per-field division is fine.
+void Envelope::Rescale(int32_t numerator, int32_t denominator) {
+  if (denominator <= 0) return; // Degenerate scale; leave levels unchanged
+  uint32_t num = static_cast<uint32_t>(numerator);
+  uint32_t den = static_cast<uint32_t>(denominator);
+  bias_q31_ = ScaleRatio(bias_q31_, num, den);
+  value_q30_ = ScaleRatio(value_q30_, num, den);
+  target_q30_ = ScaleRatio(target_q30_, num, den);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
-    stage_target_q30_[i] = static_cast<int32_t>(stage_target_q30_[i] * factor);
+    stage_target_q30_[i] = ScaleRatio(stage_target_q30_[i], num, den);
   }
   for (int i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-    expo_slope_lut_q30_[i] = static_cast<int32_t>(expo_slope_lut_q30_[i] * factor);
+    expo_slope_lut_q30_[i] = ScaleRatio(expo_slope_lut_q30_[i], num, den);
   }
 }
 

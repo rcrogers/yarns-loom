@@ -82,7 +82,7 @@ class Envelope {
     int32_t bias_q31, int32_t bias_slope_q31
   );
 
-  void Rescale(float scaling_factor);
+  void Rescale(int32_t numerator, int32_t denominator);
 
   // Step the running bias state directly, bypassing the per-block slew that
   // RenderSamples applies. Used to absorb an instantaneous bias jump (e.g. a

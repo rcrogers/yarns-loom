@@ -189,12 +189,13 @@ int16_t Oscillator::WarpTimbre(
 void Oscillator::set_shape(OscillatorShape new_shape) {
   if (shape_ == new_shape) return;
 
-  // Remap timbre envelope on the fly so held notes keep an ~equivalent timbre
+  // Remap timbre envelope on the fly so held notes keep an ~equivalent timbre.
+  // Rescale divides each level by new_scale/old_scale exactly (no soft-float);
+  // it no-ops if old_scale is degenerate (the float path divided by zero).
   int16_t midpoint_timbre = 1 << 14;
-  float old_scale = static_cast<float>(WarpTimbre(midpoint_timbre, shape_));
-  float new_scale = static_cast<float>(WarpTimbre(midpoint_timbre, new_shape));
-  float scaling_factor = new_scale / old_scale;
-  timbre_envelope_.Rescale(scaling_factor);
+  int32_t old_scale = WarpTimbre(midpoint_timbre, shape_);
+  int32_t new_scale = WarpTimbre(midpoint_timbre, new_shape);
+  timbre_envelope_.Rescale(new_scale, old_scale);
 
   shape_ = new_shape;
 
