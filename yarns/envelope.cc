@@ -9,10 +9,10 @@
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -20,10 +20,12 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
-// 
+//
 // See http://creativecommons.org/licenses/MIT/ for more information.
 
 #include "yarns/envelope.h"
+
+#include <algorithm>
 
 #include "stmlib/stmlib.h"
 #include "stmlib/utils/dsp.h"
@@ -35,21 +37,25 @@ namespace yarns {
 
 using namespace stmlib;
 
-// System-wide PRNG buffer shared by all envelopes' chiff post-passes.
-// Filled once per audio block by FillSharedPrngBuffer().
-//
-// NB: the perf benefit of sharing this buffer (vs each envelope running
-// inline xorshift32) is marginal once the per-envelope decorrelation EOR
-// is factored in — roughly 1 cycle/sample/envelope saved, offset by the
-// ~448-cycle one-time fill. Breaks even around N=4-5 envelopes per block;
-// at the worst-case 8 (unison-paraphonic gain+timbre × 4 voices) saves
-// only ~70 cycles per block. The design is kept because shared state
-// makes the decorrelation mask + chiff timing reasoning local to one
-// place and avoids per-envelope PRNG state in RAM.
+// System-wide PRNG buffer shared by all envelopes' slew-shift dither.
+// Filled once per audio block by FillSharedPrngBuffer(). Shared state keeps
+// per-envelope PRNG state out of RAM; the per-instance XOR mask decorrelates
+// each envelope's dither decisions.
 namespace {
   uint32_t shared_prng_buffer[kAudioBlockSize];
   uint32_t shared_prng_state = 0xCAFEBABE;
 }  // namespace
+
+// Number of slew time constants a timed stage spans, as log2 in Q5.27.
+// log2(4) = 2: the stage hands off with e^-4 ~= 1.8% of its initial delta
+// remaining (absorbed by the next stage's slew). Tunable by ear: larger
+// front-loads the curve and lands closer to the target; smaller straightens
+// the curve but leaves a bigger residual at handoff.
+const uint32_t kStageTimeConstantsLog2_q5_27 = 2u << 27;
+
+// Base shift is capped so that shift + dither <= 28: keeps `delta >> shift`
+// well-defined, and 2^28 samples is already an absurdly long time constant.
+const uint32_t kMaxSlewShift_q5_27 = 27u << 27;
 
 void Envelope::FillSharedPrngBuffer() {
   uint32_t state = shared_prng_state;
@@ -63,8 +69,9 @@ void Envelope::FillSharedPrngBuffer() {
 }
 
 void Envelope::Init(int16_t zero_value_s16) {
-  phase_u32_ = phase_increment_u32_ = 0;
+  phase_increment_u32_ = 0;
   phase_samples_left_ = 0;
+  slew_shift_q5_27_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   std::fill(
@@ -72,22 +79,11 @@ void Envelope::Init(int16_t zero_value_s16) {
     &stage_target_q30_[ENV_NUM_STAGES],
     zero_value_q30
   );
-  std::fill(
-    &expo_slope_lut_q30_[0],
-    &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-    0
-  );
-  chiff_probability_u31_ = 0;
-  chiff_prob_decrement_u32_ = 0;
-  chiff_start_s16_ = 0;
-  chiff_target_s16_ = 0;
-  chiff_lp_state_q15_ = 0;
-  chiff_lp_coeff_q15_ = 32767;  // passthrough until oscillator pushes a coeff
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
-  // that's needed to decorrelate sample positions.
-  chiff_prng_xor_u32_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
+  // that's needed to decorrelate dither decisions.
+  prng_xor_u32_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -99,7 +95,7 @@ void Envelope::NoteOn(
   ADSR& adsr,
   // Bounds stored as s32 but semantically s16
   int32_t min_target_s16, int32_t max_target_s16,
-  uint8_t chiff_amount
+  uint8_t /* chiff_amount: reserved until chiff unifies into the slew */
 ) {
   adsr_ = &adsr;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
@@ -114,7 +110,7 @@ void Envelope::NoteOn(
 
   switch (stage_) {
     case ENV_STAGE_ATTACK:
-      // Legato: ignore changes to peak target; chiff continues its ramp.
+      // Legato: ignore changes to peak target
       break;
     case ENV_STAGE_DECAY:
     case ENV_STAGE_SUSTAIN:
@@ -124,22 +120,132 @@ void Envelope::NoteOn(
     case ENV_STAGE_RELEASE:
     case ENV_STAGE_DEAD:
     case ENV_NUM_STAGES:
-      // Fresh attack: arm noise amplitude ramp. Probability lives in
-      // top-31-bit unsigned space [0, 2^31) so the USAT #31 saturating
-      // decrement in the post-pass works on the signed SUBS result.
-      // chiff_amount in [0, 127], so <<24 caps prob at 0x7F000000.
-      // LPF state is NOT reset here — it carries from any prior chiff
-      // tail, ensuring continuity if a re-trigger overlaps a fade-out.
-      chiff_probability_u31_ = static_cast<uint32_t>(chiff_amount) << 24;
-      chiff_prob_decrement_u32_ = static_cast<uint32_t>(
-        (static_cast<uint64_t>(chiff_probability_u31_) * adsr.attack_u32) >> 32);
       Trigger(ENV_STAGE_ATTACK);
       break;
   }
 }
 
-#define TRIGGER_NEXT_STAGE \
-  return Trigger(static_cast<EnvelopeStage>(stage + 1));
+// Update current stage and its state. The slew always moves from the current
+// value toward the stage target at a rate set by the stage's nominal
+// duration, so there is no nominal-vs-actual delta bookkeeping: starting
+// closer to the target just means arriving (proportionally) closer to it
+// when the stage's sample countdown expires.
+void Envelope::Trigger(EnvelopeStage stage) {
+  stage_ = stage;
+  target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
+  switch (stage) {
+    case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
+    case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
+    case ENV_STAGE_RELEASE: phase_increment_u32_ = adsr_->release_u32 ; break;
+    default:
+      // Hold stage: no countdown; keep slewing toward the target with the
+      // shift inherited from the previous stage, converging asymptotically.
+      phase_increment_u32_ = 0;
+      return;
+  }
+
+  if (value_q30_ == target_q30_) {
+    // Nothing to do this stage; skip ahead
+    return Trigger(static_cast<EnvelopeStage>(stage + 1));
+  }
+
+  // Nominal stage duration in samples
+  phase_samples_left_ = UINT32_MAX / phase_increment_u32_;
+
+  // Slew shift from stage duration: with N = 2^32 / increment samples and
+  // k = 2^kStageTimeConstantsLog2 time constants per stage, the time
+  // constant 2^shift = N / k, i.e. shift = log2(N) - log2(k).
+  // log2(N) = 32 - log2(increment); log2(increment) is approximated as
+  // (31 - clz) plus a linear mantissa fraction (max error ~0.09, i.e. ~6%
+  // of the time constant -- inaudible, and monotone in the increment).
+  uint8_t leading_zeros = __builtin_clz(phase_increment_u32_);
+  if (leading_zeros >= 30) {
+    // Increment <= 3: N >= ~2^30.5, whose shift saturates the cap anyway.
+    // Computed separately because (leading_zeros + 1) << 27 would overflow.
+    slew_shift_q5_27_ = kMaxSlewShift_q5_27;
+    return;
+  }
+  uint32_t mantissa_frac_q5_27 =
+      ((phase_increment_u32_ << leading_zeros) & 0x7FFFFFFFu) >> 4;
+  uint32_t log2_stage_samples_q5_27 =
+      (static_cast<uint32_t>(leading_zeros + 1) << 27) - mantissa_frac_q5_27;
+  slew_shift_q5_27_ = log2_stage_samples_q5_27 <= kStageTimeConstantsLog2_q5_27
+    ? 0 // Stage too short for a meaningful slew; jump straight to target
+    : std::min(
+        log2_stage_samples_q5_27 - kStageTimeConstantsLog2_q5_27,
+        kMaxSlewShift_q5_27
+      );
+}
+
+void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
+  // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
+  const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
+  RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
+}
+
+// Mix the envelope value (Q30) and the already-advanced bias (Q31) into a
+// 0..INT16_MAX output sample. ClipU16(x) >> 1 equals ClipUShifted(x, 15, 1) at
+// both saturation boundaries, but folds the final right-shift into the USAT.
+static inline int16_t EnvelopeSample(int32_t value_q30, int32_t bias_q31) {
+  int32_t sum_s16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16));
+  return ClipUShifted(sum_s16, 15, 1);
+}
+
+// Advance to the next stage and resume rendering this block's remaining
+// samples there. The caller saves value_q30_ first (so the re-entrant Trigger
+// sees the real start value). Even with no samples left, the re-entry saves
+// bias state for us.
+void Envelope::HandOffToNextStage(
+  int16_t* sample_buffer, size_t block_samples_left,
+  int32_t bias_q31, int32_t bias_slope_q31
+) {
+  Trigger(static_cast<EnvelopeStage>(stage_ + 1));
+  RenderStage(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+}
+
+void Envelope::RenderStage(
+  int16_t* sample_buffer, size_t block_samples_left,
+  int32_t bias_q31, int32_t bias_slope_q31
+) {
+  int32_t value_q30 = value_q30_;
+  const int32_t target_q30 = target_q30_;
+
+  // Dithered downshift: use base_shift, or base_shift + 1 with per-sample
+  // probability dither_threshold/2^10, so the effective slew coefficient
+  // interpolates between the two power-of-two time constants.
+  const uint32_t base_shift = slew_shift_q5_27_ >> 27;
+  const uint32_t dither_threshold_u10 = (slew_shift_q5_27_ >> 17) & 0x3FF;
+  const uint32_t prng_xor = prng_xor_u32_;
+  // Buffer position doubles as the index into the shared PRNG block.
+  const uint32_t* prng = &shared_prng_buffer[kAudioBlockSize - block_samples_left];
+
+  const bool timed = phase_increment_u32_ != 0;
+  uint32_t run_samples = timed
+    ? std::min<uint32_t>(phase_samples_left_, block_samples_left)
+    : block_samples_left;
+  block_samples_left -= run_samples;
+  if (timed) phase_samples_left_ -= run_samples;
+
+  while (run_samples--) {
+    uint32_t random = *prng++ ^ prng_xor;
+    uint32_t shift = base_shift + ((random >> 22) < dither_threshold_u10);
+    // Never overshoots: |delta >> shift| <= |delta|. Truncation stalls an
+    // upward slew once delta < 2^shift, but timed stages end by countdown
+    // (below), and hold stages are content to sit near their target.
+    value_q30 += (target_q30 - value_q30) >> shift;
+    bias_q31 += bias_slope_q31;
+    *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+  }
+
+  value_q30_ = value_q30;
+  bias_q31_ = bias_q31;
+  if (timed && phase_samples_left_ == 0) {
+    // Countdown expired: hand off to the next stage from wherever the slew
+    // got to. Tail call keeps the transition flat (no extra frame).
+    return HandOffToNextStage(
+      sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  }
+}
 
 // Exact unsigned division of a 64-bit dividend (hi:lo) by a 32-bit divisor,
 // valid when the quotient fits 32 bits (hi < divisor; the caller saturates
@@ -177,282 +283,6 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor) {
   return q1 * b + q0;
 }
 
-// Update current stage and its state
-void Envelope::Trigger(EnvelopeStage stage) {
-  stage_ = stage;
-  phase_u32_ = 0;
-  target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
-  // Chiff state persists across stage transitions. Spike amplitude is
-  // delta * alpha (delta = target − value), so chiff fades naturally as
-  // the envelope approaches each stage's target — including release
-  // tails after NoteOff cuts attack short, avoiding an abrupt cutoff.
-  switch (stage) {
-    case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
-    case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
-    case ENV_STAGE_RELEASE: phase_increment_u32_ = adsr_->release_u32 ; break;
-    default: phase_increment_u32_ = 0; return;
-  }
-
-  int32_t actual_delta_q30 = SatSub(target_q30_, value_q30_, 31);
-  if (!actual_delta_q30) TRIGGER_NEXT_STAGE; // Already at target
-
-  // Decay always treats the current value as nominal start, because in all
-  // scenarios, the peak level doesn't give us useful information:
-  // 1. Automatic transition from attack: we know value reached peak level
-  // 2. Legato NoteOn: peak level is irrelevant, actual delta is all we have
-  // 3. Skipped attack: ^
-  int32_t nominal_start_q30 = stage == ENV_STAGE_DECAY
-    ? value_q30_
-    : stage_target_q30_[stmlib::modulo(
-        static_cast<int8_t>(stage) - 1,
-        static_cast<int8_t>(ENV_NUM_STAGES)
-    )];
-  int32_t nominal_delta_q30 = SatSub(target_q30_, nominal_start_q30, 31);
-
-  // Skip stage if there is a direction disagreement or nowhere to go
-  // Cases: NoteOn during release from above peak level
-  if (
-    // The stage is supposed to have a direction
-    nominal_delta_q30 != 0 &&
-    // It doesn't agree with the actual direction
-    (nominal_delta_q30 > 0) != (actual_delta_q30 > 0)
-  ) {
-    TRIGGER_NEXT_STAGE;
-  }
-
-  int32_t linear_slope_q30;
-  if (abs(actual_delta_q30) < abs(nominal_delta_q30)) {
-    // Closer to target than expected -- shorten stage duration proportionally, keeping nominal slope
-    // Cases: NoteOn during release (of same polarity); NoteOff from below sustain level during attack
-    linear_slope_q30 = MulS32(nominal_delta_q30, phase_increment_u32_);
-    // Shorten the stage: scale the increment by |nominal / actual| (> 1 here),
-    // exact and entirely in 32-bit hardware ops. A hardware umull forms the
-    // 64-bit product, which DivU64ByU32 then divides by |actual| -- no
-    // soft-float and no 64-bit divide library. Saturates if a near-instant
-    // stage would overflow the 32-bit increment.
-    uint32_t abs_nominal = abs(nominal_delta_q30);
-    uint32_t abs_actual = abs(actual_delta_q30);
-    uint32_t product_hi = MulU32(phase_increment_u32_, abs_nominal);
-    uint32_t product_lo = phase_increment_u32_ * abs_nominal;
-    phase_increment_u32_ = product_hi >= abs_actual
-        ? UINT32_MAX
-        : DivU64ByU32(product_hi, product_lo, abs_actual);
-  } else {
-    // Distance is GTE expected -- keep nominal stage duration, but steepen the slope
-    // Cases: NoteOff during attack/decay from between sustain/peak levels; NoteOn during release of opposite polarity (hi timbre); normal well-adjusted stages
-    linear_slope_q30 = MulS32(actual_delta_q30, phase_increment_u32_);
-  }
-  if (!linear_slope_q30) TRIGGER_NEXT_STAGE; // Too close to target for useful slope
-
-  // phase_u32_ starts at 0, so it stays below UINT32_MAX for this many sample
-  // increments. RenderStage counts this down per block instead of dividing.
-  phase_samples_left_ = UINT32_MAX / phase_increment_u32_;
-
-  // Populate dynamic LUT for phase-dependent slope
-  const uint32_t max_expo_phase_increment_u32 = UINT32_MAX >> (kLutExpoSlopeShiftSizeBits + 1);
-  if (phase_increment_u32_ > max_expo_phase_increment_u32) {
-    // If we won't get 2+ samples per expo shift, fall back on linear slope
-    std::fill(
-      &expo_slope_lut_q30_[0],
-      &expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE],
-      linear_slope_q30
-    );
-  } else {
-    const uint8_t max_shift = signed_clz(linear_slope_q30) - 1; // Maintain 31-bit scaling
-    for (uint8_t i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-      int8_t shift = lut_expo_slope_shift[i];
-      expo_slope_lut_q30_[i] = shift >= 0
-        ? linear_slope_q30 << std::min(static_cast<uint8_t>(shift), max_shift)
-        : linear_slope_q30 >> static_cast<uint8_t>(-shift);
-      if (!expo_slope_lut_q30_[i]) {
-        expo_slope_lut_q30_[i] = linear_slope_q30 > 0 ? 1 : -1;
-      }
-    }
-  }
-
-}
-
-void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
-  // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
-  const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  size_t samples_left = kAudioBlockSize;
-  RenderStageDispatch(sample_buffer, samples_left, bias_q31_, bias_slope_q31);
-
-  // Chiff post-process: probabilistic sample replacement, band-limited by
-  // a 1-pole LPF whose cutoff tracks voice pitch. Per sample, a PRNG-gated
-  // fraction picks a replacement (attack-start or -target); the
-  // perturbation (replacement − original) is run through the LPF and added
-  // back to the original. Filtering the delta — not the buffer — leaves
-  // the envelope signal itself unfiltered. Reads from the system-shared
-  // PRNG buffer filled once per block.
-  uint32_t prob = chiff_probability_u31_;
-  const uint32_t dec = chiff_prob_decrement_u32_;
-  const int16_t start = chiff_start_s16_;
-  const int16_t target = chiff_target_s16_;
-  const uint32_t prng_xor = chiff_prng_xor_u32_;
-  int32_t lp_q15 = chiff_lp_state_q15_;
-  const int32_t coeff_q15 = chiff_lp_coeff_q15_;
-  for (size_t i = 0; i < kAudioBlockSize; ++i) {
-    // XOR with per-envelope mask decorrelates this envelope's chiff
-    // positions from other envelopes sharing the same PRNG buffer.
-    uint32_t prng = shared_prng_buffer[i] ^ prng_xor;
-    int16_t original = sample_buffer[i];
-    int16_t replacement = (prng & 1u) ? target : start;
-    // Compare against (prng >> 1) so prob lives in the top-31-bit space
-    // [0, 2^31) — required by the USAT #31 saturating decrement below.
-    int16_t fired = (prng >> 1) < prob ? replacement : original;
-    // 1-pole LPF on the perturbation: lp += alpha * (delta − lp). Plain
-    // Q15 multiply (no shift tricks). |delta − lp| < 2^16 and coeff ≤ 2^15
-    // so the product fits int32.
-    int32_t delta = fired - original;
-    lp_q15 += ((delta - lp_q15) * coeff_q15) >> 15;
-    int32_t out;
-    __asm__ ("usat %0, #15, %1"
-             : "=r"(out)
-             : "r"(original + lp_q15));
-    sample_buffer[i] = static_cast<int16_t>(out);
-    // Saturating decrement via SUBS + USAT: 2 cycles vs ~3 for the
-    // cmp/cmov idiom. USAT clamps the signed result of (prob − dec) to
-    // [0, 2^31), giving 0 on underflow. Safe because prob is bounded to
-    // [0, 2^31) by the <<24 in NoteOn.
-    int32_t signed_prob;
-    __asm__ (
-        "subs %0, %1, %2\n\t"
-        "usat %0, #31, %0"
-        : "=r"(signed_prob)
-        : "r"(prob), "r"(dec)
-        : "cc");
-    prob = static_cast<uint32_t>(signed_prob);
-  }
-  chiff_probability_u31_ = prob;
-  chiff_lp_state_q15_ = lp_q15;
-}
-
-void Envelope::RenderStageDispatch(
-  int16_t* sample_buffer, size_t block_samples_left,
-  int32_t bias_q31, int32_t bias_slope_q31
-) {
-  if (phase_increment_u32_ == 0) {
-    RenderStage<false , false >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
-  } else if (expo_slope_lut_q30_[0] > 0) {
-    RenderStage<true  , true  >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
-  } else {
-    RenderStage<true  , false >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
-  }
-}
-
-// Mix the envelope value (Q30) and the already-advanced bias (Q31) into a
-// 0..INT16_MAX output sample. ClipU16(x) >> 1 equals ClipUShifted(x, 15, 1) at
-// both saturation boundaries, but folds the final right-shift into the USAT.
-static inline int16_t EnvelopeSample(int32_t value_q30, int32_t bias_q31) {
-  int32_t sum_s16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16));
-  return ClipUShifted(sum_s16, 15, 1);
-}
-
-// Advance one sample of a moving stage: step value by the slope (clamping at
-// target), advance bias, and emit the sample. Returns true once value reaches
-// target, signalling the caller to hand off to the next stage.
-template<bool POSITIVE_SLOPE>
-static inline bool StepSample(
-  int32_t slope_q30, int32_t target_q30, int32_t bias_slope_q31,
-  int32_t& value_q30, int32_t& bias_q31, int16_t*& sample_buffer
-) {
-  value_q30 += slope_q30;
-  bool reached_target =
-      POSITIVE_SLOPE ? value_q30 >= target_q30 : value_q30 <= target_q30;
-  if (reached_target) value_q30 = target_q30; // Don't overshoot
-  bias_q31 += bias_slope_q31;
-  *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
-  return reached_target;
-}
-
-// Advance to the next stage and resume rendering this block's remaining samples
-// there. The caller snapshots value_q30_ first (so the re-entrant Trigger sees
-// the real start value). Even with no samples left, the re-entry saves bias
-// state for us.
-void Envelope::HandOffToNextStage(
-  int16_t* sample_buffer, size_t block_samples_left,
-  int32_t bias_q31, int32_t bias_slope_q31
-) {
-  Trigger(static_cast<EnvelopeStage>(stage_ + 1));
-  RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
-}
-
-template<bool MOVING, bool POSITIVE_SLOPE>
-void Envelope::RenderStage(
-  int16_t* sample_buffer, size_t block_samples_left,
-  int32_t bias_q31, int32_t bias_slope_q31
-) {
-  int32_t value_q30 = value_q30_;
-  int32_t target_q30 = target_q30_;
-  // Read the slope LUT straight from the member array via a loop-invariant
-  // base pointer. No local snapshot is needed: the only writer is Trigger(),
-  // which only runs on a stage transition -- and that path exits this loop.
-  const int32_t* const expo_slope_q30 = expo_slope_lut_q30_;
-
-  if (!MOVING) {
-    // Skipped a stage whose delta was too small to produce a nonzero slope:
-    // hold at target for the whole block.
-    value_q30 = target_q30;
-    while (block_samples_left--) {
-      bias_q31 += bias_slope_q31;
-      *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
-    }
-    value_q30_ = value_q30;
-    bias_q31_ = bias_q31;
-    return;
-  }
-
-  uint32_t phase_u32 = phase_u32_;
-  const uint32_t phase_increment_u32 = phase_increment_u32_; // nonzero (MOVING)
-  uint32_t phase_samples_left = phase_samples_left_;
-
-  // Before saturation: phase_u32 cannot overflow until it saturates, so the
-  // per-sample overflow guard is gone -- we just run the precomputed countdown
-  // (clamped to this block). block_samples_left advances in lockstep so it
-  // stays correct for the stage-transition handoff.
-  uint32_t block_phase_samples_left =
-      std::min<size_t>(phase_samples_left, block_samples_left);
-  phase_samples_left -= block_phase_samples_left;
-  while (block_phase_samples_left) {
-    --block_phase_samples_left;
-    --block_samples_left;
-    phase_u32 += phase_increment_u32;
-    int32_t slope_q30 = expo_slope_q30[phase_u32 >> (32 - kLutExpoSlopeShiftSizeBits)];
-    if (StepSample<POSITIVE_SLOPE>(slope_q30, target_q30, bias_slope_q31,
-                                   value_q30, bias_q31, sample_buffer)) {
-      value_q30_ = value_q30; // So the re-entrant Trigger sees the real start
-      return HandOffToNextStage(sample_buffer, block_samples_left,
-                                bias_q31, bias_slope_q31);
-    }
-  }
-
-  if (block_samples_left) {
-    // After phase saturates it pins at UINT32_MAX, so the slope is fixed at the
-    // steepest (last) LUT entry -- no phase increment or LUT lookup per sample.
-    phase_u32 = UINT32_MAX;
-    const int32_t slope_q30 =
-        expo_slope_q30[(1 << kLutExpoSlopeShiftSizeBits) - 1];
-    while (block_samples_left) {
-      --block_samples_left;
-      if (StepSample<POSITIVE_SLOPE>(slope_q30, target_q30, bias_slope_q31,
-                                     value_q30, bias_q31, sample_buffer)) {
-        value_q30_ = value_q30; // So the re-entrant Trigger sees the real start
-        return HandOffToNextStage(sample_buffer, block_samples_left,
-                                  bias_q31, bias_slope_q31);
-      }
-    }
-  }
-
-  // Render is complete, but stage is not -- save state for next render
-  value_q30_ = value_q30;
-  phase_u32_ = phase_u32;
-  phase_samples_left_ = phase_samples_left;
-  bias_q31_ = bias_q31;
-}
-
-#undef STEP_AND_OUTPUT
-
 // Scale value by numerator/denominator, exact and in 32-bit hardware ops only.
 // A hardware umull forms the 64-bit product, which DivU64ByU32 divides; the
 // result is saturated into the signed 32-bit range. Unlike a fixed-point
@@ -472,8 +302,10 @@ static int32_t ScaleRatio(int32_t value, uint32_t numerator, uint32_t denominato
                    : static_cast<int32_t>(quotient);
 }
 
-// Rescale all envelope levels by numerator/denominator (both non-negative, from
-// WarpTimbre). Cold path (shape change), so exact per-field division is fine.
+// Rescale all envelope levels by numerator/denominator (both non-negative,
+// from WarpTimbre). Cold path (shape change), so exact per-field division is
+// fine. The slew shift is a pure rate and thus scale-invariant -- no
+// adjustment needed.
 void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   if (denominator <= 0) return; // Degenerate scale; leave levels unchanged
   uint32_t num = static_cast<uint32_t>(numerator);
@@ -483,9 +315,6 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   target_q30_ = ScaleRatio(target_q30_, num, den);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
     stage_target_q30_[i] = ScaleRatio(stage_target_q30_[i], num, den);
-  }
-  for (int i = 0; i < LUT_EXPO_SLOPE_SHIFT_SIZE; ++i) {
-    expo_slope_lut_q30_[i] = ScaleRatio(expo_slope_lut_q30_[i], num, den);
   }
 }
 

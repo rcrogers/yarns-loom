@@ -9,10 +9,10 @@
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -20,7 +20,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
-// 
+//
 // See http://creativecommons.org/licenses/MIT/ for more information.
 
 #ifndef YARNS_ENVELOPE_H_
@@ -46,42 +46,31 @@ struct ADSR {
   uint32_t attack_u32, decay_u32, release_u32; // Phase increments
 };
 
-const uint8_t kLutExpoSlopeShiftSizeBits = 4;
-STATIC_ASSERT(
-  1 << kLutExpoSlopeShiftSizeBits == LUT_EXPO_SLOPE_SHIFT_SIZE,
-  expo_slope_shift_size
-);
-
 class Envelope {
  public:
   Envelope() { }
   ~Envelope() { }
 
   void Init(int16_t zero_value_s16);
-  // Refill the system-wide chiff PRNG buffer; must be called once per
-  // audio block (before any envelope renders) so all envelopes share the
-  // same random words this block.
+  // Refill the system-wide PRNG buffer consumed by the slew-shift dither;
+  // must be called once per audio block (before any envelope renders) so
+  // all envelopes share the same random words this block.
   static void FillSharedPrngBuffer();
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
     // Bounds stored as s32 but semantically s16
     int32_t min_target_s16, int32_t max_target_s16,
-    uint8_t chiff_amount
+    uint8_t chiff_amount // Reserved: unused until chiff unifies into the slew
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
-  void RenderStageDispatch(
-    int16_t* sample_buffer, size_t block_samples_left,
-    int32_t bias_q31, int32_t bias_slope_q31
-  );
-  template<bool MOVING, bool POSITIVE_SLOPE>
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
-  // Trimmed to the same arg footprint as RenderStageDispatch so the
-  // transition tail-call stays flat (sibling call, no per-transition frame).
+  // Trimmed to the same arg footprint as RenderStage so the transition
+  // tail-call stays flat (sibling call, no per-transition frame).
   void HandOffToNextStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
@@ -103,26 +92,13 @@ class Envelope {
   inline int16_t value() const { return value_q30_ >> (30 - 15); }
   inline EnvelopeStage stage() const { return stage_; }
 
-  // Per-block setter: install the chiff LPF coefficient (Q15 alpha). The
-  // oscillator derives this from voice pitch so the chiff's band-limiting
-  // tracks the carrier.
-  inline void set_chiff_lp_coeff(uint16_t coeff_q15) {
-    chiff_lp_coeff_q15_ = coeff_q15;
-  }
-
-  static inline uint8_t signed_clz(int32_t x) {
-    const uint32_t x_for_clz = static_cast<uint32_t>(abs(x >= 0 ? x : x + 1));
-    return __builtin_clzl(x_for_clz) - 1;
-  }
-
  private:
   ADSR* adsr_;
 
-  // Q30 in int32_t; the top integer bit is saturation headroom for
-  // `value += slope` overshoot and for SatSub deltas (range [-2, 2)).
+  // Q30 in int32_t; the top integer bit is headroom for the slew delta
+  // (target - value spans up to 2^31 - 1, still within int32).
   int32_t stage_target_q30_[ENV_NUM_STAGES];
   int32_t target_q30_, value_q30_;
-  int32_t expo_slope_lut_q30_[LUT_EXPO_SLOPE_SHIFT_SIZE];
 
   // Q31 (full s32; no overshoot, slope is pre-scaled by block size).
   int32_t bias_q31_;
@@ -130,40 +106,28 @@ class Envelope {
   // Current stage.
   EnvelopeStage stage_;
 
-  uint32_t phase_u32_, phase_increment_u32_;
+  // Nonzero for timed stages (attack/decay/release); doubles as the source
+  // of the stage's nominal sample count. Zero for hold stages
+  // (sustain/dead), which slew toward their target indefinitely.
+  uint32_t phase_increment_u32_;
 
-  // Samples remaining before phase_u32_ saturates at UINT32_MAX. Computed once
-  // per stage in Trigger() (UINT32_MAX / phase_increment_u32_, from phase 0)
-  // and counted down per block, so RenderStage doesn't divide on the hot path.
+  // Timed stages: samples remaining before handing off to the next stage.
+  // The slew ends wherever it is at that point -- no snap to target; the
+  // next stage's slew continues seamlessly from the current value.
   uint32_t phase_samples_left_;
 
-  // Chiff: probabilistic sample replacement applied as a post-process pass
-  // over the rendered int16 buffer. A fraction of samples (0..100%
-  // initially) gets replaced by either the attack-start value or the
-  // attack-target value (50/50 via a bit of the shared PRNG draw), cached
-  // as int16 at attack-trigger time. Probability ramps linearly to 0 over
-  // a duration equal to the attack stage; chiff persists past attack so a
-  // released note still gets chiff in its tail. Post-pass runs
-  // unconditionally each block for uniform worst-case cost. All envelopes
-  // share one PRNG buffer per block (filled in FillSharedPrngBuffer); the
-  // resulting cross-envelope correlation is acceptable for this effect.
-  uint32_t chiff_probability_u31_;        // current ramping prob, max ~2^31-1 (compared against prng>>1)
-  uint32_t chiff_prob_decrement_u32_;     // per-sample decrement
+  // Per-sample slew: value += (target - value) >> shift. The shift is a
+  // Q5.27 fixed-point value; the integer part is the base downshift, and
+  // the fraction is the per-sample probability of dithering to the next
+  // integer shift, interpolating time constants between powers of two.
+  uint32_t slew_shift_q5_27_;
+
   // Per-instance decorrelation mask XORed into the shared PRNG draw each
-  // sample. Identical chiff_amount + identical ADSR yield identical prob
-  // trajectories across all envelopes triggered together; without this
-  // mask, all such envelopes would fire chiff on the exact same sample
-  // positions every block, producing an impulsive correlated burst at
-  // multi-NoteOn. Mask is derived from `this` once in Init().
-  uint32_t chiff_prng_xor_u32_;
-  int16_t chiff_start_s16_;               // captured start value as int16
-  int16_t chiff_target_s16_;              // captured attack target as int16
-  // 1-pole LPF on the chiff perturbation (the replacement delta), cutoff
-  // tracked to voice pitch. Filtering the delta — not the buffer — leaves
-  // the underlying envelope signal unfiltered. State carries across blocks
-  // for tail continuity; coeff is pushed per-block by the oscillator.
-  int32_t  chiff_lp_state_q15_;           // 1-pole LPF state (Q15, same scale as buffer)
-  uint16_t chiff_lp_coeff_q15_;           // 1-pole alpha (Q15); 32767 ≈ passthrough
+  // sample. Without it, envelopes with identical stage timing would make
+  // identical dither decisions on the same sample positions every block,
+  // correlating their slew noise at multi-NoteOn. Derived from `this` in
+  // Init().
+  uint32_t prng_xor_u32_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

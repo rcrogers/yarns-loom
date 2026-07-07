@@ -23,7 +23,6 @@
 #include "stmlib/stmlib.h"            // STATIC_ASSERT
 
 #include "yarns/drivers/dac.h"        // kAudioBlockSize
-#include "yarns/envelope.h"           // LUT_EXPO_SLOPE_SHIFT_SIZE
 
 #ifndef STACK_RESERVATION_BYTES
 #error "STACK_RESERVATION_BYTES must be passed by the makefile; see yarns/makefile"
@@ -45,16 +44,9 @@ const size_t kOscillatorRender =
 const size_t kCVOutputRenderSamples =
     kAudioBlockSize * sizeof(int16_t);
 
-// Envelope::RenderStageDispatch (envelope.cc): the compiler inlines up to
-// three specializations of RenderStage<>, each of which copies the
-// expo_slope_lut_ table to a local expo_slope[] buffer. We budget for all
-// three being live simultaneously (conservative -- they're typically not).
-const size_t kEnvelopeDispatch =
-    3 * LUT_EXPO_SLOPE_SHIFT_SIZE * sizeof(int32_t);
-
 // Conservative allowance for compiler framing across the full call chain:
 // main -> RenderSamples -> Oscillator::Render -> fn (render impl)
-//      -> Envelope::RenderSamples -> RenderStageDispatch
+//      -> Envelope::RenderSamples -> RenderStage
 // Each frame contributes saved registers, alignment padding, return addrs.
 // ARM AAPCS + Cortex-M3 Thumb: push/pop of callee-saves is typically 20-40 B
 // per frame; this path has ~6 frames so allow 256 B total.
@@ -63,7 +55,6 @@ const size_t kCallChainOverhead = 256;
 const size_t kWorstCaseRenderPath =
     kOscillatorRender +
     kCVOutputRenderSamples +
-    kEnvelopeDispatch +
     kCallChainOverhead;
 
 STATIC_ASSERT(
