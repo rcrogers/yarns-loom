@@ -162,15 +162,29 @@ def render(scenario, mode, prng, prng_xor=0x20001000):
 K_CHIFF_FASTEST_SHIFT_Q5_27 = 2 << 27
 
 
-def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000):
-    """Integer replica of RenderStage<CHIFF=true> over the scenario."""
+def trunc_div(a, b):
+    """C-style signed division (truncate toward zero)."""
+    q = abs(a) // b
+    return q if a >= 0 else -q
+
+
+def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000,
+                 mode='reslope'):
+    """Integer replica of the unified RenderStage over the scenario.
+
+    mode='reslope': firmware semantics -- absolute ramping shift, explicit
+    chiff timer on its original timetable, increment re-sloped toward the
+    new nominal at each stage trigger.
+    mode='deficit': the superseded design (shift = nominal - decaying
+    deficit), kept to demonstrate the intensity step at early release.
+    """
     plan = scenario.stage_plan()
     trace = np.empty(scenario.total_n, dtype=np.float64)
 
     peak = plan[0][1]
     floor = 0
-    span_shifted = (peak - floor) >> 10
-    gate = chiff_amount << 3
+    span_q14 = (peak - floor) >> 16
+    gate = chiff_amount << 9  # 16-bit gate
 
     stage_index = 0
     name, target, countdown = plan[0]
@@ -182,9 +196,22 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000):
     # Arm chiff against the attack's nominal shift
     full_drop = nominal - K_CHIFF_FASTEST_SHIFT_Q5_27 \
         if nominal > K_CHIFF_FASTEST_SHIFT_Q5_27 else 0
-    deficit = (full_drop >> 7) * chiff_amount
+    drop = (full_drop >> 7) * chiff_amount
     attack_samples = UINT32_MAX // increment
-    decrement = max(deficit // attack_samples, 1) if deficit else 0
+    chiff_left = attack_samples if drop else 0
+    ramp = nominal - drop
+    ramp_increment = trunc_div(nominal - ramp, chiff_left) if chiff_left else 0
+    # deficit-mode state
+    deficit = drop
+    deficit_decrement = max(drop // attack_samples, 1) if drop else 0
+
+    def reslope():
+        nonlocal ramp, ramp_increment
+        if chiff_left:
+            ramp_increment = trunc_div(nominal - ramp, chiff_left)
+        else:
+            ramp = nominal
+            ramp_increment = 0
 
     value = 0
     gate_off_pending = True
@@ -196,6 +223,7 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000):
             increment = UINT32_MAX // max(countdown, 1)
             samples_left = UINT32_MAX // increment
             nominal = slew_shift_q5_27(increment)
+            reslope()
         while countdown is not None and samples_left == 0:
             stage_index += 1
             name, target, countdown = plan[stage_index]
@@ -203,21 +231,114 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000):
                 increment = UINT32_MAX // max(countdown, 1)
                 samples_left = UINT32_MAX // increment
                 nominal = slew_shift_q5_27(increment)
+                reslope()
 
         random = int(prng[i]) ^ prng_xor
-        deficit = deficit - decrement if deficit > decrement else 0
-        shift_q = nominal - deficit if nominal > deficit else 0
+        chiff_active = chiff_left > 0
+        if mode == 'reslope':
+            if chiff_active:
+                ramp += ramp_increment
+                chiff_left -= 1
+                if chiff_left == 0:
+                    shift_q = ramp  # last ramped sample
+                    ramp = nominal  # window closed: land on nominal
+                else:
+                    shift_q = ramp
+            else:
+                shift_q = ramp  # == nominal
+        else:  # deficit
+            deficit = deficit - deficit_decrement \
+                if deficit > deficit_decrement else 0
+            chiff_active = deficit > 0
+            shift_q = nominal - deficit if nominal > deficit else 0
+
         frac = (shift_q << 5) & 0xFFFFFFFF
         dither_phase = (dither_phase + frac) & 0xFFFFFFFF
         shift = (shift_q >> 27) + (1 if dither_phase < frac else 0)
         sample_target = target
-        if deficit and ((random >> 12) & 0x3FF) < gate:
-            sample_target = floor + span_shifted * (random & 0x3FF)
+        if chiff_active and (random >> 16) < gate:
+            sample_target = floor + span_q14 * (random & 0xFFFF)
         value += asr(sample_target - value, shift)
         if countdown is not None:
             samples_left -= 1
         trace[i] = value
     return trace
+
+
+def release_figure():
+    """Early release under chiff: re-sloped ramp vs superseded deficit.
+    The money metric is the per-sample step magnitude (chiff perturbation
+    envelope) around the release point: deficit steps discontinuously,
+    re-slope stays smooth."""
+    C_TEXT = '#0b0b0b'
+    C_TEXT2 = '#52514e'
+    C_GRID = '#e5e4e0'
+    C_RESLOPE = '#2a78d6'
+    C_DEFICIT = '#e34948'
+
+    scenarios = [
+        ('too fast: A 20ms, R 600ms, release at 10ms',
+         Scenario('', 0.020, 0.250, 0.600, 0.5, gate_s=0.010, total_s=0.8)),
+        ('too slow: A 1s, R 10ms, release at 0.9s',
+         Scenario('', 1.0, 2.0, 0.010, 0.6, gate_s=0.9, total_s=1.6)),
+    ]
+    amount = 96
+    lsb = 1 << 15
+    kernel = np.ones(64) / 64.0
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8), facecolor='#fcfcfb')
+    fig.suptitle('Early release under chiff %d: re-sloped ramp vs deficit'
+                 % amount, color=C_TEXT, fontsize=12)
+    for col, (label, sc) in enumerate(scenarios):
+        prng = xorshift32_stream(sc.total_n)
+        reslope = render_chiff(sc, amount, prng, mode='reslope')
+        deficit = render_chiff(sc, amount, prng, mode='deficit')
+        t = np.arange(sc.total_n) / FS
+
+        ax = axes[0][col]
+        ax.plot(t, deficit / lsb, color=C_DEFICIT, lw=0.8, label='deficit')
+        ax.plot(t, reslope / lsb, color=C_RESLOPE, lw=0.8, label='re-sloped ramp')
+        ax.axvline(sc.gate_n / FS, color=C_TEXT2, lw=0.8, ls='--')
+        ax.set_title(label, color=C_TEXT, fontsize=10)
+        ax.set_ylabel('output (15-bit LSB)', color=C_TEXT2, fontsize=9)
+        ax.legend(frameon=False, fontsize=8)
+
+        ax = axes[1][col]
+        for trace, color, name in (
+            (deficit, C_DEFICIT, 'deficit'),
+            (reslope, C_RESLOPE, 're-sloped ramp'),
+        ):
+            step = np.abs(np.diff(trace)) / lsb
+            step_envelope = np.convolve(step, kernel, mode='same')
+            ax.semilogy(t[1:], np.maximum(step_envelope, 1e-4),
+                        color=color, lw=0.8, label=name)
+        ax.axvline(sc.gate_n / FS, color=C_TEXT2, lw=0.8, ls='--')
+        ax.set_ylabel('per-sample step (LSB, log)', color=C_TEXT2, fontsize=9)
+        ax.set_xlabel('time (s)', color=C_TEXT2, fontsize=9)
+        ax.legend(frameon=False, fontsize=8)
+
+        for row in range(2):
+            a = axes[row][col]
+            a.set_facecolor('#fcfcfb')
+            a.grid(True, color=C_GRID, lw=0.6)
+            a.tick_params(colors=C_TEXT2, labelsize=8)
+            for s in a.spines.values():
+                s.set_color(C_GRID)
+
+        # Perturbation-envelope ratio across the release boundary
+        release_i = sc.gate_n
+        window = 32
+        for trace, name in ((deficit, 'deficit'), (reslope, 'reslope')):
+            step = np.abs(np.diff(trace)) / lsb
+            before = np.mean(step[release_i - window:release_i])
+            after = np.mean(step[release_i:release_i + window])
+            ratio = after / max(before, 1e-9)
+            print('  %s / %-8s: step envelope %6.2f -> %6.2f LSB across release (x%.2f)'
+                  % (label.split(':')[0], name, before, after, ratio))
+
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig('env_chiff_release.png', dpi=130)
+    print('wrote env_chiff_release.png')
 
 
 def chiff_figure(scenarios):
@@ -347,6 +468,7 @@ def main():
     print('wrote env_slew_sim.png')
 
     chiff_figure(scenarios)
+    release_figure()
 
 
 if __name__ == '__main__':

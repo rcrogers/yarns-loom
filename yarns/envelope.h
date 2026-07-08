@@ -65,25 +65,29 @@ class Envelope {
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
-  // Dispatches on chiff activity so envelopes without an active chiff ramp
-  // render with the lean loop (no per-sample deficit/random-target work).
-  void RenderStageDispatch(
-    int16_t* sample_buffer, size_t block_samples_left,
-    int32_t bias_q31, int32_t bias_slope_q31
-  );
-  template<bool CHIFF>
+  // One render loop for all envelopes, chiff or not: this is a realtime
+  // system, so the worst case is the only case that matters, and a lean
+  // variant would only flatter the average.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
-  // Trimmed to the same arg footprint as RenderStageDispatch so the
-  // transition tail-call stays flat (sibling call, no per-transition frame).
+  // Trimmed to the same arg footprint as RenderStage so the transition
+  // tail-call stays flat (sibling call, no per-transition frame).
   void HandOffToNextStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
 
   void Rescale(int32_t numerator, int32_t denominator);
+
+ private:
+  // Point the chiff ramp's increment at the current stage-nominal shift,
+  // spread over the remaining chiff window; with no window left, the ramp
+  // simply is the nominal.
+  void ReSlopeChiffRamp();
+
+ public:
 
   // Step the running bias state directly, bypassing the per-block slew that
   // RenderSamples applies. Used to absorb an instantaneous bias jump (e.g. a
@@ -138,25 +142,30 @@ class Envelope {
   // are phase-offset rather than correlated.
   uint32_t dither_phase_u32_;
 
-  // Per-instance decorrelation mask XORed into the shared PRNG draw each
-  // sample (chiff only). Without it, envelopes with identical settings
-  // would fire chiff on the same sample positions every block, correlating
-  // their noise at multi-NoteOn. Derived from `this` in Init().
-  uint32_t prng_xor_u32_;
+  // Per-instance start offset into the double-length shared PRNG buffer.
+  // Distinct offsets mean co-triggered envelopes never consume the same
+  // random word on the same sample, so their chiff draws are decorrelated
+  // without per-sample work. Assigned round-robin in Init().
+  uint32_t prng_offset_u32_;
 
-  // Chiff: while the shift deficit is nonzero, the effective slew shift is
-  // stage-nominal minus the deficit (i.e. faster), and each sample has a
-  // gate probability of slewing toward a random target instead of the
-  // stage target. Chiff intensity thus fades via the shift itself: as the
-  // deficit ramps to zero (over the attack's nominal duration), random
-  // targets are tracked ever more sluggishly, and at zero deficit the
-  // random-target gate closes. The deficit persists across stage
-  // transitions, so a note released mid-attack keeps its chiff tail.
-  uint32_t chiff_shift_deficit_q5_27_;
-  uint32_t chiff_deficit_decrement_q5_27_; // Per-sample ramp step
-  uint32_t chiff_gate_u10_;                // P(random target), 10-bit
-  int32_t chiff_floor_q30_;                // Random target range: floor...
-  int32_t chiff_span_shifted_q30_;         // ...+ (span >> 10) * rand10
+  // Chiff: while the timer runs, the slew shift follows a ramp that starts
+  // below stage-nominal (i.e. faster) and each sample has a gate
+  // probability of slewing toward a random target instead of the stage
+  // target. Chiff intensity fades via the shift itself: as the ramp rises,
+  // random targets are tracked ever more sluggishly. The timer is armed to
+  // the attack's nominal duration at NoteOn and keeps its original
+  // timetable through stage transitions; each Trigger re-slopes the
+  // increment toward the new stage's nominal over the remaining window
+  // (signed: the ramp may sit above or below the new nominal). This keeps
+  // the shift -- and thus the chiff perturbation amplitude, 2^-shift --
+  // free of discontinuities at early release, while still landing on the
+  // release's correct slew when the window closes.
+  int32_t chiff_shift_ramp_q5_27_;      // == nominal when timer is 0
+  int32_t chiff_ramp_increment_q5_27_;  // Signed per-sample step
+  uint32_t chiff_samples_left_;         // 0 = chiff inactive
+  uint32_t chiff_gate_u16_;             // P(random target), 16-bit
+  int32_t chiff_floor_q30_;             // Random target range: floor...
+  int32_t chiff_span_q14_;              // ...+ (span >> 16) * rand16
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
