@@ -65,15 +65,6 @@ const uint32_t kMaxSlewShift_q5_27 = 27u << 27;
 // i.e. maximum noise. Tunable.
 const uint32_t kChiffFastestShift_q5_27 = 2u << 27;
 
-// chiff_amount lives in [0, kChiffAmountMax].
-const uint32_t kChiffAmountBits = 7;
-const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
-// Snap-to-bound engages above this amount (half scale)...
-const uint32_t kChiffSnapKneeAmount = (kChiffAmountMax + 1) >> 1;
-// ...and the amounts above the knee scale onto the full u32 fraction range.
-const uint32_t kChiffSnapFractionPerAmount =
-  UINT32_MAX / (kChiffAmountMax - kChiffSnapKneeAmount);
-
 void Envelope::FillSharedPrngBuffer() {
   uint32_t state = shared_prng_state;
   for (size_t i = 0; i < 2 * kAudioBlockSize; ++i) {
@@ -95,9 +86,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_gate_u16_ = 0;
   chiff_floor_q30_ = 0;
   chiff_span_q14_ = 0;
-  chiff_snap_threshold_u16_ = 0;
-  chiff_snap_fraction_u32_ = 0;
-  chiff_snap_block_decrement_u32_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   std::fill(
@@ -155,9 +143,8 @@ void Envelope::NoteOn(
       uint32_t full_drop_q5_27 = slew_shift_q5_27_ > kChiffFastestShift_q5_27
         ? slew_shift_q5_27_ - kChiffFastestShift_q5_27
         : 0;
-      // chiff_amount scales the drop below stage-nominal
-      uint32_t drop_q5_27 =
-        (full_drop_q5_27 >> kChiffAmountBits) * chiff_amount;
+      // chiff_amount in [0, 127] scales the drop below stage-nominal
+      uint32_t drop_q5_27 = (full_drop_q5_27 >> 7) * chiff_amount;
       // The chiff window keeps this timetable even if later stages cut in
       // early; Trigger re-slopes the increment toward each new nominal.
       chiff_samples_left_ = drop_q5_27
@@ -166,24 +153,10 @@ void Envelope::NoteOn(
       chiff_shift_ramp_q5_27_ =
         static_cast<int32_t>(slew_shift_q5_27_ - drop_q5_27);
       ReSlopeChiffRamp();
-      chiff_gate_u16_ =
-        static_cast<uint32_t>(chiff_amount) << (16 - kChiffAmountBits);
+      chiff_gate_u16_ = static_cast<uint32_t>(chiff_amount) << 9;
       chiff_floor_q30_ = stage_target_q30_[ENV_STAGE_DEAD];
       chiff_span_q14_ =
         (stage_target_q30_[ENV_STAGE_ATTACK] - chiff_floor_q30_) >> 16;
-      // Snap-to-bound fraction: none up to the knee, full scale at max
-      chiff_snap_fraction_u32_ = chiff_amount > kChiffSnapKneeAmount
-        ? (chiff_amount - kChiffSnapKneeAmount) * kChiffSnapFractionPerAmount
-        : 0;
-      // Fade to zero over the chiff window, in block-rate steps. A zero
-      // decrement (window longer than ~2^32 samples per unit fraction)
-      // just leaves the fade to the gate closing at window end.
-      uint32_t window_blocks = chiff_samples_left_ >> kAudioBlockSizeBits;
-      chiff_snap_block_decrement_u32_ = window_blocks
-        ? chiff_snap_fraction_u32_ / window_blocks
-        : chiff_snap_fraction_u32_;
-      chiff_snap_threshold_u16_ =
-        (chiff_gate_u16_ * (chiff_snap_fraction_u32_ >> 16)) >> 16;
       break;
     }
   }
@@ -267,15 +240,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  // Block-rate fade of the snap-to-bound threshold (see envelope.h)
-  if (chiff_samples_left_) {
-    chiff_snap_fraction_u32_ =
-      chiff_snap_fraction_u32_ > chiff_snap_block_decrement_u32_
-        ? chiff_snap_fraction_u32_ - chiff_snap_block_decrement_u32_
-        : 0;
-    chiff_snap_threshold_u16_ =
-      (chiff_gate_u16_ * (chiff_snap_fraction_u32_ >> 16)) >> 16;
-  }
   RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
 }
 
@@ -331,7 +295,6 @@ void Envelope::RenderStage(
     const bool chiff = chiff_samples_left_ != 0;
     const int32_t ramp_increment_q5_27 = chiff ? chiff_ramp_increment_q5_27_ : 0;
     const uint32_t chiff_gate_u16 = chiff ? chiff_gate_u16_ : 0;
-    const uint32_t chiff_snap_u16 = chiff ? chiff_snap_threshold_u16_ : 0;
     uint32_t run_samples = std::min<uint32_t>(
       block_samples_left,
       std::min<uint32_t>(
@@ -346,13 +309,12 @@ void Envelope::RenderStage(
     // invariants, GCC 4.8 otherwise reloads them from stack slots every
     // sample (see the blackbox-hoist idiom elsewhere in this codebase).
     uint32_t pinned_gate_u16 = chiff_gate_u16;
-    uint32_t pinned_snap_u16 = chiff_snap_u16;
     int32_t pinned_floor_q30 = chiff_floor_q30;
     int32_t pinned_span_q14 = chiff_span_q14;
     int32_t pinned_stage_target_q30 = stage_target_q30;
     int32_t pinned_bias_slope_q31 = bias_slope_q31;
-    __asm__ volatile ("" : "+r"(pinned_gate_u16), "+r"(pinned_snap_u16),
-                           "+r"(pinned_floor_q30), "+r"(pinned_span_q14),
+    __asm__ volatile ("" : "+r"(pinned_gate_u16), "+r"(pinned_floor_q30),
+                           "+r"(pinned_span_q14),
                            "+r"(pinned_stage_target_q30),
                            "+r"(pinned_bias_slope_q31));
 
@@ -376,25 +338,13 @@ void Envelope::RenderStage(
           : "=&r"(shift), "+&r"(dither_phase_u32)
           : "r"(frac_u32), "r"(static_cast<uint32_t>(ramp_q5_27))
           : "cc");
-      // Snap-to-bound: a gate roll below the (fading) snap threshold --
-      // a sub-range of the firing range, so the roll's magnitude is still
-      // uniform conditional on firing -- replaces the value draw with 0
-      // or 65535, side picked by the draw's own top bit. Same sign-mask
-      // blend idiom as the gate select below.
-      int32_t draw_u16 = static_cast<int32_t>(random & 0xFFFF);
-      int32_t snap_mask = (
-        static_cast<int32_t>(random >> 16) - static_cast<int32_t>(pinned_snap_u16)
-      ) >> 31;
-      int32_t bound_u16 =
-        (static_cast<int32_t>(random << 16) >> 31) & 0xFFFF;
-      draw_u16 ^= (draw_u16 ^ bound_u16) & snap_mask;
       // Branchless target select: compute the random target
       // unconditionally (mla is 2 cycles on M3), then blend via an
       // arithmetic mask -- all-ones iff the 16-bit gate draw fires. Sign
       // arithmetic is safe: both operands are < 2^16, so the difference
       // fits int32 and its sign bit is the comparison result.
       int32_t random_target_q30 = pinned_floor_q30
-        + pinned_span_q14 * draw_u16;
+        + pinned_span_q14 * static_cast<int32_t>(random & 0xFFFF);
       int32_t gate_mask = (
         static_cast<int32_t>(random >> 16) - static_cast<int32_t>(pinned_gate_u16)
       ) >> 31;

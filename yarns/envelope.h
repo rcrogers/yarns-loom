@@ -167,18 +167,6 @@ class Envelope {
   int32_t chiff_floor_q30_;             // Random target range: floor...
   int32_t chiff_span_q14_;              // ...+ (span >> 16) * rand16
 
-  // Snap-to-bound: gate rolls below this threshold (a sub-range of the
-  // firing range, so the decision costs no extra entropy and stays
-  // independent of the value draw) snap the random target to floor or
-  // peak, side picked by the value draw's top bit. The target
-  // distribution becomes point masses at the bounds plus a uniform body.
-  // Engages above half chiff amount, full-scale at 127; the underlying
-  // fraction fades to zero over the chiff window, refreshed at block rate
-  // in RenderSamples -- smooth at control rate without a per-sample cost.
-  uint32_t chiff_snap_threshold_u16_;
-  uint32_t chiff_snap_fraction_u32_;
-  uint32_t chiff_snap_block_decrement_u32_;
-
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
 
