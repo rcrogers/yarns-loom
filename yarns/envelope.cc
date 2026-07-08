@@ -60,10 +60,16 @@ const uint32_t kStageTimeConstantsLog2_q5_27 = 2u << 27;
 // well-defined, and 2^28 samples is already an absurdly long time constant.
 const uint32_t kMaxSlewShift_q5_27 = 27u << 27;
 
-// At full chiff amount, stages start at this downshift (time constant of
-// 4 samples): fast enough to nearly track the per-sample random targets,
-// i.e. maximum noise. Tunable.
-const uint32_t kChiffFastestShift_q5_27 = 2u << 27;
+// At full chiff amount, stages start at this downshift. Zero = raw sample
+// replacement: a fired sample jumps all the way to its random target,
+// flat-spectrum and maximally aggressive (the original chiff character).
+// Nonzero values lowpass the whole effect: 2 already band-limits it to
+// ~1.8 kHz at 45 kHz.
+const uint32_t kChiffFastestShift_q5_27 = 0;
+
+// chiff_amount lives in [0, kChiffAmountMax].
+const uint32_t kChiffAmountBits = 7;
+const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 
 void Envelope::FillSharedPrngBuffer() {
   uint32_t state = shared_prng_state;
@@ -143,8 +149,9 @@ void Envelope::NoteOn(
       uint32_t full_drop_q5_27 = slew_shift_q5_27_ > kChiffFastestShift_q5_27
         ? slew_shift_q5_27_ - kChiffFastestShift_q5_27
         : 0;
-      // chiff_amount in [0, 127] scales the drop below stage-nominal
-      uint32_t drop_q5_27 = (full_drop_q5_27 >> 7) * chiff_amount;
+      // chiff_amount scales the drop below stage-nominal
+      uint32_t drop_q5_27 =
+        (full_drop_q5_27 >> kChiffAmountBits) * chiff_amount;
       // The chiff window keeps this timetable even if later stages cut in
       // early; Trigger re-slopes the increment toward each new nominal.
       chiff_samples_left_ = drop_q5_27
@@ -153,7 +160,8 @@ void Envelope::NoteOn(
       chiff_shift_ramp_q5_27_ =
         static_cast<int32_t>(slew_shift_q5_27_ - drop_q5_27);
       ReSlopeChiffRamp();
-      chiff_gate_u16_ = static_cast<uint32_t>(chiff_amount) << 9;
+      chiff_gate_u16_ =
+        static_cast<uint32_t>(chiff_amount) << (16 - kChiffAmountBits);
       chiff_floor_q30_ = stage_target_q30_[ENV_STAGE_DEAD];
       chiff_span_q14_ =
         (stage_target_q30_[ENV_STAGE_ATTACK] - chiff_floor_q30_) >> 16;
