@@ -159,7 +159,7 @@ def render(scenario, mode, prng, prng_xor=0x20001000):
     return trace
 
 
-K_CHIFF_FASTEST_SHIFT_Q5_27 = 2 << 27
+K_CHIFF_FASTEST_SHIFT_Q5_27 = 0
 
 
 def trunc_div(a, b):
