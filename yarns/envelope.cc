@@ -57,6 +57,11 @@ const uint32_t kStageTimeConstantsLog2_q5_27 = 2u << 27;
 // well-defined, and 2^28 samples is already an absurdly long time constant.
 const uint32_t kMaxSlewShift_q5_27 = 27u << 27;
 
+// At full chiff amount, stages start at this downshift (time constant of
+// 4 samples): fast enough to nearly track the per-sample random targets,
+// i.e. maximum noise. Tunable.
+const uint32_t kChiffFastestShift_q5_27 = 2u << 27;
+
 void Envelope::FillSharedPrngBuffer() {
   uint32_t state = shared_prng_state;
   for (size_t i = 0; i < kAudioBlockSize; ++i) {
@@ -72,6 +77,11 @@ void Envelope::Init(int16_t zero_value_s16) {
   phase_increment_u32_ = 0;
   phase_samples_left_ = 0;
   slew_shift_q5_27_ = 0;
+  chiff_shift_deficit_q5_27_ = 0;
+  chiff_deficit_decrement_q5_27_ = 0;
+  chiff_gate_u10_ = 0;
+  chiff_floor_q30_ = 0;
+  chiff_span_shifted_q30_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   std::fill(
@@ -82,8 +92,9 @@ void Envelope::Init(int16_t zero_value_s16) {
   // Address-derived mask: every Envelope instance lives at a distinct
   // address, so each gets a unique XOR mask. Low bits of the address
   // differ across instances within the same parent struct, which is all
-  // that's needed to decorrelate dither decisions.
+  // that's needed to decorrelate chiff decisions and dither ripple phase.
   prng_xor_u32_ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this));
+  dither_phase_u32_ = prng_xor_u32_;
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -95,7 +106,7 @@ void Envelope::NoteOn(
   ADSR& adsr,
   // Bounds stored as s32 but semantically s16
   int32_t min_target_s16, int32_t max_target_s16,
-  uint8_t /* chiff_amount: reserved until chiff unifies into the slew */
+  uint8_t chiff_amount
 ) {
   adsr_ = &adsr;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
@@ -119,9 +130,32 @@ void Envelope::NoteOn(
       break;
     case ENV_STAGE_RELEASE:
     case ENV_STAGE_DEAD:
-    case ENV_NUM_STAGES:
+    case ENV_NUM_STAGES: {
+      // Fresh attack: arm chiff. Trigger first, so the deficit is computed
+      // against the attack's nominal slew shift.
       Trigger(ENV_STAGE_ATTACK);
+      uint32_t full_drop_q5_27 = slew_shift_q5_27_ > kChiffFastestShift_q5_27
+        ? slew_shift_q5_27_ - kChiffFastestShift_q5_27
+        : 0;
+      // chiff_amount in [0, 127] scales the drop below stage-nominal
+      uint32_t deficit_q5_27 = (full_drop_q5_27 >> 7) * chiff_amount;
+      chiff_shift_deficit_q5_27_ = deficit_q5_27;
+      if (deficit_q5_27) {
+        // Ramp the deficit to zero over the attack's nominal duration. The
+        // floor of 1 guarantees expiry (in at most deficit samples, which
+        // is then shorter than the attack).
+        uint32_t attack_samples = adsr.attack_u32
+          ? UINT32_MAX / adsr.attack_u32
+          : 1;
+        uint32_t decrement = deficit_q5_27 / attack_samples;
+        chiff_deficit_decrement_q5_27_ = decrement ? decrement : 1;
+      }
+      chiff_gate_u10_ = static_cast<uint32_t>(chiff_amount) << 3;
+      chiff_floor_q30_ = stage_target_q30_[ENV_STAGE_DEAD];
+      chiff_span_shifted_q30_ =
+        (stage_target_q30_[ENV_STAGE_ATTACK] - chiff_floor_q30_) >> 10;
       break;
+    }
   }
 }
 
@@ -147,6 +181,11 @@ void Envelope::Trigger(EnvelopeStage stage) {
   if (value_q30_ == target_q30_) {
     // Nothing to do this stage; skip ahead
     return Trigger(static_cast<EnvelopeStage>(stage + 1));
+  }
+
+  if (!phase_increment_u32_) {
+    // Degenerate zero increment: treat as a hold (also guards the division)
+    return;
   }
 
   // Nominal stage duration in samples
@@ -180,7 +219,18 @@ void Envelope::Trigger(EnvelopeStage stage) {
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
+  RenderStageDispatch(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
+}
+
+void Envelope::RenderStageDispatch(
+  int16_t* sample_buffer, size_t block_samples_left,
+  int32_t bias_q31, int32_t bias_slope_q31
+) {
+  if (chiff_shift_deficit_q5_27_) {
+    RenderStage<true >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  } else {
+    RenderStage<false>(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  }
 }
 
 // Mix the envelope value (Q30) and the already-advanced bias (Q31) into a
@@ -200,21 +250,34 @@ void Envelope::HandOffToNextStage(
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   Trigger(static_cast<EnvelopeStage>(stage_ + 1));
-  RenderStage(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  // Re-dispatch: the chiff deficit may have expired within this block.
+  RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
 }
 
+template<bool CHIFF>
 void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   int32_t value_q30 = value_q30_;
-  const int32_t target_q30 = target_q30_;
+  const int32_t stage_target_q30 = target_q30_;
 
-  // Dithered downshift: use base_shift, or base_shift + 1 with per-sample
-  // probability dither_threshold/2^10, so the effective slew coefficient
-  // interpolates between the two power-of-two time constants.
-  const uint32_t base_shift = slew_shift_q5_27_ >> 27;
-  const uint32_t dither_threshold_u10 = (slew_shift_q5_27_ >> 17) & 0x3FF;
+  // Dithered downshift: use base_shift, or base_shift + 1 on the carry of
+  // a sigma-delta accumulation of the Q5.27 fraction (as Q32), so the
+  // effective slew coefficient interpolates between the two power-of-two
+  // time constants. With CHIFF, the shift starts below stage-nominal
+  // (deficit) and ramps up to it, so the base/fraction split must happen
+  // per sample instead.
+  const uint32_t nominal_shift_q5_27 = slew_shift_q5_27_;
+  const uint32_t base_shift = nominal_shift_q5_27 >> 27;
+  const uint32_t dither_frac_u32 = nominal_shift_q5_27 << 5;
+  uint32_t dither_phase_u32 = dither_phase_u32_;
+  uint32_t deficit_q5_27 = chiff_shift_deficit_q5_27_;
+  const uint32_t deficit_decrement_q5_27 = chiff_deficit_decrement_q5_27_;
+  const uint32_t chiff_gate_u10 = chiff_gate_u10_;
+  const int32_t chiff_floor_q30 = chiff_floor_q30_;
+  const int32_t chiff_span_shifted_q30 = chiff_span_shifted_q30_;
+
   const uint32_t prng_xor = prng_xor_u32_;
   // Buffer position doubles as the index into the shared PRNG block.
   const uint32_t* prng = &shared_prng_buffer[kAudioBlockSize - block_samples_left];
@@ -227,8 +290,32 @@ void Envelope::RenderStage(
   if (timed) phase_samples_left_ -= run_samples;
 
   while (run_samples--) {
-    uint32_t random = *prng++ ^ prng_xor;
-    uint32_t shift = base_shift + ((random >> 22) < dither_threshold_u10);
+    uint32_t shift;
+    int32_t target_q30 = stage_target_q30;
+    if (CHIFF) {
+      // PRNG budget: bits 12-21 random-target gate, 0-9 random target
+      // value (22-31 spare).
+      uint32_t random = *prng++ ^ prng_xor;
+      deficit_q5_27 = deficit_q5_27 > deficit_decrement_q5_27
+        ? deficit_q5_27 - deficit_decrement_q5_27
+        : 0;
+      // Next stage's nominal can be below a deficit armed on a longer
+      // stage; clamp instead of underflowing.
+      uint32_t shift_q5_27 = nominal_shift_q5_27 > deficit_q5_27
+        ? nominal_shift_q5_27 - deficit_q5_27
+        : 0;
+      uint32_t frac_u32 = shift_q5_27 << 5;
+      dither_phase_u32 += frac_u32;
+      shift = (shift_q5_27 >> 27) + (dither_phase_u32 < frac_u32);
+      if (deficit_q5_27 && ((random >> 12) & 0x3FF) < chiff_gate_u10) {
+        target_q30 = chiff_floor_q30
+          + chiff_span_shifted_q30 * static_cast<int32_t>(random & 0x3FF);
+      }
+    } else {
+      // Unsigned wraparound of the accumulation = the carry
+      dither_phase_u32 += dither_frac_u32;
+      shift = base_shift + (dither_phase_u32 < dither_frac_u32);
+    }
     // Never overshoots: |delta >> shift| <= |delta|. Truncation stalls an
     // upward slew once delta < 2^shift, but timed stages end by countdown
     // (below), and hold stages are content to sit near their target.
@@ -239,6 +326,8 @@ void Envelope::RenderStage(
 
   value_q30_ = value_q30;
   bias_q31_ = bias_q31;
+  dither_phase_u32_ = dither_phase_u32;
+  if (CHIFF) chiff_shift_deficit_q5_27_ = deficit_q5_27;
   if (timed && phase_samples_left_ == 0) {
     // Countdown expired: hand off to the next stage from wherever the slew
     // got to. Tail call keeps the transition flat (no extra frame).
@@ -313,6 +402,8 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   bias_q31_ = ScaleRatio(bias_q31_, num, den);
   value_q30_ = ScaleRatio(value_q30_, num, den);
   target_q30_ = ScaleRatio(target_q30_, num, den);
+  chiff_floor_q30_ = ScaleRatio(chiff_floor_q30_, num, den);
+  chiff_span_shifted_q30_ = ScaleRatio(chiff_span_shifted_q30_, num, den);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
     stage_target_q30_[i] = ScaleRatio(stage_target_q30_[i], num, den);
   }
