@@ -83,6 +83,8 @@ void Envelope::Init(int16_t zero_value_s16) {
   slew_shift_increment_q5_27_ = 0;
   chiff_duration_samples_left_ = 0;
   prob_that_chiff_is_target_u16_ = 0;
+  prob_that_chiff_is_target_q16_16_ = 0;
+  chiff_probability_block_decrement_q16_16_ = 0;
   note_floor_q30_ = 0;
   note_span_q14_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
@@ -157,6 +159,16 @@ void Envelope::NoteOn(
       ReSlopeSlewShift();
       prob_that_chiff_is_target_u16_ =
         static_cast<uint32_t>(chiff_amount) << (16 - kChiffAmountBits);
+      // Fade the probability to zero over the chiff duration, in
+      // block-rate steps (a zero decrement -- absurdly long window --
+      // just leaves the fade to the window's end)
+      prob_that_chiff_is_target_q16_16_ =
+        prob_that_chiff_is_target_u16_ << 16;
+      uint32_t window_blocks =
+        chiff_duration_samples_left_ >> kAudioBlockSizeBits;
+      chiff_probability_block_decrement_q16_16_ = window_blocks
+        ? prob_that_chiff_is_target_q16_16_ / window_blocks
+        : prob_that_chiff_is_target_q16_16_;
       note_floor_q30_ = stage_target_q30_[ENV_STAGE_DEAD];
       note_span_q14_ =
         (stage_target_q30_[ENV_STAGE_ATTACK] - note_floor_q30_) >> 16;
@@ -243,6 +255,16 @@ void Envelope::Trigger(EnvelopeStage stage) {
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
+  // Block-rate fade of the chiff probability (see envelope.h)
+  if (chiff_duration_samples_left_) {
+    prob_that_chiff_is_target_q16_16_ =
+      prob_that_chiff_is_target_q16_16_
+          > chiff_probability_block_decrement_q16_16_
+        ? prob_that_chiff_is_target_q16_16_
+            - chiff_probability_block_decrement_q16_16_
+        : 0;
+    prob_that_chiff_is_target_u16_ = prob_that_chiff_is_target_q16_16_ >> 16;
+  }
   RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
 }
 

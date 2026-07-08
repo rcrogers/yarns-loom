@@ -169,7 +169,8 @@ def trunc_div(a, b):
 
 
 def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000,
-                 mode='reslope'):
+                 mode='reslope', peak_cap_u16=None, prob_fades=True,
+                 target_mode='uniform'):
     """Integer replica of the unified RenderStage over the scenario.
 
     mode='reslope': firmware semantics -- absolute ramping shift, explicit
@@ -177,14 +178,21 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000,
     new nominal at each stage trigger.
     mode='deficit': the superseded design (shift = nominal - decaying
     deficit), kept to demonstrate the intensity step at early release.
+
+    peak_cap_u16: cap on P(peak-bound); a value resting at the peak keeps
+    taking floor-dives at rate (65536 - cap)/65536, so the crackle
+    persists (fading with the shift ramp) instead of self-extinguishing.
+    prob_fades: fade the chiff-sample probability linearly over the
+    window, like the pre-rewrite chiff did.
     """
     plan = scenario.stage_plan()
     trace = np.empty(scenario.total_n, dtype=np.float64)
 
     peak = plan[0][1]
     floor = 0
-    span_q14 = (peak - floor) >> 16
-    gate = chiff_amount << 9  # 16-bit gate
+    span_inverse = ((1 << 32) - 1) // ((peak - floor) >> 14)
+    span_q14 = (peak - floor) >> 16  # target_mode='uniform' only
+    gate = chiff_amount << 9  # 16-bit chiff probability
 
     stage_index = 0
     name, target, countdown = plan[0]
@@ -235,6 +243,9 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000,
 
         random = int(prng[i]) ^ prng_xor
         chiff_active = chiff_left > 0
+        gate_now = gate
+        if prob_fades and chiff_active:
+            gate_now = gate * chiff_left // attack_samples
         if mode == 'reslope':
             if chiff_active:
                 ramp += ramp_increment
@@ -256,13 +267,94 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000,
         dither_phase = (dither_phase + frac) & 0xFFFFFFFF
         shift = (shift_q >> 27) + (1 if dither_phase < frac else 0)
         sample_target = target
-        if chiff_active and (random >> 16) < gate:
-            sample_target = floor + span_q14 * (random & 0xFFFF)
+        if chiff_active and (random >> 16) < gate_now:
+            if target_mode == 'balanced':
+                # Floor or peak, coin weighted by the value's position in
+                # the note range (pull averages to zero)
+                position_u16 = ((((value - floor) >> 14) * span_inverse)
+                                >> 16) & 0xFFFF
+                if peak_cap_u16 is not None and position_u16 > peak_cap_u16:
+                    position_u16 = peak_cap_u16
+                sample_target = peak if (random & 0xFFFF) < position_u16 \
+                    else floor
+            else:  # uniform over the note range (original design)
+                sample_target = floor + span_q14 * (random & 0xFFFF)
         value += asr(sample_target - value, shift)
         if countdown is not None:
             samples_left -= 1
         trace[i] = value
     return trace
+
+
+def peak_cap_experiment():
+    """Does the P(peak) cap sustain the crackle across the chiff window,
+    with amplitude fading via the shift ramp, without bending durations?
+    Prints crackle amplitude per 10ms bin, the ceiling level, and the
+    release time (must match chiff-free)."""
+    sc = Scenario('cap', 0.100, 0.200, 0.100, 0.6, gate_s=0.4, total_s=0.7)
+    peak = float((1 << 30) - (1 << 15))
+    threshold = peak * 0.01
+    prng = xorshift32_stream(sc.total_n)
+
+    def release_ms(trace):
+        below = np.nonzero(np.asarray(trace)[sc.gate_n:] < threshold)[0]
+        return below[0] / FS * 1000 if len(below) else float('inf')
+
+    base_release = release_ms(render(sc, 'sd', prng))
+    print('== peak-cap experiment: A 100ms (= chiff window), chiff 96 ==')
+    print('   chiff-free release-to-1%%: %.1f ms' % base_release)
+    print('   crackle = mean |step| per 10ms bin, %% of peak x100')
+    variants = [
+        ('no cap             ', dict()),
+        ('cap 97%            ', dict(peak_cap_u16=63700)),
+        ('cap 94%            ', dict(peak_cap_u16=61600)),
+        ('cap 88%            ', dict(peak_cap_u16=57700)),
+        ('cap 94% + prob fade', dict(peak_cap_u16=61600, prob_fades=True)),
+    ]
+    for label, kw in variants:
+        tr = np.asarray(render_chiff(sc, 96, prng, **kw))
+        step = np.abs(np.diff(tr)) / peak * 10000
+        bins = [step[int(a * FS / 1000):int((a + 10) * FS / 1000)].mean()
+                for a in range(0, 100, 10)]
+        ceiling = tr[int(0.05 * FS):int(0.10 * FS)].mean() / peak * 100
+        print('   %s: %s | ceil %5.1f%% | rel %6.1f ms'
+              % (label, ' '.join('%4.0f' % b for b in bins),
+                 ceiling, release_ms(tr)))
+
+
+def trajectory_statistics(seeds=20):
+    """Trajectory spread of balanced chiff across random seeds:
+    per-checkpoint mean/sd/percentiles vs the chiff-free envelope, as % of
+    peak, plus the spread of time-to-90%-peak."""
+    sc = Scenario('traj', 0.100, 0.300, 0.200, 0.6, gate_s=0.5, total_s=0.8)
+    peak = float((1 << 30) - (1 << 15))
+    check_ms = [25, 50, 75, 100, 200, 400, 550, 600]
+
+    base = render(sc, 'sd', xorshift32_stream(sc.total_n)) / peak * 100
+    for amount in (64, 96, 127):
+        runs = []
+        t90 = []
+        for s in range(seeds):
+            prng = xorshift32_stream(sc.total_n, seed=0x1234 + 977 * s)
+            trace = np.asarray(
+                render_chiff(sc, amount, prng, prng_xor=0x2000 + 613 * s)
+            ) / peak * 100
+            runs.append(trace)
+            above = np.nonzero(trace > 90.0)[0]
+            t90.append(above[0] / FS * 1000 if len(above) else float('inf'))
+        runs = np.array(runs)
+        print('== trajectory spread, chiff %d (n=%d seeds), %% of peak =='
+              % (amount, seeds))
+        print('  time-to-90%%-peak ms: min %.1f  med %.1f  max %.1f'
+              '  (chiff-free attack: 100ms nominal)'
+              % (min(t90), sorted(t90)[seeds // 2], max(t90)))
+        print('  t_ms | base | mean |  sd  | p10-p90')
+        for ms in check_ms:
+            i = int(ms * FS / 1000)
+            col = runs[:, i]
+            print('  %4d | %5.1f | %5.1f | %4.1f | %5.1f-%5.1f'
+                  % (ms, base[i], col.mean(), col.std(),
+                     np.percentile(col, 10), np.percentile(col, 90)))
 
 
 def release_figure():
@@ -469,6 +561,8 @@ def main():
 
     chiff_figure(scenarios)
     release_figure()
+    trajectory_statistics()
+    peak_cap_experiment()
 
 
 if __name__ == '__main__':
