@@ -52,9 +52,8 @@ class Envelope {
   ~Envelope() { }
 
   void Init(int16_t zero_value_s16);
-  // Refill the system-wide PRNG buffer consumed by the slew-shift dither;
-  // must be called once per audio block (before any envelope renders) so
-  // all envelopes share the same random words this block.
+  // Refill the system-wide PRNG buffer consumed by the chiff draws; must
+  // be called once per audio block, before any envelope renders.
   static void FillSharedPrngBuffer();
   void NoteOff();
   void NoteOn(
@@ -82,10 +81,10 @@ class Envelope {
   void Rescale(int32_t numerator, int32_t denominator);
 
  private:
-  // Point the chiff ramp's increment at the current stage-nominal shift,
-  // spread over the remaining chiff window; with no window left, the ramp
-  // simply is the nominal.
-  void ReSlopeChiffRamp();
+  // Point the slew shift's increment at the current stage-nominal shift,
+  // spread over the remaining chiff duration; with no duration left, the
+  // shift simply is the nominal.
+  void ReSlopeSlewShift();
 
  public:
 
@@ -125,13 +124,13 @@ class Envelope {
   // Timed stages: samples remaining before handing off to the next stage.
   // The slew ends wherever it is at that point -- no snap to target; the
   // next stage's slew continues seamlessly from the current value.
-  uint32_t phase_samples_left_;
+  uint32_t stage_samples_left_;
 
   // Per-sample slew: value += (target - value) >> shift. The shift is a
   // Q5.27 fixed-point value; the integer part is the base downshift, and
   // the fraction dithers to the next integer shift via the sigma-delta
   // accumulator below, interpolating time constants between powers of two.
-  uint32_t slew_shift_q5_27_;
+  uint32_t stage_nominal_slew_shift_q5_27_;
 
   // Sigma-delta state for the fractional shift: the fraction (as Q32) is
   // accumulated per sample, and the carry selects shift + 1. Deterministic
@@ -140,7 +139,7 @@ class Envelope {
   // white noise + random walk. Free-running across stages; seeded from the
   // instance address in Init() so co-triggered envelopes' ripple patterns
   // are phase-offset rather than correlated.
-  uint32_t dither_phase_u32_;
+  uint32_t slew_shift_error_accumulator_q0_32_;
 
   // Per-instance start offset into the double-length shared PRNG buffer.
   // Distinct offsets mean co-triggered envelopes never consume the same
@@ -148,24 +147,27 @@ class Envelope {
   // without per-sample work. Assigned round-robin in Init().
   uint32_t prng_offset_u32_;
 
-  // Chiff: while the timer runs, the slew shift follows a ramp that starts
-  // below stage-nominal (i.e. faster) and each sample has a gate
-  // probability of slewing toward a random target instead of the stage
-  // target. Chiff intensity fades via the shift itself: as the ramp rises,
-  // random targets are tracked ever more sluggishly. The timer is armed to
-  // the attack's nominal duration at NoteOn and keeps its original
-  // timetable through stage transitions; each Trigger re-slopes the
-  // increment toward the new stage's nominal over the remaining window
-  // (signed: the ramp may sit above or below the new nominal). This keeps
-  // the shift -- and thus the chiff perturbation amplitude, 2^-shift --
-  // free of discontinuities at early release, while still landing on the
-  // release's correct slew when the window closes.
-  int32_t chiff_shift_ramp_q5_27_;      // == nominal when timer is 0
-  int32_t chiff_ramp_increment_q5_27_;  // Signed per-sample step
-  uint32_t chiff_samples_left_;         // 0 = chiff inactive
-  uint32_t chiff_gate_u16_;             // P(random target), 16-bit
-  int32_t chiff_floor_q30_;             // Random target range: floor...
-  int32_t chiff_span_q14_;              // ...+ (span >> 16) * rand16
+  // Chiff: while the chiff duration runs, the slew shift starts below
+  // stage-nominal (i.e. faster) and each sample has a probability of
+  // slewing toward a random target instead of the stage target. Chiff
+  // intensity fades via the shift itself: as the shift rises toward
+  // nominal, random targets are tracked ever more sluggishly. The duration
+  // is armed to the attack's nominal length at NoteOn and keeps its
+  // original timetable through stage transitions; each Trigger re-slopes
+  // the increment toward the new stage's nominal over the remaining
+  // duration (signed: the shift may sit above or below the new nominal).
+  // This keeps the shift -- and thus the chiff perturbation amplitude,
+  // 2^-shift -- free of discontinuities at early release, while still
+  // landing on the release's correct slew when the duration ends.
+  int32_t slew_shift_q5_27_;            // == nominal when chiff is over
+  int32_t slew_shift_increment_q5_27_;  // Signed per-sample step
+  uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
+  uint32_t prob_that_chiff_is_target_u16_;
+  // Random target = note_floor + (note_span >> 16) * draw16. Note-scoped:
+  // captured at NoteOn from the DEAD (floor) and ATTACK (peak) stage
+  // targets, regardless of the current stage.
+  int32_t note_floor_q30_;
+  int32_t note_span_q14_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
