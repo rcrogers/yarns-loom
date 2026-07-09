@@ -1,0 +1,475 @@
+<title>Chiff Envelope Simulator</title>
+<style>
+:root {
+  --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
+  --ink: #1b1d1f; --ink2: #5c5f63; --ink3: #92959a;
+  --trace: #2a78d6; --dialed: #eda100; --noise: #1baf7a; --mark: #e34948;
+  --chip: #f0efe9; --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a; --panel: #1d2126; --line: #2b3037; --grid: #232830;
+    --ink: #e8eaec; --ink2: #a2a7ad; --ink3: #6b7077;
+    --trace: #3987e5; --dialed: #c98500; --noise: #199e70; --mark: #e66767;
+    --chip: #242932; --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171a; --panel: #1d2126; --line: #2b3037; --grid: #232830;
+  --ink: #e8eaec; --ink2: #a2a7ad; --ink3: #6b7077;
+  --trace: #3987e5; --dialed: #c98500; --noise: #199e70; --mark: #e66767;
+  --chip: #242932; --accent: #3987e5;
+}
+:root[data-theme="light"] {
+  --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
+  --ink: #1b1d1f; --ink2: #5c5f63; --ink3: #92959a;
+  --trace: #2a78d6; --dialed: #eda100; --noise: #1baf7a; --mark: #e34948;
+  --chip: #f0efe9; --accent: #2a78d6;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-variant-numeric: tabular-nums; }
+.wrap { display: flex; gap: 14px; padding: 14px; min-height: 100vh; }
+.rail { width: 252px; flex: none; display: flex; flex-direction: column; gap: 10px; }
+.stage { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+header { padding: 2px 2px 0; }
+header h1 { font-size: 15px; margin: 0; letter-spacing: .01em; }
+header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
+.group { background: var(--panel); border: 1px solid var(--line);
+         border-radius: 6px; padding: 10px 12px 12px; }
+.group h2 { font-size: 10.5px; margin: 0 0 8px; color: var(--ink3);
+            text-transform: uppercase; letter-spacing: .12em; font-weight: 600; }
+.knob { display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+        gap: 2px 8px; margin-bottom: 7px; }
+.knob:last-child { margin-bottom: 0; }
+.knob label { font-size: 12px; color: var(--ink2); }
+.knob output { font-size: 12px; color: var(--ink); }
+.knob input[type=range] { grid-column: 1 / -1; width: 100%; margin: 0;
+  accent-color: var(--accent); height: 18px; }
+.knob input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: flex; gap: 4px; grid-column: 1 / -1; }
+.seg button { flex: 1; font: 11px system-ui; padding: 4px 0; cursor: pointer;
+  border: 1px solid var(--line); background: var(--chip); color: var(--ink2);
+  border-radius: 4px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff;
+  border-color: var(--accent); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.checks label { display: flex; gap: 7px; align-items: center; font-size: 12px;
+  color: var(--ink2); margin-bottom: 5px; cursor: pointer; }
+.checks label:last-child { margin-bottom: 0; }
+.checks input { accent-color: var(--accent); margin: 0; }
+.scope { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 340px; }
+canvas { width: 100%; height: 100%; flex: 1; display: block; cursor: crosshair; }
+.legend { display: flex; gap: 16px; padding: 2px 4px 8px; font-size: 11.5px;
+  color: var(--ink2); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chipbox { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 12px; min-width: 118px; }
+.chipbox .k { font-size: 10px; color: var(--ink3); text-transform: uppercase;
+  letter-spacing: .1em; }
+.chipbox .v { font-size: 15px; margin-top: 1px; }
+.chipbox .v small { font-size: 11px; color: var(--ink2); }
+button.roll { width: 100%; padding: 6px 0; font: 12px system-ui; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--chip);
+  color: var(--ink); }
+button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { font-size: 11px; color: var(--ink3); margin-top: 6px; line-height: 1.4; }
+@media (max-width: 760px) { .wrap { flex-direction: column; } .rail { width: 100%; } }
+</style>
+
+<div class="wrap">
+  <div class="rail">
+    <header>
+      <h1>Chiff Envelope Simulator</h1>
+      <p>Exact integer port of yarns/envelope.cc (duty-binary chiff)</p>
+    </header>
+
+    <div class="group"><h2>ADSR</h2>
+      <div class="knob"><label for="atk">Attack</label><output class="mono" id="atkV"></output>
+        <input type="range" id="atk" min="0" max="1000" value="620"></div>
+      <div class="knob"><label for="dec">Decay</label><output class="mono" id="decV"></output>
+        <input type="range" id="dec" min="0" max="1000" value="560"></div>
+      <div class="knob"><label for="sus">Sustain</label><output class="mono" id="susV"></output>
+        <input type="range" id="sus" min="0" max="100" value="60"></div>
+      <div class="knob"><label for="rel">Release</label><output class="mono" id="relV"></output>
+        <input type="range" id="rel" min="0" max="1000" value="500"></div>
+    </div>
+
+    <div class="group"><h2>Note</h2>
+      <div class="knob"><label for="gate">Release at</label><output class="mono" id="gateV"></output>
+        <input type="range" id="gate" min="0" max="1000" value="700"></div>
+    </div>
+
+    <div class="group"><h2>Chiff</h2>
+      <div class="knob"><label for="amt">Amount</label><output class="mono" id="amtV"></output>
+        <input type="range" id="amt" min="0" max="127" value="96"></div>
+    </div>
+
+    <div class="group"><h2>Duty</h2>
+      <div class="knob"><label>Curve</label><span></span>
+        <div class="seg" role="group" aria-label="Duty curve">
+          <button id="curveLin" aria-pressed="false">Linear</button>
+          <button id="curveExp" aria-pressed="true">Expo</button>
+        </div></div>
+      <div class="knob"><label for="kTc">k (time constants / stage)</label>
+        <output class="mono" id="kTcV"></output>
+        <input type="range" id="kTc" min="10" max="80" value="40"></div>
+      <div class="knob"><label for="seedD">Duty seed</label><output class="mono" id="seedDV"></output>
+        <input type="range" id="seedD" min="0" max="20" value="0"></div>
+      <div class="note">k = 4 matches the stage slew constant (4&tau;/stage): the
+        duty then reproduces the dialed curve. Expo only.</div>
+    </div>
+
+    <div class="group"><h2>Randomness</h2>
+      <button class="roll" id="reroll">Re-roll seed</button>
+      <div class="note mono" id="seedShow"></div>
+    </div>
+
+    <div class="group checks"><h2>Overlays</h2>
+      <label><input type="checkbox" id="showDialed" checked> Dialed (chiff-free) envelope</label>
+      <label><input type="checkbox" id="showNoise" checked> Noise band (|step|, smoothed)</label>
+      <label><input type="checkbox" id="showLine" > Duty line (mixture mean)</label>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="scope">
+      <div class="legend">
+        <span><i style="background:var(--trace)"></i>chiff envelope</span>
+        <span><i style="background:var(--dialed)"></i>dialed</span>
+        <span><i style="background:var(--noise)"></i>noise</span>
+        <span><i style="background:var(--mark)"></i>release</span>
+        <span class="mono" id="readout" style="margin-left:auto;color:var(--ink2)"></span>
+      </div>
+      <canvas id="cv"></canvas>
+    </div>
+    <div class="chips">
+      <div class="chipbox"><div class="k">Attack landing</div>
+        <div class="v mono" id="mLand">–</div></div>
+      <div class="chipbox"><div class="k">Release to 1%</div>
+        <div class="v mono" id="mRel">–</div></div>
+      <div class="chipbox"><div class="k">Chiff window</div>
+        <div class="v mono" id="mWin">–</div></div>
+      <div class="chipbox"><div class="k">Attack shift (nominal)</div>
+        <div class="v mono" id="mShift">–</div></div>
+      <div class="chipbox"><div class="k">Render</div>
+        <div class="v mono" id="mMs">–</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const FS = 45000, U32 = 4294967296, PEAK = (1<<30) - (1<<15);
+const $ = id => document.getElementById(id);
+
+// ---- log slider mapping: 1ms .. 8000ms ----
+const msFromSlider = v => Math.round(Math.exp(Math.log(1) + (v/1000) * Math.log(8000)));
+const fmtMs = ms => ms >= 1000 ? (ms/1000).toFixed(2).replace(/0$/,'') + ' s' : ms + ' ms';
+
+// ---- firmware math ports ----
+function slewShiftQ527(increment) {           // Envelope::Trigger derivation
+  const K_TC = 2 * (1<<27);                    // 4 time constants per stage
+  const K_MAX = 27 * (1<<27);
+  const z = Math.clz32(increment);
+  if (z >= 30) return K_MAX;
+  const mantissa = ((increment * Math.pow(2, z)) % U32) % 2147483648;
+  const log2n = (z + 1) * (1<<27) - Math.floor(mantissa / 16);
+  if (log2n <= K_TC) return 0;
+  return Math.min(log2n - K_TC, K_MAX);
+}
+function makePrng(seed) {
+  let s = seed >>> 0 || 0xCAFEBABE;
+  return () => { s ^= (s << 13); s >>>= 0; s ^= (s >>> 17); s ^= (s << 5); s >>>= 0; return s; };
+}
+const asr = (x, s) => x >> s;                  // int32 arithmetic shift
+
+// ---- the simulator ----
+function render(p) {
+  const aN = Math.max(1, Math.round(p.attack * FS / 1000));
+  const dN = Math.max(1, Math.round(p.decay * FS / 1000));
+  const rN = Math.max(1, Math.round(p.release * FS / 1000));
+  const gateN = Math.max(1, Math.round(p.gate * FS / 1000));
+  const sus = Math.round(PEAK * p.sustain);
+  const plan = [ [PEAK, aN], [sus, dN], [sus, null], [0, rN], [0, null] ];
+  const totalN = gateN + rN * 4 + Math.round(0.1 * FS);
+  const out = new Float64Array(totalN);
+  const rand = makePrng(p.seed);
+
+  let si = 0, target = plan[0][0], countdown = plan[0][1];
+  let increment = Math.floor((U32 - 1) / countdown);
+  let samplesLeft = Math.floor((U32 - 1) / increment);
+  let nominal = slewShiftQ527(increment);
+  const drop = (nominal >> 7) * p.amount;
+  let chiffLeft = drop ? samplesLeft : 0;
+  const windowN = chiffLeft;
+  let ramp = nominal - drop;
+  let rampInc = chiffLeft ? Math.trunc((nominal - ramp) / chiffLeft) : 0;
+  let err = 0x20001000;                        // sigma-delta accumulator seed
+  let value = 0, S = 0, stageTotal = samplesLeft;
+  let gateOff = false;
+
+  const armStage = () => {
+    S = value;
+    increment = Math.floor((U32 - 1) / countdown);
+    samplesLeft = Math.floor((U32 - 1) / increment);
+    nominal = slewShiftQ527(increment);
+    if (chiffLeft) rampInc = Math.trunc((nominal - ramp) / chiffLeft);
+    else { ramp = nominal; rampInc = 0; }
+    stageTotal = samplesLeft;
+  };
+
+  const nominalAttackShift = nominal / (1<<27);
+
+  for (let i = 0; i < totalN; i++) {
+    if (!gateOff && i >= gateN) {
+      gateOff = true; si = 3; target = plan[3][0]; countdown = plan[3][1]; armStage();
+    }
+    while (countdown !== null && samplesLeft === 0) {
+      si += 1; target = plan[si][0]; countdown = plan[si][1];
+      if (countdown !== null) armStage();
+      else { S = value; stageTotal = null; if (!chiffLeft) { ramp = nominal; rampInc = 0; } }
+    }
+
+    const r = rand();
+    const chiffActive = chiffLeft > 0;
+    let shiftQ;
+    if (chiffActive) {
+      ramp += rampInc; chiffLeft -= 1; shiftQ = ramp;
+      if (chiffLeft === 0) ramp = nominal;
+    } else shiftQ = ramp;
+
+    const frac = (shiftQ * 32) % U32;
+    err = (err + frac) % U32;
+    const shift = Math.floor(shiftQ / (1<<27)) + (err < frac ? 1 : 0);
+
+    // duty; the S-mixing depth crossfades against the slew lag with the
+    // exact law beta = 1 - tau_chiff/tau_nominal = 1 - 2^(-shift drop),
+    // computed from the CURRENT ramp so the mixing also fades out as the
+    // chiff window closes. Amount 0 (drop 0) is exactly classic.
+    let duty = 65536;
+    if (chiffActive && stageTotal) {
+      const phi = (stageTotal - samplesLeft) / stageTotal;
+      const base = p.curve === 'expo' ? 1 - Math.exp(-p.k * phi) : phi;
+      duty = Math.min(65536, p.dutySeed + Math.floor(65536 * base));
+      const beta = 1 - Math.pow(2, (shiftQ - nominal) / (1 << 27));
+      duty = 65536 - Math.floor((65536 - duty) * beta);
+    }
+    let sampleTarget = target;
+    if ((r & 0xFFFF) >= duty) sampleTarget = S;
+
+    value += asr((sampleTarget - value) | 0, shift);
+    if (countdown !== null) samplesLeft -= 1;
+    out[i] = value;
+  }
+  return { out, gateN, totalN, windowN, aN, nominalAttackShift,
+           plan, sus, rN, dN };
+}
+
+function dialed(p, totalN, gateN) {           // chiff-free reference (amount 0)
+  return render(Object.assign({}, p, { amount: 0 })).out.slice(0, totalN);
+}
+
+function dutyLine(p, res) {                    // mixture-mean line for overlay
+  const { gateN, totalN, aN, dN, rN, sus, windowN, nominalAttackShift } = res;
+  const line = new Float64Array(totalN);
+  const dropShift = nominalAttackShift * p.amount / 128;
+  let S = 0, t0 = 0, target = PEAK, dur = aN, si = 0, cur = 0;
+  let gateOff = false;
+  for (let i = 0; i < totalN; i++) {
+    if (!gateOff && i >= gateN) { gateOff = true; S = cur; target = 0; dur = rN; t0 = i; si = 3; }
+    else if (si === 0 && i - t0 >= dur) { S = cur; target = sus; dur = dN; t0 = i; si = 1; }
+    else if (si === 1 && i - t0 >= dur) { si = 2; S = cur; target = sus; }
+    else if (si === 3 && i - t0 >= dur) { si = 4; S = cur; target = 0; }
+    let phi = (si === 2 || si === 4) ? 1 : Math.min(1, (i - t0) / dur);
+    const base = p.curve === 'expo' ? 1 - Math.exp(-p.k * phi) : phi;
+    let d = Math.min(1, p.dutySeed / 65536 + base);
+    // ramp assumed linear across the window for the overlay
+    const rampDrop = windowN ? dropShift * Math.max(0, 1 - i / windowN) : 0;
+    const beta = 1 - Math.pow(2, -rampDrop);
+    d = 1 - (1 - d) * beta;
+    cur = S + (target - S) * d;
+    line[i] = cur;
+  }
+  return line;
+}
+
+// ---- measurements ----
+function measure(res, dialedTrace) {
+  const { out, gateN, aN, windowN } = res;
+  const land = out[Math.min(aN - 1, out.length - 1)] / PEAK * 100;
+  const thr = PEAK * 0.01;
+  let rel = null;
+  for (let i = gateN; i < out.length; i++) if (out[i] < thr) { rel = (i - gateN) / FS * 1000; break; }
+  let relBase = null;
+  for (let i = gateN; i < dialedTrace.length; i++) if (dialedTrace[i] < thr) { relBase = (i - gateN) / FS * 1000; break; }
+  return { land, rel, relBase, winMs: windowN / FS * 1000 };
+}
+
+// ---- drawing ----
+const cv = $('cv'), ctx = cv.getContext('2d');
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+let lastRes = null, lastDialed = null, lastLine = null, lastP = null;
+
+function draw() {
+  const p = params();
+  const t0 = performance.now();
+  const res = render(p);
+  const dia = dialed(p, res.totalN, res.gateN);
+  const line = dutyLine(p, res);
+  const dt = performance.now() - t0;
+  lastRes = res; lastDialed = dia; lastLine = line; lastP = p;
+
+  const m = measure(res, dia);
+  $('mLand').textContent = m.land.toFixed(1) + ' %';
+  $('mRel').innerHTML = (m.rel === null ? '&gt;window' : m.rel.toFixed(0) + ' ms')
+    + ' <small>(dialed ' + (m.relBase === null ? '?' : m.relBase.toFixed(0)) + ')</small>';
+  $('mWin').textContent = fmtMs(Math.round(m.winMs));
+  $('mShift').textContent = res.nominalAttackShift.toFixed(2);
+  $('mMs').textContent = dt.toFixed(0) + ' ms';
+
+  paint(null);
+}
+
+function paint(hoverX) {
+  if (!lastRes) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const { out, gateN, totalN } = lastRes;
+  const padL = 34, padB = 18, padT = 6, padR = 6;
+  const pw = W - padL - padR, ph = H - padT - padB;
+  const X = i => padL + i / (totalN - 1) * pw;
+  const Y = v => padT + (1 - v / PEAK) * ph;
+
+  // grid
+  ctx.strokeStyle = cssVar('--grid'); ctx.lineWidth = 1;
+  ctx.fillStyle = cssVar('--ink3');
+  ctx.font = '10px ui-monospace, Menlo, monospace';
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + ph * g / 4;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    ctx.fillText((100 - g * 25) + '%', 4, y + 3);
+  }
+  const totalMs = totalN / FS * 1000;
+  const step = totalMs > 4000 ? 1000 : totalMs > 1600 ? 500 : totalMs > 700 ? 200 : totalMs > 250 ? 100 : 50;
+  for (let t = 0; t <= totalMs; t += step) {
+    const x = padL + t / totalMs * pw;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
+    ctx.fillText(t >= 1000 ? (t/1000) + 's' : t + '', x + 2, H - 6);
+  }
+
+  // release marker
+  ctx.strokeStyle = cssVar('--mark'); ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(X(gateN), padT); ctx.lineTo(X(gateN), H - padB); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const plot = (arr, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    const stride = Math.max(1, Math.floor(totalN / (pw * 2)));
+    for (let px = 0; px <= pw; px++) {           // min/max decimation per pixel
+      const i0 = Math.floor(px / pw * (totalN - 1));
+      const i1 = Math.min(totalN - 1, Math.floor((px + 1) / pw * (totalN - 1)));
+      let lo = arr[i0], hi = arr[i0];
+      for (let i = i0; i <= i1; i += stride) { const v = arr[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+      if (px === 0) ctx.moveTo(padL + px, Y(lo));
+      ctx.lineTo(padL + px, Y(hi)); ctx.lineTo(padL + px, Y(lo));
+    }
+    ctx.stroke();
+  };
+
+  if ($('showDialed').checked) plot(lastDialed, cssVar('--dialed'), 1.4);
+  if ($('showLine').checked) plot(lastLine, cssVar('--ink3'), 1);
+  plot(out, cssVar('--trace'), 1.2);
+
+  // noise band along the bottom: smoothed |step|, scaled to 25% of height
+  if ($('showNoise').checked) {
+    ctx.fillStyle = cssVar('--noise'); ctx.globalAlpha = 0.55;
+    const win = Math.max(1, Math.floor(FS * 0.002));
+    let acc = 0; const q = [];
+    ctx.beginPath(); ctx.moveTo(padL, H - padB);
+    for (let px = 0; px <= pw; px++) {
+      const i = Math.max(1, Math.floor(px / pw * (totalN - 1)));
+      let s = 0, n = 0;
+      for (let j = Math.max(1, i - win); j <= i; j += Math.max(1, Math.floor(win / 16))) {
+        s += Math.abs(out[j] - out[j - 1]); n++;
+      }
+      const noise = (s / n) / PEAK;              // per-sample step, fraction of peak
+      const y = H - padB - Math.min(1, noise * 8) * ph * 0.25;
+      ctx.lineTo(padL + px, y);
+    }
+    ctx.lineTo(W - padR, H - padB); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // hover crosshair
+  if (hoverX !== null && hoverX >= padL && hoverX <= W - padR) {
+    const i = Math.round((hoverX - padL) / pw * (totalN - 1));
+    ctx.strokeStyle = cssVar('--ink3'); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hoverX, padT); ctx.lineTo(hoverX, H - padB); ctx.stroke();
+    const tMs = i / FS * 1000;
+    $('readout').textContent = tMs.toFixed(1) + ' ms · chiff ' +
+      (out[i] / PEAK * 100).toFixed(1) + '% · dialed ' +
+      (lastDialed[i] / PEAK * 100).toFixed(1) + '%';
+  } else $('readout').textContent = '';
+}
+
+// ---- controls ----
+let seed = 0xCAFEBABE;
+function params() {
+  return {
+    attack: msFromSlider(+$('atk').value),
+    decay: msFromSlider(+$('dec').value),
+    sustain: +$('sus').value / 100,
+    release: msFromSlider(+$('rel').value),
+    gate: msFromSlider(+$('gate').value),
+    amount: +$('amt').value,
+    curve: $('curveExp').getAttribute('aria-pressed') === 'true' ? 'expo' : 'linear',
+    k: +$('kTc').value / 10,
+    dutySeed: Math.round(+$('seedD').value / 100 * 65536),
+    seed: seed,
+  };
+}
+function labels() {
+  $('atkV').textContent = fmtMs(msFromSlider(+$('atk').value));
+  $('decV').textContent = fmtMs(msFromSlider(+$('dec').value));
+  $('susV').textContent = $('sus').value + ' %';
+  $('relV').textContent = fmtMs(msFromSlider(+$('rel').value));
+  $('gateV').textContent = fmtMs(msFromSlider(+$('gate').value));
+  $('amtV').textContent = $('amt').value + ' / 127';
+  $('kTcV').textContent = (+$('kTc').value / 10).toFixed(1);
+  $('seedDV').textContent = $('seedD').value + ' %';
+  $('seedShow').textContent = 'seed 0x' + (seed >>> 0).toString(16);
+}
+let raf = null;
+function update() { labels(); if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); }
+['atk','dec','sus','rel','gate','amt','kTc','seedD'].forEach(id =>
+  $(id).addEventListener('input', update));
+['showDialed','showNoise','showLine'].forEach(id =>
+  $(id).addEventListener('change', () => paint(null)));
+$('curveLin').addEventListener('click', () => { setCurve('linear'); });
+$('curveExp').addEventListener('click', () => { setCurve('expo'); });
+function setCurve(c) {
+  $('curveLin').setAttribute('aria-pressed', c === 'linear');
+  $('curveExp').setAttribute('aria-pressed', c === 'expo');
+  update();
+}
+$('reroll').addEventListener('click', () => {
+  seed = (Math.random() * 0xFFFFFFFF) >>> 0; update();
+});
+cv.addEventListener('mousemove', e => {
+  const r = cv.getBoundingClientRect(); paint((e.clientX - r.left));
+});
+cv.addEventListener('mouseleave', () => paint(null));
+window.addEventListener('resize', () => paint(null));
+update();
+</script>
