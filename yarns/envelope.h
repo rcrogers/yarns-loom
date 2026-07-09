@@ -162,22 +162,21 @@ class Envelope {
   int32_t slew_shift_q5_27_;            // == nominal when chiff is over
   int32_t slew_shift_increment_q5_27_;  // Signed per-sample step
   uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
-  uint32_t prob_that_chiff_is_target_u16_;
-  // The probability fades linearly to zero over the chiff duration. This
-  // is what un-sticks early releases: the random targets average out to
-  // mid-range, and while they fire they pull the envelope there; fading
-  // the probability makes that pull drain away with the window, so a
-  // released note always sinks -- its extension over the dialed release
-  // is bounded by the remaining window, and vanishes as the window does.
-  // Faded at block rate in RenderSamples (Q16.16 state feeding the u16
-  // threshold above): zero cost in the sample loop.
-  uint32_t prob_that_chiff_is_target_q16_16_;
-  uint32_t chiff_probability_block_decrement_q16_16_;
-  // Random target = note_floor + (note_span >> 16) * draw16. Note-scoped:
-  // captured at NoteOn from the DEAD (floor) and ATTACK (peak) stage
-  // targets, regardless of the current stage.
-  int32_t note_floor_q30_;
-  int32_t note_span_q14_;
+
+  // While the chiff duration runs, each sample's slew target is one of
+  // exactly two levels: the stage's start value or the stage's target,
+  // picked by a coin whose weight is the stage's progress (the duty:
+  // P(stage target) ramps 0 -> 1 over the stage, at block rate). The
+  // mixture's mean therefore rides the straight line from start to
+  // target -- approximately the dialed trajectory -- at every chiff
+  // amount, so chiff cannot hold a release up, blunt an attack, or race
+  // ahead of a long one; the noise blooms mid-stage and dies at both
+  // ends, and chiff amount's only job is the slew-shift drop (noise
+  // bandwidth). Once the chiff duration ends, every sample targets the
+  // stage target: the classic exact envelope.
+  int32_t chiff_stage_start_q30_;         // Value captured at Trigger
+  uint32_t chiff_duty_q16_16_;            // P(stage target)
+  uint32_t chiff_duty_block_increment_q16_16_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

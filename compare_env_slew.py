@@ -222,6 +222,10 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000,
             ramp_increment = 0
 
     value = 0
+    # target_mode='duty' state: stage start level and total (firmware:
+    # chiff_stage_start_q30_, chiff_duty ramp armed per Trigger)
+    stage_start = 0
+    stage_total = samples_left
     gate_off_pending = True
     for i in range(scenario.total_n):
         if gate_off_pending and i >= scenario.gate_n:
@@ -232,14 +236,17 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000,
             samples_left = UINT32_MAX // increment
             nominal = slew_shift_q5_27(increment)
             reslope()
+            stage_start, stage_total = value, samples_left
         while countdown is not None and samples_left == 0:
             stage_index += 1
             name, target, countdown = plan[stage_index]
+            stage_start, stage_total = value, None
             if countdown is not None:
                 increment = UINT32_MAX // max(countdown, 1)
                 samples_left = UINT32_MAX // increment
                 nominal = slew_shift_q5_27(increment)
                 reslope()
+                stage_total = samples_left
 
         random = int(prng[i]) ^ prng_xor
         chiff_active = chiff_left > 0
@@ -267,7 +274,15 @@ def render_chiff(scenario, chiff_amount, prng, prng_xor=0x20001000,
         dither_phase = (dither_phase + frac) & 0xFFFFFFFF
         shift = (shift_q >> 27) + (1 if dither_phase < frac else 0)
         sample_target = target
-        if chiff_active and (random >> 16) < gate_now:
+        if target_mode == 'duty':
+            # Firmware semantics: targets are only {stage start, stage
+            # target}; P(target) = stage progress. No separate chiff
+            # probability -- pure stage-target slew once the window closes.
+            if chiff_active and stage_total:
+                duty_u16 = ((stage_total - samples_left) << 16) // stage_total
+                if (random & 0xFFFF) >= duty_u16:
+                    sample_target = stage_start
+        elif chiff_active and (random >> 16) < gate_now:
             if target_mode == 'balanced':
                 # Floor or peak, coin weighted by the value's position in
                 # the note range (pull averages to zero)

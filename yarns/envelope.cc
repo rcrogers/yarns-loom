@@ -82,11 +82,9 @@ void Envelope::Init(int16_t zero_value_s16) {
   slew_shift_q5_27_ = 0;
   slew_shift_increment_q5_27_ = 0;
   chiff_duration_samples_left_ = 0;
-  prob_that_chiff_is_target_u16_ = 0;
-  prob_that_chiff_is_target_q16_16_ = 0;
-  chiff_probability_block_decrement_q16_16_ = 0;
-  note_floor_q30_ = 0;
-  note_span_q14_ = 0;
+  chiff_stage_start_q30_ = 0;
+  chiff_duty_q16_16_ = 0;
+  chiff_duty_block_increment_q16_16_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   std::fill(
@@ -157,21 +155,6 @@ void Envelope::NoteOn(
       slew_shift_q5_27_ =
         static_cast<int32_t>(stage_nominal_slew_shift_q5_27_ - drop_q5_27);
       ReSlopeSlewShift();
-      prob_that_chiff_is_target_u16_ =
-        static_cast<uint32_t>(chiff_amount) << (16 - kChiffAmountBits);
-      // Fade the probability to zero over the chiff duration, in
-      // block-rate steps (a zero decrement -- absurdly long window --
-      // just leaves the fade to the window's end)
-      prob_that_chiff_is_target_q16_16_ =
-        prob_that_chiff_is_target_u16_ << 16;
-      uint32_t window_blocks =
-        chiff_duration_samples_left_ >> kAudioBlockSizeBits;
-      chiff_probability_block_decrement_q16_16_ = window_blocks
-        ? prob_that_chiff_is_target_q16_16_ / window_blocks
-        : prob_that_chiff_is_target_q16_16_;
-      note_floor_q30_ = stage_target_q30_[ENV_STAGE_DEAD];
-      note_span_q14_ =
-        (stage_target_q30_[ENV_STAGE_ATTACK] - note_floor_q30_) >> 16;
       break;
     }
   }
@@ -200,6 +183,8 @@ void Envelope::ReSlopeSlewShift() {
 void Envelope::Trigger(EnvelopeStage stage) {
   stage_ = stage;
   target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
+  // Every stage's chiff targets are anchored on where the stage began
+  chiff_stage_start_q30_ = value_q30_;
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
     case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
@@ -207,7 +192,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
     default:
       // Hold stage: no countdown; keep slewing toward the target with the
       // shift inherited from the previous stage, converging asymptotically.
+      // Duty pegged to all-target: a hold has nowhere to have started from.
       phase_increment_u32_ = 0;
+      chiff_duty_q16_16_ = UINT32_MAX;
+      chiff_duty_block_increment_q16_16_ = 0;
       return;
   }
 
@@ -218,11 +206,22 @@ void Envelope::Trigger(EnvelopeStage stage) {
 
   if (!phase_increment_u32_) {
     // Degenerate zero increment: treat as a hold (also guards the division)
+    chiff_duty_q16_16_ = UINT32_MAX;
+    chiff_duty_block_increment_q16_16_ = 0;
     return;
   }
 
   // Nominal stage duration in samples
   stage_samples_left_ = UINT32_MAX / phase_increment_u32_;
+
+  // Arm the duty ramp: P(stage target) sweeps 0 -> 1 over this stage, so
+  // the chiff target mixture's mean rides the start-to-target line.
+  // Sub-block stages jump straight to all-target after the first block.
+  chiff_duty_q16_16_ = 0;
+  uint32_t stage_blocks = stage_samples_left_ >> kAudioBlockSizeBits;
+  chiff_duty_block_increment_q16_16_ = stage_blocks
+    ? UINT32_MAX / stage_blocks
+    : UINT32_MAX;
 
   // Slew shift from stage duration: with N = 2^32 / increment samples and
   // k = 2^kStageTimeConstantsLog2 time constants per stage, the time
@@ -255,16 +254,14 @@ void Envelope::Trigger(EnvelopeStage stage) {
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  // Block-rate fade of the chiff probability (see envelope.h)
-  if (chiff_duration_samples_left_) {
-    prob_that_chiff_is_target_q16_16_ =
-      prob_that_chiff_is_target_q16_16_
-          > chiff_probability_block_decrement_q16_16_
-        ? prob_that_chiff_is_target_q16_16_
-            - chiff_probability_block_decrement_q16_16_
-        : 0;
-    prob_that_chiff_is_target_u16_ = prob_that_chiff_is_target_q16_16_ >> 16;
+  // Advance the chiff duty ramp (block rate; see envelope.h). Saturating:
+  // duty rests at all-target once the stage's sweep completes.
+  uint32_t advanced_duty_q16_16 =
+    chiff_duty_q16_16_ + chiff_duty_block_increment_q16_16_;
+  if (advanced_duty_q16_16 < chiff_duty_q16_16_) {
+    advanced_duty_q16_16 = UINT32_MAX;
   }
+  chiff_duty_q16_16_ = advanced_duty_q16_16;
   RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
 }
 
@@ -301,8 +298,7 @@ void Envelope::RenderStage(
   // between powers of two.
   int32_t slew_shift_q5_27 = slew_shift_q5_27_;
   uint32_t slew_shift_error_accumulator_q0_32 = slew_shift_error_accumulator_q0_32_;
-  const int32_t note_floor_q30 = note_floor_q30_;
-  const int32_t note_span_q14 = note_span_q14_;
+  const int32_t chiff_stage_start_q30 = chiff_stage_start_q30_;
 
   // Buffer position (plus this instance's decorrelation offset) doubles as
   // the index into the shared PRNG block.
@@ -312,16 +308,17 @@ void Envelope::RenderStage(
   const bool timed = phase_increment_u32_ != 0;
   uint32_t stage_samples_left = timed ? stage_samples_left_ : UINT32_MAX;
 
-  // Segmented by the two countdowns (stage, chiff window); every segment
+  // Segmented by the two countdowns (stage, chiff duration); every segment
   // runs the same loop body -- no lean variant, the worst case is the only
-  // case that matters. Chiff-inactive segments just carry a zero ramp
-  // increment and a zero chiff probability (a 16-bit draw is never < 0).
+  // case that matters. Chiff-inactive segments carry a zero shift
+  // increment and an all-target duty (a 16-bit draw is always < 2^16), so
+  // they render the classic exact envelope.
   while (block_samples_left) {
     const bool chiff_active = chiff_duration_samples_left_ != 0;
     const int32_t slew_shift_increment_q5_27 =
       chiff_active ? slew_shift_increment_q5_27_ : 0;
-    const uint32_t prob_that_chiff_is_target_u16 =
-      chiff_active ? prob_that_chiff_is_target_u16_ : 0;
+    const uint32_t chiff_duty_u17 =
+      chiff_active ? (chiff_duty_q16_16_ >> 16) : (1u << 16);
     uint32_t run_samples = std::min<uint32_t>(
       block_samples_left,
       std::min<uint32_t>(
@@ -336,13 +333,12 @@ void Envelope::RenderStage(
     // Pin the loop invariants into registers. With -fno-move-loop-
     // invariants, GCC 4.8 otherwise reloads them from stack slots every
     // sample (see the blackbox-hoist idiom elsewhere in this codebase).
-    uint32_t pinned_chiff_prob_u16 = prob_that_chiff_is_target_u16;
-    int32_t pinned_note_floor_q30 = note_floor_q30;
-    int32_t pinned_note_span_q14 = note_span_q14;
+    uint32_t pinned_duty_u17 = chiff_duty_u17;
+    int32_t pinned_stage_start_q30 = chiff_stage_start_q30;
     int32_t pinned_stage_target_q30 = stage_target_q30;
     int32_t pinned_bias_slope_q31 = bias_slope_q31;
-    __asm__ volatile ("" : "+r"(pinned_chiff_prob_u16), "+r"(pinned_note_floor_q30),
-                           "+r"(pinned_note_span_q14),
+    __asm__ volatile ("" : "+r"(pinned_duty_u17),
+                           "+r"(pinned_stage_start_q30),
                            "+r"(pinned_stage_target_q30),
                            "+r"(pinned_bias_slope_q31));
 
@@ -350,8 +346,8 @@ void Envelope::RenderStage(
     // pointer instead of a separate countdown register.
     int16_t* const segment_end = sample_buffer + run_samples;
     while (sample_buffer != segment_end) {
-      // PRNG budget: 16 bits per consumer -- bits 16-31 decide whether
-      // chiff is this sample's target, bits 0-15 pick the target value.
+      // PRNG budget: bits 0-15 are the duty draw; bits 16-31 are spare
+      // (reserved for the extremes dial).
       uint32_t chiff_draw_u32 = *prng++;
       slew_shift_q5_27 += slew_shift_increment_q5_27;
       uint32_t shift_fraction_u32 = static_cast<uint32_t>(slew_shift_q5_27) << 5;
@@ -366,18 +362,19 @@ void Envelope::RenderStage(
           : "=&r"(shift), "+&r"(slew_shift_error_accumulator_q0_32)
           : "r"(shift_fraction_u32), "r"(static_cast<uint32_t>(slew_shift_q5_27))
           : "cc");
-      // Branchless target select: compute the random target
-      // unconditionally (mla is 2 cycles on M3), then blend via an
-      // arithmetic mask -- all-ones iff the 16-bit probability draw picks
-      // chiff. Sign arithmetic is safe: both operands are < 2^16, so the
-      // difference fits int32 and its sign bit is the comparison result.
-      int32_t random_target_q30 = pinned_note_floor_q30
-        + pinned_note_span_q14 * static_cast<int32_t>(chiff_draw_u32 & 0xFFFF);
-      int32_t chiff_target_mask = (
-        static_cast<int32_t>(chiff_draw_u32 >> 16) - static_cast<int32_t>(pinned_chiff_prob_u16)
-      ) >> 31;
-      int32_t target_q30 = pinned_stage_target_q30
-        ^ ((pinned_stage_target_q30 ^ random_target_q30) & chiff_target_mask);
+      // Duty-weighted target: the stage target if the draw lands under
+      // the duty, else the stage's start value, via a branchless sign-mask
+      // blend. The u17 duty means an inactive segment (duty = 2^16) beats
+      // every 16-bit draw: pure stage-target slewing. Sign arithmetic is
+      // safe: both operands fit 17 bits, so the difference fits int32 and
+      // its sign bit is the comparison result.
+      int32_t target_select_mask = (
+        static_cast<int32_t>(chiff_draw_u32 & 0xFFFF)
+        - static_cast<int32_t>(pinned_duty_u17)
+      ) >> 31;  // all-ones iff draw < duty: pick the stage target
+      int32_t target_q30 = pinned_stage_start_q30
+        ^ ((pinned_stage_start_q30 ^ pinned_stage_target_q30)
+           & target_select_mask);
       // Never overshoots: |delta >> shift| <= |delta|. Truncation stalls
       // an upward slew once delta < 2^shift, but timed stages end by
       // countdown, and hold stages are content to sit near their target.
@@ -480,8 +477,7 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   bias_q31_ = ScaleRatio(bias_q31_, num, den);
   value_q30_ = ScaleRatio(value_q30_, num, den);
   target_q30_ = ScaleRatio(target_q30_, num, den);
-  note_floor_q30_ = ScaleRatio(note_floor_q30_, num, den);
-  note_span_q14_ = ScaleRatio(note_span_q14_, num, den);
+  chiff_stage_start_q30_ = ScaleRatio(chiff_stage_start_q30_, num, den);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
     stage_target_q30_[i] = ScaleRatio(stage_target_q30_[i], num, den);
   }
