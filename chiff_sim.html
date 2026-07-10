@@ -63,10 +63,13 @@ header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
   color: var(--ink2); margin-bottom: 5px; cursor: pointer; }
 .checks label:last-child { margin-bottom: 0; }
 .checks input { accent-color: var(--accent); margin: 0; }
+.check1 { display: flex; gap: 7px; align-items: center; font-size: 12px;
+  color: var(--ink2); margin-top: 8px; cursor: pointer; }
+.check1 input { accent-color: var(--accent); margin: 0; }
 .scope { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 140px; }
+  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 120px; }
 .spectrum { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-  padding: 8px 10px; flex: none; height: 128px; display: flex; flex-direction: column; }
+  padding: 8px 10px; flex: none; height: 48vh; display: flex; flex-direction: column; }
 #cv { cursor: crosshair; }
 canvas { width: 100%; height: 100%; flex: 1; min-height: 0; display: block; }
 .legend { display: flex; gap: 16px; padding: 2px 4px 8px; font-size: 11.5px;
@@ -99,13 +102,13 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
       <div class="knob"><label for="atk">Attack</label><output class="mono" id="atkV"></output>
         <input type="range" id="atk" min="0" max="1000" value="620"></div>
       <div class="knob"><label for="dec">Decay</label><output class="mono" id="decV"></output>
-        <input type="range" id="dec" min="0" max="1000" value="560"></div>
+        <input type="range" id="dec" min="0" max="1000" value="0"></div>
       <div class="knob"><label for="peak">Peak</label><output class="mono" id="peakV"></output>
         <input type="range" id="peak" min="0" max="100" value="100"></div>
       <div class="knob"><label for="sus">Sustain (of peak)</label><output class="mono" id="susV"></output>
         <input type="range" id="sus" min="0" max="100" value="60"></div>
       <div class="knob"><label for="rel">Release</label><output class="mono" id="relV"></output>
-        <input type="range" id="rel" min="0" max="1000" value="500"></div>
+        <input type="range" id="rel" min="0" max="1000" value="0"></div>
     </div>
 
     <div class="group"><h2>Note</h2>
@@ -121,6 +124,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
       <div class="note">100 = full lut_env_expo (1&minus;e<sup>&minus;4x</sup>) warp
         (matches firmware): low amounts drop the shift into the audible
         band sooner. 0 = linear amount&rarr;shift-drop (old behavior).</div>
+      <label class="check1"><input type="checkbox" id="jitter"> Jitter slew (anti-zipper)</label>
     </div>
 
     <div class="group"><h2>Duty</h2>
@@ -163,8 +167,8 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     </div>
     <div class="spectrum">
       <div class="legend">
-        <span><i style="background:var(--noise)"></i>Noise spectrum (residual, Hann, 1024-pt)</span>
-        <span class="mono" id="specInfo" style="margin-left:auto;color:var(--ink2)"></span>
+        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; freq; residual vs mean, dark&rarr;bright = &minus;60&rarr;0 dB)</span>
+        <span class="mono" style="margin-left:auto;color:var(--ink3)">re-roll seed to compare realizations</span>
       </div>
       <canvas id="specCv"></canvas>
     </div>
@@ -218,7 +222,7 @@ function render(p) {
   const peakLevel = Math.round(PEAK * p.peak);
   const sus = Math.round(peakLevel * p.sustain);
   const plan = [ [peakLevel, aN], [sus, dN], [sus, null], [0, rN], [0, null] ];
-  const totalN = gateN + rN * 4 + Math.round(0.1 * FS);
+  const totalN = gateN + rN + Math.round(0.004 * FS);  // stop just after release ends
   const out = new Float64Array(totalN);
   const rand = makePrng(p.seed);
 
@@ -309,7 +313,20 @@ function render(p) {
     let sampleTarget = target;
     if ((r & 0xFFFF) >= duty) sampleTarget = S;
 
-    value += asr((sampleTarget - value) | 0, shift);
+    if (p.jitter) {
+      // Stochastic slew: move a random fraction of the delta with mean
+      // 2^-shiftFloat (so the mean trajectory and noise level are kept),
+      // bounded to [0, delta] so value never leaves [floor, peak]. Uses
+      // the spare PRNG bits 16-31. Smears the dyadic landing levels that
+      // cause the fading-tail zipper.
+      const shiftFloat = shiftQ / (1 << 27);
+      const r16 = (r >>> 16) & 0xFFFF;
+      let f = (r16 / 65536) * 2 * Math.pow(2, -shiftFloat);
+      if (f > 1) f = 1;
+      value += (sampleTarget - value) * f;
+    } else {
+      value += asr((sampleTarget - value) | 0, shift);
+    }
     if (countdown !== null) samplesLeft -= 1;
     out[i] = value;
   }
@@ -370,6 +387,7 @@ function draw() {
   const line = dutyLine(p, res);
   const dt = performance.now() - t0;
   lastRes = res; lastDialed = dia; lastLine = line; lastP = p;
+  computeSpectrogram();
 
   const m = measure(res, dia);
   $('mLand').textContent = m.land.toFixed(1) + ' %';
@@ -457,28 +475,104 @@ function paint(hoverX) {
     ctx.globalAlpha = 1;
   }
 
-  // hover crosshair -- also positions the spectrum window
+  // hover crosshair
   if (hoverX !== null && hoverX >= padL && hoverX <= W - padR) {
     const i = Math.round((hoverX - padL) / pw * (totalN - 1));
-    specSample = i;
     ctx.strokeStyle = cssVar('--ink3'); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(hoverX, padT); ctx.lineTo(hoverX, H - padB); ctx.stroke();
-    // mark the spectrum window on the trace
-    const wPix = SPEC_N / (totalN - 1) * pw;
-    ctx.strokeStyle = cssVar('--noise'); ctx.globalAlpha = 0.4;
-    ctx.strokeRect(hoverX - wPix / 2, padT, wPix, ph); ctx.globalAlpha = 1;
     const tMs = i / FS * 1000;
     $('readout').textContent = tMs.toFixed(1) + ' ms · chiff ' +
       (out[i] / PEAK * 100).toFixed(1) + '% · dialed ' +
       (lastDialed[i] / PEAK * 100).toFixed(1) + '%';
   } else $('readout').textContent = '';
-  drawSpectrum();
+  drawSpectrogram();
 }
 
-// ---- noise spectrum ----
-const SPEC_N = 1024;
-let specSample = -1;                 // trace sample at window center (-1 = default)
+// ---- noise spectrogram (STFT of the residual: time x frequency) ----
+const SPEC_N = 512, SPEC_HOP = 64, SPEC_FMAX = FS / 2;  // finer time res (11ms window, 1.4ms hop)
 const specCv = $('specCv'), specCtx = specCv.getContext('2d');
+let specData = null;   // { frames, nFrames, maxBin, gPeak, tMax, fMax }
+
+function computeSpectrogram() {
+  if (!lastRes) return;
+  const out = lastRes.out, line = lastLine, totalN = lastRes.totalN;
+  const bins = SPEC_N / 2;
+  const maxBin = Math.max(1, Math.floor(bins * SPEC_FMAX / (FS / 2)));
+  const nFrames = Math.max(1, Math.floor((totalN - SPEC_N) / SPEC_HOP));
+  const re = new Float64Array(SPEC_N), im = new Float64Array(SPEC_N);
+  const frames = new Array(nFrames);
+  let gPeak = 1e-9;
+  for (let f = 0; f < nFrames; f++) {
+    const s = f * SPEC_HOP;
+    for (let k = 0; k < SPEC_N; k++) {
+      const h = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_N - 1));
+      re[k] = ((out[s + k] - line[s + k]) / PEAK) * h; im[k] = 0;
+    }
+    fft(re, im);
+    const m = new Float64Array(maxBin);
+    for (let b = 0; b < maxBin; b++) { m[b] = Math.hypot(re[b], im[b]); if (m[b] > gPeak) gPeak = m[b]; }
+    frames[f] = m;
+  }
+  specData = { frames, nFrames, maxBin, gPeak,
+    tMax: (nFrames * SPEC_HOP) / FS * 1000, fMax: maxBin / bins * (FS / 2) };
+}
+
+function hslToRgb(h, s, l) {
+  s /= 100; l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+function drawSpectrogram() {
+  if (!specData) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = specCv.clientWidth, H = specCv.clientHeight;
+  if (specCv.width !== W * dpr || specCv.height !== H * dpr) { specCv.width = W * dpr; specCv.height = H * dpr; }
+  specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  specCtx.clearRect(0, 0, W, H);
+  const padL = 30, padB = 14, padT = 4, padR = 4;
+  const pw = Math.max(1, Math.round(W - padL - padR)), ph = Math.max(1, Math.round(H - padT - padB));
+  // Render at pixel resolution with box-averaging over the frequency bins
+  // that fall in each row -- proper anti-aliased downsampling, so no moire
+  // striations from bilinear drawImage rescaling.
+  const { frames, nFrames, maxBin, gPeak } = specData;
+  const tmp = document.createElement('canvas'); tmp.width = pw; tmp.height = ph;
+  const tctx = tmp.getContext('2d'); const img = tctx.createImageData(pw, ph);
+  for (let py = 0; py < ph; py++) {
+    let b0 = Math.floor((1 - (py + 1) / ph) * maxBin);
+    let b1 = Math.floor((1 - py / ph) * maxBin);
+    if (b1 <= b0) b1 = b0 + 1;
+    for (let px = 0; px < pw; px++) {
+      const col = frames[Math.min(nFrames - 1, Math.floor(px / pw * nFrames))];
+      let s = 0, cnt = 0;
+      for (let b = b0; b < b1 && b < maxBin; b++) { s += col[b]; cnt++; }
+      const mag = cnt ? s / cnt : col[Math.min(b0, maxBin - 1)];
+      const db = 20 * Math.log10(mag / gPeak + 1e-9);
+      const t = Math.max(0, Math.min(1, (db + 60) / 60));
+      const [r, g, bl] = hslToRgb(150, 55 + t * 20, 8 + t * 74);
+      const idx = (py * pw + px) * 4;
+      img.data[idx] = r; img.data[idx + 1] = g; img.data[idx + 2] = bl; img.data[idx + 3] = 255;
+    }
+  }
+  tctx.putImageData(img, 0, 0);
+  specCtx.imageSmoothingEnabled = false;
+  specCtx.drawImage(tmp, padL, padT);
+  const specMeta = specData;
+  specCtx.fillStyle = cssVar('--ink3'); specCtx.font = '9px ui-monospace, Menlo, monospace';
+  for (let f = 0; f <= specMeta.fMax; f += 3000) {
+    const y = padT + (1 - f / specMeta.fMax) * ph;
+    specCtx.fillText((f / 1000) + 'k', 2, y + 3);
+  }
+  const step = specMeta.tMax > 2000 ? 500 : 200;
+  for (let t = 0; t <= specMeta.tMax; t += step) {
+    const x = padL + t / specMeta.tMax * pw;
+    specCtx.fillText(t >= 1000 ? (t / 1000) + 's' : t + '', x + 1, H - 4);
+  }
+}
 
 function fft(re, im) {
   const n = re.length;
@@ -570,6 +664,7 @@ function params() {
     gate: msFromSlider(+$('gate').value),
     amount: +$('amt').value,
     warp: +$('warp').value / 100,
+    jitter: $('jitter').checked,
     curve: $('curveExp').getAttribute('aria-pressed') === 'true' ? 'expo' : 'linear',
     k: +$('kTc').value / 10,
     dutySeed: Math.round(+$('seedD').value / 100 * 65536),
@@ -595,6 +690,7 @@ function update() { labels(); if (raf) cancelAnimationFrame(raf); raf = requestA
   $(id).addEventListener('input', update));
 ['showDialed','showNoise','showLine'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));
+$('jitter').addEventListener('change', update);
 $('curveLin').addEventListener('click', () => { setCurve('linear'); });
 $('curveExp').addEventListener('click', () => { setCurve('expo'); });
 function setCurve(c) {
