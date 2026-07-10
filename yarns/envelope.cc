@@ -83,8 +83,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   slew_shift_increment_q5_27_ = 0;
   chiff_duration_samples_left_ = 0;
   chiff_stage_start_q30_ = 0;
-  chiff_duty_q16_16_ = 0;
-  chiff_duty_block_increment_q16_16_ = 0;
+  chiff_duty_phase_u32_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   std::fill(
@@ -192,10 +191,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
     default:
       // Hold stage: no countdown; keep slewing toward the target with the
       // shift inherited from the previous stage, converging asymptotically.
-      // Duty pegged to all-target: a hold has nowhere to have started from.
+      // Duty pinned to all-target: a hold has nowhere to have started from.
       phase_increment_u32_ = 0;
-      chiff_duty_q16_16_ = UINT32_MAX;
-      chiff_duty_block_increment_q16_16_ = 0;
+      chiff_duty_phase_u32_ = UINT32_MAX;
       return;
   }
 
@@ -206,22 +204,19 @@ void Envelope::Trigger(EnvelopeStage stage) {
 
   if (!phase_increment_u32_) {
     // Degenerate zero increment: treat as a hold (also guards the division)
-    chiff_duty_q16_16_ = UINT32_MAX;
-    chiff_duty_block_increment_q16_16_ = 0;
+    chiff_duty_phase_u32_ = UINT32_MAX;
     return;
   }
 
   // Nominal stage duration in samples
   stage_samples_left_ = UINT32_MAX / phase_increment_u32_;
 
-  // Arm the duty ramp: P(stage target) sweeps 0 -> 1 over this stage, so
-  // the chiff target mixture's mean rides the start-to-target line.
-  // Sub-block stages jump straight to all-target after the first block.
-  chiff_duty_q16_16_ = 0;
-  uint32_t stage_blocks = stage_samples_left_ >> kAudioBlockSizeBits;
-  chiff_duty_block_increment_q16_16_ = stage_blocks
-    ? UINT32_MAX / stage_blocks
-    : UINT32_MAX;
+  // Arm the duty phase at 0; it advances toward full over the stage at
+  // segment rate in RenderStage (phase_increment_u32_ per sample -- the
+  // same increment that spans the stage), reading the duty curve from
+  // lut_env_expo. At phase 0 the duty is 0 (all-start), so the envelope
+  // begins where the stage began.
+  chiff_duty_phase_u32_ = 0;
 
   // Slew shift from stage duration: with N = 2^32 / increment samples and
   // k = 2^kStageTimeConstantsLog2 time constants per stage, the time
@@ -254,14 +249,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  // Advance the chiff duty ramp (block rate; see envelope.h). Saturating:
-  // duty rests at all-target once the stage's sweep completes.
-  uint32_t advanced_duty_q16_16 =
-    chiff_duty_q16_16_ + chiff_duty_block_increment_q16_16_;
-  if (advanced_duty_q16_16 < chiff_duty_q16_16_) {
-    advanced_duty_q16_16 = UINT32_MAX;
-  }
-  chiff_duty_q16_16_ = advanced_duty_q16_16;
   RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
 }
 
@@ -317,8 +304,31 @@ void Envelope::RenderStage(
     const bool chiff_active = chiff_duration_samples_left_ != 0;
     const int32_t slew_shift_increment_q5_27 =
       chiff_active ? slew_shift_increment_q5_27_ : 0;
-    const uint32_t chiff_duty_u17 =
-      chiff_active ? (chiff_duty_q16_16_ >> 16) : (1u << 16);
+    // P(stage target) for this segment, as a u17 so 2^16 always beats a
+    // 16-bit draw (all-target: classic envelope). While chiff runs it is
+    // the exponential duty curve (lut_env_expo over stage progress)
+    // whose mixing depth is crossfaded against the residual slew lag by
+    // beta = 1 - 2^-(nominal - ramp): the chiff drains to nothing as the
+    // shift ramp reaches nominal, and amount 0 (zero drop) stays exactly
+    // classic. Evaluated once per segment; segments are stage- and
+    // window-bounded, so sub-block stages resolve correctly.
+    uint32_t chiff_duty_u17 = 1u << 16;
+    if (chiff_active) {
+      uint32_t duty_u16 = Interpolate824(lut_env_expo, chiff_duty_phase_u32_);
+      int32_t drop_q5_27 =
+        static_cast<int32_t>(stage_nominal_slew_shift_q5_27_) - slew_shift_q5_27;
+      if (drop_q5_27 > 0) {
+        uint32_t drop_int = static_cast<uint32_t>(drop_q5_27) >> 27;
+        uint32_t two_pow_neg_drop_u16 = drop_int >= 16
+          ? 0
+          : Interpolate824(lut_expo2_neg,
+              (static_cast<uint32_t>(drop_q5_27) & 0x07FFFFFFu) << 5) >> drop_int;
+        uint32_t beta_u16 = (1u << 16) - two_pow_neg_drop_u16;
+        uint32_t effective_gap_u16 =
+          ((65535u - duty_u16) * beta_u16) >> 16;
+        chiff_duty_u17 = (1u << 16) - effective_gap_u16;
+      }
+    }
     uint32_t run_samples = std::min<uint32_t>(
       block_samples_left,
       std::min<uint32_t>(
@@ -381,6 +391,17 @@ void Envelope::RenderStage(
       value_q30 += (target_q30 - value_q30) >> shift;
       bias_q31 += pinned_bias_slope_q31;
       *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+    }
+
+    // Advance the duty phase by the samples just rendered (segment rate).
+    // phase_increment_u32_ spans the stage, so phase reaches full near
+    // stage end; saturate there. A following stage transition resets it.
+    if (chiff_active) {
+      uint64_t advanced_phase =
+        static_cast<uint64_t>(chiff_duty_phase_u32_) +
+        static_cast<uint64_t>(phase_increment_u32_) * run_samples;
+      chiff_duty_phase_u32_ = advanced_phase > UINT32_MAX
+        ? UINT32_MAX : static_cast<uint32_t>(advanced_phase);
     }
 
     if (chiff_active && chiff_duration_samples_left_ == 0) {

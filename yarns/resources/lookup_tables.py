@@ -110,6 +110,15 @@ def envelope():
     # lookup_tables.append(('env_inverse_expo', env_inverse_expo / env_inverse_expo.max() * 65535.0))
   expo()
 
+  # 2^-x over one octave of x in [0, 1], as a uint16 fraction (65535 at x=0,
+  # 32768 at x=1). The chiff mixing crossfade needs 2^-(shift drop): index
+  # this by the fractional drop, then right-shift by the integer drop. This
+  # is a pure exponential ratio -- distinct from lut_env_expo, which is the
+  # normalized 1 - e^(-4*phi) duty *shape*.
+  expo2_neg_input = numpy.arange(257) / 256.0
+  expo2_neg = numpy.power(2.0, -expo2_neg_input) * 65535.0
+  lookup_tables.append(('expo2_neg', numpy.round(expo2_neg)))
+
   # Quarter sine wave (0 to pi/2) for symmetric lookup with quadrant logic.
   # uint16_t range (0..65535) for use with quadrant_lookup alongside lut_env_expo.
   sine_quadrant_input = numpy.arange(257) / 256.0 * (numpy.pi / 2)

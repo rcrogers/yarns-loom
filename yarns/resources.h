@@ -62,6 +62,7 @@ extern const uint16_t* const char_table[];
 
 extern const char str_dummy[];
 extern const uint16_t lut_env_expo[];
+extern const uint16_t lut_expo2_neg[];
 extern const uint16_t lut_sine_quadrant[];
 extern const uint16_t lut_expo_quadrant[];
 extern const uint16_t lut_arpeggiator_patterns[];
@@ -135,23 +136,25 @@ extern const uint16_t chr_characters[];
 #define STR_DUMMY 0  // dummy
 #define LUT_ENV_EXPO 0
 #define LUT_ENV_EXPO_SIZE 257
-#define LUT_SINE_QUADRANT 1
+#define LUT_EXPO2_NEG 1
+#define LUT_EXPO2_NEG_SIZE 257
+#define LUT_SINE_QUADRANT 2
 #define LUT_SINE_QUADRANT_SIZE 257
-#define LUT_EXPO_QUADRANT 2
+#define LUT_EXPO_QUADRANT 3
 #define LUT_EXPO_QUADRANT_SIZE 257
-#define LUT_ARPEGGIATOR_PATTERNS 3
+#define LUT_ARPEGGIATOR_PATTERNS 4
 #define LUT_ARPEGGIATOR_PATTERNS_SIZE 23
-#define LUT_CONSONANCE 4
+#define LUT_CONSONANCE 5
 #define LUT_CONSONANCE_SIZE 1536
-#define LUT_CLOCK_RATIO_TICKS 5
+#define LUT_CLOCK_RATIO_TICKS 6
 #define LUT_CLOCK_RATIO_TICKS_SIZE 32
-#define LUT_SVF_CUTOFF 6
+#define LUT_SVF_CUTOFF 7
 #define LUT_SVF_CUTOFF_SIZE 257
-#define LUT_SVF_DAMP 7
+#define LUT_SVF_DAMP 8
 #define LUT_SVF_DAMP_SIZE 257
-#define LUT_SVF_SCALE 8
+#define LUT_SVF_SCALE 9
 #define LUT_SVF_SCALE_SIZE 257
-#define LUT_CHIFF_LPF_SHIFTS 9
+#define LUT_CHIFF_LPF_SHIFTS 10
 #define LUT_CHIFF_LPF_SHIFTS_SIZE 128
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12

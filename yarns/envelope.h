@@ -165,18 +165,18 @@ class Envelope {
 
   // While the chiff duration runs, each sample's slew target is one of
   // exactly two levels: the stage's start value or the stage's target,
-  // picked by a coin whose weight is the stage's progress (the duty:
-  // P(stage target) ramps 0 -> 1 over the stage, at block rate). The
-  // mixture's mean therefore rides the straight line from start to
-  // target -- approximately the dialed trajectory -- at every chiff
-  // amount, so chiff cannot hold a release up, blunt an attack, or race
-  // ahead of a long one; the noise blooms mid-stage and dies at both
-  // ends, and chiff amount's only job is the slew-shift drop (noise
-  // bandwidth). Once the chiff duration ends, every sample targets the
-  // stage target: the classic exact envelope.
+  // picked by a coin whose weight is the duty -- P(stage target), an
+  // exponential 1 - e^(-4*phi) over the stage's progress phi, read from
+  // lut_env_expo (the same curve, k = 4, that the slew itself traces, so
+  // the mixture's mean reproduces the dialed trajectory). The mixing
+  // depth is then crossfaded against the residual slew lag by
+  // beta = 1 - 2^-(nominal - ramp) (from lut_expo2_neg), which drains the
+  // chiff to nothing as the shift ramp reaches nominal and makes chiff
+  // amount continuous from bit-exact classic at 0. phi advances at
+  // segment rate (see RenderStage); phase == UINT32_MAX pins the duty to
+  // all-target for hold stages and once the stage sweep completes.
   int32_t chiff_stage_start_q30_;         // Value captured at Trigger
-  uint32_t chiff_duty_q16_16_;            // P(stage target)
-  uint32_t chiff_duty_block_increment_q16_16_;
+  uint32_t chiff_duty_phase_u32_;         // Stage progress phi, Q0.32
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
