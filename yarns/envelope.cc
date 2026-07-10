@@ -189,10 +189,24 @@ void Envelope::ReSlopeSlewShift() {
 // closer to the target just means arriving (proportionally) closer to it
 // when the stage's sample countdown expires.
 void Envelope::Trigger(EnvelopeStage stage) {
+  // Anchor the new stage's chiff start on where the leaving stage's mean
+  // actually was -- its duty line, start + (target - start) * duty --
+  // rather than the instantaneous value_q30_. At high chiff the value
+  // telegraphs between start and target, so the raw value hands the next
+  // stage a random starting energy (most audible as wildly varying
+  // early-release levels). Only when chiff is live is the value noisy;
+  // with chiff off the value is the exact classic slew, so use it
+  // directly (also spares the multiply on the common path).
+  int32_t stage_start_q30 = value_q30_;
+  if (chiff_duration_samples_left_) {
+    uint32_t duty_u16 = Interpolate824(lut_env_expo, chiff_duty_phase_u32_);
+    stage_start_q30 = chiff_stage_start_q30_ + static_cast<int32_t>(
+      (static_cast<int64_t>(target_q30_ - chiff_stage_start_q30_) * duty_u16)
+      >> 16);
+  }
   stage_ = stage;
   target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
-  // Every stage's chiff targets are anchored on where the stage began
-  chiff_stage_start_q30_ = value_q30_;
+  chiff_stage_start_q30_ = stage_start_q30;
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
     case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
