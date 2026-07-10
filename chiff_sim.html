@@ -221,6 +221,10 @@ function render(p) {
     increment = Math.floor((U32 - 1) / countdown);
     samplesLeft = Math.floor((U32 - 1) / increment);
     nominal = slewShiftQ527(increment);
+    // Clamp: the shift may sit below nominal (chiff, faster) but never
+    // above it. Above-nominal only sluggishly slews with no benefit --
+    // what made an early release inherit the attack's long time constant.
+    if (ramp > nominal) ramp = nominal;
     if (chiffLeft) rampInc = Math.trunc((nominal - ramp) / chiffLeft);
     else { ramp = nominal; rampInc = 0; }
     stageTotal = samplesLeft;
