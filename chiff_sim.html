@@ -33,9 +33,10 @@ body {
 }
 .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
         font-variant-numeric: tabular-nums; }
-.wrap { display: flex; gap: 14px; padding: 14px; min-height: 100vh; }
-.rail { width: 252px; flex: none; display: flex; flex-direction: column; gap: 10px; }
-.stage { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.wrap { display: flex; gap: 14px; padding: 14px; height: 100vh; overflow: hidden; }
+.rail { width: 252px; flex: none; display: flex; flex-direction: column; gap: 10px;
+        overflow-y: auto; }
+.stage { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 header { padding: 2px 2px 0; }
 header h1 { font-size: 15px; margin: 0; letter-spacing: .01em; }
 header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
@@ -63,8 +64,8 @@ header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
 .checks label:last-child { margin-bottom: 0; }
 .checks input { accent-color: var(--accent); margin: 0; }
 .scope { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 340px; }
-canvas { width: 100%; height: 100%; flex: 1; display: block; cursor: crosshair; }
+  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 160px; }
+canvas { width: 100%; height: 100%; flex: 1; min-height: 0; display: block; cursor: crosshair; }
 .legend { display: flex; gap: 16px; padding: 2px 4px 8px; font-size: 11.5px;
   color: var(--ink2); flex-wrap: wrap; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -96,7 +97,9 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
         <input type="range" id="atk" min="0" max="1000" value="620"></div>
       <div class="knob"><label for="dec">Decay</label><output class="mono" id="decV"></output>
         <input type="range" id="dec" min="0" max="1000" value="560"></div>
-      <div class="knob"><label for="sus">Sustain</label><output class="mono" id="susV"></output>
+      <div class="knob"><label for="peak">Peak</label><output class="mono" id="peakV"></output>
+        <input type="range" id="peak" min="0" max="100" value="100"></div>
+      <div class="knob"><label for="sus">Sustain (of peak)</label><output class="mono" id="susV"></output>
         <input type="range" id="sus" min="0" max="100" value="60"></div>
       <div class="knob"><label for="rel">Release</label><output class="mono" id="relV"></output>
         <input type="range" id="rel" min="0" max="1000" value="500"></div>
@@ -197,8 +200,9 @@ function render(p) {
   const dN = Math.max(1, Math.round(p.decay * FS / 1000));
   const rN = Math.max(1, Math.round(p.release * FS / 1000));
   const gateN = Math.max(1, Math.round(p.gate * FS / 1000));
-  const sus = Math.round(PEAK * p.sustain);
-  const plan = [ [PEAK, aN], [sus, dN], [sus, null], [0, rN], [0, null] ];
+  const peakLevel = Math.round(PEAK * p.peak);
+  const sus = Math.round(peakLevel * p.sustain);
+  const plan = [ [peakLevel, aN], [sus, dN], [sus, null], [0, rN], [0, null] ];
   const totalN = gateN + rN * 4 + Math.round(0.1 * FS);
   const out = new Float64Array(totalN);
   const rand = makePrng(p.seed);
@@ -216,8 +220,21 @@ function render(p) {
   let value = 0, S = 0, stageTotal = samplesLeft;
   let gateOff = false;
 
-  const armStage = () => {
-    S = value;
+  // The leaving stage's duty LINE (deterministic mean), used to anchor the
+  // next stage's chiff-start instead of the instantaneous (noisy) value.
+  // At high chiff the value telegraphs between S and target, so the raw
+  // value would give the next stage a random starting energy (wildly
+  // varying early-release levels). Only noisy while chiff is live.
+  const lineAnchor = () => {
+    if (!(chiffLeft > 0) || !stageTotal) return value;
+    const phi = (stageTotal - samplesLeft) / stageTotal;
+    const base = p.curve === 'expo' ? 1 - Math.exp(-p.k * phi) : phi;
+    const duty = Math.min(1, p.dutySeed / 65536 + base);
+    return S + (target - S) * duty;
+  };
+
+  const armStage = (anchor) => {
+    S = anchor;
     increment = Math.floor((U32 - 1) / countdown);
     samplesLeft = Math.floor((U32 - 1) / increment);
     nominal = slewShiftQ527(increment);
@@ -234,12 +251,14 @@ function render(p) {
 
   for (let i = 0; i < totalN; i++) {
     if (!gateOff && i >= gateN) {
-      gateOff = true; si = 3; target = plan[3][0]; countdown = plan[3][1]; armStage();
+      const a = lineAnchor();
+      gateOff = true; si = 3; target = plan[3][0]; countdown = plan[3][1]; armStage(a);
     }
     while (countdown !== null && samplesLeft === 0) {
+      const a = lineAnchor();
       si += 1; target = plan[si][0]; countdown = plan[si][1];
-      if (countdown !== null) armStage();
-      else { S = value; stageTotal = null; if (!chiffLeft) { ramp = nominal; rampInc = 0; } }
+      if (countdown !== null) armStage(a);
+      else { S = a; stageTotal = null; if (!chiffLeft) { ramp = nominal; rampInc = 0; } }
     }
 
     const r = rand();
@@ -433,6 +452,7 @@ function params() {
   return {
     attack: msFromSlider(+$('atk').value),
     decay: msFromSlider(+$('dec').value),
+    peak: +$('peak').value / 100,
     sustain: +$('sus').value / 100,
     release: msFromSlider(+$('rel').value),
     gate: msFromSlider(+$('gate').value),
@@ -446,6 +466,7 @@ function params() {
 function labels() {
   $('atkV').textContent = fmtMs(msFromSlider(+$('atk').value));
   $('decV').textContent = fmtMs(msFromSlider(+$('dec').value));
+  $('peakV').textContent = $('peak').value + ' %';
   $('susV').textContent = $('sus').value + ' %';
   $('relV').textContent = fmtMs(msFromSlider(+$('rel').value));
   $('gateV').textContent = fmtMs(msFromSlider(+$('gate').value));
@@ -456,7 +477,7 @@ function labels() {
 }
 let raf = null;
 function update() { labels(); if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); }
-['atk','dec','sus','rel','gate','amt','kTc','seedD'].forEach(id =>
+['atk','dec','peak','sus','rel','gate','amt','kTc','seedD'].forEach(id =>
   $(id).addEventListener('input', update));
 ['showDialed','showNoise','showLine'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));
