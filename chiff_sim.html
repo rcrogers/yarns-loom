@@ -64,8 +64,11 @@ header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
 .checks label:last-child { margin-bottom: 0; }
 .checks input { accent-color: var(--accent); margin: 0; }
 .scope { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
-  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 160px; }
-canvas { width: 100%; height: 100%; flex: 1; min-height: 0; display: block; cursor: crosshair; }
+  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 140px; }
+.spectrum { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 10px; flex: none; height: 128px; display: flex; flex-direction: column; }
+#cv { cursor: crosshair; }
+canvas { width: 100%; height: 100%; flex: 1; min-height: 0; display: block; }
 .legend { display: flex; gap: 16px; padding: 2px 4px 8px; font-size: 11.5px;
   color: var(--ink2); flex-wrap: wrap; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -158,6 +161,13 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
       </div>
       <canvas id="cv"></canvas>
     </div>
+    <div class="spectrum">
+      <div class="legend">
+        <span><i style="background:var(--noise)"></i>Noise spectrum (residual, Hann, 1024-pt)</span>
+        <span class="mono" id="specInfo" style="margin-left:auto;color:var(--ink2)"></span>
+      </div>
+      <canvas id="specCv"></canvas>
+    </div>
     <div class="chips">
       <div class="chipbox"><div class="k">Attack landing</div>
         <div class="v mono" id="mLand">–</div></div>
@@ -222,7 +232,7 @@ function render(p) {
   const warpX = p.amount / 127;
   const warpExpo = (1 - Math.exp(-4 * warpX)) / (1 - Math.exp(-4));
   const warpedAmt = (warpX * (1 - p.warp) + warpExpo * p.warp) * 127;
-  const drop = (nominal >> 7) * warpedAmt;
+  const drop = (nominal / 128) * warpedAmt;  // float: nominal can exceed 2^31
   let chiffLeft = drop ? samplesLeft : 0;
   const windowN = chiffLeft;
   let ramp = nominal - drop;
@@ -447,16 +457,105 @@ function paint(hoverX) {
     ctx.globalAlpha = 1;
   }
 
-  // hover crosshair
+  // hover crosshair -- also positions the spectrum window
   if (hoverX !== null && hoverX >= padL && hoverX <= W - padR) {
     const i = Math.round((hoverX - padL) / pw * (totalN - 1));
+    specSample = i;
     ctx.strokeStyle = cssVar('--ink3'); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(hoverX, padT); ctx.lineTo(hoverX, H - padB); ctx.stroke();
+    // mark the spectrum window on the trace
+    const wPix = SPEC_N / (totalN - 1) * pw;
+    ctx.strokeStyle = cssVar('--noise'); ctx.globalAlpha = 0.4;
+    ctx.strokeRect(hoverX - wPix / 2, padT, wPix, ph); ctx.globalAlpha = 1;
     const tMs = i / FS * 1000;
     $('readout').textContent = tMs.toFixed(1) + ' ms · chiff ' +
       (out[i] / PEAK * 100).toFixed(1) + '% · dialed ' +
       (lastDialed[i] / PEAK * 100).toFixed(1) + '%';
   } else $('readout').textContent = '';
+  drawSpectrum();
+}
+
+// ---- noise spectrum ----
+const SPEC_N = 1024;
+let specSample = -1;                 // trace sample at window center (-1 = default)
+const specCv = $('specCv'), specCtx = specCv.getContext('2d');
+
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr;
+                 const ti = im[i]; im[i] = im[j]; im[j] = ti; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k, b = a + len / 2;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti;
+        re[a] += tr; im[a] += ti;
+        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+}
+
+function drawSpectrum() {
+  if (!lastRes) return;
+  const out = lastRes.out, totalN = lastRes.totalN;
+  let center = specSample < 0 ? Math.floor(totalN * 0.55) : specSample;
+  let start = Math.max(1, Math.min(totalN - SPEC_N - 1, center - SPEC_N / 2));
+  // residual = value minus a 64-tap moving mean (isolate the noise from the
+  // envelope trend), then Hann-windowed
+  const re = new Float64Array(SPEC_N), im = new Float64Array(SPEC_N);
+  const mw = 64;
+  for (let k = 0; k < SPEC_N; k++) {
+    let m = 0;
+    for (let j = -mw; j <= mw; j++) m += out[start + k + j] || out[start + k];
+    m /= (2 * mw + 1);
+    const hann = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_N - 1));
+    re[k] = ((out[start + k] - m) / PEAK) * hann;
+  }
+  fft(re, im);
+  const bins = SPEC_N / 2;
+  let peak = 1e-9;
+  const mag = new Float64Array(bins);
+  for (let b = 0; b < bins; b++) { mag[b] = Math.hypot(re[b], im[b]); if (mag[b] > peak) peak = mag[b]; }
+
+  const dpr = window.devicePixelRatio || 1;
+  const W = specCv.clientWidth, H = specCv.clientHeight;
+  if (specCv.width !== W * dpr || specCv.height !== H * dpr) { specCv.width = W * dpr; specCv.height = H * dpr; }
+  specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  specCtx.clearRect(0, 0, W, H);
+  const padL = 30, padB = 14, padT = 4, padR = 4;
+  const pw = W - padL - padR, ph = H - padT - padB;
+  const nyq = FS / 2;
+  specCtx.strokeStyle = cssVar('--grid'); specCtx.fillStyle = cssVar('--ink3');
+  specCtx.font = '9px ui-monospace, Menlo, monospace'; specCtx.lineWidth = 1;
+  for (let db = 0; db >= -60; db -= 20) {
+    const y = padT + (-db / 60) * ph;
+    specCtx.beginPath(); specCtx.moveTo(padL, y); specCtx.lineTo(W - padR, y); specCtx.stroke();
+    specCtx.fillText(db + '', 2, y + 3);
+  }
+  for (let f = 0; f <= nyq; f += 5000) {
+    const x = padL + f / nyq * pw;
+    specCtx.beginPath(); specCtx.moveTo(x, padT); specCtx.lineTo(x, H - padB); specCtx.stroke();
+    specCtx.fillText((f / 1000) + 'k', x + 1, H - 4);
+  }
+  specCtx.strokeStyle = cssVar('--noise'); specCtx.lineWidth = 1.2; specCtx.beginPath();
+  for (let b = 1; b < bins; b++) {
+    const db = 20 * Math.log10(mag[b] / peak + 1e-9);
+    const x = padL + (b / bins) * pw;
+    const y = padT + Math.min(1, -db / 60) * ph;
+    if (b === 1) specCtx.moveTo(x, y); else specCtx.lineTo(x, y);
+  }
+  specCtx.stroke();
+  $('specInfo').textContent = 'window @ ' + (center / FS * 1000).toFixed(0) + ' ms'
+    + (specSample < 0 ? ' (default; hover trace to move)' : '');
 }
 
 // ---- controls ----
