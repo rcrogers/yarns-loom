@@ -113,6 +113,11 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     <div class="group"><h2>Chiff</h2>
       <div class="knob"><label for="amt">Amount</label><output class="mono" id="amtV"></output>
         <input type="range" id="amt" min="0" max="127" value="96"></div>
+      <div class="knob"><label for="warp">Amount warp</label><output class="mono" id="warpV"></output>
+        <input type="range" id="warp" min="0" max="100" value="100"></div>
+      <div class="note">100 = full lut_env_expo (1&minus;e<sup>&minus;4x</sup>) warp
+        (matches firmware): low amounts drop the shift into the audible
+        band sooner. 0 = linear amount&rarr;shift-drop (old behavior).</div>
     </div>
 
     <div class="group"><h2>Duty</h2>
@@ -211,7 +216,13 @@ function render(p) {
   let increment = Math.floor((U32 - 1) / countdown);
   let samplesLeft = Math.floor((U32 - 1) / increment);
   let nominal = slewShiftQ527(increment);
-  const drop = (nominal >> 7) * p.amount;
+  // Amount warp: blend linear amount with the lut_env_expo (1-e^-4x)
+  // shape, which front-loads the shift-drop so low amounts reach the
+  // audible band. p.warp in [0,1]; 0 = linear (current firmware).
+  const warpX = p.amount / 127;
+  const warpExpo = (1 - Math.exp(-4 * warpX)) / (1 - Math.exp(-4));
+  const warpedAmt = (warpX * (1 - p.warp) + warpExpo * p.warp) * 127;
+  const drop = (nominal >> 7) * warpedAmt;
   let chiffLeft = drop ? samplesLeft : 0;
   const windowN = chiffLeft;
   let ramp = nominal - drop;
@@ -398,7 +409,7 @@ function paint(hoverX) {
 
   const plot = (arr, color, width) => {
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
-    const stride = Math.max(1, Math.floor(totalN / (pw * 2)));
+    const stride = 1;                            // exact min/max, no aliasing
     for (let px = 0; px <= pw; px++) {           // min/max decimation per pixel
       const i0 = Math.floor(px / pw * (totalN - 1));
       const i1 = Math.min(totalN - 1, Math.floor((px + 1) / pw * (totalN - 1)));
@@ -414,11 +425,13 @@ function paint(hoverX) {
   if ($('showLine').checked) plot(lastLine, cssVar('--ink3'), 1);
   plot(out, cssVar('--trace'), 1.2);
 
-  // noise band along the bottom: smoothed |step|, scaled to 25% of height
+  // Noise band from the bottom: smoothed mean |per-sample step|, as a
+  // fraction of full-scale peak, scaled so full telegraph (~0.5/sample at
+  // max chiff) reaches the top -- no artificial cap, so the true level
+  // (and its scaling with the Peak knob) is visible.
   if ($('showNoise').checked) {
-    ctx.fillStyle = cssVar('--noise'); ctx.globalAlpha = 0.55;
+    ctx.fillStyle = cssVar('--noise'); ctx.globalAlpha = 0.5;
     const win = Math.max(1, Math.floor(FS * 0.002));
-    let acc = 0; const q = [];
     ctx.beginPath(); ctx.moveTo(padL, H - padB);
     for (let px = 0; px <= pw; px++) {
       const i = Math.max(1, Math.floor(px / pw * (totalN - 1)));
@@ -427,7 +440,7 @@ function paint(hoverX) {
         s += Math.abs(out[j] - out[j - 1]); n++;
       }
       const noise = (s / n) / PEAK;              // per-sample step, fraction of peak
-      const y = H - padB - Math.min(1, noise * 8) * ph * 0.25;
+      const y = H - padB - Math.min(1, noise * 2) * ph;
       ctx.lineTo(padL + px, y);
     }
     ctx.lineTo(W - padR, H - padB); ctx.closePath(); ctx.fill();
@@ -457,6 +470,7 @@ function params() {
     release: msFromSlider(+$('rel').value),
     gate: msFromSlider(+$('gate').value),
     amount: +$('amt').value,
+    warp: +$('warp').value / 100,
     curve: $('curveExp').getAttribute('aria-pressed') === 'true' ? 'expo' : 'linear',
     k: +$('kTc').value / 10,
     dutySeed: Math.round(+$('seedD').value / 100 * 65536),
@@ -471,13 +485,14 @@ function labels() {
   $('relV').textContent = fmtMs(msFromSlider(+$('rel').value));
   $('gateV').textContent = fmtMs(msFromSlider(+$('gate').value));
   $('amtV').textContent = $('amt').value + ' / 127';
+  $('warpV').textContent = $('warp').value + ' %';
   $('kTcV').textContent = (+$('kTc').value / 10).toFixed(1);
   $('seedDV').textContent = $('seedD').value + ' %';
   $('seedShow').textContent = 'seed 0x' + (seed >>> 0).toString(16);
 }
 let raf = null;
 function update() { labels(); if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); }
-['atk','dec','peak','sus','rel','gate','amt','kTc','seedD'].forEach(id =>
+['atk','dec','peak','sus','rel','gate','amt','warp','kTc','seedD'].forEach(id =>
   $(id).addEventListener('input', update));
 ['showDialed','showNoise','showLine'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));
