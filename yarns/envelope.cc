@@ -160,16 +160,25 @@ void Envelope::NoteOn(
 }
 
 void Envelope::ReSlopeSlewShift() {
+  int32_t nominal = static_cast<int32_t>(stage_nominal_slew_shift_q5_27_);
+  // The shift may sit below nominal (chiff: faster, and the duty
+  // compensates the mean so it still rides the dialed curve) but never
+  // above it. A shift slower than the stage's own nominal only sluggishly
+  // slews the envelope with no benefit -- that is what made an early
+  // release on a long attack inherit the attack's (much longer) time
+  // constant and crawl. Clamp so every stage slews at least at its
+  // nominal rate. Safe from pops: shift > nominal means drop < 0, where
+  // the chiff mixing is already off (the drop > 0 guard in RenderStage),
+  // so this changes only the slew speed, not the chiff amplitude.
+  if (slew_shift_q5_27_ > nominal) slew_shift_q5_27_ = nominal;
   if (chiff_duration_samples_left_) {
-    // Signed: the ramp may sit above or below the new nominal (early
-    // release from a slow attack vs a longer next stage). Truncation
-    // toward zero means the ramp never crosses the nominal; the residual
-    // at expiry is under one integer shift, landed at minimum intensity.
+    // Ramp the (now <= nominal) shift up to nominal over the remaining
+    // window; truncation toward zero keeps it from crossing nominal.
     slew_shift_increment_q5_27_ =
-      (static_cast<int32_t>(stage_nominal_slew_shift_q5_27_) - slew_shift_q5_27_)
+      (nominal - slew_shift_q5_27_)
       / static_cast<int32_t>(chiff_duration_samples_left_);
   } else {
-    slew_shift_q5_27_ = static_cast<int32_t>(stage_nominal_slew_shift_q5_27_);
+    slew_shift_q5_27_ = nominal;
     slew_shift_increment_q5_27_ = 0;
   }
 }
