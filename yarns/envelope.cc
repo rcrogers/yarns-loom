@@ -144,8 +144,18 @@ void Envelope::NoteOn(
       // shift starts at ~0: raw sample replacement -- a chiff sample jumps
       // all the way to its random target, flat-spectrum and maximally
       // aggressive. (Each integer shift above 0 halves the bandwidth.)
-      uint32_t drop_q5_27 =
-        (stage_nominal_slew_shift_q5_27_ >> kChiffAmountBits) * chiff_amount;
+      // The amount->drop map is warped through lut_env_expo (1 - e^-4x) so
+      // low amounts already drop the shift into the audible band, rather
+      // than wasting the bottom of the knob in the inaudible near-nominal
+      // zone. The kChiffAmountBits-wide amount indexes the LUT_ENV_EXPO
+      // table whose usable span is a power of two (LUT_ENV_EXPO_SIZE - 1);
+      // the compile-time ratio aligns the widths. amount 0 -> lut 0 ->
+      // drop 0 (classic); amount max -> ~full drop.
+      uint32_t amount_warp_u16 = lut_env_expo[
+        chiff_amount * ((LUT_ENV_EXPO_SIZE - 1) >> kChiffAmountBits)];
+      uint32_t drop_q5_27 = static_cast<uint32_t>(
+        (static_cast<uint64_t>(stage_nominal_slew_shift_q5_27_) *
+         amount_warp_u16) >> 16);
       // The chiff window keeps this timetable even if later stages cut in
       // early; Trigger re-slopes the increment toward each new nominal.
       chiff_duration_samples_left_ = drop_q5_27
