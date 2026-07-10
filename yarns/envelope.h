@@ -159,8 +159,11 @@ class Envelope {
   // This keeps the shift -- and thus the chiff perturbation amplitude,
   // 2^-shift -- free of discontinuities at early release, while still
   // landing on the release's correct slew when the duration ends.
-  int32_t slew_shift_q5_27_;            // == nominal when chiff is over
-  int32_t slew_shift_increment_q5_27_;  // Signed per-sample step
+  // Unsigned: a shift magnitude, 0..kMaxSlewShift. The max exceeds 2^31
+  // (integer shift up to 27), so int32 would sign-flip on long attacks
+  // (>= ~5.8s, nominal shift ~16 = 2^31) and corrupt `>> shift`.
+  uint32_t slew_shift_q5_27_;            // == nominal when chiff is over
+  uint32_t slew_shift_increment_q5_27_;  // Per-sample step (>= 0 post-clamp)
   uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
 
   // While the chiff duration runs, each sample's slew target is one of

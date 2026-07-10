@@ -161,8 +161,7 @@ void Envelope::NoteOn(
       chiff_duration_samples_left_ = drop_q5_27
         ? (adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 1)
         : 0;
-      slew_shift_q5_27_ =
-        static_cast<int32_t>(stage_nominal_slew_shift_q5_27_ - drop_q5_27);
+      slew_shift_q5_27_ = stage_nominal_slew_shift_q5_27_ - drop_q5_27;
       ReSlopeSlewShift();
       break;
     }
@@ -170,7 +169,7 @@ void Envelope::NoteOn(
 }
 
 void Envelope::ReSlopeSlewShift() {
-  int32_t nominal = static_cast<int32_t>(stage_nominal_slew_shift_q5_27_);
+  uint32_t nominal = stage_nominal_slew_shift_q5_27_;
   // The shift may sit below nominal (chiff: faster, and the duty
   // compensates the mean so it still rides the dialed curve) but never
   // above it. A shift slower than the stage's own nominal only sluggishly
@@ -185,8 +184,7 @@ void Envelope::ReSlopeSlewShift() {
     // Ramp the (now <= nominal) shift up to nominal over the remaining
     // window; truncation toward zero keeps it from crossing nominal.
     slew_shift_increment_q5_27_ =
-      (nominal - slew_shift_q5_27_)
-      / static_cast<int32_t>(chiff_duration_samples_left_);
+      (nominal - slew_shift_q5_27_) / chiff_duration_samples_left_;
   } else {
     slew_shift_q5_27_ = nominal;
     slew_shift_increment_q5_27_ = 0;
@@ -316,7 +314,7 @@ void Envelope::RenderStage(
   // it otherwise). Its Q5.27 fraction is applied by sigma-delta: the error
   // accumulator's carry selects shift + 1, interpolating time constants
   // between powers of two.
-  int32_t slew_shift_q5_27 = slew_shift_q5_27_;
+  uint32_t slew_shift_q5_27 = slew_shift_q5_27_;
   uint32_t slew_shift_error_accumulator_q0_32 = slew_shift_error_accumulator_q0_32_;
   const int32_t chiff_stage_start_q30 = chiff_stage_start_q30_;
 
@@ -335,8 +333,8 @@ void Envelope::RenderStage(
   // they render the classic exact envelope.
   while (block_samples_left) {
     const bool chiff_active = chiff_duration_samples_left_ != 0;
-    const int32_t slew_shift_increment_q5_27 =
-      chiff_active ? slew_shift_increment_q5_27_ : 0;
+    const uint32_t slew_shift_increment_q5_27 =
+      chiff_active ? slew_shift_increment_q5_27_ : 0u;
     // P(stage target) for this segment, as a u17 so 2^16 always beats a
     // 16-bit draw (all-target: classic envelope). While chiff runs it is
     // the exponential duty curve (lut_env_expo over stage progress)
@@ -348,14 +346,15 @@ void Envelope::RenderStage(
     uint32_t chiff_duty_u17 = 1u << 16;
     if (chiff_active) {
       uint32_t duty_u16 = Interpolate824(lut_env_expo, chiff_duty_phase_u32_);
-      int32_t drop_q5_27 =
-        static_cast<int32_t>(stage_nominal_slew_shift_q5_27_) - slew_shift_q5_27;
-      if (drop_q5_27 > 0) {
-        uint32_t drop_int = static_cast<uint32_t>(drop_q5_27) >> 27;
+      // ramp <= nominal always (armed <= nominal, rises toward it), so the
+      // drop is a non-negative shift magnitude.
+      uint32_t drop_q5_27 = stage_nominal_slew_shift_q5_27_ - slew_shift_q5_27;
+      if (drop_q5_27) {
+        uint32_t drop_int = drop_q5_27 >> 27;
         uint32_t two_pow_neg_drop_u16 = drop_int >= 16
           ? 0
           : Interpolate824(lut_expo2_neg,
-              (static_cast<uint32_t>(drop_q5_27) & 0x07FFFFFFu) << 5) >> drop_int;
+              (drop_q5_27 & 0x07FFFFFFu) << 5) >> drop_int;
         uint32_t beta_u16 = (1u << 16) - two_pow_neg_drop_u16;
         uint32_t effective_gap_u16 =
           ((65535u - duty_u16) * beta_u16) >> 16;
@@ -441,7 +440,7 @@ void Envelope::RenderStage(
       // Window closed: land on stage nominal. The step is bounded by the
       // re-slope division's truncation residual (under one integer shift)
       // and occurs at chiff's minimum intensity.
-      slew_shift_q5_27 = static_cast<int32_t>(stage_nominal_slew_shift_q5_27_);
+      slew_shift_q5_27 = stage_nominal_slew_shift_q5_27_;
     }
 
     if (timed && stage_samples_left == 0) {
