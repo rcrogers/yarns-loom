@@ -64,9 +64,14 @@ class Envelope {
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
-  // One render loop for all envelopes, chiff or not: this is a realtime
-  // system, so the worst case is the only case that matters, and a lean
-  // variant would only flatter the average.
+  // Dispatch on chiff activity so the chiff-inactive render carries none of
+  // the chiff machinery (draw, duty, coefficient ramp). Transitions happen
+  // once, at a re-dispatch point, not per sample.
+  void RenderStageDispatch(
+    int16_t* sample_buffer, size_t block_samples_left,
+    int32_t bias_q31, int32_t bias_slope_q31
+  );
+  template<bool Chiff>
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31

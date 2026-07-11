@@ -301,7 +301,18 @@ void Envelope::Trigger(EnvelopeStage stage) {
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
+  RenderStageDispatch(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
+}
+
+void Envelope::RenderStageDispatch(
+  int16_t* sample_buffer, size_t block_samples_left,
+  int32_t bias_q31, int32_t bias_slope_q31
+) {
+  if (chiff_duration_samples_left_) {
+    RenderStage<true >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  } else {
+    RenderStage<false>(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  }
 }
 
 // Mix the envelope value (Q30) and the already-advanced bias (Q31) into a
@@ -321,47 +332,40 @@ void Envelope::HandOffToNextStage(
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   Trigger(static_cast<EnvelopeStage>(stage_ + 1));
-  RenderStage(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  // Re-dispatch: the chiff window may have expired within this block.
+  RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
 }
 
+template<bool Chiff>
 void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   int32_t value_q30 = value_q30_;
+  int32_t slew_alpha_q31 = slew_alpha_q31_;
+
+  // One straight run, bounded by the block, the stage countdown, and (with
+  // chiff) the chiff window. Whichever expires hands off or re-dispatches --
+  // once, not re-checked per sample.
+  const bool timed = phase_increment_u32_ != 0;
+  uint32_t run_samples = block_samples_left;
+  if (timed) run_samples = std::min<uint32_t>(run_samples, stage_samples_left_);
+  if (Chiff) run_samples = std::min<uint32_t>(run_samples, chiff_duration_samples_left_);
+  int16_t* const segment_end = sample_buffer + run_samples;
   const int32_t stage_target_q30 = target_q30_;
 
-  // Slew coefficient (Q31) and its running value; the shift is kept only to
-  // derive the chiff beta, and advances at segment rate.
-  uint32_t slew_shift_q5_27 = slew_shift_q5_27_;
-  int32_t slew_alpha_q31 = slew_alpha_q31_;
-  const int32_t chiff_stage_start_q30 = chiff_stage_start_q30_;
-
-  // Buffer position (plus this instance's decorrelation offset) doubles as
-  // the index into the shared PRNG block.
-  const uint32_t* prng = &shared_prng_buffer[
-    prng_offset_u32_ + (kAudioBlockSize - block_samples_left)];
-
-  const bool timed = phase_increment_u32_ != 0;
-  uint32_t stage_samples_left = timed ? stage_samples_left_ : UINT32_MAX;
-
-  // Segmented by the two countdowns (stage, chiff duration); one loop body.
-  // A chiff-inactive segment carries a zero decay (constant alpha) and an
-  // all-target duty (a 16-bit draw is always < 2^16): the classic envelope.
-  while (block_samples_left) {
-    const bool chiff_active = chiff_duration_samples_left_ != 0;
-    const int32_t slew_alpha_decay_q32 =
-      chiff_active ? slew_alpha_decay_q32_ : 0;
-    // P(stage target) for this segment (u17). While chiff runs: the
-    // exponential duty curve (lut_env_expo over stage progress) with its
-    // mixing depth crossfaded against the residual slew lag by
-    // beta = 1 - 2^-(nominal - shift), draining to nothing as the shift
-    // reaches nominal. Amount 0 (zero drop) stays exactly classic. Evaluated
-    // once per segment; segments are stage- and window-bounded.
+  if (Chiff) {
+    const int32_t chiff_stage_start_q30 = chiff_stage_start_q30_;
+    const int32_t decay_q32 = slew_alpha_decay_q32_;
+    const uint32_t slew_shift_increment = slew_shift_increment_q5_27_;
+    uint32_t slew_shift_q5_27 = slew_shift_q5_27_;
+    // P(stage target) for this run (u17): the exponential duty curve
+    // (lut_env_expo over stage progress) with its mixing depth crossfaded
+    // against the residual slew lag by beta = 1 - 2^-(nominal - shift),
+    // draining to nothing as the shift reaches nominal. Evaluated once.
     uint32_t chiff_duty_u17 = 1u << 16;
-    if (chiff_active) {
+    {
       uint32_t duty_u16 = Interpolate824(lut_env_expo, chiff_duty_phase_u32_);
-      // shift <= nominal always, so the drop is a non-negative magnitude.
       uint32_t drop_q5_27 = stage_nominal_slew_shift_q5_27_ - slew_shift_q5_27;
       if (drop_q5_27) {
         uint32_t drop_int = drop_q5_27 >> 27;
@@ -370,95 +374,82 @@ void Envelope::RenderStage(
           : Interpolate824(lut_expo2_neg,
               (drop_q5_27 & 0x07FFFFFFu) << 5) >> drop_int;
         uint32_t beta_u16 = (1u << 16) - two_pow_neg_drop_u16;
-        uint32_t effective_gap_u16 =
-          ((65535u - duty_u16) * beta_u16) >> 16;
+        uint32_t effective_gap_u16 = ((65535u - duty_u16) * beta_u16) >> 16;
         chiff_duty_u17 = (1u << 16) - effective_gap_u16;
       }
     }
-    uint32_t run_samples = std::min<uint32_t>(
-      block_samples_left,
-      std::min<uint32_t>(
-        stage_samples_left,
-        chiff_active ? chiff_duration_samples_left_ : UINT32_MAX
-      )
-    );
-    block_samples_left -= run_samples;
-    stage_samples_left -= run_samples;
-    if (chiff_active) chiff_duration_samples_left_ -= run_samples;
-
-    // Pin the loop invariants into registers (blackbox-hoist idiom; GCC 4.8
-    // with -fno-move-loop-invariants otherwise reloads them every sample).
-    uint32_t pinned_duty_u17 = chiff_duty_u17;
-    int32_t pinned_stage_start_q30 = chiff_stage_start_q30;
-    int32_t pinned_stage_target_q30 = stage_target_q30;
-    int32_t pinned_bias_slope_q31 = bias_slope_q31;
-    int32_t pinned_decay_q32 = slew_alpha_decay_q32;
-    __asm__ volatile ("" : "+r"(pinned_duty_u17),
-                           "+r"(pinned_stage_start_q30),
-                           "+r"(pinned_stage_target_q30),
-                           "+r"(pinned_bias_slope_q31),
-                           "+r"(pinned_decay_q32));
-
-    // End-pointer termination: folds the loop test into the buffer pointer.
-    int16_t* const segment_end = sample_buffer + run_samples;
+    // Buffer position (plus this instance's decorrelation offset) doubles as
+    // the index into the shared PRNG block.
+    const uint32_t* prng = &shared_prng_buffer[
+      prng_offset_u32_ + (kAudioBlockSize - block_samples_left)];
     while (sample_buffer != segment_end) {
       // PRNG budget: bits 0-15 are the duty draw; bits 16-31 are spare.
       uint32_t chiff_draw_u32 = *prng++;
-      // Geometric coefficient ramp: alpha *= 2^-increment (zero decay holds).
-      slew_alpha_q31 -= static_cast<int32_t>(
-        (static_cast<int64_t>(slew_alpha_q31) * pinned_decay_q32) >> 32);
+      slew_shift_q5_27 += slew_shift_increment;
+      // Geometric coefficient ramp: alpha *= 2^-increment. Explicit SMULL
+      // high word so GCC 4.8 keeps the product 32-bit (else it spills).
+      int32_t ramp_lo, ramp_hi;
+      __asm__("smull %0, %1, %2, %3"
+              : "=&r"(ramp_lo), "=r"(ramp_hi)
+              : "r"(slew_alpha_q31), "r"(decay_q32));
+      slew_alpha_q31 -= ramp_hi;
       // Duty-weighted target: stage target if the draw lands under the duty,
       // else the stage start, via a branchless sign-mask blend. Both fit 17
       // bits, so the difference fits int32 and its sign is the comparison.
       int32_t target_select_mask = (
         static_cast<int32_t>(chiff_draw_u32 & 0xFFFF)
-        - static_cast<int32_t>(pinned_duty_u17)
+        - static_cast<int32_t>(chiff_duty_u17)
       ) >> 31;
-      int32_t target_q30 = pinned_stage_start_q30
-        ^ ((pinned_stage_start_q30 ^ pinned_stage_target_q30)
-           & target_select_mask);
-      // Never overshoots: alpha <= 1, so |delta * alpha >> 31| <= |delta|.
+      int32_t target_q30 = chiff_stage_start_q30
+        ^ ((chiff_stage_start_q30 ^ stage_target_q30) & target_select_mask);
+      // Never overshoots: alpha <= 1, so |step| <= |delta|.
       value_q30 += static_cast<int32_t>(
         (static_cast<int64_t>(target_q30 - value_q30) * slew_alpha_q31) >> 31);
-      bias_q31 += pinned_bias_slope_q31;
+      bias_q31 += bias_slope_q31;
       *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
     }
-
-    // Advance the duty phase and the shift ramp at segment rate (the shift
-    // feeds only the next segment's beta).
-    if (chiff_active) {
-      uint64_t advanced_phase =
-        static_cast<uint64_t>(chiff_duty_phase_u32_) +
-        static_cast<uint64_t>(phase_increment_u32_) * run_samples;
-      chiff_duty_phase_u32_ = advanced_phase > UINT32_MAX
-        ? UINT32_MAX : static_cast<uint32_t>(advanced_phase);
-      slew_shift_q5_27 += slew_shift_increment_q5_27_ * run_samples;
-    }
-
-    if (chiff_active && chiff_duration_samples_left_ == 0) {
-      // Window closed: land the shift and alpha on stage nominal.
+    // Advance the duty phase and the shift ramp for the whole run.
+    uint64_t advanced_phase =
+      static_cast<uint64_t>(chiff_duty_phase_u32_) +
+      static_cast<uint64_t>(phase_increment_u32_) * run_samples;
+    chiff_duty_phase_u32_ = advanced_phase > UINT32_MAX
+      ? UINT32_MAX : static_cast<uint32_t>(advanced_phase);
+    chiff_duration_samples_left_ -= run_samples;
+    if (chiff_duration_samples_left_ == 0) {
+      // Window closed: land the shift and alpha exactly on stage nominal.
       slew_shift_q5_27 = stage_nominal_slew_shift_q5_27_;
       slew_alpha_q31 = AlphaFromShift_q31(stage_nominal_slew_shift_q5_27_);
     }
+    slew_shift_q5_27_ = slew_shift_q5_27;
+  } else {
+    // Chiff inactive: plain slew at the constant stage rate (alpha fixed).
+    const int32_t alpha_q31 = slew_alpha_q31;
+    while (sample_buffer != segment_end) {
+      value_q30 += static_cast<int32_t>(
+        (static_cast<int64_t>(stage_target_q30 - value_q30) * alpha_q31) >> 31);
+      bias_q31 += bias_slope_q31;
+      *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+    }
+  }
 
-    if (timed && stage_samples_left == 0) {
-      // Countdown expired: hand off to the next stage from wherever the slew
-      // got to. Save state first -- the re-entrant Trigger re-slopes from it.
-      value_q30_ = value_q30;
-      bias_q31_ = bias_q31;
-      slew_alpha_q31_ = slew_alpha_q31;
-      slew_shift_q5_27_ = slew_shift_q5_27;
-      stage_samples_left_ = 0;
+  block_samples_left -= run_samples;
+  value_q30_ = value_q30;
+  bias_q31_ = bias_q31;
+  slew_alpha_q31_ = slew_alpha_q31;
+
+  if (timed) {
+    stage_samples_left_ -= run_samples;
+    if (stage_samples_left_ == 0) {
+      // Countdown expired: hand off to the next stage. Tail call stays flat.
       return HandOffToNextStage(
         sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
     }
   }
-
-  value_q30_ = value_q30;
-  bias_q31_ = bias_q31;
-  slew_alpha_q31_ = slew_alpha_q31;
-  slew_shift_q5_27_ = slew_shift_q5_27;
-  if (timed) stage_samples_left_ = stage_samples_left;
+  if (Chiff && chiff_duration_samples_left_ == 0 && block_samples_left) {
+    // Window closed mid-block: render the remainder as chiff-inactive.
+    return RenderStageDispatch(
+      sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  }
 }
 
 // Exact unsigned division of a 64-bit dividend (hi:lo) by a 32-bit divisor,
