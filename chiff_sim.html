@@ -66,6 +66,10 @@ header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
 .check1 { display: flex; gap: 7px; align-items: center; font-size: 12px;
   color: var(--ink2); margin-top: 8px; cursor: pointer; }
 .check1 input { accent-color: var(--accent); margin: 0; }
+.check1 select { flex: 1; font: 11px system-ui; padding: 4px 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+  border-radius: 4px; }
+.check1 select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .scope { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 120px; }
 .spectrum { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
@@ -124,7 +128,18 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
       <div class="note">100 = full lut_env_expo (1&minus;e<sup>&minus;4x</sup>) warp
         (matches firmware): low amounts drop the shift into the audible
         band sooner. 0 = linear amount&rarr;shift-drop (old behavior).</div>
-      <label class="check1"><input type="checkbox" id="jitter"> Jitter slew (anti-zipper)</label>
+      <label class="check1">Slew&nbsp;
+        <select id="slewMethod">
+          <option value="sigma">sigma-delta shift (current chiff)</option>
+          <option value="frac" selected>fractional coeff (unified, exact contour)</option>
+          <option value="lincoeff">linear-coeff interp (drift-free, warps contour)</option>
+        </select></label>
+      <div class="note">Unify the slew: <b>fractional coeff</b> replaces the
+        sigma-delta shift-dither with an exact per-sample multiply by
+        2<sup>-shift</sup> (shift still ramped additively, so the contour is
+        identical) -- no ripple for a nonlinear CV dest (wavefolder) to
+        amplify. <b>linear-coeff</b> interpolates the coefficient linearly
+        (cheap, no drift) but front-loads brightness.</div>
     </div>
 
     <div class="group"><h2>Duty</h2>
@@ -241,6 +256,11 @@ function render(p) {
   const windowN = chiffLeft;
   let ramp = nominal - drop;
   let rampInc = chiffLeft ? Math.trunc((nominal - ramp) / chiffLeft) : 0;
+  // Linear-coeff option: alpha ramps additively (drift-free) between the
+  // window's shift endpoints, but in the coefficient domain (2^-shift).
+  let alphaLin = Math.pow(2, -ramp / (1 << 27));
+  let alphaLinInc = chiffLeft
+    ? (Math.pow(2, -nominal / (1 << 27)) - alphaLin) / chiffLeft : 0;
   let err = 0x20001000;                        // sigma-delta accumulator seed
   let value = 0, S = 0, stageTotal = samplesLeft;
   let gateOff = false;
@@ -269,6 +289,10 @@ function render(p) {
     if (ramp > nominal) ramp = nominal;
     if (chiffLeft) rampInc = Math.trunc((nominal - ramp) / chiffLeft);
     else { ramp = nominal; rampInc = 0; }
+    const alphaNom = Math.pow(2, -nominal / (1 << 27));
+    if (alphaLin < alphaNom) alphaLin = alphaNom;   // mirror the ramp clamp
+    if (chiffLeft) alphaLinInc = (alphaNom - alphaLin) / chiffLeft;
+    else { alphaLin = alphaNom; alphaLinInc = 0; }
     stageTotal = samplesLeft;
   };
 
@@ -290,8 +314,8 @@ function render(p) {
     const chiffActive = chiffLeft > 0;
     let shiftQ;
     if (chiffActive) {
-      ramp += rampInc; chiffLeft -= 1; shiftQ = ramp;
-      if (chiffLeft === 0) ramp = nominal;
+      ramp += rampInc; alphaLin += alphaLinInc; chiffLeft -= 1; shiftQ = ramp;
+      if (chiffLeft === 0) { ramp = nominal; alphaLin = Math.pow(2, -nominal / (1 << 27)); }
     } else shiftQ = ramp;
 
     const frac = (shiftQ * 32) % U32;
@@ -313,19 +337,22 @@ function render(p) {
     let sampleTarget = target;
     if ((r & 0xFFFF) >= duty) sampleTarget = S;
 
-    if (p.jitter) {
-      // Stochastic slew: move a random fraction of the delta with mean
-      // 2^-shiftFloat (so the mean trajectory and noise level are kept),
-      // bounded to [0, delta] so value never leaves [floor, peak]. Uses
-      // the spare PRNG bits 16-31. Smears the dyadic landing levels that
-      // cause the fading-tail zipper.
-      const shiftFloat = shiftQ / (1 << 27);
-      const r16 = (r >>> 16) & 0xFFFF;
-      let f = (r16 / 65536) * 2 * Math.pow(2, -shiftFloat);
-      if (f > 1) f = 1;
-      value += (sampleTarget - value) * f;
+    // Value stays an integer (Q30) in every branch -- Math.floor mirrors the
+    // firmware's arithmetic-shift truncation, so the quantization that matters
+    // is preserved; only the rate coefficient differs between methods.
+    const delta = (sampleTarget - value) | 0;
+    if (p.slewMethod === 'sigma') {
+      // Current chiff path: integer shift dithered by the sigma-delta carry.
+      value += asr(delta, shift);
+    } else if (p.slewMethod === 'lincoeff') {
+      // Coefficient interpolated linearly across the window (drift-free, one
+      // add) -- but linear-in-coeff front-loads brightness vs linear-in-shift.
+      value += Math.floor(delta * alphaLin);
     } else {
-      value += asr((sampleTarget - value) | 0, shift);
+      // Unified fractional coeff: exact per-sample multiply by 2^-shift, with
+      // shift still ramped additively so the contour matches the sigma-delta
+      // path, minus the dither ripple a nonlinear CV dest would amplify.
+      value += Math.floor(delta * Math.pow(2, -shiftQ / (1 << 27)));
     }
     if (countdown !== null) samplesLeft -= 1;
     out[i] = value;
@@ -664,7 +691,7 @@ function params() {
     gate: msFromSlider(+$('gate').value),
     amount: +$('amt').value,
     warp: +$('warp').value / 100,
-    jitter: $('jitter').checked,
+    slewMethod: $('slewMethod').value,
     curve: $('curveExp').getAttribute('aria-pressed') === 'true' ? 'expo' : 'linear',
     k: +$('kTc').value / 10,
     dutySeed: Math.round(+$('seedD').value / 100 * 65536),
@@ -690,7 +717,7 @@ function update() { labels(); if (raf) cancelAnimationFrame(raf); raf = requestA
   $(id).addEventListener('input', update));
 ['showDialed','showNoise','showLine'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));
-$('jitter').addEventListener('change', update);
+$('slewMethod').addEventListener('change', update);
 $('curveLin').addEventListener('click', () => { setCurve('linear'); });
 $('curveExp').addEventListener('click', () => { setCurve('expo'); });
 function setCurve(c) {
