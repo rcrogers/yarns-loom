@@ -130,16 +130,13 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
         band sooner. 0 = linear amount&rarr;shift-drop (old behavior).</div>
       <label class="check1">Slew&nbsp;
         <select id="slewMethod">
-          <option value="sigma">sigma-delta shift (current chiff)</option>
-          <option value="frac" selected>fractional coeff (unified, exact contour)</option>
-          <option value="lincoeff">linear-coeff interp (drift-free, warps contour)</option>
+          <option value="geometric" selected>geometric (alpha *= r, firmware)</option>
+          <option value="sigma">sigma-delta shift (old chiff)</option>
         </select></label>
-      <div class="note">Unify the slew: <b>fractional coeff</b> replaces the
-        sigma-delta shift-dither with an exact per-sample multiply by
-        2<sup>-shift</sup> (shift still ramped additively, so the contour is
-        identical) -- no ripple for a nonlinear CV dest (wavefolder) to
-        amplify. <b>linear-coeff</b> interpolates the coefficient linearly
-        (cheap, no drift) but front-loads brightness.</div>
+      <div class="note"><b>geometric</b> is the firmware design: ramp the
+        coefficient multiplicatively, alpha &times;= r (r = 2<sup>-increment</sup>),
+        exact int64. Ripple-free, so a nonlinear CV dest (wavefolder) has no
+        dither to amplify. <b>sigma-delta</b> is the old path for comparison.</div>
     </div>
 
     <div class="group"><h2>Duty</h2>
@@ -228,6 +225,19 @@ function makePrng(seed) {
 }
 const asr = (x, s) => x >> s;                  // int32 arithmetic shift
 
+// ---- geometric-ramp helpers (BigInt so alpha*r>>31 is the exact int64 the
+// firmware does; JS numbers lose precision past 2^53) ----
+const LN2 = 0.6931471805599453;
+// alpha = 2^-shift as a Q31 BigInt (2^31 == 1.0).
+const alphaQ31 = shiftQ527 => BigInt(Math.round(Math.pow(2, -shiftQ527 / (1 << 27)) * 2147483648));
+// r = 2^-increment as Q31 BigInt via a 2-term Taylor (increment is a tiny
+// per-sample shift step, < 0.01, so 1 - u + u^2/2 matches exact-pow). Computed
+// once per stage in the firmware; here per re-slope.
+function rQ31(rampIncQ527) {
+  const u = (rampIncQ527 / (1 << 27)) * LN2;
+  return BigInt(Math.round((1 - u + u * u / 2) * 2147483648));
+}
+
 // ---- the simulator ----
 function render(p) {
   const aN = Math.max(1, Math.round(p.attack * FS / 1000));
@@ -258,9 +268,9 @@ function render(p) {
   let rampInc = chiffLeft ? Math.trunc((nominal - ramp) / chiffLeft) : 0;
   // Linear-coeff option: alpha ramps additively (drift-free) between the
   // window's shift endpoints, but in the coefficient domain (2^-shift).
-  let alphaLin = Math.pow(2, -ramp / (1 << 27));
-  let alphaLinInc = chiffLeft
-    ? (Math.pow(2, -nominal / (1 << 27)) - alphaLin) / chiffLeft : 0;
+  // Geometric option (the firmware): alpha in Q31, ramped by r per sample.
+  let alphaGeo = alphaQ31(ramp);
+  let rGeo = chiffLeft ? rQ31(rampInc) : (1n << 31n);
   let err = 0x20001000;                        // sigma-delta accumulator seed
   let value = 0, S = 0, stageTotal = samplesLeft;
   let gateOff = false;
@@ -289,10 +299,10 @@ function render(p) {
     if (ramp > nominal) ramp = nominal;
     if (chiffLeft) rampInc = Math.trunc((nominal - ramp) / chiffLeft);
     else { ramp = nominal; rampInc = 0; }
-    const alphaNom = Math.pow(2, -nominal / (1 << 27));
-    if (alphaLin < alphaNom) alphaLin = alphaNom;   // mirror the ramp clamp
-    if (chiffLeft) alphaLinInc = (alphaNom - alphaLin) / chiffLeft;
-    else { alphaLin = alphaNom; alphaLinInc = 0; }
+    const alphaNomB = alphaQ31(nominal);
+    if (alphaGeo < alphaNomB) alphaGeo = alphaNomB; // mirror clamp (alpha >= alphaNom)
+    if (chiffLeft) rGeo = rQ31(rampInc);
+    else { alphaGeo = alphaNomB; rGeo = 1n << 31n; }
     stageTotal = samplesLeft;
   };
 
@@ -314,8 +324,10 @@ function render(p) {
     const chiffActive = chiffLeft > 0;
     let shiftQ;
     if (chiffActive) {
-      ramp += rampInc; alphaLin += alphaLinInc; chiffLeft -= 1; shiftQ = ramp;
-      if (chiffLeft === 0) { ramp = nominal; alphaLin = Math.pow(2, -nominal / (1 << 27)); }
+      ramp += rampInc;
+      alphaGeo = (alphaGeo * rGeo) >> 31n;         // firmware: alpha *= r
+      chiffLeft -= 1; shiftQ = ramp;
+      if (chiffLeft === 0) { ramp = nominal; alphaGeo = alphaQ31(nominal); }
     } else shiftQ = ramp;
 
     const frac = (shiftQ * 32) % U32;
@@ -337,22 +349,16 @@ function render(p) {
     let sampleTarget = target;
     if ((r & 0xFFFF) >= duty) sampleTarget = S;
 
-    // Value stays an integer (Q30) in every branch -- Math.floor mirrors the
-    // firmware's arithmetic-shift truncation, so the quantization that matters
-    // is preserved; only the rate coefficient differs between methods.
+    // Value stays an integer (Q30); Math.floor / asr mirror the firmware's
+    // arithmetic-shift truncation, so the quantization that matters is kept.
     const delta = (sampleTarget - value) | 0;
     if (p.slewMethod === 'sigma') {
-      // Current chiff path: integer shift dithered by the sigma-delta carry.
+      // Old chiff path: integer shift dithered by the sigma-delta carry.
       value += asr(delta, shift);
-    } else if (p.slewMethod === 'lincoeff') {
-      // Coefficient interpolated linearly across the window (drift-free, one
-      // add) -- but linear-in-coeff front-loads brightness vs linear-in-shift.
-      value += Math.floor(delta * alphaLin);
     } else {
-      // Unified fractional coeff: exact per-sample multiply by 2^-shift, with
-      // shift still ramped additively so the contour matches the sigma-delta
-      // path, minus the dither ripple a nonlinear CV dest would amplify.
-      value += Math.floor(delta * Math.pow(2, -shiftQ / (1 << 27)));
+      // Firmware design: value += (delta * alpha) >> 31, exact int64. BigInt
+      // right shift floors (matches the arithmetic shift) for negative delta.
+      value += Number((BigInt(delta) * alphaGeo) >> 31n);
     }
     if (countdown !== null) samplesLeft -= 1;
     out[i] = value;
