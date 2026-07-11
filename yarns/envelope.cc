@@ -79,6 +79,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   phase_increment_u32_ = 0;
   stage_samples_left_ = 0;
   stage_nominal_slew_shift_q5_27_ = 0;
+  slew_alpha_q31_ = 0;
   slew_shift_q5_27_ = 0;
   slew_shift_increment_q5_27_ = 0;
   chiff_duration_samples_left_ = 0;
@@ -272,6 +273,15 @@ void Envelope::Trigger(EnvelopeStage stage) {
           kMaxSlewShift_q5_27
         );
   }
+  // Exact classic-slew coefficient alpha = 2^-(nominal) for the chiff-
+  // inactive loop: 2^-fraction (lut_expo2_neg, u16) promoted to Q31, then
+  // downshifted by the integer part. Same LUT and Q5.27 split the chiff beta
+  // uses. At fraction 0 this is ~0x7FFF8000 (one LSB under 2^31 == 1.0).
+  uint32_t nominal_int = stage_nominal_slew_shift_q5_27_ >> 27;
+  uint32_t two_pow_neg_fraction_u16 = Interpolate824(
+    lut_expo2_neg, (stage_nominal_slew_shift_q5_27_ & 0x07FFFFFFu) << 5);
+  slew_alpha_q31_ = (two_pow_neg_fraction_u16 << 15) >> nominal_int;
+
   // The nominal may have changed; keep the chiff ramp's original timetable,
   // re-aimed at this stage's nominal.
   ReSlopeSlewShift();
@@ -387,42 +397,61 @@ void Envelope::RenderStage(
     // End-pointer termination: folds the loop test into the buffer
     // pointer instead of a separate countdown register.
     int16_t* const segment_end = sample_buffer + run_samples;
-    while (sample_buffer != segment_end) {
-      // PRNG budget: bits 0-15 are the duty draw; bits 16-31 are spare
-      // (reserved for the extremes dial).
-      uint32_t chiff_draw_u32 = *prng++;
-      slew_shift_q5_27 += slew_shift_increment_q5_27;
-      uint32_t shift_fraction_u32 = static_cast<uint32_t>(slew_shift_q5_27) << 5;
-      // Sigma-delta the shift fraction: the carry out of the phase
-      // accumulation selects shift + 1. ADDS/ADC keeps the carry in the
-      // flags; GCC 4.8 would otherwise spend an ITE pair reifying it.
-      uint32_t shift;
-      __asm__ (
-          "adds %1, %1, %2\n\t"
-          "lsr %0, %3, #27\n\t"       // flag-preserving (no S suffix)
-          "adc %0, %0, #0"
-          : "=&r"(shift), "+&r"(slew_shift_error_accumulator_q0_32)
-          : "r"(shift_fraction_u32), "r"(static_cast<uint32_t>(slew_shift_q5_27))
-          : "cc");
-      // Duty-weighted target: the stage target if the draw lands under
-      // the duty, else the stage's start value, via a branchless sign-mask
-      // blend. The u17 duty means an inactive segment (duty = 2^16) beats
-      // every 16-bit draw: pure stage-target slewing. Sign arithmetic is
-      // safe: both operands fit 17 bits, so the difference fits int32 and
-      // its sign bit is the comparison result.
-      int32_t target_select_mask = (
-        static_cast<int32_t>(chiff_draw_u32 & 0xFFFF)
-        - static_cast<int32_t>(pinned_duty_u17)
-      ) >> 31;  // all-ones iff draw < duty: pick the stage target
-      int32_t target_q30 = pinned_stage_start_q30
-        ^ ((pinned_stage_start_q30 ^ pinned_stage_target_q30)
-           & target_select_mask);
-      // Never overshoots: |delta >> shift| <= |delta|. Truncation stalls
-      // an upward slew once delta < 2^shift, but timed stages end by
-      // countdown, and hold stages are content to sit near their target.
-      value_q30 += (target_q30 - value_q30) >> shift;
-      bias_q31 += pinned_bias_slope_q31;
-      *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+    if (chiff_active) {
+      while (sample_buffer != segment_end) {
+        // PRNG budget: bits 0-15 are the duty draw; bits 16-31 are spare
+        // (reserved for the extremes dial).
+        uint32_t chiff_draw_u32 = *prng++;
+        slew_shift_q5_27 += slew_shift_increment_q5_27;
+        uint32_t shift_fraction_u32 = static_cast<uint32_t>(slew_shift_q5_27) << 5;
+        // Sigma-delta the shift fraction: the carry out of the phase
+        // accumulation selects shift + 1. ADDS/ADC keeps the carry in the
+        // flags; GCC 4.8 would otherwise spend an ITE pair reifying it.
+        uint32_t shift;
+        __asm__ (
+            "adds %1, %1, %2\n\t"
+            "lsr %0, %3, #27\n\t"       // flag-preserving (no S suffix)
+            "adc %0, %0, #0"
+            : "=&r"(shift), "+&r"(slew_shift_error_accumulator_q0_32)
+            : "r"(shift_fraction_u32), "r"(static_cast<uint32_t>(slew_shift_q5_27))
+            : "cc");
+        // Duty-weighted target: the stage target if the draw lands under
+        // the duty, else the stage's start value, via a branchless sign-mask
+        // blend. The u17 duty means an inactive segment (duty = 2^16) beats
+        // every 16-bit draw: pure stage-target slewing. Sign arithmetic is
+        // safe: both operands fit 17 bits, so the difference fits int32 and
+        // its sign bit is the comparison result.
+        int32_t target_select_mask = (
+          static_cast<int32_t>(chiff_draw_u32 & 0xFFFF)
+          - static_cast<int32_t>(pinned_duty_u17)
+        ) >> 31;  // all-ones iff draw < duty: pick the stage target
+        int32_t target_q30 = pinned_stage_start_q30
+          ^ ((pinned_stage_start_q30 ^ pinned_stage_target_q30)
+             & target_select_mask);
+        // Never overshoots: |delta >> shift| <= |delta|. Truncation stalls
+        // an upward slew once delta < 2^shift, but timed stages end by
+        // countdown, and hold stages are content to sit near their target.
+        value_q30 += (target_q30 - value_q30) >> shift;
+        bias_q31 += pinned_bias_slope_q31;
+        *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+      }
+    } else {
+      // Chiff-inactive: the classic envelope, and the only place the slew
+      // ripple is exposed. Slew by the exact fractional rate (multiply by
+      // alpha = 2^-nominal, constant for the stage) instead of the sigma-
+      // delta-dithered integer shift, so no periodic ripple rides the moving
+      // value for a nonlinear CV destination to amplify. No PRNG or duty
+      // draw: the target is always the stage target. alpha in Q31, so the
+      // Q30 delta * alpha lands back in Q30 after >> 31; the 64-bit product
+      // holds |delta| (< 2^31) * alpha (<= 2^31) without overflow.
+      const int32_t alpha_q31 = slew_alpha_q31_;
+      while (sample_buffer != segment_end) {
+        value_q30 += static_cast<int32_t>(
+          (static_cast<int64_t>(pinned_stage_target_q30 - value_q30) *
+           alpha_q31) >> 31);
+        bias_q31 += pinned_bias_slope_q31;
+        *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+      }
     }
 
     // Advance the duty phase by the samples just rendered (segment rate).

@@ -132,6 +132,18 @@ class Envelope {
   // accumulator below, interpolating time constants between powers of two.
   uint32_t stage_nominal_slew_shift_q5_27_;
 
+  // Classic-slew (chiff-inactive) coefficient: the exact fractional rate
+  // 2^-(nominal) in Q31 (2^31 == 1.0), precomputed at Trigger. The chiff-
+  // inactive loop applies it as a multiply so the per-sample slew hits the
+  // true rate, instead of the sigma-delta dithering between the two integer
+  // shifts that bracket the fraction. That dither leaves a periodic ripple on
+  // the moving envelope -- negligible into a linear VCA (~-90 dB), but a
+  // nonlinear CV destination (wavefolder fold amount, near-resonant filter
+  // cutoff) has a steep transfer slope that amplifies it into audible noise.
+  // Signed (always positive, < 2^31) so the per-sample slew is a single
+  // signed 32x32->64 SMULL against the signed delta, not a 3-part widening.
+  int32_t slew_alpha_q31_;
+
   // Sigma-delta state for the fractional shift: the fraction (as Q32) is
   // accumulated per sample, and the carry selects shift + 1. Deterministic
   // first-order noise shaping: the same average coefficient as random
