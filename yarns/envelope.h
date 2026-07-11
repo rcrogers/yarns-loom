@@ -132,26 +132,14 @@ class Envelope {
   // accumulator below, interpolating time constants between powers of two.
   uint32_t stage_nominal_slew_shift_q5_27_;
 
-  // Classic-slew (chiff-inactive) coefficient: the exact fractional rate
-  // 2^-(nominal) in Q31 (2^31 == 1.0), precomputed at Trigger. The chiff-
-  // inactive loop applies it as a multiply so the per-sample slew hits the
-  // true rate, instead of the sigma-delta dithering between the two integer
-  // shifts that bracket the fraction. That dither leaves a periodic ripple on
-  // the moving envelope -- negligible into a linear VCA (~-90 dB), but a
-  // nonlinear CV destination (wavefolder fold amount, near-resonant filter
-  // cutoff) has a steep transfer slope that amplifies it into audible noise.
-  // Signed (always positive, < 2^31) so the per-sample slew is a single
-  // signed 32x32->64 SMULL against the signed delta, not a 3-part widening.
+  // Slew rate 2^-shift in Q31 (2^31 == 1.0): value += (target-value)*alpha>>31.
+  // Positive, <= 0x7FFF8000 < 2^31 (single signed SMULL vs the signed delta).
   int32_t slew_alpha_q31_;
 
-  // Sigma-delta state for the fractional shift: the fraction (as Q32) is
-  // accumulated per sample, and the carry selects shift + 1. Deterministic
-  // first-order noise shaping: the same average coefficient as random
-  // dither, but the error is a periodic high-frequency ripple instead of
-  // white noise + random walk. Free-running across stages; seeded from the
-  // instance address in Init() so co-triggered envelopes' ripple patterns
-  // are phase-offset rather than correlated.
-  uint32_t slew_shift_error_accumulator_q0_32_;
+  // Geometric ramp of the coefficient while chiff runs: decay = 1 - 2^-increment
+  // (Q32), so alpha -= (alpha*decay)>>32 each sample == alpha *= 2^-increment,
+  // reproducing the linear-shift ramp with no per-sample LUT. Zero = hold.
+  int32_t slew_alpha_decay_q32_;
 
   // Per-instance start offset into the double-length shared PRNG buffer.
   // Distinct offsets mean co-triggered envelopes never consume the same
