@@ -186,6 +186,22 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
   return static_cast<int32_t>(u_q32 - ((u_q32 * u_q32) >> 33));
 }
 
+// P(stage target) as a u17: the exponential duty curve (lut_env_expo over
+// stage progress) with mixing depth crossfaded by beta = 1 - 2^-drop
+// (drop = nominal - shift). Evaluated at a run's start and end, then lerped.
+static inline uint32_t ChiffDutyU17(uint32_t duty_phase_u32, uint32_t drop_q5_27) {
+  uint32_t duty_u16 = Interpolate824(lut_env_expo, duty_phase_u32);
+  if (!drop_q5_27) return 1u << 16;
+  uint32_t drop_int = drop_q5_27 >> 27;
+  uint32_t two_pow_neg_drop_u16 = drop_int >= 16
+    ? 0
+    : Interpolate824(lut_expo2_neg,
+        (drop_q5_27 & 0x07FFFFFFu) << 5) >> drop_int;
+  uint32_t beta_u16 = (1u << 16) - two_pow_neg_drop_u16;
+  uint32_t effective_gap_u16 = ((65535u - duty_u16) * beta_u16) >> 16;
+  return (1u << 16) - effective_gap_u16;
+}
+
 void Envelope::ReSlopeSlewShift() {
   uint32_t nominal = stage_nominal_slew_shift_q5_27_;
   // The shift may sit below nominal (chiff: faster, and the duty
@@ -357,27 +373,26 @@ void Envelope::RenderStage(
   if (Chiff) {
     const int32_t chiff_stage_start_q30 = chiff_stage_start_q30_;
     const int32_t decay_q32 = slew_alpha_decay_q32_;
-    const uint32_t slew_shift_increment = slew_shift_increment_q5_27_;
-    uint32_t slew_shift_q5_27 = slew_shift_q5_27_;
-    // P(stage target) for this run (u17): the exponential duty curve
-    // (lut_env_expo over stage progress) with its mixing depth crossfaded
-    // against the residual slew lag by beta = 1 - 2^-(nominal - shift),
-    // draining to nothing as the shift reaches nominal. Evaluated once.
-    uint32_t chiff_duty_u17 = 1u << 16;
-    {
-      uint32_t duty_u16 = Interpolate824(lut_env_expo, chiff_duty_phase_u32_);
-      uint32_t drop_q5_27 = stage_nominal_slew_shift_q5_27_ - slew_shift_q5_27;
-      if (drop_q5_27) {
-        uint32_t drop_int = drop_q5_27 >> 27;
-        uint32_t two_pow_neg_drop_u16 = drop_int >= 16
-          ? 0
-          : Interpolate824(lut_expo2_neg,
-              (drop_q5_27 & 0x07FFFFFFu) << 5) >> drop_int;
-        uint32_t beta_u16 = (1u << 16) - two_pow_neg_drop_u16;
-        uint32_t effective_gap_u16 = ((65535u - duty_u16) * beta_u16) >> 16;
-        chiff_duty_u17 = (1u << 16) - effective_gap_u16;
-      }
-    }
+    const uint32_t nominal = stage_nominal_slew_shift_q5_27_;
+    // Duty (P(stage target), u17) lerped across the run. Held per segment it
+    // stays at the run-start value, which the beta crush drives near zero for
+    // ~1-block attacks -- the mid-attack loudness trough. Interpolating from
+    // the run's start to its end lets the duty rise within the run instead.
+    // Endpoints from the start/end phase and shift; Q8 fractional accumulator.
+    uint32_t phase_start = chiff_duty_phase_u32_;
+    uint64_t phase_end64 = static_cast<uint64_t>(phase_start)
+      + static_cast<uint64_t>(phase_increment_u32_) * run_samples;
+    uint32_t phase_end = phase_end64 > UINT32_MAX
+      ? UINT32_MAX : static_cast<uint32_t>(phase_end64);
+    uint32_t shift_end =
+      slew_shift_q5_27_ + slew_shift_increment_q5_27_ * run_samples;
+    if (shift_end > nominal) shift_end = nominal;
+    int32_t duty_start = ChiffDutyU17(phase_start, nominal - slew_shift_q5_27_);
+    int32_t duty_end = ChiffDutyU17(phase_end, nominal - shift_end);
+    int32_t duty_acc_q8 = duty_start << 8;
+    const int32_t duty_inc_q8 =
+      ((duty_end - duty_start) << 8) / static_cast<int32_t>(run_samples);
+
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
     const uint32_t* prng = &shared_prng_buffer[
@@ -385,7 +400,6 @@ void Envelope::RenderStage(
     while (sample_buffer != segment_end) {
       // PRNG budget: bits 0-15 are the duty draw; bits 16-31 are spare.
       uint32_t chiff_draw_u32 = *prng++;
-      slew_shift_q5_27 += slew_shift_increment;
       // Geometric coefficient ramp: alpha *= 2^-increment. Explicit SMULL
       // high word so GCC 4.8 keeps the product 32-bit (else it spills).
       int32_t ramp_lo, ramp_hi;
@@ -397,9 +411,9 @@ void Envelope::RenderStage(
       // else the stage start, via a branchless sign-mask blend. Both fit 17
       // bits, so the difference fits int32 and its sign is the comparison.
       int32_t target_select_mask = (
-        static_cast<int32_t>(chiff_draw_u32 & 0xFFFF)
-        - static_cast<int32_t>(chiff_duty_u17)
+        static_cast<int32_t>(chiff_draw_u32 & 0xFFFF) - (duty_acc_q8 >> 8)
       ) >> 31;
+      duty_acc_q8 += duty_inc_q8;
       int32_t target_q30 = chiff_stage_start_q30
         ^ ((chiff_stage_start_q30 ^ stage_target_q30) & target_select_mask);
       // Never overshoots: alpha <= 1, so |step| <= |delta|.
@@ -408,19 +422,15 @@ void Envelope::RenderStage(
       bias_q31 += bias_slope_q31;
       *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
     }
-    // Advance the duty phase and the shift ramp for the whole run.
-    uint64_t advanced_phase =
-      static_cast<uint64_t>(chiff_duty_phase_u32_) +
-      static_cast<uint64_t>(phase_increment_u32_) * run_samples;
-    chiff_duty_phase_u32_ = advanced_phase > UINT32_MAX
-      ? UINT32_MAX : static_cast<uint32_t>(advanced_phase);
+    chiff_duty_phase_u32_ = phase_end;
     chiff_duration_samples_left_ -= run_samples;
     if (chiff_duration_samples_left_ == 0) {
       // Window closed: land the shift and alpha exactly on stage nominal.
-      slew_shift_q5_27 = stage_nominal_slew_shift_q5_27_;
-      slew_alpha_q31 = AlphaFromShift_q31(stage_nominal_slew_shift_q5_27_);
+      slew_shift_q5_27_ = nominal;
+      slew_alpha_q31 = AlphaFromShift_q31(nominal);
+    } else {
+      slew_shift_q5_27_ = shift_end;
     }
-    slew_shift_q5_27_ = slew_shift_q5_27;
   } else {
     // Chiff inactive: plain slew at the constant stage rate (alpha fixed).
     const int32_t alpha_q31 = slew_alpha_q31;
