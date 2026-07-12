@@ -125,21 +125,22 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
         <input type="range" id="amt" min="0" max="127" value="96"></div>
       <div class="knob"><label for="warp">Amount warp</label><output class="mono" id="warpV"></output>
         <input type="range" id="warp" min="0" max="100" value="100"></div>
-      <div class="note">100 = full lut_env_expo (1&minus;e<sup>&minus;4x</sup>) warp
-        (matches firmware): low amounts drop the shift into the audible
-        band sooner. 0 = linear amount&rarr;shift-drop (old behavior).</div>
+      <div class="knob"><label for="floor">Sustain floor</label><output class="mono" id="floorV"></output>
+        <input type="range" id="floor" min="0" max="200" value="0"></div>
       <label class="check1">Slew&nbsp;
         <select id="slewMethod">
-          <option value="geometric" selected>geometric (alpha *= r, firmware)</option>
-          <option value="sigma">sigma-delta shift (old chiff)</option>
+          <option value="geometric" selected>geometric (firmware)</option>
+          <option value="sigma">sigma-delta (old)</option>
         </select></label>
-      <div class="note"><b>geometric</b> is the firmware design: ramp the
-        coefficient multiplicatively, alpha &times;= r (r = 2<sup>-increment</sup>),
-        exact int64. Ripple-free, so a nonlinear CV dest (wavefolder) has no
-        dither to amplify. <b>sigma-delta</b> is the old path for comparison.</div>
+      <label class="check1">Duty rate&nbsp;
+        <select id="dutyMode">
+          <option value="block" selected>per-block (firmware)</option>
+          <option value="linear">linear lerp (fix)</option>
+          <option value="sample">per-sample (ref)</option>
+        </select></label>
     </div>
 
-    <div class="group"><h2>Duty</h2>
+    <div class="group" style="display:none"><h2>Duty</h2>
       <div class="knob"><label>Curve</label><span></span>
         <div class="seg" role="group" aria-label="Duty curve">
           <button id="curveLin" aria-pressed="false">Linear</button>
@@ -262,7 +263,7 @@ function render(p) {
   const warpExpo = (1 - Math.exp(-4 * warpX)) / (1 - Math.exp(-4));
   const warpedAmt = (warpX * (1 - p.warp) + warpExpo * p.warp) * 127;
   const drop = (nominal / 128) * warpedAmt;  // float: nominal can exceed 2^31
-  let chiffLeft = drop ? samplesLeft : 0;
+  let chiffLeft = drop ? Math.max(samplesLeft, Math.round(p.floor * FS / 1000)) : 0;
   const windowN = chiffLeft;
   let ramp = nominal - drop;
   let rampInc = chiffLeft ? Math.trunc((nominal - ramp) / chiffLeft) : 0;
@@ -307,6 +308,13 @@ function render(p) {
   };
 
   const nominalAttackShift = nominal / (1<<27);
+  let heldDuty = -1, dutyInc = 0;        // per-block held duty + per-sample lerp step
+  const computeDuty = (phi, sh) => {
+    const base = p.curve === 'expo' ? 1 - Math.exp(-p.k * phi) : phi;
+    const d = Math.min(65536, p.dutySeed + Math.floor(65536 * base));
+    const beta = 1 - Math.pow(2, (sh - nominal) / (1 << 27));
+    return 65536 - Math.floor((65536 - d) * beta);
+  };
 
   for (let i = 0; i < totalN; i++) {
     if (!gateOff && i >= gateN) {
@@ -341,10 +349,20 @@ function render(p) {
     let duty = 65536;
     if (chiffActive && stageTotal) {
       const phi = (stageTotal - samplesLeft) / stageTotal;
-      const base = p.curve === 'expo' ? 1 - Math.exp(-p.k * phi) : phi;
-      duty = Math.min(65536, p.dutySeed + Math.floor(65536 * base));
-      const beta = 1 - Math.pow(2, (shiftQ - nominal) / (1 << 27));
-      duty = 65536 - Math.floor((65536 - duty) * beta);
+      if (p.dutyMode === 'sample') {
+        duty = computeDuty(phi, shiftQ);                       // per-sample (exact, costly)
+      } else if (p.dutyMode === 'linear') {                    // per-block endpoints, lerp
+        if (i % 64 === 0 || heldDuty < 0) {
+          const phiE = (stageTotal - Math.max(0, samplesLeft - 64)) / stageTotal;
+          const shE = Math.min(nominal, shiftQ + 64 * rampInc);
+          heldDuty = computeDuty(phi, shiftQ);
+          dutyInc = (computeDuty(phiE, shE) - heldDuty) / 64;
+        } else heldDuty += dutyInc;
+        duty = heldDuty;
+      } else {                                                 // per-block hold (firmware)
+        if (i % 64 === 0 || heldDuty < 0) heldDuty = computeDuty(phi, shiftQ);
+        duty = heldDuty;
+      }
     }
     let sampleTarget = target;
     if ((r & 0xFFFF) >= duty) sampleTarget = S;
@@ -697,6 +715,8 @@ function params() {
     gate: msFromSlider(+$('gate').value),
     amount: +$('amt').value,
     warp: +$('warp').value / 100,
+    floor: +$('floor').value / 10,   // sustain floor in ms (slider 0-200 -> 0-20ms)
+    dutyMode: $('dutyMode').value,
     slewMethod: $('slewMethod').value,
     curve: $('curveExp').getAttribute('aria-pressed') === 'true' ? 'expo' : 'linear',
     k: +$('kTc').value / 10,
@@ -713,17 +733,19 @@ function labels() {
   $('gateV').textContent = fmtMs(msFromSlider(+$('gate').value));
   $('amtV').textContent = $('amt').value + ' / 127';
   $('warpV').textContent = $('warp').value + ' %';
+  $('floorV').textContent = (+$('floor').value / 10).toFixed(1) + ' ms';
   $('kTcV').textContent = (+$('kTc').value / 10).toFixed(1);
   $('seedDV').textContent = $('seedD').value + ' %';
   $('seedShow').textContent = 'seed 0x' + (seed >>> 0).toString(16);
 }
 let raf = null;
 function update() { labels(); if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); }
-['atk','dec','peak','sus','rel','gate','amt','warp','kTc','seedD'].forEach(id =>
+['atk','dec','peak','sus','rel','gate','amt','warp','floor','kTc','seedD'].forEach(id =>
   $(id).addEventListener('input', update));
 ['showDialed','showNoise','showLine'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));
 $('slewMethod').addEventListener('change', update);
+$('dutyMode').addEventListener('change', update);
 $('curveLin').addEventListener('click', () => { setCurve('linear'); });
 $('curveExp').addEventListener('click', () => { setCurve('expo'); });
 function setCurve(c) {
