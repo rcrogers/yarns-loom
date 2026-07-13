@@ -183,7 +183,7 @@ class Envelope {
   // amount continuous from bit-exact classic at 0. phi advances at
   // segment rate (see RenderStage); phase == UINT32_MAX pins the duty to
   // all-target for hold stages and once the stage sweep completes.
-  int32_t chiff_stage_start_q30_;         // Value captured at Trigger
+  int32_t chiff_off_target_q30_;         // Value captured at Trigger
   uint32_t chiff_duty_phase_u32_;         // Stage progress phi, Q0.32
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);

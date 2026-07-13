@@ -84,7 +84,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   slew_shift_q5_27_ = 0;
   slew_shift_increment_q5_27_ = 0;
   chiff_duration_samples_left_ = 0;
-  chiff_stage_start_q30_ = 0;
+  chiff_off_target_q30_ = 0;
   chiff_duty_phase_u32_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
@@ -245,13 +245,13 @@ void Envelope::Trigger(EnvelopeStage stage) {
   int32_t stage_start_q30 = value_q30_;
   if (chiff_duration_samples_left_) {
     uint32_t duty_u16 = Interpolate824(lut_env_expo, chiff_duty_phase_u32_);
-    stage_start_q30 = chiff_stage_start_q30_ + static_cast<int32_t>(
-      (static_cast<int64_t>(target_q30_ - chiff_stage_start_q30_) * duty_u16)
+    stage_start_q30 = chiff_off_target_q30_ + static_cast<int32_t>(
+      (static_cast<int64_t>(target_q30_ - chiff_off_target_q30_) * duty_u16)
       >> 16);
   }
   stage_ = stage;
   target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
-  chiff_stage_start_q30_ = stage_start_q30;
+  chiff_off_target_q30_ = stage_start_q30;
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
     case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
@@ -371,7 +371,7 @@ void Envelope::RenderStage(
   const int32_t stage_target_q30 = target_q30_;
 
   if (Chiff) {
-    const int32_t chiff_stage_start_q30 = chiff_stage_start_q30_;
+    const int32_t chiff_off_target_q30 = chiff_off_target_q30_;
     const int32_t decay_q32 = slew_alpha_decay_q32_;
     const uint32_t nominal = stage_nominal_slew_shift_q5_27_;
     // Duty (P(stage target), u17) lerped across the run. Held per segment it
@@ -414,8 +414,8 @@ void Envelope::RenderStage(
         static_cast<int32_t>(chiff_draw_u32 & 0xFFFF) - (duty_acc_q8 >> 8)
       ) >> 31;
       duty_acc_q8 += duty_inc_q8;
-      int32_t target_q30 = chiff_stage_start_q30
-        ^ ((chiff_stage_start_q30 ^ stage_target_q30) & target_select_mask);
+      int32_t target_q30 = chiff_off_target_q30
+        ^ ((chiff_off_target_q30 ^ stage_target_q30) & target_select_mask);
       // Never overshoots: alpha <= 1, so |step| <= |delta|.
       value_q30 += static_cast<int32_t>(
         (static_cast<int64_t>(target_q30 - value_q30) * slew_alpha_q31) >> 31);
@@ -528,7 +528,7 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   bias_q31_ = ScaleRatio(bias_q31_, num, den);
   value_q30_ = ScaleRatio(value_q30_, num, den);
   target_q30_ = ScaleRatio(target_q30_, num, den);
-  chiff_stage_start_q30_ = ScaleRatio(chiff_stage_start_q30_, num, den);
+  chiff_off_target_q30_ = ScaleRatio(chiff_off_target_q30_, num, den);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
     stage_target_q30_[i] = ScaleRatio(stage_target_q30_[i], num, den);
   }
