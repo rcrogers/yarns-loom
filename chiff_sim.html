@@ -104,7 +104,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
 
     <div class="group"><h2>ADSR</h2>
       <div class="knob"><label for="atk">Attack</label><output class="mono" id="atkV"></output>
-        <input type="range" id="atk" min="0" max="1000" value="620"></div>
+        <input type="range" id="atk" min="0" max="1000" value="789"></div>
       <div class="knob"><label for="dec">Decay</label><output class="mono" id="decV"></output>
         <input type="range" id="dec" min="0" max="1000" value="0"></div>
       <div class="knob"><label for="peak">Peak</label><output class="mono" id="peakV"></output>
@@ -112,12 +112,12 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
       <div class="knob"><label for="sus">Sustain (of peak)</label><output class="mono" id="susV"></output>
         <input type="range" id="sus" min="0" max="100" value="60"></div>
       <div class="knob"><label for="rel">Release</label><output class="mono" id="relV"></output>
-        <input type="range" id="rel" min="0" max="1000" value="0"></div>
+        <input type="range" id="rel" min="0" max="1000" value="667"></div>
     </div>
 
     <div class="group"><h2>Note</h2>
       <div class="knob"><label for="gate">Release at</label><output class="mono" id="gateV"></output>
-        <input type="range" id="gate" min="0" max="1000" value="700"></div>
+        <input type="range" id="gate" min="0" max="1000" value="456"></div>
     </div>
 
     <div class="group"><h2>Chiff</h2>
@@ -248,7 +248,9 @@ function render(p) {
   const peakLevel = Math.round(PEAK * p.peak);
   const sus = Math.round(peakLevel * p.sustain);
   const plan = [ [peakLevel, aN], [sus, dN], [sus, null], [0, rN], [0, null] ];
-  const totalN = gateN + rN + Math.round(0.004 * FS);  // stop just after release ends
+  // The release re-scopes the chiff window to finish within itself (see the
+  // gate-off arm), so a small margin past release-end shows the whole tail land.
+  const totalN = gateN + rN + Math.round(0.015 * FS);
   const out = new Float64Array(totalN);
   const rand = makePrng(p.seed);
 
@@ -275,6 +277,13 @@ function render(p) {
   let err = 0x20001000;                        // sigma-delta accumulator seed
   let value = 0, S = 0, stageTotal = samplesLeft;
   let gateOff = false;
+  // Release "straddle" (automatic, no knob): on release the upper telegraph
+  // point is pinned to full scale and releaseP0 = 1 - L/PEAK is the fraction of
+  // samples already aiming at 0, so the release opens in motion (no start notch)
+  // while the mixture mean stays on the carried level L. Paired with a chiff
+  // window re-scope at the gate-off arm so the noise also FINISHES within the
+  // release. Stays 0 when chiff is already off (released after the window).
+  let releaseP0 = 0;
 
   // The leaving stage's duty LINE (deterministic mean), used to anchor the
   // next stage's chiff-start instead of the instantaneous (noisy) value.
@@ -318,13 +327,28 @@ function render(p) {
 
   for (let i = 0; i < totalN; i++) {
     if (!gateOff && i >= gateN) {
-      const a = lineAnchor();
-      gateOff = true; si = 3; target = plan[3][0]; countdown = plan[3][1]; armStage(a);
+      let a = lineAnchor();
+      gateOff = true; si = 3; target = plan[3][0]; countdown = plan[3][1];
+      // Two automatic release fixes, no knob:
+      // (1) Straddle at full headroom -- pin the upper telegraph point to full
+      //     scale so the release opens already in motion (no start notch). The
+      //     effective mix p0 = 1 - L/PEAK keeps the mean on the carried level L.
+      // (2) Re-scope the chiff window to min(its remaining attack timetable, the
+      //     release) so the noise winds all the way down to nominal BY the end
+      //     of the release, instead of being chopped off while still loud.
+      releaseP0 = 0;
+      if (chiffLeft > 0 && a > 0) {
+        releaseP0 = 1 - a / PEAK;        // upper point pinned to full scale
+        a = PEAK;
+        const relSamples = Math.floor((U32 - 1) / Math.floor((U32 - 1) / countdown));
+        if (chiffLeft > relSamples) chiffLeft = relSamples;
+      }
+      armStage(a); heldDuty = -1;
     }
     while (countdown !== null && samplesLeft === 0) {
       const a = lineAnchor();
       si += 1; target = plan[si][0]; countdown = plan[si][1];
-      if (countdown !== null) armStage(a);
+      if (countdown !== null) { armStage(a); heldDuty = -1; }   // firmware recomputes duty at each run (stage) start
       else { S = a; stageTotal = null; if (!chiffLeft) { ramp = nominal; rampInc = 0; } }
     }
 
@@ -362,6 +386,12 @@ function render(p) {
       } else {                                                 // per-block hold (firmware)
         if (i % 64 === 0 || heldDuty < 0) heldDuty = computeDuty(phi, shiftQ);
         duty = heldDuty;
+      }
+      // Remap the release duty from [0,1] into [p0,1]: it opens at p0 (motion
+      // from sample 0, no notch) and still reaches 1 at the release end, where
+      // the level is ~0 and the fade-to-silence is inaudible.
+      if (si === 3 && releaseP0 > 0) {
+        duty = Math.round(releaseP0 * 65536 + (1 - releaseP0) * duty);
       }
     }
     let sampleTarget = target;
