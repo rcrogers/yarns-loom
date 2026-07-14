@@ -171,20 +171,30 @@ class Envelope {
   uint32_t slew_shift_increment_q5_27_;  // Per-sample step (>= 0 post-clamp)
   uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
 
-  // While the chiff duration runs, each sample's slew target is one of
-  // exactly two levels: the stage's start value or the stage's target,
-  // picked by a coin whose weight is the duty -- P(stage target), an
-  // exponential 1 - e^(-4*phi) over the stage's progress phi, read from
-  // lut_env_expo (the same curve, k = 4, that the slew itself traces, so
-  // the mixture's mean reproduces the dialed trajectory). The mixing
-  // depth is then crossfaded against the residual slew lag by
-  // beta = 1 - 2^-(nominal - ramp) (from lut_expo2_neg), which drains the
-  // chiff to nothing as the shift ramp reaches nominal and makes chiff
-  // amount continuous from bit-exact classic at 0. phi advances at
-  // segment rate (see RenderStage); phase == UINT32_MAX pins the duty to
-  // all-target for hold stages and once the stage sweep completes.
-  int32_t chiff_off_target_q30_;         // Value captured at Trigger
+  // While the chiff duration runs, each sample's slew target is one of exactly
+  // two levels -- the stage target or an off-target level -- picked by a coin
+  // whose weight is the duty = P(stage target). The duty is an exponential
+  // 1 - e^(-4*phi) over the stage progress phi (lut_env_expo, the same k = 4
+  // curve the slew traces), crossfaded against the residual slew lag by
+  // beta = 1 - 2^-(nominal - ramp) (lut_expo2_neg) so the chiff drains to
+  // nothing as the shift reaches nominal and is bit-exact classic at amount 0.
+  // The mixture mean = off_target + duty*(target - off_target) reproduces the
+  // dialed trajectory. phi advances at segment rate (see RenderStage); phase ==
+  // UINT32_MAX pins the duty to all-target for hold stages and once the sweep
+  // completes.
+  //
+  // Off-target is normally where the stage began, with the duty opening at 0 --
+  // the mean starts on the start level and the noise fades up from nothing. But
+  // if the chiff is still live at a transition (in practice only an early
+  // release), reopening the duty at 0 would drop the noise dead for an instant
+  // -- the start notch. The fill instead pushes off_target out to full scale
+  // and opens the duty at chiff_start_duty_u16_, so the noise keeps moving from
+  // the first sample while the mean still starts on the carried level. A fresh
+  // attack has no live chiff here, so off_target stays the start and start-duty
+  // stays 0 -- the degenerate case that hides both of these.
+  int32_t chiff_off_target_q30_;          // The non-target level (full scale when filling)
   uint32_t chiff_duty_phase_u32_;         // Stage progress phi, Q0.32
+  uint32_t chiff_start_duty_u16_;         // Duty at stage start; 0 except when filling
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
