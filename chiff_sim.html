@@ -108,7 +108,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
       <div class="knob"><label for="dec">Decay</label><output class="mono" id="decV"></output>
         <input type="range" id="dec" min="0" max="1000" value="0"></div>
       <div class="knob"><label for="peak">Peak</label><output class="mono" id="peakV"></output>
-        <input type="range" id="peak" min="0" max="100" value="100"></div>
+        <input type="range" id="peak" min="0" max="100" value="70"></div>
       <div class="knob"><label for="sus">Sustain (of peak)</label><output class="mono" id="susV"></output>
         <input type="range" id="sus" min="0" max="100" value="60"></div>
       <div class="knob"><label for="rel">Release</label><output class="mono" id="relV"></output>
@@ -328,20 +328,24 @@ function render(p) {
   for (let i = 0; i < totalN; i++) {
     if (!gateOff && i >= gateN) {
       let a = lineAnchor();
+      const leavingTarget = target;   // level the chiff was telegraphing to (attack peak)
       gateOff = true; si = 3; target = plan[3][0]; countdown = plan[3][1];
       // Two automatic release fixes, no knob:
-      // (1) Straddle at full headroom -- pin the upper telegraph point to full
-      //     scale so the release opens already in motion (no start notch). The
-      //     effective mix p0 = 1 - L/PEAK keeps the mean on the carried level L.
+      // (1) off_target = the leaving stage's target, so the release reuses the
+      //     SAME two telegraph levels the attack had ({0,peak} -> {peak,0}) with
+      //     the SAME odds at the seam (P(peak) = L/peak on both sides). The noise
+      //     process is continuous -> no spectral jump, and the swing tracks the
+      //     note instead of buzzing at full scale. start_duty = 1 - L/peak; it
+      //     scales with WHERE you release, not a fixed constant.
       // (2) Re-scope the chiff window to min(its remaining attack timetable, the
-      //     release) so the noise winds all the way down to nominal BY the end
-      //     of the release, instead of being chopped off while still loud.
+      //     release) so the noise winds down to nominal BY the release end.
       releaseP0 = 0;
-      if (chiffLeft > 0 && a > 0) {
-        releaseP0 = 1 - a / PEAK;        // upper point pinned to full scale
-        a = PEAK;
+      if (chiffLeft > 0 && a > 0 && leavingTarget > a) {
+        const S = leavingTarget;
+        releaseP0 = 1 - a / S;
+        a = S;
         const relSamples = Math.floor((U32 - 1) / Math.floor((U32 - 1) / countdown));
-        if (chiffLeft > relSamples) chiffLeft = relSamples;
+        if (chiffLeft > relSamples) chiffLeft = relSamples;   // finish within release
       }
       armStage(a); heldDuty = -1;
     }
