@@ -123,36 +123,11 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     <div class="group"><h2>Chiff</h2>
       <div class="knob"><label for="amt">Amount</label><output class="mono" id="amtV"></output>
         <input type="range" id="amt" min="0" max="127" value="96"></div>
-      <div class="knob"><label for="warp">Amount warp</label><output class="mono" id="warpV"></output>
-        <input type="range" id="warp" min="0" max="100" value="100"></div>
-      <div class="knob"><label for="floor">Sustain floor</label><output class="mono" id="floorV"></output>
-        <input type="range" id="floor" min="0" max="200" value="0"></div>
-      <label class="check1">Slew&nbsp;
-        <select id="slewMethod">
-          <option value="geometric" selected>geometric (firmware)</option>
-          <option value="sigma">sigma-delta (old)</option>
-        </select></label>
-      <label class="check1">Duty rate&nbsp;
-        <select id="dutyMode">
-          <option value="block" selected>per-block (firmware)</option>
-          <option value="linear">linear lerp (fix)</option>
-          <option value="sample">per-sample (ref)</option>
-        </select></label>
-    </div>
-
-    <div class="group" style="display:none"><h2>Duty</h2>
-      <div class="knob"><label>Curve</label><span></span>
-        <div class="seg" role="group" aria-label="Duty curve">
-          <button id="curveLin" aria-pressed="false">Linear</button>
-          <button id="curveExp" aria-pressed="true">Expo</button>
-        </div></div>
-      <div class="knob"><label for="kTc">k (time constants / stage)</label>
-        <output class="mono" id="kTcV"></output>
-        <input type="range" id="kTc" min="10" max="80" value="40"></div>
-      <div class="knob"><label for="seedD">Duty seed</label><output class="mono" id="seedDV"></output>
-        <input type="range" id="seedD" min="0" max="20" value="0"></div>
-      <div class="note">k = 4 matches the stage slew constant (4&tau;/stage): the
-        duty then reproduces the dialed curve. Expo only.</div>
+      <div class="knob"><label for="chiffDur">Chiff duration</label><output class="mono" id="chiffDurV"></output>
+        <input type="range" id="chiffDur" min="0" max="1000" value="712">
+        <div class="note">The chiff's own lifetime, independent of the ADSR. The
+          decaying noise burst tracks the envelope level over this window,
+          continuous across stages. Can be shorter or longer than the attack.</div></div>
     </div>
 
     <div class="group"><h2>Randomness</h2>
@@ -163,7 +138,6 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     <div class="group checks"><h2>Overlays</h2>
       <label><input type="checkbox" id="showDialed" checked> Dialed (chiff-free) envelope</label>
       <label><input type="checkbox" id="showNoise" checked> Noise band (|step|, smoothed)</label>
-      <label><input type="checkbox" id="showLine" > Duty line (mixture mean)</label>
     </div>
   </div>
 
@@ -239,7 +213,16 @@ function rQ31(rampIncQ527) {
   return BigInt(Math.round((1 - u + u * u / 2) * 2147483648));
 }
 
-// ---- the simulator ----
+// ---- the simulator (dart-chiff model) ----
+// The chiff is a decaying noise burst added to the dialed ADSR envelope.
+// `dialed` is a slow slew toward each stage's target -- that IS the mean (no
+// lag). `pert` is a zero-mean slewed noise: ~half the samples it darts toward
+// +-amp (RANDOM sign -> broadband, not a tone), else relaxes toward 0. amp =
+// k*maxLevel*frac -- scaled by the note's range so it's loud at onset, and
+// faded by frac (chiff-window fraction remaining) so it decays smoothly to 0;
+// independent of any stage's delta. Output = clamp(dialed + pert, 0, maxLevel):
+// never clips, and near a rail the clamp trims overshoot (a small mean sag while
+// the burst is loud). Carried continuously across every stage, sustain included.
 function render(p) {
   const aN = Math.max(1, Math.round(p.attack * FS / 1000));
   const dN = Math.max(1, Math.round(p.decay * FS / 1000));
@@ -247,173 +230,69 @@ function render(p) {
   const gateN = Math.max(1, Math.round(p.gate * FS / 1000));
   const peakLevel = Math.round(PEAK * p.peak);
   const sus = Math.round(peakLevel * p.sustain);
+  const maxLevel = Math.max(peakLevel, sus);            // top telegraph rail
+  const chiffN = Math.max(1, Math.round(p.chiffDur * FS / 1000));
   const plan = [ [peakLevel, aN], [sus, dN], [sus, null], [0, rN], [0, null] ];
-  // The release re-scopes the chiff window to finish within itself (see the
-  // gate-off arm), so a small margin past release-end shows the whole tail land.
-  const totalN = gateN + rN + Math.round(0.015 * FS);
+  const totalN = gateN + rN + Math.round(0.02 * FS);
   const out = new Float64Array(totalN);
   const rand = makePrng(p.seed);
 
-  let si = 0, target = plan[0][0], countdown = plan[0][1];
-  let increment = Math.floor((U32 - 1) / countdown);
-  let samplesLeft = Math.floor((U32 - 1) / increment);
-  let nominal = slewShiftQ527(increment);
-  // Amount warp: blend linear amount with the lut_env_expo (1-e^-4x)
-  // shape, which front-loads the shift-drop so low amounts reach the
-  // audible band. p.warp in [0,1]; 0 = linear (current firmware).
-  const warpX = p.amount / 127;
-  const warpExpo = (1 - Math.exp(-4 * warpX)) / (1 - Math.exp(-4));
-  const warpedAmt = (warpX * (1 - p.warp) + warpExpo * p.warp) * 127;
-  const drop = (nominal / 128) * warpedAmt;  // float: nominal can exceed 2^31
-  let chiffLeft = drop ? Math.max(samplesLeft, Math.round(p.floor * FS / 1000)) : 0;
+  const shiftOf = n => Math.max(0, Math.log2(Math.max(1, n)) - 2); // ~log2(N/4)
+  const alphaOf = sh => Math.pow(2, -sh);
+  const k = 0.9;                                        // fixed dart depth (excursion cap)
+  // Noise slew ramps shBright -> shDark over the burst (LPF closes). The dark end
+  // is the CHIFF's own nominal (its duration), not any one stage's, so a
+  // stage-spanning burst darkens smoothly to ~DC by its own end. The chiff AMOUNT
+  // warps the ONSET brightness shBright (like the old shift-drop): amount 0 -> no
+  // chiff (onset = nominal); amount max -> onset ~1 (brightest). Warped (1-e^-4x)
+  // so low amounts already reach the audible band. Loudness follows brightness
+  // (faster slew = louder), so higher amount fades in higher harmonics -- not
+  // just louder -- matching the good version.
+  const shDark = shiftOf(chiffN);
+  const warpedAmt = (1 - Math.exp(-4 * p.amount / 127)) / (1 - Math.exp(-4));
+  const shBright = shDark - warpedAmt * (shDark - 1);
+  const nominalAttackShift = shiftOf(aN);
+
+  let dialed = 0, pert = 0;
+  let chiffLeft = p.amount > 0 ? chiffN : 0, chiffDec = 1;
   const windowN = chiffLeft;
-  let ramp = nominal - drop;
-  let rampInc = chiffLeft ? Math.trunc((nominal - ramp) / chiffLeft) : 0;
-  // Linear-coeff option: alpha ramps additively (drift-free) between the
-  // window's shift endpoints, but in the coefficient domain (2^-shift).
-  // Geometric option (the firmware): alpha in Q31, ramped by r per sample.
-  let alphaGeo = alphaQ31(ramp);
-  let rGeo = chiffLeft ? rQ31(rampInc) : (1n << 31n);
-  let err = 0x20001000;                        // sigma-delta accumulator seed
-  let value = 0, S = 0, stageTotal = samplesLeft;
+  let si = 0, target = plan[0][0], countdown = plan[0][1], samplesLeft = countdown;
+  let stageShift = shiftOf(countdown);
   let gateOff = false;
-  // Release "straddle" (automatic, no knob): on release the upper telegraph
-  // point is pinned to full scale and releaseP0 = 1 - L/PEAK is the fraction of
-  // samples already aiming at 0, so the release opens in motion (no start notch)
-  // while the mixture mean stays on the carried level L. Paired with a chiff
-  // window re-scope at the gate-off arm so the noise also FINISHES within the
-  // release. Stays 0 when chiff is already off (released after the window).
-  let releaseP0 = 0;
-
-  // The leaving stage's duty LINE (deterministic mean), used to anchor the
-  // next stage's chiff-start instead of the instantaneous (noisy) value.
-  // At high chiff the value telegraphs between S and target, so the raw
-  // value would give the next stage a random starting energy (wildly
-  // varying early-release levels). Only noisy while chiff is live.
-  const lineAnchor = () => {
-    if (!(chiffLeft > 0) || !stageTotal) return value;
-    const phi = (stageTotal - samplesLeft) / stageTotal;
-    const base = p.curve === 'expo' ? 1 - Math.exp(-p.k * phi) : phi;
-    const duty = Math.min(1, p.dutySeed / 65536 + base);
-    return S + (target - S) * duty;
-  };
-
-  const armStage = (anchor) => {
-    S = anchor;
-    increment = Math.floor((U32 - 1) / countdown);
-    samplesLeft = Math.floor((U32 - 1) / increment);
-    nominal = slewShiftQ527(increment);
-    // Clamp: the shift may sit below nominal (chiff, faster) but never
-    // above it. Above-nominal only sluggishly slews with no benefit --
-    // what made an early release inherit the attack's long time constant.
-    if (ramp > nominal) ramp = nominal;
-    if (chiffLeft) rampInc = Math.trunc((nominal - ramp) / chiffLeft);
-    else { ramp = nominal; rampInc = 0; }
-    const alphaNomB = alphaQ31(nominal);
-    if (alphaGeo < alphaNomB) alphaGeo = alphaNomB; // mirror clamp (alpha >= alphaNom)
-    if (chiffLeft) rGeo = rQ31(rampInc);
-    else { alphaGeo = alphaNomB; rGeo = 1n << 31n; }
-    stageTotal = samplesLeft;
-  };
-
-  const nominalAttackShift = nominal / (1<<27);
-  let heldDuty = -1, dutyInc = 0;        // per-block held duty + per-sample lerp step
-  const computeDuty = (phi, sh) => {
-    const base = p.curve === 'expo' ? 1 - Math.exp(-p.k * phi) : phi;
-    const d = Math.min(65536, p.dutySeed + Math.floor(65536 * base));
-    const beta = 1 - Math.pow(2, (sh - nominal) / (1 << 27));
-    return 65536 - Math.floor((65536 - d) * beta);
-  };
 
   for (let i = 0; i < totalN; i++) {
-    if (!gateOff && i >= gateN) {
-      let a = lineAnchor();
-      const leavingTarget = target;   // level the chiff was telegraphing to (attack peak)
+    if (!gateOff && i >= gateN) {                       // NoteOff -> release
       gateOff = true; si = 3; target = plan[3][0]; countdown = plan[3][1];
-      // Two automatic release fixes, no knob:
-      // (1) off_target = the leaving stage's target, so the release reuses the
-      //     SAME two telegraph levels the attack had ({0,peak} -> {peak,0}) with
-      //     the SAME odds at the seam (P(peak) = L/peak on both sides). The noise
-      //     process is continuous -> no spectral jump, and the swing tracks the
-      //     note instead of buzzing at full scale. start_duty = 1 - L/peak; it
-      //     scales with WHERE you release, not a fixed constant.
-      // (2) Re-scope the chiff window to min(its remaining attack timetable, the
-      //     release) so the noise winds down to nominal BY the release end.
-      releaseP0 = 0;
-      if (chiffLeft > 0 && a > 0 && leavingTarget > a) {
-        const S = leavingTarget;
-        releaseP0 = 1 - a / S;
-        a = S;
-        const relSamples = Math.floor((U32 - 1) / Math.floor((U32 - 1) / countdown));
-        if (chiffLeft > relSamples) chiffLeft = relSamples;   // finish within release
-      }
-      armStage(a); heldDuty = -1;
+      samplesLeft = countdown; stageShift = shiftOf(countdown);
+      // Accelerate the burst to land with the release: if more chiff remains than
+      // the release lasts, compress it so it decays to nothing as release hits 0.
+      if (chiffLeft > rN) chiffDec = chiffLeft / rN;
     }
-    while (countdown !== null && samplesLeft === 0) {
-      const a = lineAnchor();
-      si += 1; target = plan[si][0]; countdown = plan[si][1];
-      if (countdown !== null) { armStage(a); heldDuty = -1; }   // firmware recomputes duty at each run (stage) start
-      else { S = a; stageTotal = null; if (!chiffLeft) { ramp = nominal; rampInc = 0; } }
+    while (countdown !== null && samplesLeft <= 0) {    // stage handoff
+      si += 1; target = plan[si][0]; countdown = plan[si][1]; samplesLeft = countdown;
+      if (countdown !== null) stageShift = shiftOf(countdown);
     }
+    dialed += (target - dialed) * alphaOf(stageShift);  // envelope = the mean
 
-    const r = rand();
-    const chiffActive = chiffLeft > 0;
-    let shiftQ;
-    if (chiffActive) {
-      ramp += rampInc;
-      alphaGeo = (alphaGeo * rGeo) >> 31n;         // firmware: alpha *= r
-      chiffLeft -= 1; shiftQ = ramp;
-      if (chiffLeft === 0) { ramp = nominal; alphaGeo = alphaQ31(nominal); }
-    } else shiftQ = ramp;
-
-    const frac = (shiftQ * 32) % U32;
-    err = (err + frac) % U32;
-    const shift = Math.floor(shiftQ / (1<<27)) + (err < frac ? 1 : 0);
-
-    // duty; the S-mixing depth crossfades against the slew lag with the
-    // exact law beta = 1 - tau_chiff/tau_nominal = 1 - 2^(-shift drop),
-    // computed from the CURRENT ramp so the mixing also fades out as the
-    // chiff window closes. Amount 0 (drop 0) is exactly classic.
-    let duty = 65536;
-    if (chiffActive && stageTotal) {
-      const phi = (stageTotal - samplesLeft) / stageTotal;
-      if (p.dutyMode === 'sample') {
-        duty = computeDuty(phi, shiftQ);                       // per-sample (exact, costly)
-      } else if (p.dutyMode === 'linear') {                    // per-block endpoints, lerp
-        if (i % 64 === 0 || heldDuty < 0) {
-          const phiE = (stageTotal - Math.max(0, samplesLeft - 64)) / stageTotal;
-          const shE = Math.min(nominal, shiftQ + 64 * rampInc);
-          heldDuty = computeDuty(phi, shiftQ);
-          dutyInc = (computeDuty(phiE, shE) - heldDuty) / 64;
-        } else heldDuty += dutyInc;
-        duty = heldDuty;
-      } else {                                                 // per-block hold (firmware)
-        if (i % 64 === 0 || heldDuty < 0) heldDuty = computeDuty(phi, shiftQ);
-        duty = heldDuty;
+    if (chiffLeft > 0) {
+      const frac = Math.max(0, chiffLeft) / chiffN;     // burst envelope: 1 -> 0
+      const amp = k * maxLevel * frac;                  // loud at onset (note's range), decays
+      const chiffShift = shBright + (shDark - shBright) * (1 - frac); // LPF closes as burst decays
+      const r = rand();
+      let dartTgt = 0;                                  // 0-mean perturbation target
+      if ((r & 0xFFFF) < 0x8000) {                      // ~half the samples dart
+        dartTgt = (r & 0x10000) ? amp : -amp;           // RANDOM sign -> broadband, not a tone
       }
-      // Remap the release duty from [0,1] into [p0,1]: it opens at p0 (motion
-      // from sample 0, no notch) and still reaches 1 at the release end, where
-      // the level is ~0 and the fade-to-silence is inaudible.
-      if (si === 3 && releaseP0 > 0) {
-        duty = Math.round(releaseP0 * 65536 + (1 - releaseP0) * duty);
-      }
-    }
-    let sampleTarget = target;
-    if ((r & 0xFFFF) >= duty) sampleTarget = S;
-
-    // Value stays an integer (Q30); Math.floor / asr mirror the firmware's
-    // arithmetic-shift truncation, so the quantization that matters is kept.
-    const delta = (sampleTarget - value) | 0;
-    if (p.slewMethod === 'sigma') {
-      // Old chiff path: integer shift dithered by the sigma-delta carry.
-      value += asr(delta, shift);
+      pert += (dartTgt - pert) * alphaOf(chiffShift);   // slewed noise, added to the envelope
+      chiffLeft -= chiffDec;                            // >1 after an early release (accelerate)
+      // Output = envelope + noise, clamped to the rails: never clips; near a rail
+      // the clamp trims the overshoot (the accepted asymmetric sag).
+      out[i] = Math.max(0, Math.min(maxLevel, dialed + pert));
     } else {
-      // Firmware design: value += (delta * alpha) >> 31, exact int64. BigInt
-      // right shift floors (matches the arithmetic shift) for negative delta.
-      value += Number((BigInt(delta) * alphaGeo) >> 31n);
+      pert = 0;
+      out[i] = dialed;
     }
     if (countdown !== null) samplesLeft -= 1;
-    out[i] = value;
   }
   return { out, gateN, totalN, windowN, aN, nominalAttackShift,
            plan, sus, rN, dN };
@@ -423,29 +302,6 @@ function dialed(p, totalN, gateN) {           // chiff-free reference (amount 0)
   return render(Object.assign({}, p, { amount: 0 })).out.slice(0, totalN);
 }
 
-function dutyLine(p, res) {                    // mixture-mean line for overlay
-  const { gateN, totalN, aN, dN, rN, sus, windowN, nominalAttackShift } = res;
-  const line = new Float64Array(totalN);
-  const dropShift = nominalAttackShift * p.amount / 128;
-  let S = 0, t0 = 0, target = PEAK, dur = aN, si = 0, cur = 0;
-  let gateOff = false;
-  for (let i = 0; i < totalN; i++) {
-    if (!gateOff && i >= gateN) { gateOff = true; S = cur; target = 0; dur = rN; t0 = i; si = 3; }
-    else if (si === 0 && i - t0 >= dur) { S = cur; target = sus; dur = dN; t0 = i; si = 1; }
-    else if (si === 1 && i - t0 >= dur) { si = 2; S = cur; target = sus; }
-    else if (si === 3 && i - t0 >= dur) { si = 4; S = cur; target = 0; }
-    let phi = (si === 2 || si === 4) ? 1 : Math.min(1, (i - t0) / dur);
-    const base = p.curve === 'expo' ? 1 - Math.exp(-p.k * phi) : phi;
-    let d = Math.min(1, p.dutySeed / 65536 + base);
-    // ramp assumed linear across the window for the overlay
-    const rampDrop = windowN ? dropShift * Math.max(0, 1 - i / windowN) : 0;
-    const beta = 1 - Math.pow(2, -rampDrop);
-    d = 1 - (1 - d) * beta;
-    cur = S + (target - S) * d;
-    line[i] = cur;
-  }
-  return line;
-}
 
 // ---- measurements ----
 function measure(res, dialedTrace) {
@@ -469,7 +325,7 @@ function draw() {
   const t0 = performance.now();
   const res = render(p);
   const dia = dialed(p, res.totalN, res.gateN);
-  const line = dutyLine(p, res);
+  const line = dia; // dart model: mean = dialed envelope
   const dt = performance.now() - t0;
   lastRes = res; lastDialed = dia; lastLine = line; lastP = p;
   computeSpectrogram();
@@ -535,7 +391,6 @@ function paint(hoverX) {
   };
 
   if ($('showDialed').checked) plot(lastDialed, cssVar('--dialed'), 1.4);
-  if ($('showLine').checked) plot(lastLine, cssVar('--ink3'), 1);
   plot(out, cssVar('--trace'), 1.2);
 
   // Noise band from the bottom: smoothed mean |per-sample step|, as a
@@ -748,13 +603,7 @@ function params() {
     release: msFromSlider(+$('rel').value),
     gate: msFromSlider(+$('gate').value),
     amount: +$('amt').value,
-    warp: +$('warp').value / 100,
-    floor: +$('floor').value / 10,   // sustain floor in ms (slider 0-200 -> 0-20ms)
-    dutyMode: $('dutyMode').value,
-    slewMethod: $('slewMethod').value,
-    curve: $('curveExp').getAttribute('aria-pressed') === 'true' ? 'expo' : 'linear',
-    k: +$('kTc').value / 10,
-    dutySeed: Math.round(+$('seedD').value / 100 * 65536),
+    chiffDur: msFromSlider(+$('chiffDur').value),   // independent chiff duration (ms)
     seed: seed,
   };
 }
@@ -766,27 +615,15 @@ function labels() {
   $('relV').textContent = fmtMs(msFromSlider(+$('rel').value));
   $('gateV').textContent = fmtMs(msFromSlider(+$('gate').value));
   $('amtV').textContent = $('amt').value + ' / 127';
-  $('warpV').textContent = $('warp').value + ' %';
-  $('floorV').textContent = (+$('floor').value / 10).toFixed(1) + ' ms';
-  $('kTcV').textContent = (+$('kTc').value / 10).toFixed(1);
-  $('seedDV').textContent = $('seedD').value + ' %';
+  $('chiffDurV').textContent = fmtMs(msFromSlider(+$('chiffDur').value));
   $('seedShow').textContent = 'seed 0x' + (seed >>> 0).toString(16);
 }
 let raf = null;
 function update() { labels(); if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); }
-['atk','dec','peak','sus','rel','gate','amt','warp','floor','kTc','seedD'].forEach(id =>
+['atk','dec','peak','sus','rel','gate','amt','chiffDur'].forEach(id =>
   $(id).addEventListener('input', update));
-['showDialed','showNoise','showLine'].forEach(id =>
+['showDialed','showNoise'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));
-$('slewMethod').addEventListener('change', update);
-$('dutyMode').addEventListener('change', update);
-$('curveLin').addEventListener('click', () => { setCurve('linear'); });
-$('curveExp').addEventListener('click', () => { setCurve('expo'); });
-function setCurve(c) {
-  $('curveLin').setAttribute('aria-pressed', c === 'linear');
-  $('curveExp').setAttribute('aria-pressed', c === 'expo');
-  update();
-}
 $('reroll').addEventListener('click', () => {
   seed = (Math.random() * 0xFFFFFFFF) >>> 0; update();
 });
