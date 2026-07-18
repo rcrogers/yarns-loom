@@ -920,3 +920,28 @@ def chiff_lpf_shifts():
   return packed_lut
 
 lookup_tables.append(('chiff_lpf_shifts', chiff_lpf_shifts()))
+
+"""----------------------------------------------------------------------------
+Envelope chiff: duration setting -> samples, and noise reach factor
+----------------------------------------------------------------------------"""
+
+def envelope_chiff():
+  # CHIFF DURATION setting (0..127) -> burst length in samples. Log map over
+  # 1ms..8s, matching the sim's slider (8000^(v/max) ms).
+  num_values = 128
+  max_ms = 8000.0
+  v = numpy.arange(num_values) / float(num_values - 1)
+  samples = numpy.round(numpy.power(max_ms, v) * audio_rate / 1000.0)
+  lookup_tables_32.append(('chiff_duration_samples', samples.astype(int)))
+
+  # Realized reach of the slewed chiff noise, as a fraction (u16, 65535 = 1.0)
+  # of the raw dart depth, indexed by the integer slew shift (alpha = 2^-shift).
+  # The noise is a 1-pole slew driven by +-depth targets on half the samples:
+  # spread sigma = depth * sqrt(alpha / (2*(2-alpha))); peaks ~3 sigma
+  # (bell-curve tail), capped at the raw depth. Guard entry for interpolation.
+  shifts = numpy.arange(29)
+  alpha = numpy.power(2.0, -shifts.astype(float))
+  factor = numpy.minimum(1.0, 3.0 * numpy.sqrt(alpha / (2.0 * (2.0 - alpha))))
+  factor = numpy.append(factor, factor[-1])
+  lookup_tables.append(('chiff_reach_factor', numpy.round(factor * 65535.0)))
+envelope_chiff()

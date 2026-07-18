@@ -72,6 +72,7 @@ extern const uint16_t lut_svf_cutoff[];
 extern const uint16_t lut_svf_damp[];
 extern const uint16_t lut_svf_scale[];
 extern const uint16_t lut_chiff_lpf_shifts[];
+extern const uint16_t lut_chiff_reach_factor[];
 extern const int16_t lut_scale_pythagorean[];
 extern const int16_t lut_scale_1_4_eb[];
 extern const int16_t lut_scale_1_4_e[];
@@ -130,6 +131,7 @@ extern const uint32_t lut_portamento_increments[];
 extern const uint32_t lut_envelope_phase_increments[];
 extern const uint32_t lut_oscillator_increments[];
 extern const uint32_t lut_euclidean[];
+extern const uint32_t lut_chiff_duration_samples[];
 extern const int8_t lut_expo_slope_shift[];
 extern const int8_t lut_fm_index_2x_upshifts[];
 extern const uint16_t chr_characters[];
@@ -156,6 +158,8 @@ extern const uint16_t chr_characters[];
 #define LUT_SVF_SCALE_SIZE 257
 #define LUT_CHIFF_LPF_SHIFTS 10
 #define LUT_CHIFF_LPF_SHIFTS_SIZE 128
+#define LUT_CHIFF_REACH_FACTOR 11
+#define LUT_CHIFF_REACH_FACTOR_SIZE 30
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12
 #define LUT_SCALE_1_4_EB 1
@@ -276,6 +280,8 @@ extern const uint16_t chr_characters[];
 #define LUT_OSCILLATOR_INCREMENTS_SIZE 97
 #define LUT_EUCLIDEAN 4
 #define LUT_EUCLIDEAN_SIZE 1024
+#define LUT_CHIFF_DURATION_SAMPLES 5
+#define LUT_CHIFF_DURATION_SAMPLES_SIZE 128
 #define LUT_EXPO_SLOPE_SHIFT 0
 #define LUT_EXPO_SLOPE_SHIFT_SIZE 16
 #define LUT_FM_INDEX_2X_UPSHIFTS 1

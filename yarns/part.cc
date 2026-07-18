@@ -112,6 +112,7 @@ void Part::Init() {
   voicing_.env_mod_sustain = 0;
   voicing_.env_mod_release = 32;
   voicing_.chiff_amount = 32;
+  voicing_.chiff_duration = 90;  // ~580ms via lut_chiff_duration_samples
 
   seq_.clock_division = 20;
   seq_.gate_length = 3;
@@ -833,7 +834,7 @@ void Part::VoiceNoteOn(
 
   voice->NoteOn(Tune(pitch), vel, portamento,
     voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2,
-    voicing_.chiff_amount);
+    voicing_.chiff_amount, voicing_.chiff_duration);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {

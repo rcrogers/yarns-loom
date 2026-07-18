@@ -747,6 +747,12 @@ const Setting Settings::settings_[] = {
     SETTING_UNIT_UINT8, 0, 127, NULL,
     0xff, 0xff,
   },
+  {
+    "CD", "CHIFF DURATION",
+    SETTING_DOMAIN_PART, { PART_VOICING_CHIFF_DURATION, 0 },
+    SETTING_UNIT_UINT8, 0, 127, NULL,
+    0xff, 0xff,
+  },
 };
 
 void Settings::Init() {

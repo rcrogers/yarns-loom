@@ -141,6 +141,7 @@ enum SettingIndex {
   SETTING_VOICING_TUNING_FACTOR,
   SETTING_VOICING_PORTAMENTO_MOD_VELOCITY,
   SETTING_VOICING_CHIFF_AMOUNT,
+  SETTING_VOICING_CHIFF_DURATION,
 
   // NB: Add new settings here. These values are wire format identifiers
   // in tagged sysex — inserting in the middle breaks saved data.

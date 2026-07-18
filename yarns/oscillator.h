@@ -161,8 +161,9 @@ class Oscillator {
   inline void NoteOn(
       ADSR& adsr, bool drone,
       int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
-      uint8_t chiff_amount) {
-    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1, chiff_amount);
+      uint8_t chiff_amount, uint8_t chiff_duration) {
+    gain_envelope_.NoteOn(
+      adsr, drone ? scale_ >> 1 : 0, scale_ >> 1, chiff_amount, chiff_duration);
 
     // Snap the pitch-driven jump in timbre bias out of RenderSamples' slew so
     // warped timbre tracks the new pitch instantly; only LFO bias motion stays
@@ -183,7 +184,7 @@ class Oscillator {
     // above is where pitch tracking is made accurate; the envelope's transient
     // pitch dependence during a glide is accepted as-is.
     int16_t warped_max_timbre = WarpTimbre(raw_max_timbre, shape_, target_pitch);
-    timbre_envelope_.NoteOn(adsr, 0, warped_max_timbre, chiff_amount);
+    timbre_envelope_.NoteOn(adsr, 0, warped_max_timbre, chiff_amount, chiff_duration);
   }
   inline void NoteOff() {
     gain_envelope_.NoteOff();

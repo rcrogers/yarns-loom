@@ -60,18 +60,15 @@ class Envelope {
     ADSR& adsr,
     // Bounds stored as s32 but semantically s16
     int32_t min_target_s16, int32_t max_target_s16,
-    uint8_t chiff_amount
+    uint8_t chiff_amount, uint8_t chiff_duration
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
-  // Dispatch on chiff activity so the chiff-inactive render carries none of
-  // the chiff machinery (draw, duty, coefficient ramp). Transitions happen
-  // once, at a re-dispatch point, not per sample.
-  void RenderStageDispatch(
-    int16_t* sample_buffer, size_t block_samples_left,
-    int32_t bias_q31, int32_t bias_slope_q31
-  );
-  template<bool Chiff>
+  // Single render path: this is a realtime system, so the worst case (chiff
+  // live) is the only case that matters; a lean chiff-off variant would only
+  // optimize the best case. With the window closed the same loop degenerates
+  // correctly by itself: amp = 0 -> dart targets 0 -> pert stays 0 -> output
+  // = dialed, clamp transparent.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
@@ -86,9 +83,10 @@ class Envelope {
   void Rescale(int32_t numerator, int32_t denominator);
 
  private:
-  // Point the slew shift's increment at the current stage-nominal shift,
-  // spread over the remaining chiff duration; with no duration left, the
-  // shift simply is the nominal.
+  // Re-derive the slew coefficients after a stage change: the classic/dialed
+  // alpha from the new stage's nominal shift and, if the chiff is live, the
+  // noise-slew ramp (toward the chiff's own dark endpoint, compressed into
+  // the remaining stage when the stage is shorter than the chiff).
   void ReSlopeSlewShift();
 
  public:
@@ -152,49 +150,51 @@ class Envelope {
   // without per-sample work. Assigned round-robin in Init().
   uint32_t prng_offset_u32_;
 
-  // Chiff: while the chiff duration runs, the slew shift starts below
-  // stage-nominal (i.e. faster) and each sample has a probability of
-  // slewing toward a random target instead of the stage target. Chiff
-  // intensity fades via the shift itself: as the shift rises toward
-  // nominal, random targets are tracked ever more sluggishly. The duration
-  // is armed to the attack's nominal length at NoteOn and keeps its
-  // original timetable through stage transitions; each Trigger re-slopes
-  // the increment toward the new stage's nominal over the remaining
-  // duration (signed: the shift may sit above or below the new nominal).
-  // This keeps the shift -- and thus the chiff perturbation amplitude,
-  // 2^-shift -- free of discontinuities at early release, while still
-  // landing on the release's correct slew when the duration ends.
-  // Unsigned: a shift magnitude, 0..kMaxSlewShift. The max exceeds 2^31
-  // (integer shift up to 27), so int32 would sign-flip on long attacks
-  // (>= ~5.8s, nominal shift ~16 = 2^31) and corrupt `>> shift`.
-  uint32_t slew_shift_q5_27_;            // == nominal when chiff is over
-  uint32_t slew_shift_increment_q5_27_;  // Per-sample step (>= 0 post-clamp)
-  uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
-
-  // While the chiff duration runs, each sample's slew target is one of exactly
-  // two levels -- the stage target or an off-target level -- picked by a coin
-  // whose weight is the duty = P(stage target). The duty is an exponential
-  // 1 - e^(-4*phi) over the stage progress phi (lut_env_expo, the same k = 4
-  // curve the slew traces), crossfaded against the residual slew lag by
-  // beta = 1 - 2^-(nominal - ramp) (lut_expo2_neg) so the chiff drains to
-  // nothing as the shift reaches nominal and is bit-exact classic at amount 0.
-  // The mixture mean = off_target + duty*(target - off_target) reproduces the
-  // dialed trajectory. phi advances at segment rate (see RenderStage); phase ==
-  // UINT32_MAX pins the duty to all-target for hold stages and once the sweep
-  // completes.
+  // Chiff (dart model): output = clamp(dialed + pert, floor, top).
   //
-  // Off-target is normally where the stage began, with the duty opening at 0 --
-  // the mean starts on the start level and the noise fades up from nothing. But
-  // if the chiff is still live at a transition (in practice only an early
-  // release), reopening the duty at 0 would drop the noise dead for an instant
-  // -- the start notch. The fill instead pushes off_target out to full scale
-  // and opens the duty at chiff_start_duty_u16_, so the noise keeps moving from
-  // the first sample while the mean still starts on the carried level. A fresh
-  // attack has no live chiff here, so off_target stays the start and start-duty
-  // stays 0 -- the degenerate case that hides both of these.
-  int32_t chiff_off_target_q30_;          // The non-target level (full scale when filling)
-  uint32_t chiff_duty_phase_u32_;         // Stage progress phi, Q0.32
-  uint32_t chiff_start_duty_u16_;         // Duty at stage start; 0 except when filling
+  // `dialed` is the chiff-free envelope -- a classic slew toward the stage
+  // target at the stage-nominal rate; it IS the mean, so stage transitions
+  // need no anchor bookkeeping. `pert` is a zero-mean noise: on ~half the
+  // samples it slews toward a dart target +-amp around a center, else toward
+  // 0. The dart depth amp = 0.9*(top - floor) fades linearly over the chiff
+  // window; the noise slew's shift ramps linearly from an amount-warped
+  // bright onset to the chiff's OWN dark endpoint (log2(window) - k), so the
+  // burst darkens to ~DC by its own end regardless of stage. Near the top
+  // rail the dart center shifts down by exactly what the noise's realized
+  // reach needs (reach = amp * lut_chiff_reach_factor[shift]); the level
+  // rides inside the noise band there and converges back to `dialed` as the
+  // burst fades.
+  //
+  // The chiff window spans stages (sustain included). Only a stage shorter
+  // than the remaining window (in practice the release) compresses it: fade
+  // and shift ramp re-sloped to land by stage end.
+  //
+  // While the chiff runs, slew_alpha_q31_/slew_shift_q5_27_ describe the
+  // NOISE slew (ramping); dialed_alpha_q31_ carries the stage-nominal rate
+  // for the dialed slew. With the chiff off they describe the classic slew
+  // and value_q30_ == dialed_q30_.
+  //
+  // Shift is unsigned: a magnitude, 0..kMaxSlewShift. The max exceeds 2^31
+  // as Q5.27 (integer shift up to 27), so int32 would sign-flip and corrupt
+  // derived shifts.
+  uint32_t slew_shift_q5_27_;            // Noise-slew shift while chiff runs
+  uint32_t slew_shift_increment_q5_27_;  // Per-sample ramp step (>= 0)
+  uint32_t chiff_dark_shift_q5_27_;      // Ramp endpoint: the chiff's own dark
+  uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
+  int32_t dialed_q30_;                   // The mean (== value when chiff off)
+  int32_t pert_q30_;                     // Zero-mean noise state
+  int32_t dialed_alpha_q31_;             // Stage-nominal alpha for dialed
+  int32_t chiff_amp_q30_;                // Current dart depth
+  int32_t chiff_amp_step_q30_;           // Per-sample depth fade
+  // Ordered clamp bounds over the note's stage targets. The envelope's range
+  // may be numerically inverted (CV DAC codes fall as volts rise; a warped
+  // timbre target may be negative), so these are min/max, not release/peak.
+  int32_t chiff_floor_q30_;
+  int32_t chiff_top_q30_;
+  // Which rail is the acoustic peak (the far side from the release level):
+  // the reach fit shifts the dart center off that rail; the other rail keeps
+  // the plain output clamp (the sim-validated onset trim).
+  bool chiff_fit_at_floor_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

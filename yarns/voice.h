@@ -101,7 +101,8 @@ class Voice {
   void NoteOn(
     int16_t note, uint8_t velocity, uint8_t portamento,
     int8_t portamento_mod_velocity, bool trigger,
-    ADSR& adsr, int16_t timbre_envelope_target, uint8_t chiff_amount
+    ADSR& adsr, int16_t timbre_envelope_target,
+    uint8_t chiff_amount, uint8_t chiff_duration
   );
   void NoteOff(bool force = false);
   void ControlChange(uint8_t controller, uint8_t value);
@@ -328,8 +329,11 @@ class CVOutput {
   inline bool sounding() const {
     return envelope_.stage() != ENV_STAGE_DEAD;
   }
-  inline void NoteOn(ADSR& adsr, uint8_t chiff_amount) {
-    envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1, chiff_amount);
+  inline void NoteOn(
+      ADSR& adsr, uint8_t chiff_amount, uint8_t chiff_duration) {
+    envelope_.NoteOn(
+      adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1,
+      chiff_amount, chiff_duration);
   }
   inline void NoteOff(bool force = false) {
     if (!force) {

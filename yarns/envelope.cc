@@ -64,10 +64,8 @@ const uint32_t kMaxSlewShift_q5_27 = 27u << 27;
 const uint32_t kChiffAmountBits = 7;
 const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 
-// Envelope full scale in Q30: the value that maps to a saturated output sample
-// (EnvelopeSample's clip ceiling). The fill pushes off_target here so it has
-// the most room to move into.
-const int32_t kFullScale_q30 = (1 << 30) - (1 << 15);
+// Dart depth as a fraction of the note's range (sim: k = 0.9).
+const int32_t kChiffDartDepth_q15 = static_cast<int32_t>(0.9 * (1 << 15));
 
 void Envelope::FillSharedPrngBuffer() {
   uint32_t state = shared_prng_state;
@@ -88,12 +86,18 @@ void Envelope::Init(int16_t zero_value_s16) {
   slew_alpha_decay_q32_ = 0;
   slew_shift_q5_27_ = 0;
   slew_shift_increment_q5_27_ = 0;
+  chiff_dark_shift_q5_27_ = 0;
   chiff_duration_samples_left_ = 0;
-  chiff_off_target_q30_ = 0;
-  chiff_duty_phase_u32_ = 0;
-  chiff_start_duty_u16_ = 0;
+  pert_q30_ = 0;
+  dialed_alpha_q31_ = 0;
+  chiff_amp_q30_ = 0;
+  chiff_amp_step_q30_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
+  dialed_q30_ = zero_value_q30;
+  chiff_floor_q30_ = zero_value_q30;
+  chiff_top_q30_ = zero_value_q30;
+  chiff_fit_at_floor_ = false;
   std::fill(
     &stage_target_q30_[0],
     &stage_target_q30_[ENV_NUM_STAGES],
@@ -114,11 +118,52 @@ void Envelope::NoteOff() {
   Trigger(ENV_STAGE_RELEASE);
 }
 
+// Slew shift for a window of `samples`: shift = log2(samples) - log2(k time
+// constants), Q5.27, clamped to [0, kMaxSlewShift]. log2 as integer bits plus
+// a linear mantissa fraction (max error ~0.09 shifts -- same approximation
+// spirit as Trigger's increment-based derivation).
+static uint32_t SlewShiftFromSamples_q5_27(uint32_t samples) {
+  if (samples < 4) return 0;  // log2 <= kStageTimeConstantsLog2
+  uint32_t leading_zeros = __builtin_clz(samples);
+  uint32_t integer_bits = 31 - leading_zeros;
+  uint32_t mantissa_frac_q5_27 =
+      ((samples << leading_zeros) & 0x7FFFFFFFu) >> 4;
+  uint32_t log2_q5_27 = (integer_bits << 27) + mantissa_frac_q5_27;
+  if (log2_q5_27 <= kStageTimeConstantsLog2_q5_27) return 0;
+  return std::min(
+      log2_q5_27 - kStageTimeConstantsLog2_q5_27, kMaxSlewShift_q5_27);
+}
+
+// Realized reach of the slewed noise as a fraction (u16) of the raw dart
+// depth, from the current noise-slew shift. Table indexed by integer shift,
+// lerped on the fraction (see lut_chiff_reach_factor in lookup_tables.py).
+static inline uint32_t ChiffReachFactor_u16(uint32_t shift_q5_27) {
+  uint32_t index = shift_q5_27 >> 27;
+  int32_t frac_u16 = (shift_q5_27 >> 11) & 0xFFFF;
+  int32_t factor_a = lut_chiff_reach_factor[index];
+  int32_t factor_b = lut_chiff_reach_factor[index + 1];
+  return factor_a + (((factor_b - factor_a) * frac_u16) >> 16);
+}
+
+// (1 - alpha)^n in Q31 by binary exponentiation: the fraction of a slew
+// delta remaining after n samples. Exact-to-rounding, so a run's dialed
+// endpoint carries no error across runs.
+static int32_t PowQ31(int32_t base_q31, uint32_t n) {
+  int64_t result_q31 = 1LL << 31;
+  int64_t power_q31 = base_q31;
+  while (n) {
+    if (n & 1) result_q31 = (result_q31 * power_q31) >> 31;
+    power_q31 = (power_q31 * power_q31) >> 31;
+    n >>= 1;
+  }
+  return static_cast<int32_t>(result_q31);
+}
+
 void Envelope::NoteOn(
   ADSR& adsr,
   // Bounds stored as s32 but semantically s16
   int32_t min_target_s16, int32_t max_target_s16,
-  uint8_t chiff_amount
+  uint8_t chiff_amount, uint8_t chiff_duration
 ) {
   adsr_ = &adsr;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
@@ -130,6 +175,18 @@ void Envelope::NoteOn(
     (min_target_q31 + scale_s16 * adsr.sustain_u16) >> 1;
   stage_target_q30_[ENV_STAGE_RELEASE] = stage_target_q30_[ENV_STAGE_DEAD] =
     min_target_q31 >> 1;
+  // The note's range, as ORDERED bounds: the range may be numerically
+  // inverted (CV DAC codes fall as volts rise; a warped timbre target may be
+  // negative), so min/max over the stage targets, not release/peak.
+  int32_t release_q30 = stage_target_q30_[ENV_STAGE_RELEASE];
+  chiff_top_q30_ = std::max(release_q30, std::max(
+    stage_target_q30_[ENV_STAGE_ATTACK], stage_target_q30_[ENV_STAGE_SUSTAIN]));
+  chiff_floor_q30_ = std::min(release_q30, std::min(
+    stage_target_q30_[ENV_STAGE_ATTACK], stage_target_q30_[ENV_STAGE_SUSTAIN]));
+  // The acoustic peak is the rail far from the release level: that is where
+  // the reach fit protects; the release-side rail keeps the plain clamp.
+  chiff_fit_at_floor_ =
+    (chiff_top_q30_ - release_q30) < (release_q30 - chiff_floor_q30_);
 
   switch (stage_) {
     case ENV_STAGE_ATTACK:
@@ -143,31 +200,50 @@ void Envelope::NoteOn(
     case ENV_STAGE_RELEASE:
     case ENV_STAGE_DEAD:
     case ENV_NUM_STAGES: {
-      // Fresh attack: arm chiff. Trigger first, so the slew shift starts
-      // relative to the attack's nominal.
+      // Fresh attack: arm the chiff. Trigger first so the stage machinery
+      // (nominal shift, dialed rate) is set up for the attack; the noise
+      // state (pert) deliberately carries across a retrigger for continuity.
       Trigger(ENV_STAGE_ATTACK);
-      // chiff_amount scales the shift drop below stage-nominal. At max the
-      // shift starts at ~0: raw sample replacement -- a chiff sample jumps
-      // all the way to its random target, flat-spectrum and maximally
-      // aggressive. (Each integer shift above 0 halves the bandwidth.)
-      // The amount->drop map is warped through lut_env_expo (1 - e^-4x) so
-      // low amounts already drop the shift into the audible band, rather
-      // than wasting the bottom of the knob in the inaudible near-nominal
-      // zone. The kChiffAmountBits-wide amount indexes the LUT_ENV_EXPO
-      // table whose usable span is a power of two (LUT_ENV_EXPO_SIZE - 1);
-      // the compile-time ratio aligns the widths. amount 0 -> lut 0 ->
-      // drop 0 (classic); amount max -> ~full drop.
-      uint32_t amount_warp_u16 = lut_env_expo[
-        chiff_amount * ((LUT_ENV_EXPO_SIZE - 1) >> kChiffAmountBits)];
-      uint32_t drop_q5_27 = static_cast<uint32_t>(
-        (static_cast<uint64_t>(stage_nominal_slew_shift_q5_27_) *
+      // The chiff window is its own duration -- independent of the ADSR --
+      // from the CHIFF DURATION setting (log map, ~1ms..8s).
+      uint32_t window_samples = lut_chiff_duration_samples[chiff_duration];
+      chiff_duration_samples_left_ = chiff_amount ? window_samples : 0;
+      if (!chiff_duration_samples_left_) {
+        ReSlopeSlewShift();
+        break;
+      }
+      // The noise slew ramps from an amount-warped bright onset down to the
+      // chiff's OWN dark endpoint (the shift of its window), so the burst
+      // closes to ~DC by its own end regardless of stage. The onset's dim
+      // anchor is the fixed 1-second shift -- NOT the duration-derived dark
+      // -- so onset brightness depends only on the amount. The warp
+      // (lut_env_expo, 1 - e^-4x) brings low amounts into the audible band;
+      // amount max lands the onset at shift 1 (brightest).
+      chiff_dark_shift_q5_27_ = SlewShiftFromSamples_q5_27(window_samples);
+      // Warp normalized so amount max lands the onset at exactly shift 1
+      // (the sim divides by 1 - e^-4; the raw table tops out just short).
+      const uint32_t kWarpStep = (LUT_ENV_EXPO_SIZE - 1) >> kChiffAmountBits;
+      const uint32_t warp_max_u16 = lut_env_expo[kChiffAmountMax * kWarpStep];
+      uint32_t amount_warp_u16 =
+        (static_cast<uint32_t>(lut_env_expo[chiff_amount * kWarpStep]) << 16)
+          / warp_max_u16;
+      const uint32_t kBrightestShift_q5_27 = 1u << 27;
+      uint32_t onset_dim_q5_27 = SlewShiftFromSamples_q5_27(kFrameHz);
+      uint32_t bright_q5_27 = onset_dim_q5_27 - static_cast<uint32_t>(
+        (static_cast<uint64_t>(onset_dim_q5_27 - kBrightestShift_q5_27) *
          amount_warp_u16) >> 16);
-      // The chiff window keeps this timetable even if later stages cut in
-      // early; Trigger re-slopes the increment toward each new nominal.
-      chiff_duration_samples_left_ = drop_q5_27
-        ? (adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 1)
-        : 0;
-      slew_shift_q5_27_ = stage_nominal_slew_shift_q5_27_ - drop_q5_27;
+      // Degenerate short-and-quiet chiff: keep the ramp upward (darkening).
+      if (bright_q5_27 > chiff_dark_shift_q5_27_) {
+        bright_q5_27 = chiff_dark_shift_q5_27_;
+      }
+      slew_shift_q5_27_ = bright_q5_27;
+      // Dart depth: kChiffDartDepth of the note's range, fading linearly to
+      // 0 over the window.
+      chiff_amp_q30_ = static_cast<int32_t>(
+        (static_cast<int64_t>(chiff_top_q30_ - chiff_floor_q30_) *
+         kChiffDartDepth_q15) >> 15);
+      chiff_amp_step_q30_ =
+        chiff_amp_q30_ / static_cast<int32_t>(window_samples);
       ReSlopeSlewShift();
       break;
     }
@@ -192,123 +268,64 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
   return static_cast<int32_t>(u_q32 - ((u_q32 * u_q32) >> 33));
 }
 
-// P(stage target) as a u17: the exponential duty curve (lut_env_expo over
-// stage progress) with mixing depth crossfaded by beta = 1 - 2^-drop
-// (drop = nominal - shift). Evaluated at a run's start and end, then lerped.
-// start_duty_u16 remaps the result from [0, 1<<16] into [start_duty_u16, 1<<16]
-// -- the fill opens the duty there instead of 0; start_duty 0 (every stage but
-// a live-chiff transition) leaves this an identity.
-static inline uint32_t ChiffDutyU17(
-    uint32_t duty_phase_u32, uint32_t drop_q5_27, uint32_t start_duty_u16) {
-  uint32_t duty_u16 = Interpolate824(lut_env_expo, duty_phase_u32);
-  uint32_t base_u17;
-  if (!drop_q5_27) {
-    base_u17 = 1u << 16;
-  } else {
-    uint32_t drop_int = drop_q5_27 >> 27;
-    uint32_t two_pow_neg_drop_u16 = drop_int >= 16
-      ? 0
-      : Interpolate824(lut_expo2_neg,
-          (drop_q5_27 & 0x07FFFFFFu) << 5) >> drop_int;
-    uint32_t beta_u16 = (1u << 16) - two_pow_neg_drop_u16;
-    uint32_t effective_gap_u16 = ((65535u - duty_u16) * beta_u16) >> 16;
-    base_u17 = (1u << 16) - effective_gap_u16;
-  }
-  return start_duty_u16 + static_cast<uint32_t>(
-      (static_cast<uint64_t>((1u << 16) - start_duty_u16) * base_u17) >> 16);
-}
-
 void Envelope::ReSlopeSlewShift() {
-  uint32_t nominal = stage_nominal_slew_shift_q5_27_;
-  // The shift may sit below nominal (chiff: faster, and the duty
-  // compensates the mean so it still rides the dialed curve) but never
-  // above it. A shift slower than the stage's own nominal only sluggishly
-  // slews the envelope with no benefit -- that is what made an early
-  // release on a long attack inherit the attack's (much longer) time
-  // constant and crawl. Clamp so every stage slews at least at its
-  // nominal rate. Safe from pops: shift > nominal means drop < 0, where
-  // the chiff mixing is already off (the drop > 0 guard in RenderStage),
-  // so this changes only the slew speed, not the chiff amplitude.
-  if (slew_shift_q5_27_ > nominal) slew_shift_q5_27_ = nominal;
+  // The dialed (chiff-free mean / classic) slew always runs at the stage's
+  // own nominal rate.
+  dialed_alpha_q31_ = AlphaFromShift_q31(stage_nominal_slew_shift_q5_27_);
   if (chiff_duration_samples_left_) {
-    // Ramp the (now <= nominal) shift up to nominal over the remaining
-    // window; truncation toward zero keeps it from crossing nominal.
+    // Noise-slew ramp: from the current shift up to the chiff's own dark
+    // endpoint over the remaining window (compressed windows just ramp
+    // faster). NoteOn guarantees shift <= dark; guard anyway.
+    if (slew_shift_q5_27_ > chiff_dark_shift_q5_27_) {
+      slew_shift_q5_27_ = chiff_dark_shift_q5_27_;
+    }
     slew_shift_increment_q5_27_ =
-      (nominal - slew_shift_q5_27_) / chiff_duration_samples_left_;
+      (chiff_dark_shift_q5_27_ - slew_shift_q5_27_)
+        / chiff_duration_samples_left_;
+    slew_alpha_q31_ = AlphaFromShift_q31(slew_shift_q5_27_);
+    slew_alpha_decay_q32_ = DecayFromIncrement_q32(slew_shift_increment_q5_27_);
   } else {
-    slew_shift_q5_27_ = nominal;
+    slew_shift_q5_27_ = stage_nominal_slew_shift_q5_27_;
     slew_shift_increment_q5_27_ = 0;
+    slew_alpha_q31_ = dialed_alpha_q31_;
+    slew_alpha_decay_q32_ = 0;
   }
-  // Coefficient (re-synced to the exact shift) and its geometric ramp factor.
-  slew_alpha_q31_ = AlphaFromShift_q31(slew_shift_q5_27_);
-  slew_alpha_decay_q32_ = DecayFromIncrement_q32(slew_shift_increment_q5_27_);
 }
 
 // Update current stage and its state. The slew always moves from the current
 // value toward the stage target at a rate set by the stage's nominal
 // duration, so there is no nominal-vs-actual delta bookkeeping: starting
 // closer to the target just means arriving (proportionally) closer to it
-// when the stage's sample countdown expires.
+// when the stage's sample countdown expires. The dialed level (the mean)
+// carries across the transition untouched -- the dart model needs no anchor
+// bookkeeping; the noise rides wherever dialed goes.
 void Envelope::Trigger(EnvelopeStage stage) {
-  // Anchor the new stage's chiff start on where the leaving stage's mean
-  // actually was -- its duty line, start + (target - start) * duty --
-  // rather than the instantaneous value_q30_. At high chiff the value
-  // telegraphs between start and target, so the raw value hands the next
-  // stage a random starting energy (most audible as wildly varying
-  // early-release levels). Only when chiff is live is the value noisy;
-  // with chiff off the value is the exact classic slew, so use it
-  // directly (also spares the multiply on the common path).
-  int32_t stage_start_q30 = value_q30_;
-  if (chiff_duration_samples_left_) {
-    // Use the SAME effective duty the render used (start_duty remap + beta
-    // crush), not the raw curve. When the fill has pushed off_target to full
-    // scale, the raw curve misplaces the mean by nearly full scale, so a
-    // transition out of a filled release (e.g. a retrigger) would anchor the
-    // next stage near full scale and slam the value there.
-    uint32_t drop_q5_27 = stage_nominal_slew_shift_q5_27_ - slew_shift_q5_27_;
-    uint32_t duty_u16 = ChiffDutyU17(
-      chiff_duty_phase_u32_, drop_q5_27, chiff_start_duty_u16_);
-    stage_start_q30 = chiff_off_target_q30_ + static_cast<int32_t>(
-      (static_cast<int64_t>(target_q30_ - chiff_off_target_q30_) * duty_u16)
-      >> 16);
-  }
   stage_ = stage;
   target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
-  chiff_off_target_q30_ = stage_start_q30;
-  chiff_start_duty_u16_ = 0; // The fill below raises it only if chiff is live
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
     case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
     case ENV_STAGE_RELEASE: phase_increment_u32_ = adsr_->release_u32 ; break;
     default:
       // Hold stage: no countdown; keep slewing toward the target with the
-      // shift inherited from the previous stage, converging asymptotically.
-      // Duty pinned to all-target: a hold has nowhere to have started from.
+      // rate inherited from the previous stage, converging asymptotically.
+      // The chiff window, if live, keeps running on its own timetable.
       phase_increment_u32_ = 0;
-      chiff_duty_phase_u32_ = UINT32_MAX;
       return;
   }
 
-  if (value_q30_ == target_q30_) {
+  if (dialed_q30_ == target_q30_) {
     // Nothing to do this stage; skip ahead
     return Trigger(static_cast<EnvelopeStage>(stage + 1));
   }
 
   if (!phase_increment_u32_) {
-    // Degenerate zero increment: treat as a hold (also guards the division)
-    chiff_duty_phase_u32_ = UINT32_MAX;
+    // Degenerate zero increment: treat as a hold
     return;
   }
 
   // Nominal stage duration in samples
   stage_samples_left_ = UINT32_MAX / phase_increment_u32_;
-
-  // Arm the duty phase at 0; it advances toward full over the stage at
-  // segment rate in RenderStage (phase_increment_u32_ per sample -- the
-  // same increment that spans the stage), reading the duty curve from
-  // lut_env_expo. At phase 0 the duty is 0 (all-start), so the envelope
-  // begins where the stage began.
-  chiff_duty_phase_u32_ = 0;
 
   // Slew shift from stage duration: with N = 2^32 / increment samples and
   // k = 2^kStageTimeConstantsLog2 time constants per stage, the time
@@ -333,54 +350,26 @@ void Envelope::Trigger(EnvelopeStage stage) {
           kMaxSlewShift_q5_27
         );
   }
-  // Chiff finishes within the stage it is in: cap its remaining duration at
-  // this stage's length, so the noise winds down to nothing by the stage end
-  // instead of being cut off mid-fizz. Stage-agnostic -- a fresh attack arms
-  // its own (longer) duration after this Trigger returns, so it is unaffected.
-  if (chiff_duration_samples_left_ > stage_samples_left_) {
+  // Chiff compression: a stage shorter than the remaining window compresses
+  // the burst so it lands at nothing by the stage's end instead of being cut
+  // off mid-fizz. Release-only: the window deliberately spans attack/decay/
+  // sustain on its own timetable (a fresh attack re-arms its window in
+  // NoteOn, after this Trigger returns).
+  if (stage == ENV_STAGE_RELEASE
+      && chiff_duration_samples_left_ > stage_samples_left_) {
     chiff_duration_samples_left_ = stage_samples_left_;
+    chiff_amp_step_q30_ = chiff_amp_q30_
+      / static_cast<int32_t>(chiff_duration_samples_left_);
   }
-  // Fill (see envelope.h): if the chiff is still live at a transition, reopening
-  // the duty at 0 would drop the noise dead for an instant. Push off_target to
-  // full scale and open the duty so the mean, off_target + start_duty *
-  // (target - off_target), still starts on the carried level L. Excluded for
-  // ATTACK: attack is a fresh re-arm (the NoteOn path rebuilds the chiff right
-  // after this), so it starts from its own level with the duty rising from 0.
-  // Pinning off_target to full scale there -- where the target is itself near
-  // full scale -- would slam the value to full on a retrigger during release.
-  if (chiff_duration_samples_left_ && stage != ENV_STAGE_ATTACK) {
-    int32_t carried_level_q30 = stage_start_q30;
-    if (carried_level_q30 < 0) carried_level_q30 = 0;
-    if (carried_level_q30 > kFullScale_q30) carried_level_q30 = kFullScale_q30;
-    int32_t span_q30 = kFullScale_q30 - target_q30_;
-    if (span_q30 > 0) {
-      chiff_off_target_q30_ = kFullScale_q30;
-      int64_t start_duty = (static_cast<int64_t>(
-        kFullScale_q30 - carried_level_q30) << 16) / span_q30;
-      if (start_duty > (1 << 16)) start_duty = 1 << 16;
-      chiff_start_duty_u16_ = static_cast<uint32_t>(start_duty);
-    }
-  }
-  // The nominal may have changed; keep the chiff ramp's original timetable,
-  // re-aimed at this stage's nominal. Also re-syncs alpha and its decay.
+  // Re-derive slew coefficients for the new stage (and, if live, the chiff's
+  // ramp over its possibly-compressed window).
   ReSlopeSlewShift();
 }
 
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by stage change, thus has distinct lifecycle from other locals
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  RenderStageDispatch(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
-}
-
-void Envelope::RenderStageDispatch(
-  int16_t* sample_buffer, size_t block_samples_left,
-  int32_t bias_q31, int32_t bias_slope_q31
-) {
-  if (chiff_duration_samples_left_) {
-    RenderStage<true >(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
-  } else {
-    RenderStage<false>(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
-  }
+  RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
 }
 
 // Mix the envelope value (Q30) and the already-advanced bias (Q31) into a
@@ -400,11 +389,9 @@ void Envelope::HandOffToNextStage(
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   Trigger(static_cast<EnvelopeStage>(stage_ + 1));
-  // Re-dispatch: the chiff window may have expired within this block.
-  RenderStageDispatch(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
+  RenderStage(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
 }
 
-template<bool Chiff>
 void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
@@ -412,47 +399,64 @@ void Envelope::RenderStage(
   int32_t value_q30 = value_q30_;
   int32_t slew_alpha_q31 = slew_alpha_q31_;
 
-  // One straight run, bounded by the block, the stage countdown, and (with
-  // chiff) the chiff window. Whichever expires hands off or re-dispatches --
-  // once, not re-checked per sample.
+  // One straight run, bounded by the block, the stage countdown, and (while
+  // live) the chiff window. Whichever expires hands off or re-enters -- once,
+  // not re-checked per sample.
   const bool timed = phase_increment_u32_ != 0;
+  const bool chiff_live = chiff_duration_samples_left_ != 0;
   uint32_t run_samples = block_samples_left;
   if (timed) run_samples = std::min<uint32_t>(run_samples, stage_samples_left_);
-  if (Chiff) run_samples = std::min<uint32_t>(run_samples, chiff_duration_samples_left_);
+  if (chiff_live) {
+    run_samples = std::min<uint32_t>(run_samples, chiff_duration_samples_left_);
+  }
   int16_t* const segment_end = sample_buffer + run_samples;
   const int32_t stage_target_q30 = target_q30_;
 
-  if (Chiff) {
-    const int32_t chiff_off_target_q30 = chiff_off_target_q30_;
+  {
     const int32_t decay_q32 = slew_alpha_decay_q32_;
-    const uint32_t nominal = stage_nominal_slew_shift_q5_27_;
-    // Duty (P(stage target), u17) lerped across the run. Held per segment it
-    // stays at the run-start value, which the beta crush drives near zero for
-    // ~1-block attacks -- the mid-attack loudness trough. Interpolating from
-    // the run's start to its end lets the duty rise within the run instead.
-    // Endpoints from the start/end phase and shift; Q8 fractional accumulator.
-    uint32_t phase_start = chiff_duty_phase_u32_;
-    uint64_t phase_end64 = static_cast<uint64_t>(phase_start)
-      + static_cast<uint64_t>(phase_increment_u32_) * run_samples;
-    uint32_t phase_end = phase_end64 > UINT32_MAX
-      ? UINT32_MAX : static_cast<uint32_t>(phase_end64);
-    uint32_t shift_end =
-      slew_shift_q5_27_ + slew_shift_increment_q5_27_ * run_samples;
-    if (shift_end > nominal) shift_end = nominal;
-    int32_t duty_start = ChiffDutyU17(
-      phase_start, nominal - slew_shift_q5_27_, chiff_start_duty_u16_);
-    int32_t duty_end = ChiffDutyU17(
-      phase_end, nominal - shift_end, chiff_start_duty_u16_);
-    int32_t duty_acc_q8 = duty_start << 8;
-    const int32_t duty_inc_q8 =
-      ((duty_end - duty_start) << 8) / static_cast<int32_t>(run_samples);
+    const int32_t floor_q30 = chiff_floor_q30_;
+    const int32_t top_q30 = chiff_top_q30_;
+    // Dialed (the mean) advanced run-exact: its endpoint after run_samples of
+    // classic slew is computed exponentially, and samples inside the run
+    // interpolate linearly -- exact at run boundaries, so no error
+    // accumulates; within a run (<= one block) the chord is inaudible.
+    int32_t dialed_q30 = dialed_q30_;
+    const int32_t keep_q31 = PowQ31(
+      INT32_MAX - dialed_alpha_q31_, run_samples);
+    const int32_t dialed_end_q30 = stage_target_q30 - static_cast<int32_t>(
+      (static_cast<int64_t>(stage_target_q30 - dialed_q30) * keep_q31) >> 31);
+    // run_samples == 0 happens only on a stage handoff landing exactly at
+    // block end (re-entry still saves bias state); guard the divide.
+    const int32_t dialed_slope_q30 = run_samples
+      ? (dialed_end_q30 - dialed_q30) / static_cast<int32_t>(run_samples)
+      : 0;
+    // Dart geometry, held per run: depth from the fading amp; the center
+    // shifts down by exactly what the noise's realized reach needs to fit
+    // under the top rail (and no farther) -- reach tracks the slew shift, so
+    // low/dark amounts don't dip at all.
+    const int32_t amp_q30 = chiff_amp_q30_;
+    const int32_t reach_q30 = static_cast<int32_t>(
+      (static_cast<int64_t>(amp_q30) *
+       ChiffReachFactor_u16(slew_shift_q5_27_)) >> 16);
+    // Fit the dart center against the acoustic-peak rail (polarity-aware).
+    int32_t center_offset_q30;
+    if (chiff_fit_at_floor_) {
+      center_offset_q30 = floor_q30 + reach_q30 - dialed_q30;
+      if (center_offset_q30 < 0) center_offset_q30 = 0;
+    } else {
+      center_offset_q30 = top_q30 - reach_q30 - dialed_q30;
+      if (center_offset_q30 > 0) center_offset_q30 = 0;
+    }
+    const int32_t dart_up_q30 = center_offset_q30 + amp_q30;
+    const int32_t dart_down_q30 = center_offset_q30 - amp_q30;
+    int32_t pert_q30 = pert_q30_;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
     const uint32_t* prng = &shared_prng_buffer[
       prng_offset_u32_ + (kAudioBlockSize - block_samples_left)];
     while (sample_buffer != segment_end) {
-      // PRNG budget: bits 0-15 are the duty draw; bits 16-31 are spare.
+      // PRNG budget: bit 15 = dart-or-relax, bit 16 = dart sign.
       uint32_t chiff_draw_u32 = *prng++;
       // Geometric coefficient ramp: alpha *= 2^-increment. Explicit SMULL
       // high word so GCC 4.8 keeps the product 32-bit (else it spills).
@@ -461,38 +465,50 @@ void Envelope::RenderStage(
               : "=&r"(ramp_lo), "=r"(ramp_hi)
               : "r"(slew_alpha_q31), "r"(decay_q32));
       slew_alpha_q31 -= ramp_hi;
-      // Duty-weighted target: stage target if the draw lands under the duty,
-      // else the stage start, via a branchless sign-mask blend. Both fit 17
-      // bits, so the difference fits int32 and its sign is the comparison.
-      int32_t target_select_mask = (
-        static_cast<int32_t>(chiff_draw_u32 & 0xFFFF) - (duty_acc_q8 >> 8)
-      ) >> 31;
-      duty_acc_q8 += duty_inc_q8;
-      int32_t target_q30 = chiff_off_target_q30
-        ^ ((chiff_off_target_q30 ^ stage_target_q30) & target_select_mask);
+      // Dart target: 0 (relax) on half the samples, else +-amp around the
+      // shifted center, random sign -- branchless sign-mask blends.
+      int32_t dart_mask = static_cast<int32_t>(chiff_draw_u32 << 16) >> 31;
+      int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
+      int32_t dart_target_q30 = (
+        dart_up_q30 ^ ((dart_up_q30 ^ dart_down_q30) & sign_mask)
+      ) & dart_mask;
       // Never overshoots: alpha <= 1, so |step| <= |delta|.
-      value_q30 += static_cast<int32_t>(
-        (static_cast<int64_t>(target_q30 - value_q30) * slew_alpha_q31) >> 31);
+      pert_q30 += static_cast<int32_t>(
+        (static_cast<int64_t>(dart_target_q30 - pert_q30) * slew_alpha_q31)
+        >> 31);
+      dialed_q30 += dialed_slope_q30;
+      // Output = mean + noise, clamped to the note's range: never clips,
+      // and the clamp engages only in the reach fit's rare 3-sigma tail.
+      value_q30 = dialed_q30 + pert_q30;
+      if (value_q30 < floor_q30) value_q30 = floor_q30;
+      if (value_q30 > top_q30) value_q30 = top_q30;
       bias_q31 += bias_slope_q31;
       *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
     }
-    chiff_duty_phase_u32_ = phase_end;
-    chiff_duration_samples_left_ -= run_samples;
-    if (chiff_duration_samples_left_ == 0) {
-      // Window closed: land the shift and alpha exactly on stage nominal.
-      slew_shift_q5_27_ = nominal;
-      slew_alpha_q31 = AlphaFromShift_q31(nominal);
-    } else {
-      slew_shift_q5_27_ = shift_end;
-    }
-  } else {
-    // Chiff inactive: plain slew at the constant stage rate (alpha fixed).
-    const int32_t alpha_q31 = slew_alpha_q31;
-    while (sample_buffer != segment_end) {
-      value_q30 += static_cast<int32_t>(
-        (static_cast<int64_t>(stage_target_q30 - value_q30) * alpha_q31) >> 31);
-      bias_q31 += bias_slope_q31;
-      *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+    dialed_q30_ = dialed_end_q30;  // Exact endpoint, not the accumulated chord
+    pert_q30_ = pert_q30;
+    if (chiff_live) {
+      chiff_amp_q30_ = amp_q30 - chiff_amp_step_q30_
+        * static_cast<int32_t>(run_samples);
+      if (chiff_amp_q30_ < 0) chiff_amp_q30_ = 0;
+      uint32_t shift_end =
+        slew_shift_q5_27_ + slew_shift_increment_q5_27_ * run_samples;
+      if (shift_end > chiff_dark_shift_q5_27_) {
+        shift_end = chiff_dark_shift_q5_27_;
+      }
+      chiff_duration_samples_left_ -= run_samples;
+      if (chiff_duration_samples_left_ == 0) {
+        // Window closed: the noise has faded to ~0; zero the dart state so
+        // the loop degenerates to the plain dialed slew from here on.
+        value_q30 = dialed_end_q30;
+        pert_q30_ = 0;
+        chiff_amp_q30_ = 0;
+        slew_shift_q5_27_ = stage_nominal_slew_shift_q5_27_;
+        slew_alpha_q31 = dialed_alpha_q31_;
+        slew_alpha_decay_q32_ = 0;
+      } else {
+        slew_shift_q5_27_ = shift_end;
+      }
     }
   }
 
@@ -509,9 +525,10 @@ void Envelope::RenderStage(
         sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
     }
   }
-  if (Chiff && chiff_duration_samples_left_ == 0 && block_samples_left) {
-    // Window closed mid-block: render the remainder as chiff-inactive.
-    return RenderStageDispatch(
+  if (block_samples_left) {
+    // The chiff window expired within this block: render the remainder
+    // (same path; the dart state is now inert).
+    return RenderStage(
       sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   }
 }
@@ -582,7 +599,12 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   bias_q31_ = ScaleRatio(bias_q31_, num, den);
   value_q30_ = ScaleRatio(value_q30_, num, den);
   target_q30_ = ScaleRatio(target_q30_, num, den);
-  chiff_off_target_q30_ = ScaleRatio(chiff_off_target_q30_, num, den);
+  dialed_q30_ = ScaleRatio(dialed_q30_, num, den);
+  pert_q30_ = ScaleRatio(pert_q30_, num, den);
+  chiff_amp_q30_ = ScaleRatio(chiff_amp_q30_, num, den);
+  chiff_amp_step_q30_ = ScaleRatio(chiff_amp_step_q30_, num, den);
+  chiff_floor_q30_ = ScaleRatio(chiff_floor_q30_, num, den);
+  chiff_top_q30_ = ScaleRatio(chiff_top_q30_, num, den);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
     stage_target_q30_[i] = ScaleRatio(stage_target_q30_[i], num, den);
   }

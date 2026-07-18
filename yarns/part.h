@@ -227,7 +227,8 @@ struct PackedPart {
     env_init_decay : kTimbreBits,
     env_init_sustain : kTimbreBits,
     env_init_release : kTimbreBits,
-    chiff_amount : kTimbreBits;
+    chiff_amount : kTimbreBits,
+    chiff_duration : kTimbreBits;
 
   // SequencerSettings
   unsigned int
@@ -329,6 +330,7 @@ struct VoicingSettings {
   int8_t env_mod_release;
   int8_t portamento_mod_velocity;
   uint8_t chiff_amount;
+  uint8_t chiff_duration;
 
   void Pack(PackedPart& packed) const {
     packed.allocation_mode = allocation_mode;
@@ -370,6 +372,7 @@ struct VoicingSettings {
     packed.env_mod_release = env_mod_release;
     packed.portamento_mod_velocity = portamento_mod_velocity;
     packed.chiff_amount = chiff_amount;
+    packed.chiff_duration = chiff_duration;
   }
 
   void Unpack(PackedPart& packed) {
@@ -412,6 +415,7 @@ struct VoicingSettings {
     env_mod_release = packed.env_mod_release;
     portamento_mod_velocity = packed.portamento_mod_velocity;
     chiff_amount = packed.chiff_amount;
+    chiff_duration = packed.chiff_duration;
   }
 
 };
@@ -469,6 +473,7 @@ enum PartSetting {
   PART_VOICING_ENV_MOD_RELEASE,
   PART_VOICING_PORTAMENTO_MOD_VELOCITY,
   PART_VOICING_CHIFF_AMOUNT,
+  PART_VOICING_CHIFF_DURATION,
   PART_VOICING_LAST = PART_VOICING_ALLOCATION_MODE + sizeof(VoicingSettings) - 1,
   PART_SEQUENCER_CLOCK_DIVISION,
   PART_SEQUENCER_GATE_LENGTH,
