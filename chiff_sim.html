@@ -256,13 +256,17 @@ function render(p) {
   // is the CHIFF's own nominal (its duration), not any one stage's, so a
   // stage-spanning burst darkens smoothly to ~DC by its own end. The chiff AMOUNT
   // warps the ONSET brightness shBright (like the old shift-drop): amount 0 -> no
-  // chiff (onset = nominal); amount max -> onset ~1 (brightest). Warped (1-e^-4x)
+  // chiff (onset = dim); amount max -> onset ~1 (brightest). Warped (1-e^-4x)
   // so low amounts already reach the audible band. Loudness follows brightness
   // (faster slew = louder), so higher amount fades in higher harmonics -- not
-  // just louder -- matching the good version.
+  // just louder -- matching the good version. The dim END of the amount warp is
+  // a FIXED reference (the 1-second shift), NOT shDark: onset brightness must
+  // depend only on the amount -- anchoring it to the duration-derived shDark
+  // darkened the early harmonics as duration grew.
   const shDark = shiftOf(chiffN);
+  const shOnsetDim = shiftOf(FS);               // 1-second reference; duration-independent
   const warpedAmt = (1 - Math.exp(-4 * p.amount / 127)) / (1 - Math.exp(-4));
-  const shBright = shDark - warpedAmt * (shDark - 1);
+  const shBright = shOnsetDim - warpedAmt * (shOnsetDim - 1);
   const nominalAttackShift = shiftOf(aN);
 
   let dialed = 0, pert = 0;
