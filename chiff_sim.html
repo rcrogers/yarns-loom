@@ -430,6 +430,10 @@ function paint(hoverX) {
 
 // ---- noise spectrogram (STFT of the residual: time x frequency) ----
 const SPEC_N = 512, SPEC_HOP = 64, SPEC_FMAX = FS / 2;  // finer time res (11ms window, 1.4ms hop)
+// FIXED brightness reference (~amount 127's residual peak) so the spectrogram
+// shows ABSOLUTE noise level -- amount 1 reads faint, 127 bright -- instead of
+// auto-normalizing each render to its own peak (which hid the amount scaling).
+const SPEC_REF = 24;
 const specCv = $('specCv'), specCtx = specCv.getContext('2d');
 let specData = null;   // { frames, nFrames, maxBin, gPeak, tMax, fMax }
 
@@ -491,7 +495,7 @@ function drawSpectrogram() {
       let s = 0, cnt = 0;
       for (let b = b0; b < b1 && b < maxBin; b++) { s += col[b]; cnt++; }
       const mag = cnt ? s / cnt : col[Math.min(b0, maxBin - 1)];
-      const db = 20 * Math.log10(mag / gPeak + 1e-9);
+      const db = 20 * Math.log10(mag / SPEC_REF + 1e-9);
       const t = Math.max(0, Math.min(1, (db + 60) / 60));
       const [r, g, bl] = hslToRgb(150, 55 + t * 20, 8 + t * 74);
       const idx = (py * pw + px) * 4;
