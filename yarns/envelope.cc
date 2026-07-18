@@ -88,7 +88,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   slew_shift_increment_q5_27_ = 0;
   chiff_dark_shift_q5_27_ = 0;
   chiff_duration_samples_left_ = 0;
-  pert_q30_ = 0;
   dialed_alpha_q31_ = 0;
   chiff_amp_q30_ = 0;
   chiff_amp_step_q30_ = 0;
@@ -147,7 +146,8 @@ static inline uint32_t ChiffReachFactor_u16(uint32_t shift_q5_27) {
 
 // (1 - alpha)^n in Q31 by binary exponentiation: the fraction of a slew
 // delta remaining after n samples. Exact-to-rounding, so a run's dialed
-// endpoint carries no error across runs.
+// endpoint carries no error across runs. n == 0 (a handoff landing exactly
+// at block end) yields 1.0, saturated to Q31's max.
 static int32_t PowQ31(int32_t base_q31, uint32_t n) {
   int64_t result_q31 = 1LL << 31;
   int64_t power_q31 = base_q31;
@@ -156,8 +156,12 @@ static int32_t PowQ31(int32_t base_q31, uint32_t n) {
     power_q31 = (power_q31 * power_q31) >> 31;
     n >>= 1;
   }
+  if (result_q31 > INT32_MAX) result_q31 = INT32_MAX;
   return static_cast<int32_t>(result_q31);
 }
+
+// Defined below (Hacker's Delight divlu); used by the aim-base blend.
+static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
 void Envelope::NoteOn(
   ADSR& adsr,
@@ -201,8 +205,8 @@ void Envelope::NoteOn(
     case ENV_STAGE_DEAD:
     case ENV_NUM_STAGES: {
       // Fresh attack: arm the chiff. Trigger first so the stage machinery
-      // (nominal shift, dialed rate) is set up for the attack; the noise
-      // state (pert) deliberately carries across a retrigger for continuity.
+      // (nominal shift, dialed rate) is set up for the attack; the slewed
+      // value carries across a retrigger for continuity.
       Trigger(ENV_STAGE_ATTACK);
       // The chiff window is its own duration -- independent of the ADSR --
       // from the CHIFF DURATION setting (log map, ~1ms..8s).
@@ -413,43 +417,56 @@ void Envelope::RenderStage(
   const int32_t stage_target_q30 = target_q30_;
 
   {
-    const int32_t decay_q32 = slew_alpha_decay_q32_;
     const int32_t floor_q30 = chiff_floor_q30_;
     const int32_t top_q30 = chiff_top_q30_;
-    // Dialed (the mean) advanced run-exact: its endpoint after run_samples of
-    // classic slew is computed exponentially, and samples inside the run
-    // interpolate linearly -- exact at run boundaries, so no error
-    // accumulates; within a run (<= one block) the chord is inaudible.
-    int32_t dialed_q30 = dialed_q30_;
+    // Dialed (the mean) advanced run-exact: its endpoint after run_samples
+    // of classic slew, computed exponentially -- no error accumulates. It
+    // exists to place the aims; the output is the slewed value itself.
+    const int32_t dialed_q30 = dialed_q30_;
     const int32_t keep_q31 = PowQ31(
       INT32_MAX - dialed_alpha_q31_, run_samples);
     const int32_t dialed_end_q30 = stage_target_q30 - static_cast<int32_t>(
       (static_cast<int64_t>(stage_target_q30 - dialed_q30) * keep_q31) >> 31);
-    // run_samples == 0 happens only on a stage handoff landing exactly at
-    // block end (re-entry still saves bias state); guard the divide.
-    const int32_t dialed_slope_q30 = run_samples
-      ? (dialed_end_q30 - dialed_q30) / static_cast<int32_t>(run_samples)
-      : 0;
-    // Dart geometry, held per run: depth from the fading amp; the center
-    // shifts down by exactly what the noise's realized reach needs to fit
-    // under the top rail (and no farther) -- reach tracks the slew shift, so
-    // low/dark amounts don't dip at all.
+    // Noise-slew floor (timed stages): never slower than the stage's own
+    // rate, else the value hangs on a moving stage near the window's dark
+    // end. Monotone (alpha only darkens), so flooring freezes the ramp.
+    int32_t decay_q32 = slew_alpha_decay_q32_;
+    if (timed && slew_alpha_q31 < dialed_alpha_q31_) {
+      slew_alpha_q31 = dialed_alpha_q31_;
+      decay_q32 = 0;
+    }
+    // Aim base, derived so the value's expected step equals the mean's step
+    // in every regime (see envelope.h): base = dialed + (target - dialed) *
+    // alphaStage/alphaEff on timed stages; the mean itself on holds; the
+    // stage target once the window has closed (exact classic slew).
+    int32_t base_q30 = chiff_live ? dialed_q30 : stage_target_q30;
+    if (chiff_live && timed && dialed_alpha_q31_ > 0) {
+      uint32_t ratio_q31 = slew_alpha_q31 == dialed_alpha_q31_
+        ? static_cast<uint32_t>(INT32_MAX)
+        : DivU64ByU32(static_cast<uint32_t>(dialed_alpha_q31_) >> 1,
+                      static_cast<uint32_t>(dialed_alpha_q31_) << 31,
+                      static_cast<uint32_t>(slew_alpha_q31));
+      base_q30 += static_cast<int32_t>(
+        (static_cast<int64_t>(stage_target_q30 - dialed_q30) * ratio_q31)
+        >> 31);
+    }
+    // Dart geometry, held per run: depth from the fading amp; the aim
+    // center shifts off the acoustic-peak rail by the noise's realized
+    // reach (and no farther) -- reach tracks the slew shift, so low/dark
+    // amounts don't dip at all.
     const int32_t amp_q30 = chiff_amp_q30_;
     const int32_t reach_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(amp_q30) *
        ChiffReachFactor_u16(slew_shift_q5_27_)) >> 16);
-    // Fit the dart center against the acoustic-peak rail (polarity-aware).
-    int32_t center_offset_q30;
+    int32_t center_q30 = base_q30;
     if (chiff_fit_at_floor_) {
-      center_offset_q30 = floor_q30 + reach_q30 - dialed_q30;
-      if (center_offset_q30 < 0) center_offset_q30 = 0;
+      if (center_q30 < floor_q30 + reach_q30) center_q30 = floor_q30 + reach_q30;
     } else {
-      center_offset_q30 = top_q30 - reach_q30 - dialed_q30;
-      if (center_offset_q30 > 0) center_offset_q30 = 0;
+      if (center_q30 > top_q30 - reach_q30) center_q30 = top_q30 - reach_q30;
     }
-    const int32_t dart_up_q30 = center_offset_q30 + amp_q30;
-    const int32_t dart_down_q30 = center_offset_q30 - amp_q30;
-    int32_t pert_q30 = pert_q30_;
+    const int32_t aim_up_q30 = center_q30 + amp_q30;
+    const int32_t aim_down_q30 = center_q30 - amp_q30;
+    const int32_t aim_relax_q30 = base_q30;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
@@ -465,28 +482,25 @@ void Envelope::RenderStage(
               : "=&r"(ramp_lo), "=r"(ramp_hi)
               : "r"(slew_alpha_q31), "r"(decay_q32));
       slew_alpha_q31 -= ramp_hi;
-      // Dart target: 0 (relax) on half the samples, else +-amp around the
-      // shifted center, random sign -- branchless sign-mask blends.
+      // Aim select: relax on half the samples, else the up/down dart --
+      // branchless sign-mask blends.
       int32_t dart_mask = static_cast<int32_t>(chiff_draw_u32 << 16) >> 31;
       int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
-      int32_t dart_target_q30 = (
-        dart_up_q30 ^ ((dart_up_q30 ^ dart_down_q30) & sign_mask)
-      ) & dart_mask;
+      int32_t dart_q30 =
+        aim_up_q30 ^ ((aim_up_q30 ^ aim_down_q30) & sign_mask);
+      int32_t aim_q30 =
+        aim_relax_q30 ^ ((aim_relax_q30 ^ dart_q30) & dart_mask);
       // Never overshoots: alpha <= 1, so |step| <= |delta|.
-      pert_q30 += static_cast<int32_t>(
-        (static_cast<int64_t>(dart_target_q30 - pert_q30) * slew_alpha_q31)
-        >> 31);
-      dialed_q30 += dialed_slope_q30;
-      // Output = mean + noise, clamped to the note's range: never clips,
-      // and the clamp engages only in the reach fit's rare 3-sigma tail.
-      value_q30 = dialed_q30 + pert_q30;
+      value_q30 += static_cast<int32_t>(
+        (static_cast<int64_t>(aim_q30 - value_q30) * slew_alpha_q31) >> 31);
+      // Clamp to the note's range: never clips; contact stays in the reach
+      // fit's rare 3-sigma tail.
       if (value_q30 < floor_q30) value_q30 = floor_q30;
       if (value_q30 > top_q30) value_q30 = top_q30;
       bias_q31 += bias_slope_q31;
       *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
     }
-    dialed_q30_ = dialed_end_q30;  // Exact endpoint, not the accumulated chord
-    pert_q30_ = pert_q30;
+    dialed_q30_ = dialed_end_q30;  // Exact endpoint
     if (chiff_live) {
       chiff_amp_q30_ = amp_q30 - chiff_amp_step_q30_
         * static_cast<int32_t>(run_samples);
@@ -498,10 +512,8 @@ void Envelope::RenderStage(
       }
       chiff_duration_samples_left_ -= run_samples;
       if (chiff_duration_samples_left_ == 0) {
-        // Window closed: the noise has faded to ~0; zero the dart state so
-        // the loop degenerates to the plain dialed slew from here on.
-        value_q30 = dialed_end_q30;
-        pert_q30_ = 0;
+        // Window closed: aims collapse to the stage target from here on
+        // (exact classic slew); the value carries, no snap.
         chiff_amp_q30_ = 0;
         slew_shift_q5_27_ = stage_nominal_slew_shift_q5_27_;
         slew_alpha_q31 = dialed_alpha_q31_;
@@ -600,7 +612,6 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   value_q30_ = ScaleRatio(value_q30_, num, den);
   target_q30_ = ScaleRatio(target_q30_, num, den);
   dialed_q30_ = ScaleRatio(dialed_q30_, num, den);
-  pert_q30_ = ScaleRatio(pert_q30_, num, den);
   chiff_amp_q30_ = ScaleRatio(chiff_amp_q30_, num, den);
   chiff_amp_step_q30_ = ScaleRatio(chiff_amp_step_q30_, num, den);
   chiff_floor_q30_ = ScaleRatio(chiff_floor_q30_, num, den);

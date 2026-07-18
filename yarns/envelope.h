@@ -150,20 +150,29 @@ class Envelope {
   // without per-sample work. Assigned round-robin in Init().
   uint32_t prng_offset_u32_;
 
-  // Chiff (dart model): output = clamp(dialed + pert, floor, top).
+  // Chiff (dart model): ONE slewed value aims at three ABSOLUTE per-run-held
+  // points -- center +- depth (random-sign darts, ~half the samples) and a
+  // relax base -- and the output is that value clamped to the note's range.
+  // The mean rides the aim statistics; `dialed` (the chiff-free classic
+  // slew) is advanced run-exact purely to place the aims.
   //
-  // `dialed` is the chiff-free envelope -- a classic slew toward the stage
-  // target at the stage-nominal rate; it IS the mean, so stage transitions
-  // need no anchor bookkeeping. `pert` is a zero-mean noise: on ~half the
-  // samples it slews toward a dart target +-amp around a center, else toward
-  // 0. The dart depth amp = 0.9*(top - floor) fades linearly over the chiff
+  // The aim base is derived so the value's EXPECTED step equals the mean's
+  // step in every regime: base = dialed + (target - dialed) *
+  // alphaStage/alphaEff (timed stages; holds use dialed). Anything else
+  // makes the value chase the moving mean through its own slew -- two
+  // cascaded one-poles -- and it trails the envelope (a kink wherever the
+  // window ends). The noise slew is also floored at the stage rate on timed
+  // stages (else an early release near the window's dark end hangs); hold
+  // stages are exempt so the LPF still closes on the chiff's own schedule.
+  //
+  // The dart depth amp = 0.9*(top - floor) fades linearly over the chiff
   // window; the noise slew's shift ramps linearly from an amount-warped
   // bright onset to the chiff's OWN dark endpoint (log2(window) - k), so the
-  // burst darkens to ~DC by its own end regardless of stage. Near the top
-  // rail the dart center shifts down by exactly what the noise's realized
-  // reach needs (reach = amp * lut_chiff_reach_factor[shift]); the level
-  // rides inside the noise band there and converges back to `dialed` as the
-  // burst fades.
+  // burst darkens to ~DC by its own end regardless of stage. Near the
+  // acoustic-peak rail the aim center shifts off the rail by the noise's
+  // realized reach (amp * lut_chiff_reach_factor[shift]). At amount 0 (or
+  // window closed) the aims collapse to the stage target: the classic
+  // per-sample exponential slew, exactly.
   //
   // The chiff window spans stages (sustain included). Only a stage shorter
   // than the remaining window (in practice the release) compresses it: fade
@@ -181,8 +190,7 @@ class Envelope {
   uint32_t slew_shift_increment_q5_27_;  // Per-sample ramp step (>= 0)
   uint32_t chiff_dark_shift_q5_27_;      // Ramp endpoint: the chiff's own dark
   uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
-  int32_t dialed_q30_;                   // The mean (== value when chiff off)
-  int32_t pert_q30_;                     // Zero-mean noise state
+  int32_t dialed_q30_;                   // The mean, run-exact (aim placement)
   int32_t dialed_alpha_q31_;             // Stage-nominal alpha for dialed
   int32_t chiff_amp_q30_;                // Current dart depth
   int32_t chiff_amp_step_q30_;           // Per-sample depth fade
