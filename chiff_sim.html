@@ -240,6 +240,18 @@ function render(p) {
   const shiftOf = n => Math.max(0, Math.log2(Math.max(1, n)) - 2); // ~log2(N/4)
   const alphaOf = sh => Math.pow(2, -sh);
   const k = 0.9;                                        // fixed dart depth (excursion cap)
+  // Near the top rail there is no room for the noise's full swing. The noise
+  // keeps its dialed depth ALWAYS; instead its center shifts down exactly as
+  // far as its ACTUAL excursions need to fit under the rail, and no farther.
+  // The realized excursion of the slewed noise is far below the raw dart
+  // depth when the slew is dark (low amounts): spread = depth*sqrt(a/(2(2-a)))
+  // for slew coefficient a, and peaks ~REACH_SIGMAS x spread (bell-curve tail;
+  // capped at the raw depth, which it equals at bright slews). So the dip
+  // engages only once spikes genuinely reach the rail, scales with what's
+  // audible, stays inside the noise band (masked), and converges back to the
+  // dialed line as the burst fades or the stage leaves the rail. Validated in
+  // tools/chiff_checks/railfix11/12.js.
+  const REACH_SIGMAS = 3;
   // Noise slew ramps shBright -> shDark over the burst (LPF closes). The dark end
   // is the CHIFF's own nominal (its duration), not any one stage's, so a
   // stage-spanning burst darkens smoothly to ~DC by its own end. The chiff AMOUNT
@@ -279,11 +291,15 @@ function render(p) {
       const amp = k * maxLevel * frac;                  // loud at onset (note's range), decays
       const chiffShift = shBright + (shDark - shBright) * (1 - frac); // LPF closes as burst decays
       const r = rand();
-      let dartTgt = 0;                                  // 0-mean perturbation target
+      let dartTgt = 0;                                  // perturbation target around the shifted center
+      const alpha = alphaOf(chiffShift);
+      const reach = Math.min(amp,                       // what the slewed noise actually swings
+        REACH_SIGMAS * amp * Math.sqrt(alpha / (2 * (2 - alpha))));
+      const center = Math.min(dialed, maxLevel - reach); // shift down just enough to fit under the rail
       if ((r & 0xFFFF) < 0x8000) {                      // ~half the samples dart
-        dartTgt = (r & 0x10000) ? amp : -amp;           // RANDOM sign -> broadband, not a tone
+        dartTgt = (center - dialed) + ((r & 0x10000) ? amp : -amp); // RANDOM sign -> broadband
       }
-      pert += (dartTgt - pert) * alphaOf(chiffShift);   // slewed noise, added to the envelope
+      pert += (dartTgt - pert) * alpha;                 // slewed noise, added to the envelope
       chiffLeft -= chiffDec;                            // >1 after an early release (accelerate)
       // Output = envelope + noise, clamped to the rails: never clips; near a rail
       // the clamp trims the overshoot (the accepted asymmetric sag).
