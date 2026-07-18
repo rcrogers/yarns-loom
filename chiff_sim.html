@@ -269,7 +269,9 @@ function render(p) {
   const shBright = shOnsetDim - warpedAmt * (shOnsetDim - 1);
   const nominalAttackShift = shiftOf(aN);
 
-  let dialed = 0, pert = 0;
+  const RUN = 64;                               // firmware audio block (kAudioBlockSize)
+  let dialed = 0, value = 0;
+  let runAmp = 0, runUp = 0, runDown = 0, runRelax = 0;
   let chiffLeft = p.amount > 0 ? chiffN : 0, chiffDec = 1;
   const windowN = chiffLeft;
   let si = 0, target = plan[0][0], countdown = plan[0][1], samplesLeft = countdown;
@@ -288,29 +290,70 @@ function render(p) {
       si += 1; target = plan[si][0]; countdown = plan[si][1]; samplesLeft = countdown;
       if (countdown !== null) stageShift = shiftOf(countdown);
     }
-    dialed += (target - dialed) * alphaOf(stageShift);  // envelope = the mean
+    dialed += (target - dialed) * alphaOf(stageShift);  // the mean (reference)
 
+    // Firmware-faithful RUN structure: dart geometry (depth, reach, center,
+    // the three ABSOLUTE aim points) is derived once per RUN samples from the
+    // run-start mean, and the single slewed value aims at those absolutes --
+    // no separate per-sample mean+noise sum. The mean rides the aim
+    // statistics (aims average onto the run's mean); holding the aims for a
+    // run misplaces them by at most the mean's per-run motion, negligible
+    // against the dart depth. At amount 0 the aim collapses to the stage
+    // target: the classic slew, exactly.
+    if (i % RUN === 0) {
+      if (chiffLeft > 0) {
+        const frac = Math.max(0, chiffLeft) / chiffN;   // burst envelope: 1 -> 0
+        runAmp = k * maxLevel * frac;                   // loud at onset (note's range), decays
+        const chiffShift = shBright + (shDark - shBright) * (1 - frac);
+        const alpha = alphaOf(chiffShift);
+        const reach = Math.min(runAmp,                  // what the slewed noise actually swings
+          REACH_SIGMAS * runAmp * Math.sqrt(alpha / (2 * (2 - alpha))));
+        // Aim base, derived so the value's EXPECTED step equals the mean's
+        // step in every regime (else the value chases the moving mean
+        // through its own slew -- two cascaded one-poles -- and trails it:
+        // the kink at the window's end). Requiring
+        //   (base - dialed) * alphaEff == (target - dialed) * alphaStage
+        // gives base = dialed + (target - dialed) * alphaStage / alphaEff:
+        // the mean itself when the chiff slew is fast, the stage target when
+        // the stage-rate floor binds, exact everywhere between. Hold stages:
+        // the mean is static, base = the mean.
+        let base = dialed;
+        if (countdown !== null) {
+          const alphaStage = alphaOf(stageShift);
+          const alphaEff = Math.max(alpha, alphaStage);
+          base = dialed + (target - dialed) * (alphaStage / alphaEff);
+        }
+        const center = Math.min(base, maxLevel - reach); // shifted to fit under the rail
+        runUp = center + runAmp;
+        runDown = center - runAmp;
+        runRelax = base;
+      }
+    }
     if (chiffLeft > 0) {
-      const frac = Math.max(0, chiffLeft) / chiffN;     // burst envelope: 1 -> 0
-      const amp = k * maxLevel * frac;                  // loud at onset (note's range), decays
+      const frac = Math.max(0, chiffLeft) / chiffN;
       const chiffShift = shBright + (shDark - shBright) * (1 - frac); // LPF closes as burst decays
       const r = rand();
-      let dartTgt = 0;                                  // perturbation target around the shifted center
-      const alpha = alphaOf(chiffShift);
-      const reach = Math.min(amp,                       // what the slewed noise actually swings
-        REACH_SIGMAS * amp * Math.sqrt(alpha / (2 * (2 - alpha))));
-      const center = Math.min(dialed, maxLevel - reach); // shift down just enough to fit under the rail
+      let aim = runRelax;
       if ((r & 0xFFFF) < 0x8000) {                      // ~half the samples dart
-        dartTgt = (center - dialed) + ((r & 0x10000) ? amp : -amp); // RANDOM sign -> broadband
+        aim = (r & 0x10000) ? runUp : runDown;          // RANDOM sign -> broadband
       }
-      pert += (dartTgt - pert) * alpha;                 // slewed noise, added to the envelope
+      // TIMED stages only: the slew never runs slower than the stage's own
+      // rate. The value tracks the mean THROUGH this slew (aims refresh per
+      // run), and near the window's dark end it would otherwise hang on a
+      // moving stage (early release late in a long chiff) -- same clamp,
+      // same reason as the old duty-binary core. Hold stages (sustain/dead)
+      // have a static mean: no tracking needed, and flooring there would
+      // keep the noise bright forever (LPF must close on the chiff's own
+      // schedule).
+      let alpha = alphaOf(chiffShift);
+      if (countdown !== null) alpha = Math.max(alpha, alphaOf(stageShift));
+      value += (aim - value) * alpha;
       chiffLeft -= chiffDec;                            // >1 after an early release (accelerate)
-      // Output = envelope + noise, clamped to the rails: never clips; near a rail
-      // the clamp trims the overshoot (the accepted asymmetric sag).
-      out[i] = Math.max(0, Math.min(maxLevel, dialed + pert));
+      // Clamped to the rails: never clips; the reach fit keeps contact rare.
+      out[i] = Math.max(0, Math.min(maxLevel, value));
     } else {
-      pert = 0;
-      out[i] = dialed;
+      value += (target - value) * alphaOf(stageShift);  // classic slew, exact
+      out[i] = value;
     }
     if (countdown !== null) samplesLeft -= 1;
   }
