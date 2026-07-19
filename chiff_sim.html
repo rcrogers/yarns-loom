@@ -342,7 +342,16 @@ function render(p) {
         // depth and darkness -- so low amounts barely sag (continuity with
         // amount 0), and the center holds through the decay transition (no
         // pulse). Relax (half the draws) damps dwell at both rails.
-        const dartSpan = runAmp;
+        // The alpha floor exists to TRACK the mean, not to energize darts:
+        // floored, the noise would ride the stage rate at full depth, making
+        // amount 1 sound like attack-speed noise (a 0 -> 1 discontinuity).
+        // Scale the dart span so the realized noise equals what the
+        // un-floored chiff alpha affords -- continuous at the floor
+        // boundary, and amount -> 0 sends the noise to 0 smoothly.
+        const reachOf = a => Math.min(1, 3 * Math.sqrt(a / (2 * (2 - a))));
+        const dartScale = alphaEff > alpha
+          ? reachOf(alpha) / reachOf(alphaEff) : 1;
+        const dartSpan = runAmp * dartScale;
         const center = Math.min(base, maxLevel - tailF * dartSpan);
         runRelax = center;
         runUp = center + dartSpan;
