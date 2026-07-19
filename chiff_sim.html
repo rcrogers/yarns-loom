@@ -240,18 +240,6 @@ function render(p) {
   const shiftOf = n => Math.max(0, Math.log2(Math.max(1, n)) - 2); // ~log2(N/4)
   const alphaOf = sh => Math.pow(2, -sh);
   const k = 0.9;                                        // fixed dart depth (excursion cap)
-  // Near the top rail there is no room for the noise's full swing. The noise
-  // keeps its dialed depth ALWAYS; instead its center shifts down exactly as
-  // far as its ACTUAL excursions need to fit under the rail, and no farther.
-  // The realized excursion of the slewed noise is far below the raw dart
-  // depth when the slew is dark (low amounts): spread = depth*sqrt(a/(2(2-a)))
-  // for slew coefficient a, and peaks ~REACH_SIGMAS x spread (bell-curve tail;
-  // capped at the raw depth, which it equals at bright slews). So the dip
-  // engages only once spikes genuinely reach the rail, scales with what's
-  // audible, stays inside the noise band (masked), and converges back to the
-  // dialed line as the burst fades or the stage leaves the rail. Validated in
-  // tools/chiff_checks/railfix11/12.js.
-  const REACH_SIGMAS = 3;
   // Noise slew ramps shBright -> shDark over the burst (LPF closes). The dark end
   // is the CHIFF's own nominal (its duration), not any one stage's, so a
   // stage-spanning burst darkens smoothly to ~DC by its own end. The chiff AMOUNT
@@ -271,6 +259,10 @@ function render(p) {
 
   const RUN = 64;                               // firmware audio block (kAudioBlockSize)
   let dialed = 0, value = 0;
+  // Longest same-direction run the rail guard protects against:
+  // P(run >= RUN_GUARD) = 2^-RUN_GUARD per run -- rare enough that deeper
+  // runs never form a visible stripe.
+  const RUN_GUARD = 16;
   let runAmp = 0, runUp = 0, runDown = 0, runRelax = 0;
   let chiffLeft = p.amount > 0 ? chiffN : 0, chiffDec = 1;
   const windowN = chiffLeft;
@@ -306,8 +298,6 @@ function render(p) {
         runAmp = k * maxLevel * frac;                   // loud at onset (note's range), decays
         const chiffShift = shBright + (shDark - shBright) * (1 - frac);
         const alpha = alphaOf(chiffShift);
-        const reach = Math.min(runAmp,                  // what the slewed noise actually swings
-          REACH_SIGMAS * runAmp * Math.sqrt(alpha / (2 * (2 - alpha))));
         // Aim base, derived so the value's EXPECTED step equals the mean's
         // step in every regime (else the value chases the moving mean
         // through its own slew -- two cascaded one-poles -- and trails it:
@@ -318,15 +308,45 @@ function render(p) {
         // the stage-rate floor binds, exact everywhere between. Hold stages:
         // the mean is static, base = the mean.
         let base = dialed;
+        let alphaEff = alpha;
         if (countdown !== null) {
           const alphaStage = alphaOf(stageShift);
-          const alphaEff = Math.max(alpha, alphaStage);
+          alphaEff = Math.max(alpha, alphaStage);
           base = dialed + (target - dialed) * (alphaStage / alphaEff);
         }
-        const center = Math.min(base, maxLevel - reach); // shifted to fit under the rail
-        runUp = center + runAmp;
-        runDown = center - runAmp;
-        runRelax = base;
+        // Two aims, geometric rail guard: a run of K same-direction draws
+        // covers only 1-(1-alpha)^K of the way to its aim, so the up-aim may
+        // safely sit room/tailF past the level -- the cap lives in REALIZED
+        // space projected back through the slew. Bright slew -> cap at the
+        // rail (where pinning was real); dark slew -> cap recedes, no clip,
+        // no sag: amount 1 behaves like amount 0. The clip's midpoint sag
+        // engages only in proportion to how hard the realized noise presses
+        // the rail, and converges away as the burst fades.
+        const sigma = runAmp / Math.SQRT2;               // matches 3-point variance
+        const tailF = 1 - Math.pow(1 - alphaEff, RUN_GUARD);
+        // The sag must BUY room the noise actually uses: center the aim
+        // segment on the sagged mean and measure the guarded room from
+        // there. The center gives way toward the rail only as far as one
+        // realized noise band (amount-aware; masked; converging as the
+        // realization fades), and the span is symmetric about it -- so the
+        // noise fills the gap the sag opens, and nothing jumps when a stage
+        // transition moves the base off the rail. The floor side is not
+        // guarded: down-aims below the floor are trimmed by the output
+        // clamp (the approved loud onset).
+        // The center stays off the peak rail by exactly the guarded tail
+        // excursion (tailF * depth): full dart span then fits all the way to
+        // the peak BY CONSTRUCTION -- no noise dip approaching it. (A sag
+        // allowance sized to the +-1-sigma band under-budgets the guard's
+        // 16-run tail by ~2.4x at bright slews; that mismatch was the
+        // recurring peak dip.) The sag converges on two fading factors --
+        // depth and darkness -- so low amounts barely sag (continuity with
+        // amount 0), and the center holds through the decay transition (no
+        // pulse). Relax (half the draws) damps dwell at both rails.
+        const dartSpan = runAmp;
+        const center = Math.min(base, maxLevel - tailF * dartSpan);
+        runRelax = center;
+        runUp = center + dartSpan;
+        runDown = center - dartSpan;
       }
     }
     if (chiffLeft > 0) {
