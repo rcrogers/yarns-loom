@@ -51,23 +51,21 @@ docker run --rm -v "$ROOT:/src" -w /src/tools/simengine \
     -s EXPORTED_FUNCTIONS='["_chiff_render","_chiff_meta_count","_chiff_frame_hz","_chiff_duration_samples","_chiff_stage_samples","_malloc","_free"]' \
     -s EXPORTED_RUNTIME_METHODS='["cwrap","HEAP16","HEAP32"]'
 
+python3 inline_engine.py chiff_engine_control.js ../../chiff_sim.html \
+  ../../chiff_sim_banding_control.html
 python3 - <<'PYEOF'
-import re
-html = open('../../chiff_sim.html').read()
-engine = open('chiff_engine_control.js').read()
-blocks = list(re.finditer(r'<script>[\s\S]*?</script>', html))
-assert len(blocks) == 2, 'expected engine + sim script blocks'
-out = html[:blocks[0].start()] + '<script>\n' + engine + '\n</script>' + html[blocks[0].end():]
-out = out.replace('<title>Chiff Envelope Simulator</title>',
-                  '<title>Chiff Sim - BANDING CONTROL</title>')
-out = out.replace(
+path = '../../chiff_sim_banding_control.html'
+s = open(path).read()
+s = s.replace('<title>Chiff Envelope Simulator</title>',
+              '<title>Chiff Sim - BANDING CONTROL</title>')
+s = s.replace(
   '<p>Runs the compiled <code>yarns/envelope.cc</code> itself &mdash; no separate model</p>',
   '<p><b>Diagnostic build, not the real firmware.</b> The rail guard and the '
   'relax aim are both removed, so the value slams into the note\'s rails. '
   'Everything else is the real <code>yarns/envelope.cc</code>. Use it to find '
   'settings where rail banding is visible.</p>')
-open('../../chiff_sim_banding_control.html', 'w').write(out)
-print('wrote chiff_sim_banding_control.html')
+open(path, 'w').write(s)
+print('labelled as the diagnostic build')
 PYEOF
 
 # Leave the tree holding the REAL engine, not the diagnostic one.

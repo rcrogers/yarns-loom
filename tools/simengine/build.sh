@@ -27,4 +27,8 @@ docker run --rm -v "$ROOT:/src" -w /src/tools/simengine \
     -s EXPORTED_FUNCTIONS='["_chiff_render","_chiff_meta_count","_chiff_frame_hz","_chiff_duration_samples","_chiff_stage_samples","_malloc","_free"]' \
     -s EXPORTED_RUNTIME_METHODS='["cwrap","HEAP16","HEAP32"]'
 
+# The page carries the engine inline, so rebuilding it is not enough --
+# without this the sim keeps running the PREVIOUS firmware.
+python3 inline_engine.py chiff_engine.js ../../chiff_sim.html
+
 echo "built $(pwd)/chiff_engine.js ($(wc -c < chiff_engine.js) bytes)"

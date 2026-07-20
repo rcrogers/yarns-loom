@@ -80,6 +80,11 @@ enum MetaField {
   META_RELEASE_SAMPLES,
   META_PEAK_U16,
   META_SUSTAIN_U16,
+  // The chiff's actual rails, straight from the envelope. Recomputing these
+  // in JS was off by one: scale_s16 * peak_u16 falls just short of 2^31, so
+  // the real ceiling is 32766, not INT16_MAX.
+  META_CEILING,
+  META_FLOOR,
   META_COUNT
 };
 
@@ -143,6 +148,12 @@ int chiff_render(
       adsr.release_u32 ? static_cast<int32_t>(UINT32_MAX / adsr.release_u32) : 0;
   meta[META_PEAK_U16] = adsr.peak_u16;
   meta[META_SUSTAIN_U16] = adsr.sustain_u16;
+  // Convert the Q30 rails into the same units the rendered samples use, by
+  // the same path EnvelopeSample takes (>>14 then the saturating >>1).
+  meta[META_CEILING] = static_cast<int32_t>(
+      ClipUShifted(envelope.chiff_top_q30_ >> (30 - 16), 15, 1));
+  meta[META_FLOOR] = static_cast<int32_t>(
+      ClipUShifted(envelope.chiff_floor_q30_ >> (30 - 16), 15, 1));
   return written;
 }
 

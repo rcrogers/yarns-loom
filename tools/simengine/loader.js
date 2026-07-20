@@ -18,7 +18,7 @@ function wrapChiffEngine(Module) {
 
   const META = ['totalSamples', 'gateSamples', 'chiffWindowSamples',
                 'attackSamples', 'decaySamples', 'releaseSamples',
-                'peak_u16', 'sustain_u16'];
+                'peak_u16', 'sustain_u16', 'ceiling', 'floor'];
 
   let bufPtr = 0, bufCap = 0, metaPtr = 0;
 
