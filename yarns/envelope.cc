@@ -70,11 +70,6 @@ const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 // to match the true slew (else the mean leads the value near stage ends).
 const uint16_t kStageLandingFraction_u16 = 64335;  // round((1 - e^-4) * 2^16)
 
-// Longest same-direction run the rail guard protects against, as log2:
-// 2^4 = 16 draws, P(run >= 16) = 2^-16 per run -- rare enough that deeper
-// runs never form a visible stripe.
-const uint32_t kChiffRunGuardLog2 = 4;
-
 // Dart depth as a fraction of the note's range (sim: k = 0.9).
 const int32_t kChiffDartDepth_q15 = static_cast<int32_t>(0.9 * (1 << 15));
 
@@ -107,7 +102,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   stage_start_q30_ = zero_value_q30;
   chiff_floor_q30_ = zero_value_q30;
   chiff_top_q30_ = zero_value_q30;
-  chiff_fit_at_floor_ = false;
   std::fill(
     &stage_target_q30_[0],
     &stage_target_q30_[ENV_NUM_STAGES],
@@ -196,10 +190,6 @@ void Envelope::NoteOn(
     stage_target_q30_[ENV_STAGE_ATTACK], stage_target_q30_[ENV_STAGE_SUSTAIN]));
   chiff_floor_q30_ = std::min(release_q30, std::min(
     stage_target_q30_[ENV_STAGE_ATTACK], stage_target_q30_[ENV_STAGE_SUSTAIN]));
-  // The acoustic peak is the rail far from the release level: that is where
-  // the reach fit protects; the release-side rail keeps the plain clamp.
-  chiff_fit_at_floor_ =
-    (chiff_top_q30_ - release_q30) < (release_q30 - chiff_floor_q30_);
 
   switch (stage_) {
     case ENV_STAGE_ATTACK:
@@ -513,22 +503,15 @@ void Envelope::RenderStage(
       dart_q30 = static_cast<int32_t>(
         (static_cast<int64_t>(amp_q30) * dart_scale_q15_5) >> 15);
     }
-    int32_t keep_q31 = INT32_MAX - slew_alpha_q31;    // (1 - alpha), Q31
-    for (uint32_t i = 0; i < kChiffRunGuardLog2; ++i) {
-      keep_q31 = static_cast<int32_t>(
-        (static_cast<int64_t>(keep_q31) * keep_q31) >> 31);
-    }
-    const int32_t guard_q30 = static_cast<int32_t>(
-      (static_cast<int64_t>(INT32_MAX - keep_q31) * dart_q30) >> 31);
-    int32_t center_q30 = base_q30;
-    if (chiff_fit_at_floor_) {
-      if (center_q30 < floor_q30 + guard_q30) center_q30 = floor_q30 + guard_q30;
-    } else {
-      if (center_q30 > top_q30 - guard_q30) center_q30 = top_q30 - guard_q30;
-    }
+    // No rail guard: the aim centre IS the base. The guard used to hold the
+    // centre a guarded run's excursion off the acoustic-peak rail, costing
+    // sag everywhere to protect against a tail event the output clamp already
+    // handles. Removing it was checked against the sim by ear (no banding, no
+    // excursions) and by measurement: rail contact cannot exceed the clamp,
+    // and floor dwell at low sustain is no worse than with the guard present.
+    const int32_t center_q30 = base_q30;
     const int32_t aim_up_q30 = center_q30 + dart_q30;
     const int32_t aim_down_q30 = center_q30 - dart_q30;
-    const int32_t aim_relax_q30 = center_q30;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
@@ -544,14 +527,13 @@ void Envelope::RenderStage(
               : "=&r"(ramp_lo), "=r"(ramp_hi)
               : "r"(slew_alpha_q31), "r"(decay_q32));
       slew_alpha_q31 -= ramp_hi;
-      // Aim select: relax on half the samples, else the up/down dart --
-      // branchless sign-mask blends.
-      int32_t dart_mask = static_cast<int32_t>(chiff_draw_u32 << 16) >> 31;
+      // Every draw is a dart, up or down: one branchless sign-mask blend.
+      // There is no relax aim -- it existed to damp dwell at the rails, and
+      // measurement showed it does not (removing it leaves floor dwell no
+      // worse), so it was costing per-sample work for nothing.
       int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
-      int32_t dart_q30 =
-        aim_up_q30 ^ ((aim_up_q30 ^ aim_down_q30) & sign_mask);
       int32_t aim_q30 =
-        aim_relax_q30 ^ ((aim_relax_q30 ^ dart_q30) & dart_mask);
+        aim_up_q30 ^ ((aim_up_q30 ^ aim_down_q30) & sign_mask);
       // Never overshoots: alpha <= 1, so |step| <= |delta|.
       value_q30 += static_cast<int32_t>(
         (static_cast<int64_t>(aim_q30 - value_q30) * slew_alpha_q31) >> 31);

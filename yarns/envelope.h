@@ -203,10 +203,6 @@ class Envelope {
   // timbre target may be negative), so these are min/max, not release/peak.
   int32_t chiff_floor_q30_;
   int32_t chiff_top_q30_;
-  // Which rail is the acoustic peak (the far side from the release level):
-  // the reach fit shifts the dart center off that rail; the other rail keeps
-  // the plain output clamp (the sim-validated onset trim).
-  bool chiff_fit_at_floor_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
