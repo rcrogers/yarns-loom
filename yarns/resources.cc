@@ -948,16 +948,6 @@ const uint16_t lut_chiff_lpf_shifts[] = {
        0,      0,      0,      0,
        0,      0,      0,      0,
 };
-const uint16_t lut_chiff_reach_factor[] = {
-   65535,  65535,  52545,  35895,
-   24969,  17515,  12336,   8706,
-    6150,   4347,   3073,   2172,
-    1536,   1086,    768,    543,
-     384,    272,    192,    136,
-      96,     68,     48,     34,
-      24,     17,     12,      8,
-       6,      6,
-};
 
 
 const uint16_t* const lookup_table_table[] = {
@@ -972,7 +962,6 @@ const uint16_t* const lookup_table_table[] = {
   lut_svf_damp,
   lut_svf_scale,
   lut_chiff_lpf_shifts,
-  lut_chiff_reach_factor,
 };
 
 const int16_t lut_scale_pythagorean[] = {

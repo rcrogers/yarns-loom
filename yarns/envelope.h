@@ -181,7 +181,7 @@ class Envelope {
   // While the chiff runs, slew_alpha_q31_/slew_shift_q5_27_ describe the
   // NOISE slew (ramping); dialed_alpha_q31_ carries the stage-nominal rate
   // for the dialed slew. With the chiff off they describe the classic slew
-  // and value_q30_ == dialed_q30_.
+  // and the value is the exact classic slew.
   //
   // Shift is unsigned: a magnitude, 0..kMaxSlewShift. The max exceeds 2^31
   // as Q5.27 (integer shift up to 27), so int32 would sign-flip and corrupt
@@ -190,8 +190,12 @@ class Envelope {
   uint32_t slew_shift_increment_q5_27_;  // Per-sample ramp step (>= 0)
   uint32_t chiff_dark_shift_q5_27_;      // Ramp endpoint: the chiff's own dark
   uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
-  int32_t dialed_q30_;                   // The mean, run-exact (aim placement)
-  int32_t dialed_alpha_q31_;             // Stage-nominal alpha for dialed
+  // Where the current stage began: with the stage phase (closed-form from
+  // the countdown), this anchors the mean -- start + (target - start) *
+  // lut_env_expo[phase] -- with no iterated level state, the same
+  // construction the duty-binary core used for its duty curve.
+  int32_t stage_start_q30_;
+  int32_t dialed_alpha_q31_;             // Stage-nominal alpha (floor/blend)
   int32_t chiff_amp_q30_;                // Current dart depth
   int32_t chiff_amp_step_q30_;           // Per-sample depth fade
   // Ordered clamp bounds over the note's stage targets. The envelope's range

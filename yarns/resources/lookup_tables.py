@@ -934,14 +934,4 @@ def envelope_chiff():
   samples = numpy.round(numpy.power(max_ms, v) * audio_rate / 1000.0)
   lookup_tables_32.append(('chiff_duration_samples', samples.astype(int)))
 
-  # Realized reach of the slewed chiff noise, as a fraction (u16, 65535 = 1.0)
-  # of the raw dart depth, indexed by the integer slew shift (alpha = 2^-shift).
-  # The noise is a 1-pole slew driven by +-depth targets on half the samples:
-  # spread sigma = depth * sqrt(alpha / (2*(2-alpha))); peaks ~3 sigma
-  # (bell-curve tail), capped at the raw depth. Guard entry for interpolation.
-  shifts = numpy.arange(29)
-  alpha = numpy.power(2.0, -shifts.astype(float))
-  factor = numpy.minimum(1.0, 3.0 * numpy.sqrt(alpha / (2.0 * (2.0 - alpha))))
-  factor = numpy.append(factor, factor[-1])
-  lookup_tables.append(('chiff_reach_factor', numpy.round(factor * 65535.0)))
 envelope_chiff()
