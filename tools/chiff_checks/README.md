@@ -24,10 +24,18 @@ Also useful, outside this directory:
 - `tools/hosttest/probe.cc` — per-block internal chiff state.
 - `tools/simengine/parity.js` — engine vs native build.
 
-## Stale
+## Removed
 
-Every other script here predates the engine. They eval'd the JS model that
-used to live in `chiff_sim.html` and no longer runs. They are kept because
-several encode findings that were expensive to obtain, but they do **not**
-execute as-is. Port one via `page.js` if you need it; do not trust its output
-until you have.
+The 62 scripts that predated the engine were deleted. They eval'd the JS
+model that `chiff_sim.html` no longer contains, so none of them ran, and a
+check script that cannot run is worse than no script — it has to be
+re-evaluated every time someone reads this directory. Recover any of them
+from the commit that added them (`git log --diff-filter=A -- tools/chiff_checks`)
+and port it via `page.js` before trusting its output.
+
+## What this directory is for
+
+An agent iterating on the envelope without waiting for someone to listen to
+hardware. Judge anything added here by that: does it let the loop close
+alone? Rendering an image and looking at it counts. Printing numbers that
+only a human can interpret usually does not.
