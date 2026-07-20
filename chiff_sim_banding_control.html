@@ -1,0 +1,694 @@
+<title>Chiff Sim - BANDING CONTROL</title>
+<style>
+:root {
+  --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
+  --ink: #1b1d1f; --ink2: #5c5f63; --ink3: #92959a;
+  --trace: #2a78d6; --dialed: #eda100; --noise: #1baf7a; --mark: #e34948;
+  --chip: #f0efe9; --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a; --panel: #1d2126; --line: #2b3037; --grid: #232830;
+    --ink: #e8eaec; --ink2: #a2a7ad; --ink3: #6b7077;
+    --trace: #3987e5; --dialed: #c98500; --noise: #199e70; --mark: #e66767;
+    --chip: #242932; --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171a; --panel: #1d2126; --line: #2b3037; --grid: #232830;
+  --ink: #e8eaec; --ink2: #a2a7ad; --ink3: #6b7077;
+  --trace: #3987e5; --dialed: #c98500; --noise: #199e70; --mark: #e66767;
+  --chip: #242932; --accent: #3987e5;
+}
+:root[data-theme="light"] {
+  --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
+  --ink: #1b1d1f; --ink2: #5c5f63; --ink3: #92959a;
+  --trace: #2a78d6; --dialed: #eda100; --noise: #1baf7a; --mark: #e34948;
+  --chip: #f0efe9; --accent: #2a78d6;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-variant-numeric: tabular-nums; }
+.wrap { display: flex; gap: 14px; padding: 14px; height: 100vh; overflow: hidden; }
+.rail { width: 252px; flex: none; display: flex; flex-direction: column; gap: 10px;
+        overflow-y: auto; }
+.stage { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+header { padding: 2px 2px 0; }
+header h1 { font-size: 15px; margin: 0; letter-spacing: .01em; }
+header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
+.group { background: var(--panel); border: 1px solid var(--line);
+         border-radius: 6px; padding: 10px 12px 12px; }
+.group h2 { font-size: 10.5px; margin: 0 0 8px; color: var(--ink3);
+            text-transform: uppercase; letter-spacing: .12em; font-weight: 600; }
+.knob { display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+        gap: 2px 8px; margin-bottom: 7px; }
+.knob:last-child { margin-bottom: 0; }
+.knob label { font-size: 12px; color: var(--ink2); }
+.knob output { font-size: 12px; color: var(--ink); }
+.knob output b, .chipbox .v b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.knob output small, .chipbox .v small { color: var(--ink3); font-weight: 400; }
+.knob input[type=range] { grid-column: 1 / -1; width: 100%; margin: 0;
+  accent-color: var(--accent); height: 18px; }
+.knob input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: flex; gap: 4px; grid-column: 1 / -1; }
+.seg button { flex: 1; font: 11px system-ui; padding: 4px 0; cursor: pointer;
+  border: 1px solid var(--line); background: var(--chip); color: var(--ink2);
+  border-radius: 4px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff;
+  border-color: var(--accent); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.checks label { display: flex; gap: 7px; align-items: center; font-size: 12px;
+  color: var(--ink2); margin-bottom: 5px; cursor: pointer; }
+.checks label:last-child { margin-bottom: 0; }
+.checks input { accent-color: var(--accent); margin: 0; }
+.check1 { display: flex; gap: 7px; align-items: center; font-size: 12px;
+  color: var(--ink2); margin-top: 8px; cursor: pointer; }
+.check1 input { accent-color: var(--accent); margin: 0; }
+.check1 select { flex: 1; font: 11px system-ui; padding: 4px 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+  border-radius: 4px; }
+.check1 select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scope { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 120px; }
+.spectrum { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 10px; flex: none; height: 48vh; display: flex; flex-direction: column; }
+#cv { cursor: crosshair; }
+canvas { width: 100%; height: 100%; flex: 1; min-height: 0; display: block; }
+.legend { display: flex; gap: 16px; padding: 2px 4px 8px; font-size: 11.5px;
+  color: var(--ink2); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chipbox { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 12px; min-width: 118px; }
+.chipbox .k { font-size: 10px; color: var(--ink3); text-transform: uppercase;
+  letter-spacing: .1em; }
+.chipbox .v { font-size: 15px; margin-top: 1px; }
+.chipbox .v small { font-size: 11px; color: var(--ink2); }
+button.roll { width: 100%; padding: 6px 0; font: 12px system-ui; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--chip);
+  color: var(--ink); }
+button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { font-size: 11px; color: var(--ink3); margin-top: 6px; line-height: 1.4; }
+/* .knob is a 2-column grid; without this the note is confined to column 1. */
+.knob .note { grid-column: 1 / -1; }
+@media (max-width: 760px) { .wrap { flex-direction: column; } .rail { width: 100%; } }
+</style>
+
+<div class="wrap">
+  <div class="rail">
+    <header>
+      <h1>Chiff Envelope Simulator</h1>
+      <p><b>Diagnostic build, not the real firmware.</b> The rail guard and the relax aim are both removed, so the value slams into the note's rails. Everything else is the real <code>yarns/envelope.cc</code>. Use it to find settings where rail banding is visible.</p>
+    </header>
+
+    <div class="group"><h2>ADSR <small>(front-panel settings)</small></h2>
+      <div class="knob"><label for="atk">ENV ATTACK</label><output class="mono" id="atkV"></output>
+        <input type="range" id="atk" min="0" max="127" value="40"></div>
+      <div class="knob"><label for="dec">ENV DECAY</label><output class="mono" id="decV"></output>
+        <input type="range" id="dec" min="0" max="127" value="64"></div>
+      <div class="knob"><label for="sus">ENV SUSTAIN</label><output class="mono" id="susV"></output>
+        <input type="range" id="sus" min="0" max="127" value="70"></div>
+      <div class="knob"><label for="rel">ENV RELEASE</label><output class="mono" id="relV"></output>
+        <input type="range" id="rel" min="0" max="127" value="64"></div>
+      <div class="knob"><label for="ampmod">AMPLITUDE MOD VELOCITY</label><output class="mono" id="ampmodV"></output>
+        <input type="range" id="ampmod" min="-64" max="63" value="0">
+        <div class="note">Peak level is not a setting of its own: the firmware
+          derives it from this and the note's velocity.</div></div>
+    </div>
+
+    <div class="group"><h2>Note</h2>
+      <div class="knob"><label for="vel">Velocity</label><output class="mono" id="velV"></output>
+        <input type="range" id="vel" min="0" max="127" value="127"></div>
+      <div class="knob"><label for="gate">Gate length</label><output class="mono" id="gateV"></output>
+        <input type="range" id="gate" min="0" max="1000" value="707">
+        <div class="note">How long the key is held -- a performance, not a
+          module setting, so this one is genuinely a time.</div></div>
+    </div>
+
+    <div class="group"><h2>Chiff <small>(front-panel settings)</small></h2>
+      <div class="knob"><label for="amt">CHIFF AMOUNT</label><output class="mono" id="amtV"></output>
+        <input type="range" id="amt" min="0" max="127" value="96"></div>
+      <div class="knob"><label for="chiffDur">CHIFF DURATION</label><output class="mono" id="chiffDurV"></output>
+        <input type="range" id="chiffDur" min="0" max="127" value="90">
+        <div class="note">Indexes the same 128-entry table the module does. The
+          chiff's own lifetime, independent of the ADSR: it can be shorter or
+          longer than the attack.</div></div>
+    </div>
+
+    <div class="group"><h2>Randomness</h2>
+      <button class="roll" id="reroll">Re-roll seed</button>
+      <div class="note mono" id="seedShow"></div>
+    </div>
+
+    <div class="group checks"><h2>Overlays</h2>
+      <label><input type="checkbox" id="showDialed" checked> Dialed (chiff-free) envelope</label>
+      <label><input type="checkbox" id="showNoise" checked> Noise band (|step|, smoothed)</label>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="scope">
+      <div class="legend">
+        <span><i style="background:var(--trace)"></i>chiff envelope</span>
+        <span><i style="background:var(--dialed)"></i>dialed</span>
+        <span><i style="background:var(--noise)"></i>noise</span>
+        <span><i style="background:var(--mark)"></i>release</span>
+        <span class="mono" id="readout" style="margin-left:auto;color:var(--ink2)"></span>
+      </div>
+      <canvas id="cv"></canvas>
+    </div>
+    <div class="spectrum">
+      <div class="legend">
+        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; freq; residual vs mean, dark&rarr;bright = &minus;60&rarr;0 dB)</span>
+        <span class="mono" style="margin-left:auto;color:var(--ink3)">re-roll seed to compare realizations</span>
+      </div>
+      <canvas id="specCv"></canvas>
+    </div>
+    <div class="chips">
+      <div class="chipbox"><div class="k">Attack landing</div>
+        <div class="v mono" id="mLand">–</div></div>
+      <div class="chipbox"><div class="k">Release to 1%</div>
+        <div class="v mono" id="mRel">–</div></div>
+      <div class="chipbox"><div class="k">Chiff window</div>
+        <div class="v mono" id="mWin">–</div></div>
+      <div class="chipbox"><div class="k">Attack shift (nominal)</div>
+        <div class="v mono" id="mShift">–</div></div>
+      <div class="chipbox"><div class="k">Render</div>
+        <div class="v mono" id="mMs">–</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- The compiled firmware. Generated by tools/simengine/build.sh from
+     yarns/envelope.cc; do not edit here. Plain JS (asm.js), so it inlines
+     with no separate fetch and no WebAssembly CSP dependency. -->
+<script>
+var ChiffEngine=(()=>{var _scriptName=globalThis.document?.currentScript?.src;return async function(moduleArg={}){var Module=moduleArg;var ENVIRONMENT_IS_WEB=!!globalThis.window;var ENVIRONMENT_IS_WORKER=!!globalThis.WorkerGlobalScope;var ENVIRONMENT_IS_NODE=globalThis.process?.versions?.node&&globalThis.process?.type!="renderer";var programArgs=[];var thisProgram="./this.program";var quit_=(status,toThrow)=>{throw toThrow};if(typeof __filename!="undefined"){_scriptName=__filename}else{}var scriptDirectory="";var readAsync,readBinary;if(ENVIRONMENT_IS_NODE){var fs=require("node:fs");scriptDirectory=__dirname+"/";readBinary=filename=>{filename=isFileURI(filename)?new URL(filename):filename;var ret=fs.readFileSync(filename);return ret};readAsync=async(filename,binary=true)=>{filename=isFileURI(filename)?new URL(filename):filename;var ret=fs.readFileSync(filename,binary?undefined:"utf8");return ret};if(process.argv.length>1){thisProgram=process.argv[1].replace(/\\/g,"/")}programArgs=process.argv.slice(2);quit_=(status,toThrow)=>{process.exitCode=status;throw toThrow}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){try{scriptDirectory=new URL(".",_scriptName).href}catch{}{readAsync=async url=>{var response=await fetch(url,{credentials:"same-origin"});if(response.ok){return response.arrayBuffer()}throw new Error(response.status+" : "+response.url)}}}else{}var out=console.log.bind(console);var err=console.error.bind(console);var wasmBinary;var WebAssembly={Memory:function(opts){this.buffer=new ArrayBuffer(opts["initial"]*65536)},Module:function(binary){},Instance:function(module,info){this.exports=(
+// EMSCRIPTEN_START_ASM
+function instantiate(aa){function c(d){d.set=function(a,b){this[a]=b};d.get=function(a){return this[a]};return d}var e;var f=new Uint8Array(123);for(var a=25;a>=0;--a){f[48+a]=52+a;f[65+a]=a;f[97+a]=26+a}f[43]=62;f[47]=63;function l(m,n,o){var g,h,a=0,i=n,j=o.length,k=n+(j*3>>2)-(o[j-2]=="=")-(o[j-1]=="=");for(;a<j;a+=4){g=f[o.charCodeAt(a+1)];h=f[o.charCodeAt(a+2)];m[i++]=f[o.charCodeAt(a)]<<2|g>>4;if(i<k)m[i++]=g<<4|h>>2;if(i<k)m[i++]=h<<6|f[o.charCodeAt(a+3)]}return m}function p(q){l(e,1026,"CwQGCPELzQ+aE1cXBhumHjgiuyUxKZgs8y9AM4A2sznZPPM/AEMBRvdI4Uu/TpFRWVQWV8dZblwLX51hJWSiZhZpgGvhbThwhnLLdAd3Onlke4V9nn+vgbiDuIWxh6GJiotsjUaPGZHkkqiUZpYcmMuZdJsXnbKeSKDXoWCj46RgptenSKmzqhmsea3UrimwerHEsgq0S7WHtr238LgdukW7abyJvaS+u7/NwNvB5cLrw+zE6sXkxtrHzMi6yaXKjMtvzE/NLM4Fz9rPrdB80UfSENPW05jUWNUU1s7Whdc52OrYmNlE2u3ak9s33Njcd90T3q3eRd/a323g/eCM4RjiouIp46/jM+S05DTlseUt5qfmH+eV5wnoe+js6FvpyOkz6p3qBetr69DrNOyW7PbsVe2y7Q7uaO7B7hnvb+/E7xjwavC88AvxWvGn8fPxPvKI8tHyGfNf86Tz6fMs9G70r/Tv9C/1bfWq9eb1IvZc9pX2zvYG9z33c/eo99z3EPhC+HT4pvjW+Ab5Nflj+ZD5vfnp+RX6P/pp+pP6vPrk+gv7MvtY+377o/vI++z7D/wy/FT8dvyY/Lj82fz4/Bj9Nv1V/XP9kP2t/cn95f0B/hz+N/5R/mv+hf6e/rb+z/7n/v7+Fv8s/0P/Wf9v/4T/mv+u/8P/1//r//////8=");l(e,1552,"//9O/53+7f09/Y783/sx+4P61fko+Xz40Pck93n2z/Ul9Xv00vMp84Hy2fEx8Yrw5O8+75ju8+1O7arsBuxj68DqHep76droOeiY5/fmWOa45Rnle+Tc4z/joeIE4mjhzOAw4JXf+t5g3sbdLd2U3PvbY9vL2jPanNkG2W/Y2tdE16/WG9aG1fPUX9TM0zrTp9IV0oTR89Bi0NLPQs+zziTOlc0HzXnM68tey9HKRcq5yS3JosgXyI3HA8d5xu/FZsXexFXEzsNGw7/COMKywSzBpsAgwJu/F7+Tvg++i70IvYW8A7yAu/+6fbr8uXu5+7h7uPu3fLf9tn62ALaCtQS1h7QKtI2zEbOVshmynrEjsamwLrC0rzuvwa5JrtCtWK3grGis8at6qwOrjKoWqqGpK6m2qEGozadZp+Wmcab+pYulGaWmpDSkw6NRo+CicKL/oY+hH6GwoECg0p9jn/Weh54ZnqudPp3RnGWc+ZuNmyGbtppKmuCZdZkLmaGYN5jOl2WX/JaUliuWw5VclfSUjZQmlMCTWpP0ko6SKJLDkV6R+pCVkDGQzY9qjwePpI5Bjt6NfI0ajbmMV4z2i5WLNYvUinSKFIq1iVWJ9oiYiDmI24d9hx+HwYZkhgeGqoVOhfGElYQ6hN6Dg4Mog82CcoIYgr6BZIELgbGAWIAAgA==");l(e,2080,"////P7x9YiYMdGUYCf88ECEAOQuIowAInNvbBUgiYwTmmlkDMByaAv8zDQJXqaMBQllTAY1cFQFK5+QAsZS+AOvznwDZPIcA9R1zAFuaYgBg8lQANZNJAEgLQAD1ATgAcjExAF1iKwByaCYADSAiAE5sHgCrNRsA1WgYAOH1FQCfzxMAEesRAAc/EADFww4AxnINAIJGDABHOgsAEUoKAG9yCQBrsAgAegEIAGZjBwBG1AYAblIGAG3cBQD7cAUA+w4FAHS1BACHYwQAchgEAInTAwAxlAMA41kDACUkAwCN8gIAuMQCAFCaAgAJcwIAnE4CAMosAgBbDQIAHPABAN7UAQB5uwEAxqMBAKONAQDxeAEAk2UBAG9TAQBvQgEAezIBAIEjAQBuFQEAMggBAL37AAAD8AAA9eQAAIjaAACx0AAAZ8cAAJ++AABStgAAd64AAAinAAD8nwAAT5kAAPqSAAD4jAAARIcAANiBAACyfAAAzHcAACNzAAC0bgAAe2oAAHVmAACfYgAA9l4AAHlbAAAkWAAA9lQAAOxRAAAFTwAAPkwAAJZJAAAMRwAAnUQAAElCAAAOQAAA6j0AAN47AADnOQAABDgAADU2AAB4NAAAzTIAADMxAACpLwAALi4AAMIsAABkKwAAEyoAAM4oAACWJwAAaSYAAEglAABIJQ==");l(e,2608,"LQAAADAAAAA0AAAAOAAAADwAAABAAAAARQAAAEoAAABPAAAAVQAAAFsAAABiAAAAaQAAAHEAAAB5AAAAggAAAIwAAACWAAAAoQAAAK0AAAC5AAAAxwAAANUAAADlAAAA9gAAAAgBAAAbAQAAMAEAAEYBAABeAQAAeAEAAJQBAACxAQAA0QEAAPMBAAAYAgAAPwIAAGkCAACWAgAAxwIAAPsCAAAzAwAAbwMAAK8DAAD1AwAAPwQAAI8EAADkBAAAQAUAAKMFAAAMBgAAfgYAAPgGAAB7BwAABwgAAJ4IAAA/CQAA7QkAAKcKAABvCwAARgwAACwNAAAkDgAALQ8AAEoQAAB8EQAAxBIAACQUAACeFQAANBcAAOgYAAC7GgAAsRwAAMweAAAOIQAAeiMAABQmAADfKAAA3isAABYvAACKMgAAPjYAADk6AAB9PgAAE0MAAP5HAABFTQAA8FIAAAVZAACMXwAAjWYAABJuAAAldgAAzn4AABuIAAAWkgAAzJwAAEyoAACjtAAA4sEAABrQAABc3wAAve8AAFEBAQAwFAEAcSgBAC0+AQCCVQEAjW4BAG6JAQBIpgEAP8UBAHzmAQAoCgIAcjACAItZAgCnhQIAALUCANHnAgBcHgMA51gDAL2XAwAv2wMAkiMEAEVxBACqxAQALR4FAEB+BQ==");l(e,3120,"vrr+ysAQAQ==")}function r(s,t,u){e.copyWithin(s,t,t+u)}function $(q){var v=new ArrayBuffer(16908288);var w=new Int8Array(v);var x=new Int16Array(v);var y=new Int32Array(v);var z=new Uint8Array(v);var A=new Uint16Array(v);var B=new Uint32Array(v);var C=new Float32Array(v);var D=new Float64Array(v);var E=Math.imul;var F=Math.fround;var G=Math.abs;var H=Math.clz32;var I=Math.min;var J=Math.max;var K=Math.floor;var L=Math.ceil;var M=Math.trunc;var N=Math.sqrt;var O=q.env;var P=O.emscripten_resize_heap;var Q=69824;var R=0;var S=0;
+// EMSCRIPTEN_START_FUNCS
+function pa(a){a=a|0;var b=0,c=0,d=0,e=0,f=0,g=0,h=0,i=0,j=0,k=0,l=0,m=0,n=0;l=Q-16|0;Q=l;a:{b:{c:{d:{e:{f:{g:{h:{i:{j:{if(a>>>0<=244){e=y[945];g=a>>>0<11?16:a+11&504;b=g>>>3|0;a=e>>>b|0;if(a&3){a=b+((a^-1)&1)|0;f=a<<3;c=f+3820|0;d=y[f+3828>>2];b=y[d+8>>2];k:{if((c|0)==(b|0)){m=3780,n=ua(a)&e,y[m>>2]=n;break k}y[b+12>>2]=c;y[c+8>>2]=b}a=d+8|0;y[d+4>>2]=f|3;b=d+f|0;y[b+4>>2]=y[b+4>>2]|1;break a}k=y[947];if(k>>>0>=g>>>0){break j}if(a){d=a<<b;a=2<<b;a=ra(d&(0-a|a));f=a<<3;c=f+3820|0;h=y[f+3828>>2];b=y[h+8>>2];l:{if((c|0)==(b|0)){e=ua(a)&e;y[945]=e;break l}y[b+12>>2]=c;y[c+8>>2]=b}y[h+4>>2]=g|3;c=g+h|0;d=f-g|0;y[c+4>>2]=d|1;y[f+h>>2]=d;if(k){b=(k&-8)+3820|0;f=y[950];a=1<<(k>>>3);m:{if(!(a&e)){y[945]=a|e;a=b;break m}a=y[b+8>>2]}y[b+8>>2]=f;y[a+12>>2]=f;y[f+12>>2]=b;y[f+8>>2]=a}a=h+8|0;y[950]=c;y[947]=d;break a}j=y[946];if(!j){break j}b=y[(ra(j)<<2)+4084>>2];h=(y[b+4>>2]&-8)-g|0;d=b;while(1){n:{a=y[b+16>>2];if(!a){a=y[b+20>>2];if(!a){break n}}b=(y[a+4>>2]&-8)-g|0;c=b>>>0<h>>>0;h=c?b:h;d=c?a:d;b=a;continue}break}i=y[d+24>>2];a=y[d+12>>2];if((d|0)!=(a|0)){b=y[d+8>>2];y[b+12>>2]=a;y[a+8>>2]=b;break b}b=y[d+20>>2];if(b){c=d+20|0}else{b=y[d+16>>2];if(!b){break i}c=d+16|0}while(1){f=c;a=b;c=a+20|0;b=y[a+20>>2];if(b){continue}c=a+16|0;b=y[a+16>>2];if(b){continue}break}y[f>>2]=0;break b}g=-1;if(a>>>0>4294967231){break j}b=a+11|0;g=b&-8;j=y[946];if(!j){break j}e=31;h=0-g|0;if(a>>>0<=16777204){a=H(b>>>8|0);e=((g>>>38-a&1)-(a<<1)|0)+62|0}b=y[(e<<2)+4084>>2];o:{p:{q:{if(!b){a=0;break q}a=0;d=g<<((e|0)!=31?25-(e>>>1|0)|0:0);while(1){r:{f=(y[b+4>>2]&-8)-g|0;if(f>>>0>=h>>>0){break r}c=b;h=f;if(f){break r}h=0;a=b;break p}f=y[b+20>>2];b=y[((d>>>29&4)+b|0)+16>>2];a=f?(b|0)==(f|0)?a:f:a;d=d<<1;if(b){continue}break}}if(!(a|c)){c=0;a=2<<e;a=(0-a|a)&j;if(!a){break j}a=y[(ra(a)<<2)+4084>>2]}if(!a){break o}}while(1){b=(y[a+4>>2]&-8)-g|0;d=b>>>0<h>>>0;h=d?b:h;c=d?a:c;b=y[a+16>>2];if(b){a=b}else{a=y[a+20>>2]}if(a){continue}break}}if(!c|y[947]-g>>>0<=h>>>0){break j}e=y[c+24>>2];a=y[c+12>>2];if((c|0)!=(a|0)){b=y[c+8>>2];y[b+12>>2]=a;y[a+8>>2]=b;break c}b=y[c+20>>2];if(b){d=c+20|0}else{b=y[c+16>>2];if(!b){break h}d=c+16|0}while(1){f=d;a=b;d=a+20|0;b=y[a+20>>2];if(b){continue}d=a+16|0;b=y[a+16>>2];if(b){continue}break}y[f>>2]=0;break c}a=y[947];if(a>>>0>=g>>>0){c=y[950];b=a-g|0;s:{if(b>>>0>=16){d=c+g|0;y[d+4>>2]=b|1;y[a+c>>2]=b;y[c+4>>2]=g|3;break s}y[c+4>>2]=a|3;a=a+c|0;y[a+4>>2]=y[a+4>>2]|1;b=0;d=0}y[947]=b;y[950]=d;a=c+8|0;break a}i=y[948];if(i>>>0>g>>>0){b=i-g|0;y[948]=b;c=y[951];a=c+g|0;y[951]=a;y[a+4>>2]=b|1;y[c+4>>2]=g|3;a=c+8|0;break a}a=0;j=g+47|0;if(y[1063]){c=y[1065]}else{y[1066]=-1;y[1067]=-1;y[1064]=4096;y[1065]=4096;y[1063]=l+12&-16^1431655768;y[1068]=0;y[1056]=0;c=4096}h=j+c|0;f=0-c|0;b=h&f;if(b>>>0<=g>>>0){break a}d=y[1055];if(d){c=y[1053];e=c+b|0;if(d>>>0<e>>>0|c>>>0>=e>>>0){break a}}t:{if(!(z[4224]&4)){u:{v:{w:{x:{d=y[951];if(d){a=4228;while(1){c=y[a>>2];if(c>>>0<=d>>>0&d>>>0<c+y[a+4>>2]>>>0){break x}a=y[a+8>>2];if(a){continue}break}}d=oa(0);if((d|0)==-1){break u}e=b;c=y[1064];a=c-1|0;if(a&d){e=(b-d|0)+(a+d&0-c)|0}if(e>>>0<=g>>>0){break u}c=y[1055];if(c){a=y[1053];f=a+e|0;if(c>>>0<f>>>0|a>>>0>=f>>>0){break u}}a=oa(e);if((d|0)!=(a|0)){break w}break t}e=f&h-i;d=oa(e);if((d|0)==(y[a>>2]+y[a+4>>2]|0)){break v}a=d}if((a|0)==-1){break u}if(g+48>>>0<=e>>>0){d=a;break t}c=y[1065];c=c+(j-e|0)&0-c;if((oa(c)|0)==-1){break u}e=c+e|0;d=a;break t}if((d|0)!=-1){break t}}y[1056]=y[1056]|4}d=oa(b);a=oa(0);if((d|0)==-1|(a|0)==-1|a>>>0<=d>>>0){break e}e=a-d|0;if(e>>>0<=g+40>>>0){break e}}a=y[1053]+e|0;y[1053]=a;if(a>>>0>B[1054]){y[1054]=a}y:{f=y[951];if(f){a=4228;while(1){c=y[a>>2];b=y[a+4>>2];if((c+b|0)==(d|0)){break y}a=y[a+8>>2];if(a){continue}break}break g}a=y[949];if(!(a>>>0<=d>>>0?a:0)){y[949]=d}a=0;y[1058]=e;y[1057]=d;y[953]=-1;y[954]=y[1063];y[1060]=0;while(1){c=a<<3;b=c+3820|0;y[c+3828>>2]=b;y[c+3832>>2]=b;a=a+1|0;if((a|0)!=32){continue}break}c=e-40|0;a=-8-d&7;b=c-a|0;y[948]=b;a=a+d|0;y[951]=a;y[a+4>>2]=b|1;y[(c+d|0)+4>>2]=40;y[952]=y[1067];break f}if(y[a+12>>2]&8|(d>>>0<=f>>>0|c>>>0>f>>>0)){break g}y[a+4>>2]=b+e;a=-8-f&7;c=a+f|0;y[951]=c;b=y[948]+e|0;a=b-a|0;y[948]=a;y[c+4>>2]=a|1;y[(b+f|0)+4>>2]=40;y[952]=y[1067];break f}a=0;break b}a=0;break c}if(B[949]>d>>>0){y[949]=d}b=d+e|0;a=4228;z:{while(1){c=y[a>>2];if((c|0)!=(b|0)){a=y[a+8>>2];if(a){continue}break z}break}if(!(z[a+12|0]&8)){break d}}a=4228;while(1){A:{b=y[a>>2];if(b>>>0<=f>>>0){h=b+y[a+4>>2]|0;if(h>>>0>f>>>0){break A}}a=y[a+8>>2];continue}break}c=e-40|0;a=-8-d&7;b=c-a|0;y[948]=b;a=a+d|0;y[951]=a;y[a+4>>2]=b|1;y[(c+d|0)+4>>2]=40;y[952]=y[1067];a=(h+(39-h&7)|0)-47|0;c=a>>>0<f+16>>>0?f:a;y[c+4>>2]=27;a=y[1060];y[c+16>>2]=y[1059];y[c+20>>2]=a;a=y[1058];y[c+8>>2]=y[1057];y[c+12>>2]=a;y[1059]=c+8;y[1058]=e;y[1057]=d;y[1060]=0;a=c+24|0;while(1){y[a+4>>2]=7;b=a+8|0;a=a+4|0;if(b>>>0<h>>>0){continue}break}if((c|0)==(f|0)){break f}y[c+4>>2]=y[c+4>>2]&-2;h=c-f|0;y[f+4>>2]=h|1;y[c>>2]=h;B:{if(h>>>0<=255){a=(h&248)+3820|0;c=y[945];b=1<<(h>>>3);C:{if(!(c&b)){y[945]=b|c;b=a;break C}b=y[a+8>>2]}y[a+8>>2]=f;y[b+12>>2]=f;d=12;c=8;break B}a=31;if(h>>>0<=16777215){a=H(h>>>8|0);a=(h>>>38-a&1|a<<1)^62}y[f+28>>2]=a;y[f+16>>2]=0;y[f+20>>2]=0;d=(a<<2)+4084|0;D:{c=y[946];b=1<<a;E:{if(!(c&b)){y[946]=b|c;y[d>>2]=f;y[f+24>>2]=d;break E}a=h<<((a|0)!=31?25-(a>>>1|0)|0:0);c=y[d>>2];while(1){b=c;if((h|0)==(y[b+4>>2]&-8)){break D}d=a>>>29|0;a=a<<1;d=(d&4)+b|0;c=y[d+16>>2];if(c){continue}break}y[d+16>>2]=f;y[f+24>>2]=b}d=8;b=f;a=b;c=12;break B}a=y[b+8>>2];y[a+12>>2]=f;y[b+8>>2]=f;y[f+8>>2]=a;a=0;d=24;c=12}y[c+f>>2]=b;y[d+f>>2]=a}a=y[948];if(a>>>0<=g>>>0){break e}b=a-g|0;y[948]=b;c=y[951];a=c+g|0;y[951]=a;y[a+4>>2]=b|1;y[c+4>>2]=g|3;a=c+8|0;break a}y[944]=48;a=0;break a}y[a>>2]=d;y[a+4>>2]=y[a+4>>2]+e;h=(-8-d&7)+d|0;y[h+4>>2]=g|3;e=c+(-8-c&7)|0;i=g+h|0;d=e-i|0;F:{if(y[951]==(e|0)){y[951]=i;a=y[948]+d|0;y[948]=a;y[i+4>>2]=a|1;break F}if(y[950]==(e|0)){y[950]=i;a=y[947]+d|0;y[947]=a;y[i+4>>2]=a|1;y[a+i>>2]=a;break F}c=y[e+4>>2];if((c&3)==1){f=c&-8;g=y[e+12>>2];G:{if(c>>>0<=255){a=y[e+8>>2];if((a|0)==(g|0)){m=3780,n=y[945]&ua(c>>>3|0),y[m>>2]=n;break G}y[a+12>>2]=g;y[g+8>>2]=a;break G}j=y[e+24>>2];H:{if((e|0)!=(g|0)){a=y[e+8>>2];y[a+12>>2]=g;y[g+8>>2]=a;break H}I:{c=y[e+20>>2];if(c){a=e+20|0}else{c=y[e+16>>2];if(!c){break I}a=e+16|0}while(1){b=a;g=c;a=c+20|0;c=y[c+20>>2];if(c){continue}a=g+16|0;c=y[g+16>>2];if(c){continue}break}y[b>>2]=0;break H}g=0}if(!j){break G}b=y[e+28>>2];a=b<<2;J:{if(y[a+4084>>2]==(e|0)){y[a+4084>>2]=g;if(g){break J}m=3784,n=y[946]&ua(b),y[m>>2]=n;break G}K:{if(y[j+16>>2]==(e|0)){y[j+16>>2]=g;break K}y[j+20>>2]=g}if(!g){break G}}y[g+24>>2]=j;a=y[e+16>>2];if(a){y[g+16>>2]=a;y[a+24>>2]=g}a=y[e+20>>2];if(!a){break G}y[g+20>>2]=a;y[a+24>>2]=g}d=d+f|0;e=e+f|0;c=y[e+4>>2]}y[e+4>>2]=c&-2;y[i+4>>2]=d|1;y[d+i>>2]=d;if(d>>>0<=255){b=(d&248)+3820|0;c=y[945];a=1<<(d>>>3);L:{if(!(c&a)){y[945]=a|c;a=b;break L}a=y[b+8>>2]}y[b+8>>2]=i;y[a+12>>2]=i;y[i+12>>2]=b;y[i+8>>2]=a;break F}g=31;if(d>>>0<=16777215){a=H(d>>>8|0);g=(d>>>38-a&1|a<<1)^62}y[i+28>>2]=g;y[i+16>>2]=0;y[i+20>>2]=0;c=(g<<2)+4084|0;M:{b=y[946];a=1<<g;N:{if(!(b&a)){y[946]=a|b;y[c>>2]=i;y[i+24>>2]=c;break N}g=d<<((g|0)!=31?25-(g>>>1|0)|0:0);a=y[c>>2];while(1){b=a;if((y[a+4>>2]&-8)==(d|0)){break M}c=g>>>29|0;g=g<<1;c=a+(c&4)|0;a=y[c+16>>2];if(a){continue}break}y[c+16>>2]=i;y[i+24>>2]=b}y[i+12>>2]=i;y[i+8>>2]=i;break F}a=y[b+8>>2];y[a+12>>2]=i;y[b+8>>2]=i;y[i+24>>2]=0;y[i+12>>2]=b;y[i+8>>2]=a}a=h+8|0;break a}O:{if(!e){break O}d=y[c+28>>2];b=d<<2;P:{if(y[b+4084>>2]==(c|0)){y[b+4084>>2]=a;if(a){break P}j=ua(d)&j;y[946]=j;break O}Q:{if(y[e+16>>2]==(c|0)){y[e+16>>2]=a;break Q}y[e+20>>2]=a}if(!a){break O}}y[a+24>>2]=e;b=y[c+16>>2];if(b){y[a+16>>2]=b;y[b+24>>2]=a}b=y[c+20>>2];if(!b){break O}y[a+20>>2]=b;y[b+24>>2]=a}R:{if(h>>>0<=15){a=g+h|0;y[c+4>>2]=a|3;a=a+c|0;y[a+4>>2]=y[a+4>>2]|1;break R}y[c+4>>2]=g|3;e=c+g|0;y[e+4>>2]=h|1;y[e+h>>2]=h;if(h>>>0<=255){b=(h&248)+3820|0;d=y[945];a=1<<(h>>>3);S:{if(!(d&a)){y[945]=a|d;a=b;break S}a=y[b+8>>2]}y[b+8>>2]=e;y[a+12>>2]=e;y[e+12>>2]=b;y[e+8>>2]=a;break R}a=31;if(h>>>0<=16777215){a=H(h>>>8|0);a=(h>>>38-a&1|a<<1)^62}y[e+28>>2]=a;y[e+16>>2]=0;y[e+20>>2]=0;d=(a<<2)+4084|0;T:{b=1<<a;U:{if(!(b&j)){y[946]=b|j;y[d>>2]=e;break U}a=h<<((a|0)!=31?25-(a>>>1|0)|0:0);b=y[d>>2];while(1){d=b;if((y[b+4>>2]&-8)==(h|0)){break T}f=a>>>29|0;a=a<<1;f=b+(f&4)|0;b=y[f+16>>2];if(b){continue}break}y[f+16>>2]=e}y[e+24>>2]=d;y[e+12>>2]=e;y[e+8>>2]=e;break R}a=y[d+8>>2];y[a+12>>2]=e;y[d+8>>2]=e;y[e+24>>2]=0;y[e+12>>2]=d;y[e+8>>2]=a}a=c+8|0;break a}V:{if(!i){break V}c=y[d+28>>2];b=c<<2;W:{if(y[b+4084>>2]==(d|0)){y[b+4084>>2]=a;if(a){break W}m=3784,n=ua(c)&j,y[m>>2]=n;break V}X:{if(y[i+16>>2]==(d|0)){y[i+16>>2]=a;break X}y[i+20>>2]=a}if(!a){break V}}y[a+24>>2]=i;b=y[d+16>>2];if(b){y[a+16>>2]=b;y[b+24>>2]=a}b=y[d+20>>2];if(!b){break V}y[a+20>>2]=b;y[b+24>>2]=a}Y:{if(h>>>0<=15){a=g+h|0;y[d+4>>2]=a|3;a=a+d|0;y[a+4>>2]=y[a+4>>2]|1;break Y}y[d+4>>2]=g|3;c=d+g|0;y[c+4>>2]=h|1;y[c+h>>2]=h;if(k){b=(k&-8)+3820|0;f=y[950];a=1<<(k>>>3);Z:{if(!(a&e)){y[945]=a|e;a=b;break Z}a=y[b+8>>2]}y[b+8>>2]=f;y[a+12>>2]=f;y[f+12>>2]=b;y[f+8>>2]=a}y[950]=c;y[947]=h}a=d+8|0}Q=l+16|0;return a|0}function fa(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,s,t){a=a|0;b=b|0;c=c|0;d=d|0;e=e|0;f=f|0;g=g|0;h=h|0;i=i|0;j=j|0;k=k|0;l=l|0;m=m|0;n=n|0;o=o|0;p=p|0;q=q|0;s=s|0;t=t|0;var u=0,v=0,z=0,B=0,C=0,D=0,F=0,G=0,I=0,J=0,K=0,L=0,M=0,N=0,O=0,P=0,R=0;I=Q-128|0;Q=I;y[923]=0;y[924]=0;y[925]=0;y[926]=0;y[914]=0;y[915]=0;y[916]=0;y[917]=0;y[929]=0;y[930]=0;y[931]=0;y[932]=0;y[933]=0;y[934]=0;y[935]=0;y[936]=0;y[937]=0;y[938]=0;p=p?p:-889275714;y[780]=p;v=i<<24>>24;i=f&255;c=E(v,i)+(c<<6&16320)<<16>>16;c=(c|0)>0?c:0;x[1881]=((c|0)>=8191?8191:c)<<3;c=A[(0-(f<<1&510)<<1)+1532>>1]^65535;x[1880]=(((e|0)<0?0-E(c,e)|0:E(65536-c|0,e))^-1)>>>6;c=E(i,j<<24>>24)+(d<<6&16320)<<16>>16;c=(c|0)>0?c:0;d=(c|0)>=8191?8191:c;e=d>>>4&508;f=y[e+2080>>2];c=f>>>1|0;y[943]=f&1|c+(E((y[(e+2080|0)+4>>2]>>>1|0)-c|0,d<<2&252)>>8)<<1;b=E(i,h<<24>>24)+(b<<6&16320)<<16>>16;b=(b|0)>0?b:0;c=(b|0)>=8191?8191:b;d=c>>>4&508;e=y[d+2080>>2];b=e>>>1|0;y[942]=e&1|b+(E((y[(d+2080|0)+4>>2]>>>1|0)-b|0,c<<2&252)>>8)<<1;a=E(i,g<<24>>24)+(a<<6&16320)<<16>>16;a=(a|0)>0?a:0;b=(a|0)>=8191?8191:a;c=b>>>4&508;d=y[c+2080>>2];a=d>>>1|0;y[941]=d&1|a+(E((y[(c+2080|0)+4>>2]>>>1|0)-a|0,b<<2&252)>>8)<<1;y[927]=0;y[920]=0;y[918]=0;w[3756]=0;a=y[912];y[928]=a&63;y[912]=a+1;ca(4);y[928]=0;c=k&255;d=l&255;y[913]=3760;a=o<<16>>16;b=E(a,A[1880])>>1;y[914]=b;e=A[1881];y[918]=0;y[917]=0;a=E(a,e)>>1;y[915]=a;y[916]=a;f=(a|0)<(b|0);e=f?b:a;e=(e|0)>=0?e:0;y[938]=e;a=f?a:b;a=(a|0)<0?a:0;y[937]=a;w[3756]=(e|0)<(0-a|0);a:{b:{switch(y[922]-1|0){case 0:case 1:ca(1);break a;case 2:case 3:case 4:break b;default:break a}}b=0;ca(0);a=y[(d<<2)+2608>>2];d=c?a:0;y[932]=d;if(d){c:{if(a>>>0<4){break c}d=H(a);d=a<<d>>>4&134217727|(d^-1)<<27;if(d>>>0<268435457){break c}b=d-268435456|0;b=b>>>0>=3623878656?-671088640:b}y[931]=b;d=y[938]-y[937]|0;d=sa(d,d>>31,29491,0);d=(S&32767)<<17|d>>>15;y[935]=d;y[936]=(d|0)/(a|0);a=sa((A[(c<<2)+1024>>1]<<16>>>0)/A[766]|0,0,1660715008,0);a=1794932736-((S&65535)<<16|a>>>16)|0;y[929]=a>>>0<b>>>0?a:b}da()}a=m+n|0;L=(a|0)<(s|0)?a:s;if((L|0)>0){f=0;while(1){d:{if(!(f&1)){f=0;if((m|0)>(B|0)){break d}ca(3)}f=1}e=0;while(1){b=e<<2;a=p<<13^p;a=a>>>17^a;a=a<<5^a;y[b+3136>>2]=a;a=a^a<<13;a=a>>>17^a;p=a<<5^a;y[b+3140>>2]=p;e=e+2|0;if((e|0)!=128){continue}break}y[780]=p;d=I;a=y[921];v=a;P=0-(a>>1)>>5;b=64;while(1){C=y[932];o=y[924];G=y[923];J=G?b>>>0>o>>>0?o:b:b;D=C>>>0<J>>>0?C:J;F=C?D:J;s=y[927];N=y[938];O=y[937];h=y[919];g=y[926];n=y[920];e:{if(!G){a=g;o=y[935];c=o;break e}z=32768;a=g;e=y[934];if((a|0)<(e|0)){i=a>>31;c=a;a=i<<31|a>>>1;i=i<<1|c>>>31;j=c<<31;c=c<<1;i=ta(j,a,0-c|0,2-(((c|0)!=0)+i|0)|0);c=1073741824;while(1){a=c;c=a>>>2|0;if(a>>>0>i>>>0){continue}break}j=0;if(a){while(1){c=a+j|0;s=c>>>0>i>>>0;j=(j>>>1|0)+(s?0:a)|0;i=i-(s?0:c)|0;a=a>>>2|0;if(a){continue}break}a=E(j,3);j=(a>>>0>=46341?46341:a)<<15}a=e>>31;i=a<<1|e>>>31;c=e<<1;i=ta(e<<31,a<<31|e>>>1,0-c|0,2-(((c|0)!=0)+i|0)|0);c=1073741824;while(1){a=c;c=a>>>2|0;if(a>>>0>i>>>0){continue}break}c=0;f:{g:{if(!a){break g}while(1){s=a+c|0;z=s>>>0>i>>>0;c=(c>>>1|0)+(z?0:a)|0;i=i-(z?0:s)|0;a=a>>>2|0;if(a){continue}break}if(!c){break g}a=E(c,3);a=a>>>0>=46341?46341:a;break f}a=1}z=(j>>>0)/(a>>>0)|0;s=0;a=e}if(C){i=y[933];j=i;o=0-E(o,G)|0;u=o>>>23&510;c=A[u+1024>>1];o=sa(c+(E(A[(u+1024|0)+2>>1]-c|0,o>>>8&65535)>>>16|0)&65535,0,64335,0);i=h-i|0;M=i;u=i>>31;c=S;i=c>>>16|0;c=sa(M,u,(c&65535)<<16|o>>>16,i);K=((S&65535)<<16|c>>>16)+j|0;c=h-K|0;M=c;R=c>>31;if((a|0)!=(e|0)){u=e<<31;h=H(a);j=(h?u>>>32-h|0:0)|e>>>1<<h;o=a<<h;e=o>>>16|0;i=(j>>>0)/(e>>>0)|0;c=j-E(i,e)|0;h=u<<h>>>16|0;u=o&65535;while(1){if(!(i>>>0<=65535&E(i,u)>>>0<=(h|c<<16)>>>0)){i=i-1|0;c=c+e|0;if(c>>>0<65536){continue}}break}h=(h|j<<16)-E(i,o)|0;c=(h>>>0)/(e>>>0)|0;j=h-E(c,e)|0;while(1){if(!(c>>>0<=65535&E(c,u)>>>0<=j<<16>>>0)){c=c-1|0;j=e+j|0;if(j>>>0<65536){continue}}break}c=(i<<16)+c|0}else{c=2147483647}c=sa(M,R,c,0);h=K+((S&2147483647)<<1|c>>>31)|0}o=y[935];c=o;e=sa(c,c>>31,z,0);c=(z|0)==32768?c:(S&32767)<<17|e>>>15}if(F){e=(F<<1)+d|0;j=0-c|0;i=(y[928]-b<<2)+3392|0;z=s>>31;while(1){u=(h-n|0)+(y[i>>2]&65536?j:c)|0;K=u>>31;sa(a,a>>31,s,z);a=a-S|0;u=sa(u,K,a,a>>31);n=((S&2147483647)<<1|u>>>31)+n|0;n=(n|0)>(O|0)?n:O;n=(n|0)<(N|0)?n:N;v=v+P|0;u=(n>>14)+(v>>15)>>1;u=(u|0)>0?u:0;x[d>>1]=(u|0)>=32767?32767:u;i=i+4|0;d=d+2|0;if((e|0)!=(d|0)){continue}break}d=e}h:{i:{j:{if(C){y[932]=C-D;c=o-E(y[936],D)|0;y[935]=(c|0)>0?c:0;if(C>>>0>J>>>0){break j}y[935]=0;y[927]=0;y[929]=y[925];a=y[934]}y[926]=a;y[921]=v;y[920]=n;a=b-F|0;if(!G){break h}break i}c=y[929]+E(y[930],D)|0;e=y[931];c=c>>>0<e>>>0?c:e;y[929]=c;if(!G){y[926]=a;y[921]=v;y[920]=n;a=b-D|0;break h}if((g|0)<y[934]){e=c>>>18&510;a=A[e+1552>>1];a=(a+(E(A[(e+1552|0)+2>>1]-a|0,c>>>3&65535)>>>16|0)&65535)<<15>>>(c>>>27)|0}y[926]=a;y[921]=v;y[920]=n;a=b-D|0}c=y[924];y[924]=c-F;if((c|0)!=(F|0)){break h}ca(y[922]+1|0);b=a;continue}c=(b|0)!=(F|0);b=a;if(c){continue}break}a=L-B|0;a=(a|0)>=64?64:a;b=a<<1;if(b){r((B<<1)+q|0,I,b)}B=a+B|0;if((L|0)>(B|0)){continue}break}}y[t+4>>2]=m;y[t>>2]=B;y[t+8>>2]=k?y[((l&127)<<2)+2608>>2]:0;a=y[941];if(a){a=4294967295/(a>>>0)|0}else{a=0}y[t+12>>2]=a;a=y[942];if(a){a=4294967295/(a>>>0)|0}else{a=0}y[t+16>>2]=a;a=y[943];if(a){a=4294967295/(a>>>0)|0}else{a=0}y[t+20>>2]=a;y[t+24>>2]=A[1880];y[t+28>>2]=A[1881];Q=I+128|0;return B|0}function qa(a){a=a|0;var b=0,c=0,d=0,e=0,f=0,g=0,h=0,i=0,j=0,k=0;a:{if(!a){break a}d=a-8|0;b=y[a-4>>2];a=b&-8;f=d+a|0;b:{if(b&1){break b}if(!(b&2)){break a}e=y[d>>2];d=d-e|0;if(d>>>0<B[949]){break a}a=a+e|0;c:{d:{e:{if(y[950]!=(d|0)){c=y[d+12>>2];if(e>>>0<=255){b=y[d+8>>2];if((b|0)!=(c|0)){break e}j=3780,k=y[945]&ua(e>>>3|0),y[j>>2]=k;break b}h=y[d+24>>2];if((c|0)!=(d|0)){b=y[d+8>>2];y[b+12>>2]=c;y[c+8>>2]=b;break c}e=y[d+20>>2];if(e){b=d+20|0}else{e=y[d+16>>2];if(!e){break d}b=d+16|0}while(1){g=b;c=e;b=c+20|0;e=y[c+20>>2];if(e){continue}b=c+16|0;e=y[c+16>>2];if(e){continue}break}y[g>>2]=0;break c}b=y[f+4>>2];if((b&3)!=3){break b}y[947]=a;y[f+4>>2]=b&-2;y[d+4>>2]=a|1;y[f>>2]=a;return}y[b+12>>2]=c;y[c+8>>2]=b;break b}c=0}if(!h){break b}e=y[d+28>>2];b=e<<2;f:{if(y[b+4084>>2]==(d|0)){y[b+4084>>2]=c;if(c){break f}j=3784,k=y[946]&ua(e),y[j>>2]=k;break b}g:{if(y[h+16>>2]==(d|0)){y[h+16>>2]=c;break g}y[h+20>>2]=c}if(!c){break b}}y[c+24>>2]=h;b=y[d+16>>2];if(b){y[c+16>>2]=b;y[b+24>>2]=c}b=y[d+20>>2];if(!b){break b}y[c+20>>2]=b;y[b+24>>2]=c}if(d>>>0>=f>>>0){break a}e=y[f+4>>2];if(!(e&1)){break a}h:{i:{j:{k:{if(!(e&2)){if((f|0)==y[951]){y[951]=d;a=y[948]+a|0;y[948]=a;y[d+4>>2]=a|1;if(y[950]!=(d|0)){break a}y[947]=0;y[950]=0;return}h=y[950];if((h|0)==(f|0)){y[950]=d;a=y[947]+a|0;y[947]=a;y[d+4>>2]=a|1;y[a+d>>2]=a;return}a=(e&-8)+a|0;c=y[f+12>>2];if(e>>>0<=255){b=y[f+8>>2];if((b|0)==(c|0)){j=3780,k=y[945]&ua(e>>>3|0),y[j>>2]=k;break i}y[b+12>>2]=c;y[c+8>>2]=b;break i}i=y[f+24>>2];if((c|0)!=(f|0)){b=y[f+8>>2];y[b+12>>2]=c;y[c+8>>2]=b;break j}e=y[f+20>>2];if(e){b=f+20|0}else{e=y[f+16>>2];if(!e){break k}b=f+16|0}while(1){g=b;c=e;b=c+20|0;e=y[c+20>>2];if(e){continue}b=c+16|0;e=y[c+16>>2];if(e){continue}break}y[g>>2]=0;break j}y[f+4>>2]=e&-2;y[d+4>>2]=a|1;y[a+d>>2]=a;break h}c=0}if(!i){break i}e=y[f+28>>2];b=e<<2;l:{if((f|0)==y[b+4084>>2]){y[b+4084>>2]=c;if(c){break l}j=3784,k=y[946]&ua(e),y[j>>2]=k;break i}m:{if((f|0)==y[i+16>>2]){y[i+16>>2]=c;break m}y[i+20>>2]=c}if(!c){break i}}y[c+24>>2]=i;b=y[f+16>>2];if(b){y[c+16>>2]=b;y[b+24>>2]=c}b=y[f+20>>2];if(!b){break i}y[c+20>>2]=b;y[b+24>>2]=c}y[d+4>>2]=a|1;y[a+d>>2]=a;if((d|0)!=(h|0)){break h}y[947]=a;return}if(a>>>0<=255){b=(a&248)+3820|0;e=y[945];a=1<<(a>>>3);n:{if(!(e&a)){y[945]=a|e;a=b;break n}a=y[b+8>>2]}y[b+8>>2]=d;y[a+12>>2]=d;y[d+12>>2]=b;y[d+8>>2]=a;return}c=31;if(a>>>0<=16777215){b=H(a>>>8|0);c=(a>>>38-b&1|b<<1)^62}y[d+28>>2]=c;y[d+16>>2]=0;y[d+20>>2]=0;b=(c<<2)+4084|0;o:{p:{g=y[946];e=1<<c;q:{if(!(g&e)){y[946]=e|g;y[b>>2]=d;c=24;break q}c=a<<((c|0)!=31?25-(c>>>1|0)|0:0);b=y[b>>2];while(1){e=b;if((y[b+4>>2]&-8)==(a|0)){break p}b=c>>>29|0;c=c<<1;g=(b&4)+e|0;b=y[g+16>>2];if(b){continue}break}y[g+16>>2]=d;b=e;c=24}e=d;g=d;a=8;break o}b=y[e+8>>2];y[b+12>>2]=d;y[e+8>>2]=d;c=8;g=0;a=24}y[c+d>>2]=b;y[d+12>>2]=e;y[a+d>>2]=g;a=y[953]-1|0;y[953]=a?a:-1}}function ta(a,b,c,d){var e=0,f=0,g=0,h=0,i=0,j=0,k=0,l=0,m=0,n=0,o=0;h=b>>31;e=a^h;g=e-h|0;a=d>>31;c=c^a;i=c-a|0;c=(a^d)-((a>>>0>c>>>0)+a|0)|0;a:{b:{c:{d:{e:{f:{g:{h:{i:{j:{k:{a=(b^h)-((e>>>0<h>>>0)+h|0)|0;if(a){if(!i){break k}if(!c){break j}e=H(c)-H(a)|0;if(e>>>0<=31){break i}break c}if((c|0)==1|c>>>0>1){break c}S=0;c=(g>>>0)/(i>>>0)|0;break a}if(!g){break h}if(!c|c-1&c){break g}a=a>>>ra(c)|0;S=0;c=a;break a}if(!(i-1&i)){break f}h=(H(i)+33|0)-H(a)|0;j=0-h|0;break d}h=e+1|0;j=63-e|0;break d}S=0;c=(a>>>0)/(c>>>0)|0;break a}e=H(c)-H(a)|0;if(e>>>0<31){break e}break c}if((i|0)==1){break b}i=ra(i);c=i&31;if((i&63)>>>0>=32){e=0;a=a>>>c|0}else{e=a>>>c|0;a=((1<<c)-1&a)<<32-c|g>>>c}S=e;c=a;break a}h=e+1|0;j=63-e|0}e=h&63;f=e&31;if(e>>>0>=32){e=0;k=a>>>f|0}else{e=a>>>f|0;k=((1<<f)-1&a)<<32-f|g>>>f}j=j&63;f=j&31;if(j>>>0>=32){a=g<<f;g=0}else{a=(1<<f)-1&g>>>32-f|a<<f;g=g<<f}if(h){f=c-1|0;j=i-1|0;o=(j|0)!=-1?f+1|0:f;while(1){l=e<<1|k>>>31;e=k<<1|a>>>31;f=o-(l+(e>>>0>j>>>0)|0)>>31;m=f&i;k=e-m|0;e=l-((c&f)+(e>>>0<m>>>0)|0)|0;a=a<<1|g>>>31;g=n|g<<1;n=f&1;h=h-1|0;if(h){continue}break}}S=a<<1|g>>>31;c=n|g<<1;break a}g=0;a=0}S=a;c=g}b=b^d;a=b>>31;b=b>>31;c=c^b;d=c-b|0;S=(a^S)-((b>>>0>c>>>0)+a|0)|0;return d}function ca(a){var b=0,c=0,d=0,e=0,f=0,g=0,h=0,i=0,j=0,k=0,l=0,m=0;b=y[913];i=b+4|0;j=b+8|0;k=b+12|0;d=y[933];e=y[919];c=y[923];l=y[920];g=y[924];h=y[932];while(1){b=l;a:{if(!h){break a}b=e;if(!c){break a}c=g?0-E(c,g)|0:-1;f=c>>>23&510;b=A[f+1024>>1];c=sa(b+(E(A[(f+1024|0)+2>>1]-b|0,c>>>8&65535)>>>16|0)&65535,0,64335,0);e=e-d|0;f=e;m=e>>31;b=S;e=b>>>16|0;b=sa(f,m,(b&65535)<<16|c>>>16,e);b=((S&65535)<<16|b>>>16)+d|0}y[933]=b;d=y[(a<<2)+3656>>2];y[919]=d;c=i;b:{c:{switch(a|0){case 3:c=k;break b;default:y[923]=0;y[922]=a;return;case 0:break b;case 1:break c}}c=j}c=y[c>>2];y[923]=c;if((b|0)==(d|0)){a=a+1|0;d=b;e=b;continue}break}y[922]=a;if(c){b=4294967295/(c>>>0)|0;y[924]=b;if(c>>>0>=4){d=H(c);c=(d<<27)-(c<<d>>>4&134217727)|0;d=c+-134217728|0;e=c- -134217728>>>0>=268435457?d>>>0>=3623878656?-671088640:d:0}else{e=-671088640}y[925]=e;if(!((a|0)!=3|b>>>0>=h>>>0)){y[932]=b;y[936]=y[935]/(b|0)}da()}}function da(){var a=0,b=0,c=0,d=0;d=y[925];a=d>>>18&510;b=A[a+1552>>1];a=(b+(E(A[(a+1552|0)+2>>1]-b|0,d>>>3&65535)>>>16|0)&65535)<<15>>>(d>>>27)|0;y[934]=a;c=y[932];if(c){b=y[929];a=y[931];if(b>>>0>a>>>0){y[929]=a;b=a}d=(a-b>>>0)/(c>>>0)|0;y[930]=d;c=b>>>18&510;a=A[c+1552>>1];y[926]=(a+(E(A[(c+1552|0)+2>>1]-a|0,b>>>3&65535)>>>16|0)&65535)<<15>>>(b>>>27);a=sa(d,0,186065279,0);b=S;c=b>>>23|0;a=(b&8388607)<<9|a>>>23;sa(a,c,a,c);y[927]=a-(S>>>1|0);return}y[930]=0;y[929]=d;y[926]=a;y[927]=0}function sa(a,b,c,d){var e=0,f=0,g=0,h=0,i=0,j=0;e=c>>>16|0;f=a>>>16|0;j=E(e,f);g=c&65535;h=a&65535;i=E(g,h);f=(i>>>16|0)+E(f,g)|0;e=(f&65535)+E(e,h)|0;S=(E(b,c)+j|0)+E(a,d)+(f>>>16)+(e>>>16)|0;return i&65535|e<<16}function ia(a){a=a|0;var b=0,c=0,d=0;a=a<<6&16320;a=a>>>0>=8191?8191:a;b=a>>>4&508;c=y[b+2080>>2];d=c>>>1|0;a=d+(E((y[(b+2080|0)+4>>2]>>>1|0)-d|0,a<<2&252)>>8)<<1|c&1;if(!a){return 0}return 4294967295/(a>>>0)|0}function oa(a){var b=0,c=0;a=a+7|0;b=a>>>0<7?1:b;a:{c=y[781];a=c+(a&-8)|0;if(!(c>>>0>a>>>0?b+1|0:b)){if(a>>>0<=U()<<16>>>0){break a}if(P(a|0)|0){break a}}y[944]=48;return-1}y[781]=a;return c}function ua(a){var b=0;b=a&31;a=0-a&31;return(-1>>>b&-2)<<b|(-1<<a&-2)>>>a}
+function ra(a){if(a){return 31-H(a-1^a)|0}return 32}function ha(a){a=a|0;return y[((a&127)<<2)+2608>>2]}function ma(a){a=a|0;a=Q-a&-16;Q=a;return a|0}function ga(){return 45e3}function na(){return Q|0}function la(a){a=a|0;Q=a}function ka(){return R|0}function ja(a){a=a|0;R=a}function ea(){return 8}function ba(){}
+// EMSCRIPTEN_END_FUNCS
+e=z;p(q);var T=c([]);function U(){return v.byteLength>>16}function Z(_){_=_|0;var V=U()|0;var W=V+_|0;if(V<W&&W<65536&&W<=32768){var X=new ArrayBuffer(W<<16);var Y=new Int8Array(X);Y.set(w);w=new Int8Array(X);x=new Int16Array(X);y=new Int32Array(X);z=new Uint8Array(X);A=new Uint16Array(X);B=new Uint32Array(X);C=new Float32Array(X);D=new Float64Array(X);v=X;e=z}return V}return{memory:Object.create(Object.prototype,{grow:{value:Z},buffer:{get:function(){return v}}}),__wasm_call_ctors:ba,chiff_meta_count:ea,chiff_render:fa,chiff_frame_hz:ga,chiff_duration_samples:ha,chiff_stage_samples:ia,__indirect_function_table:T,malloc:pa,free:qa,__get_temp_ret:ka,__set_temp_ret:ja,_emscripten_stack_restore:la,_emscripten_stack_alloc:ma,emscripten_stack_get_current:na}}return $(aa)}
+// EMSCRIPTEN_END_ASM
+
+
+)(info)},instantiate:function(binary,info){return{then:function(ok){var module=new WebAssembly.Module(binary);ok({instance:new WebAssembly.Instance(module,info)})}}},RuntimeError:Error,isWasm2js:true};if(WebAssembly.isWasm2js){wasmBinary=[]}var ABORT=false;var isFileURI=filename=>filename.startsWith("file://");class EmscriptenEH{}class EmscriptenSjLj extends EmscriptenEH{}var runtimeInitialized=false;function getMemoryBuffer(){return wasmMemory.buffer}function updateMemoryViews(){if(HEAP8?.buffer?.resizable)return;var b=getMemoryBuffer();HEAP8=new Int8Array(b);Module["HEAP16"]=HEAP16=new Int16Array(b);HEAPU8=new Uint8Array(b);HEAPU16=new Uint16Array(b);Module["HEAP32"]=HEAP32=new Int32Array(b);HEAPU32=new Uint32Array(b);HEAPF32=new Float32Array(b);HEAPF64=new Float64Array(b)}function preRun(){var preRun=Module["preRun"];if(preRun){if(typeof preRun=="function")preRun=[preRun];onPreRuns.push(...preRun)}callRuntimeCallbacks(onPreRuns)}function initRuntime(){runtimeInitialized=true;wasmExports["__wasm_call_ctors"]()}function postRun(){var postRun=Module["postRun"];if(postRun){if(typeof postRun=="function")postRun=[postRun];onPostRuns.push(...postRun)}callRuntimeCallbacks(onPostRuns)}function abort(what){Module["onAbort"]?.(what);what=`Aborted(${what})`;err(what);ABORT=true;what+=". Build with -sASSERTIONS for more info.";var e=new WebAssembly.RuntimeError(what);throw e}var wasmBinaryFile;function findWasmBinary(file){}function getWasmBinary(file){}async function instantiateArrayBuffer(binaryFile,imports){try{var binary=await getWasmBinary(binaryFile);var instance=await WebAssembly.instantiate(binary,imports);return instance}catch(reason){err(`failed to asynchronously prepare wasm: ${reason}`);abort(reason)}}async function instantiateAsync(binary,binaryFile,imports){return instantiateArrayBuffer(binaryFile,imports)}function getWasmImports(){var imports={env:wasmImports,wasi_snapshot_preview1:wasmImports};return imports}async function createWasm(){function receiveInstance(instance){wasmExports=instance.exports;assignWasmExports(wasmExports);updateMemoryViews();return wasmExports}function receiveInstantiationResult(result){return receiveInstance(result["instance"])}var info=getWasmImports();var instantiateWasm=Module["instantiateWasm"];if(instantiateWasm){return new Promise(resolve=>{instantiateWasm(info,inst=>resolve(receiveInstance(inst)))})}wasmBinaryFile??=findWasmBinary();var result=await instantiateAsync(wasmBinary,wasmBinaryFile,info);var exports=receiveInstantiationResult(result);return exports}class ExitStatus{name="ExitStatus";constructor(status){this.message=`Program terminated with exit(${status})`;this.status=status}}var HEAP16;var HEAP32;var HEAP8;var HEAPF32;var HEAPF64;var HEAPU16;var HEAPU32;var HEAPU8;var callRuntimeCallbacks=callbacks=>{while(callbacks.length>0){callbacks.shift()(Module)}};var onPostRuns=[];var onPreRuns=[];var noExitRuntime=true;var stackRestore=val=>__emscripten_stack_restore(val);var stackSave=()=>_emscripten_stack_get_current();var getHeapMax=()=>2147483648;var alignMemory=(size,alignment)=>Math.ceil(size/alignment)*alignment;var growMemory=size=>{var oldHeapSize=wasmMemory.buffer.byteLength;var pages=(size-oldHeapSize+65535)/65536|0;try{wasmMemory.grow(pages);updateMemoryViews();return 1}catch(e){}};var _emscripten_resize_heap=requestedSize=>{var oldSize=HEAPU8.length;requestedSize>>>=0;var maxHeapSize=getHeapMax();if(requestedSize>maxHeapSize){return false}for(var cutDown=1;cutDown<=4;cutDown*=2){var overGrownHeapSize=oldSize*(1+.2/cutDown);overGrownHeapSize=Math.min(overGrownHeapSize,requestedSize+100663296);var newSize=Math.min(maxHeapSize,alignMemory(Math.max(requestedSize,overGrownHeapSize),65536));var replacement=growMemory(newSize);if(replacement){return true}}return false};var getCFunc=ident=>{var func=Module["_"+ident];return func};var writeArrayToMemory=(array,buffer)=>{HEAP8.set(array,buffer)};var lengthBytesUTF8=str=>{var len=0;for(var i=0;i<str.length;++i){var c=str.charCodeAt(i);if(c<=127){len++}else if(c<=2047){len+=2}else if(c>=55296&&c<=57343){len+=4;++i}else{len+=3}}return len};var stringToUTF8Array=(str,heap,outIdx,maxBytesToWrite)=>{if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.codePointAt(i);if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63}else{if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;i++}}heap[outIdx]=0;return outIdx-startIdx};var stringToUTF8=(str,outPtr,maxBytesToWrite)=>stringToUTF8Array(str,HEAPU8,outPtr,maxBytesToWrite);var stackAlloc=sz=>__emscripten_stack_alloc(sz);var stringToUTF8OnStack=str=>{var size=lengthBytesUTF8(str)+1;var ret=stackAlloc(size);stringToUTF8(str,ret,size);return ret};var UTF8Decoder=globalThis.TextDecoder&&new TextDecoder;var findStringEnd=(heapOrArray,idx,maxBytesToRead,ignoreNul)=>{var maxIdx=idx+maxBytesToRead;if(ignoreNul)return maxIdx;while(heapOrArray[idx]&&!(idx>=maxIdx))++idx;return idx};var UTF8ArrayToString=(heapOrArray,idx=0,maxBytesToRead,ignoreNul)=>{var endPtr=findStringEnd(heapOrArray,idx,maxBytesToRead,ignoreNul);if(endPtr-idx>16&&heapOrArray.buffer&&UTF8Decoder){return UTF8Decoder.decode(heapOrArray.subarray(idx,endPtr))}var str="";while(idx<endPtr){var u0=heapOrArray[idx++];if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heapOrArray[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heapOrArray[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2}else{u0=(u0&7)<<18|u1<<12|u2<<6|heapOrArray[idx++]&63}if(u0<65536){str+=String.fromCharCode(u0)}else{var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023)}}return str};var UTF8ToString=(ptr,maxBytesToRead,ignoreNul)=>ptr?UTF8ArrayToString(HEAPU8,ptr,maxBytesToRead,ignoreNul):"";var ccall=(ident,returnType,argTypes,args,opts)=>{var toC={string:str=>{var ret=0;if(str!==null&&str!==undefined&&str!==0){ret=stringToUTF8OnStack(str)}return ret},array:arr=>{var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return ret}};function convertReturnValue(ret){if(returnType==="string"){return UTF8ToString(ret)}if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i])}else{cArgs[i]=args[i]}}}var ret=func(...cArgs);function onDone(ret){if(stack!==0)stackRestore(stack);return convertReturnValue(ret)}ret=onDone(ret);return ret};var cwrap=(ident,returnType,argTypes,opts)=>{var numericArgs=!argTypes||argTypes.every(type=>type==="number"||type==="boolean");var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return(...args)=>ccall(ident,returnType,argTypes,args,opts)};{if(Module["noExitRuntime"])noExitRuntime=Module["noExitRuntime"];if(Module["print"])out=Module["print"];if(Module["printErr"])err=Module["printErr"];if(Module["arguments"])programArgs=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];var preInit=Module["preInit"];if(preInit){if(typeof preInit=="function")Module["preInit"]=preInit=[preInit];while(preInit.length>0){preInit.shift()()}}}Module["cwrap"]=cwrap;var _chiff_meta_count,_chiff_render,_chiff_frame_hz,_chiff_duration_samples,_chiff_stage_samples,_malloc,_free,___get_temp_ret,___set_temp_ret,__emscripten_stack_restore,__emscripten_stack_alloc,_emscripten_stack_get_current,memory,__indirect_function_table,wasmMemory;function assignWasmExports(wasmExports){_chiff_meta_count=Module["_chiff_meta_count"]=wasmExports["chiff_meta_count"];_chiff_render=Module["_chiff_render"]=wasmExports["chiff_render"];_chiff_frame_hz=Module["_chiff_frame_hz"]=wasmExports["chiff_frame_hz"];_chiff_duration_samples=Module["_chiff_duration_samples"]=wasmExports["chiff_duration_samples"];_chiff_stage_samples=Module["_chiff_stage_samples"]=wasmExports["chiff_stage_samples"];_malloc=Module["_malloc"]=wasmExports["malloc"];_free=Module["_free"]=wasmExports["free"];___get_temp_ret=wasmExports["__get_temp_ret"];___set_temp_ret=wasmExports["__set_temp_ret"];__emscripten_stack_restore=wasmExports["_emscripten_stack_restore"];__emscripten_stack_alloc=wasmExports["_emscripten_stack_alloc"];_emscripten_stack_get_current=wasmExports["emscripten_stack_get_current"];memory=wasmMemory=wasmExports["memory"];__indirect_function_table=wasmExports["__indirect_function_table"]}var wasmImports={emscripten_resize_heap:_emscripten_resize_heap};async function run(){preRun();var setStatus=Module["setStatus"];if(setStatus){setStatus("Running...");await new Promise(resolve=>setTimeout(resolve,1));setTimeout(setStatus,1,"")}if(ABORT)return;initRuntime();Module["onRuntimeInitialized"]?.();postRun()}var wasmExports;wasmExports=await createWasm();await run();
+;return Module}})();if(typeof exports==="object"&&typeof module==="object"){module.exports=ChiffEngine;module.exports.default=ChiffEngine}else if(typeof define==="function"&&define["amd"])define([],()=>ChiffEngine);
+
+</script>
+<script>
+'use strict';
+// Shared loader for the compiled firmware engine. Used by the node check
+// scripts; chiff_sim.html inlines chiff_engine.js and uses the same wrap()
+// below, so both go through one interface.
+//
+// All timing inputs are SETTINGS or samples. Milliseconds appear only in the
+// returned meta block, as output.
+'use strict';
+
+// Wraps a loaded Emscripten module into the engine API. Kept separate from the
+// node-specific require() so the browser can reuse it verbatim.
+function wrapChiffEngine(Module) {
+  const render = Module.cwrap('chiff_render', 'number',
+    Array(19).fill('number'));
+  const metaCount = Module.cwrap('chiff_meta_count', 'number', [])();
+  const frameHz = Module.cwrap('chiff_frame_hz', 'number', [])();
+  const durationSamples = Module.cwrap('chiff_duration_samples', 'number', ['number']);
+  const stageSamples = Module.cwrap('chiff_stage_samples', 'number', ['number']);
+
+  const META = ['totalSamples', 'gateSamples', 'chiffWindowSamples',
+                'attackSamples', 'decaySamples', 'releaseSamples',
+                'peak_u16', 'sustain_u16'];
+
+  let bufPtr = 0, bufCap = 0, metaPtr = 0;
+
+  return {
+    frameHz,
+    durationSamples,
+    stageSamples,
+    // p: attack, decay, sustain, release, amplitudeModVelocity, velocity,
+    //    envModAttack/Decay/Sustain/Release, amount, chiffDuration,
+    //    gateSamples, tailSamples, maxTarget, seed
+    render(p) {
+      const gateSamples = p.gateSamples | 0;
+      const tailSamples = p.tailSamples | 0;
+      const need = gateSamples + tailSamples + 64;
+      if (need > bufCap) {
+        if (bufPtr) Module._free(bufPtr);
+        bufPtr = Module._malloc(need * 2);
+        bufCap = need;
+      }
+      if (!metaPtr) metaPtr = Module._malloc(metaCount * 4);
+
+      const n = render(
+        p.attack | 0, p.decay | 0, p.sustain | 0, p.release | 0,
+        p.amplitudeModVelocity | 0, p.velocity === undefined ? 127 : p.velocity | 0,
+        p.envModAttack | 0, p.envModDecay | 0,
+        p.envModSustain | 0, p.envModRelease | 0,
+        p.amount | 0, p.chiffDuration | 0,
+        gateSamples, tailSamples,
+        p.maxTarget === undefined ? 32767 : p.maxTarget | 0,
+        p.seed >>> 0,
+        bufPtr, bufCap, metaPtr);
+
+      const out = Module.HEAP16.subarray(bufPtr >> 1, (bufPtr >> 1) + n).slice();
+      const meta = {};
+      for (let i = 0; i < metaCount; i++) {
+        meta[META[i]] = Module.HEAP32[(metaPtr >> 2) + i];
+      }
+      meta.msOf = samples => samples / frameHz * 1000;
+      return { out, meta };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// This file contains NO DSP. Every sample below comes from the compiled
+// yarns/envelope.cc above, so the sim cannot drift from the firmware.
+//
+// Every control is a front-panel SETTING (0..127), exactly as the module shows
+// it. Milliseconds and sample counts are OUTPUTS, derived by the engine.
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+
+let ENGINE = null;
+let FS = 45000;                      // replaced by the engine's own kFrameHz
+const PEAK = 32767;                  // engine renders full-scale int16
+
+const fmtMs = ms => ms >= 1000 ? (ms / 1000).toFixed(2).replace(/0$/, '') + ' s'
+                               : Math.round(ms) + ' ms';
+// Gate length is how long the key is held: a performance, not a module
+// setting, so it is the one control that is legitimately a time.
+const gateMsFromSlider = v => Math.round(Math.pow(8000, v / 1000));
+
+// Settings in, samples out. Shape matches what the drawing code expects.
+function render(p) {
+  const gateSamples = Math.max(64, Math.round(p.gateMs * FS / 1000));
+  const tailSamples = Math.max(64, Math.round(p.tailMs * FS / 1000));
+  const r = ENGINE.render({
+    attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release,
+    amplitudeModVelocity: p.amplitudeModVelocity, velocity: p.velocity,
+    amount: p.amount, chiffDuration: p.chiffDuration,
+    gateSamples: gateSamples, tailSamples: tailSamples,
+    maxTarget: PEAK, seed: p.seed,
+  });
+  return {
+    out: r.out,
+    gateN: r.meta.gateSamples,
+    totalN: r.meta.totalSamples,
+    aN: Math.max(1, r.meta.attackSamples),
+    windowN: r.meta.chiffWindowSamples,
+    attackSamples: r.meta.attackSamples,
+    decaySamples: r.meta.decaySamples,
+    releaseSamples: r.meta.releaseSamples,
+  };
+}
+
+function dialed(p, totalN, gateN) {   // chiff-free reference (amount 0)
+  return render(Object.assign({}, p, { amount: 0 })).out.subarray(0, totalN);
+}
+
+// ---- measurements ----
+function measure(res, dialedTrace) {
+  const { out, gateN, aN, windowN } = res;
+  const land = out[Math.min(aN - 1, out.length - 1)] / PEAK * 100;
+  const thr = PEAK * 0.01;
+  let rel = null;
+  for (let i = gateN; i < out.length; i++) if (out[i] < thr) { rel = (i - gateN) / FS * 1000; break; }
+  let relBase = null;
+  for (let i = gateN; i < dialedTrace.length; i++) if (dialedTrace[i] < thr) { relBase = (i - gateN) / FS * 1000; break; }
+  return { land, rel, relBase, winMs: windowN / FS * 1000 };
+}
+
+// ---- drawing ----
+const cv = $('cv'), ctx = cv.getContext('2d');
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+let lastRes = null, lastDialed = null, lastLine = null, lastP = null;
+
+function draw() {
+  if (!ENGINE) return;
+  const p = params();
+  const t0 = performance.now();
+  const res = render(p);
+  const dia = dialed(p, res.totalN, res.gateN);
+  const line = dia; // dart model: mean = dialed envelope
+  const dt = performance.now() - t0;
+  lastRes = res; lastDialed = dia; lastLine = line; lastP = p;
+  computeSpectrogram();
+
+  const m = measure(res, dia);
+  $('mLand').textContent = m.land.toFixed(1) + ' %';
+  $('mRel').innerHTML = m.rel === null ? '&gt;window'
+    : fwUnit(Math.round(m.rel * FS / 1000) + ' smp', fmtMs(m.rel));
+  $('mWin').innerHTML = fwUnit(res.windowN + ' smp', msOfSamples(res.windowN));
+  $('mShift').innerHTML = fwUnit(res.attackSamples + ' smp', msOfSamples(res.attackSamples));
+  $('mMs').textContent = dt.toFixed(0) + ' ms';
+
+  paint(null);
+}
+
+function paint(hoverX) {
+  if (!lastRes) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const { out, gateN, totalN } = lastRes;
+  const padL = 34, padB = 18, padT = 6, padR = 6;
+  const pw = W - padL - padR, ph = H - padT - padB;
+  const X = i => padL + i / (totalN - 1) * pw;
+  const Y = v => padT + (1 - v / PEAK) * ph;
+
+  // grid
+  ctx.strokeStyle = cssVar('--grid'); ctx.lineWidth = 1;
+  ctx.fillStyle = cssVar('--ink3');
+  ctx.font = '10px ui-monospace, Menlo, monospace';
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + ph * g / 4;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    ctx.fillText((100 - g * 25) + '%', 4, y + 3);
+  }
+  const totalMs = totalN / FS * 1000;
+  const step = totalMs > 4000 ? 1000 : totalMs > 1600 ? 500 : totalMs > 700 ? 200 : totalMs > 250 ? 100 : 50;
+  for (let t = 0; t <= totalMs; t += step) {
+    const x = padL + t / totalMs * pw;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
+    ctx.fillText(t >= 1000 ? (t/1000) + 's' : t + '', x + 2, H - 6);
+  }
+
+  // release marker
+  ctx.strokeStyle = cssVar('--mark'); ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(X(gateN), padT); ctx.lineTo(X(gateN), H - padB); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const plot = (arr, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    const stride = 1;                            // exact min/max, no aliasing
+    for (let px = 0; px <= pw; px++) {           // min/max decimation per pixel
+      const i0 = Math.floor(px / pw * (totalN - 1));
+      const i1 = Math.min(totalN - 1, Math.floor((px + 1) / pw * (totalN - 1)));
+      let lo = arr[i0], hi = arr[i0];
+      for (let i = i0; i <= i1; i += stride) { const v = arr[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+      if (px === 0) ctx.moveTo(padL + px, Y(lo));
+      ctx.lineTo(padL + px, Y(hi)); ctx.lineTo(padL + px, Y(lo));
+    }
+    ctx.stroke();
+  };
+
+  if ($('showDialed').checked) plot(lastDialed, cssVar('--dialed'), 1.4);
+  plot(out, cssVar('--trace'), 1.2);
+
+  // Noise band from the bottom: smoothed mean |per-sample step|, as a
+  // fraction of full-scale peak, scaled so full telegraph (~0.5/sample at
+  // max chiff) reaches the top -- no artificial cap, so the true level
+  // (and its scaling with the Peak knob) is visible.
+  if ($('showNoise').checked) {
+    ctx.fillStyle = cssVar('--noise'); ctx.globalAlpha = 0.5;
+    const win = Math.max(1, Math.floor(FS * 0.002));
+    ctx.beginPath(); ctx.moveTo(padL, H - padB);
+    for (let px = 0; px <= pw; px++) {
+      const i = Math.max(1, Math.floor(px / pw * (totalN - 1)));
+      let s = 0, n = 0;
+      for (let j = Math.max(1, i - win); j <= i; j += Math.max(1, Math.floor(win / 16))) {
+        s += Math.abs(out[j] - out[j - 1]); n++;
+      }
+      const noise = (s / n) / PEAK;              // per-sample step, fraction of peak
+      const y = H - padB - Math.min(1, noise * 2) * ph;
+      ctx.lineTo(padL + px, y);
+    }
+    ctx.lineTo(W - padR, H - padB); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // hover crosshair
+  if (hoverX !== null && hoverX >= padL && hoverX <= W - padR) {
+    const i = Math.round((hoverX - padL) / pw * (totalN - 1));
+    ctx.strokeStyle = cssVar('--ink3'); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hoverX, padT); ctx.lineTo(hoverX, H - padB); ctx.stroke();
+    const tMs = i / FS * 1000;
+    $('readout').textContent = tMs.toFixed(1) + ' ms · chiff ' +
+      (out[i] / PEAK * 100).toFixed(1) + '% · dialed ' +
+      (lastDialed[i] / PEAK * 100).toFixed(1) + '%';
+  } else $('readout').textContent = '';
+  drawSpectrogram();
+}
+
+// ---- noise spectrogram (STFT of the residual: time x frequency) ----
+const SPEC_N = 512, SPEC_HOP = 64, SPEC_FMAX = FS / 2;  // finer time res (11ms window, 1.4ms hop)
+// FIXED brightness reference (~amount 127's residual peak) so the spectrogram
+// shows ABSOLUTE noise level -- amount 1 reads faint, 127 bright -- instead of
+// auto-normalizing each render to its own peak (which hid the amount scaling).
+const SPEC_REF = 24;
+const specCv = $('specCv'), specCtx = specCv.getContext('2d');
+let specData = null;   // { frames, nFrames, maxBin, gPeak, tMax, fMax }
+
+function computeSpectrogram() {
+  if (!lastRes) return;
+  const out = lastRes.out, line = lastLine, totalN = lastRes.totalN;
+  const bins = SPEC_N / 2;
+  const maxBin = Math.max(1, Math.floor(bins * SPEC_FMAX / (FS / 2)));
+  const nFrames = Math.max(1, Math.floor((totalN - SPEC_N) / SPEC_HOP));
+  const re = new Float64Array(SPEC_N), im = new Float64Array(SPEC_N);
+  const frames = new Array(nFrames);
+  let gPeak = 1e-9;
+  for (let f = 0; f < nFrames; f++) {
+    const s = f * SPEC_HOP;
+    for (let k = 0; k < SPEC_N; k++) {
+      const h = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_N - 1));
+      re[k] = ((out[s + k] - line[s + k]) / PEAK) * h; im[k] = 0;
+    }
+    fft(re, im);
+    const m = new Float64Array(maxBin);
+    for (let b = 0; b < maxBin; b++) { m[b] = Math.hypot(re[b], im[b]); if (m[b] > gPeak) gPeak = m[b]; }
+    frames[f] = m;
+  }
+  specData = { frames, nFrames, maxBin, gPeak,
+    tMax: (nFrames * SPEC_HOP) / FS * 1000, fMax: maxBin / bins * (FS / 2) };
+}
+
+function hslToRgb(h, s, l) {
+  s /= 100; l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+function drawSpectrogram() {
+  if (!specData) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = specCv.clientWidth, H = specCv.clientHeight;
+  if (specCv.width !== W * dpr || specCv.height !== H * dpr) { specCv.width = W * dpr; specCv.height = H * dpr; }
+  specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  specCtx.clearRect(0, 0, W, H);
+  const padL = 30, padB = 14, padT = 4, padR = 4;
+  const pw = Math.max(1, Math.round(W - padL - padR)), ph = Math.max(1, Math.round(H - padT - padB));
+  // Render at pixel resolution with box-averaging over the frequency bins
+  // that fall in each row -- proper anti-aliased downsampling, so no moire
+  // striations from bilinear drawImage rescaling.
+  const { frames, nFrames, maxBin, gPeak } = specData;
+  const tmp = document.createElement('canvas'); tmp.width = pw; tmp.height = ph;
+  const tctx = tmp.getContext('2d'); const img = tctx.createImageData(pw, ph);
+  for (let py = 0; py < ph; py++) {
+    let b0 = Math.floor((1 - (py + 1) / ph) * maxBin);
+    let b1 = Math.floor((1 - py / ph) * maxBin);
+    if (b1 <= b0) b1 = b0 + 1;
+    for (let px = 0; px < pw; px++) {
+      const col = frames[Math.min(nFrames - 1, Math.floor(px / pw * nFrames))];
+      let s = 0, cnt = 0;
+      for (let b = b0; b < b1 && b < maxBin; b++) { s += col[b]; cnt++; }
+      const mag = cnt ? s / cnt : col[Math.min(b0, maxBin - 1)];
+      const db = 20 * Math.log10(mag / SPEC_REF + 1e-9);
+      const t = Math.max(0, Math.min(1, (db + 60) / 60));
+      const [r, g, bl] = hslToRgb(150, 55 + t * 20, 8 + t * 74);
+      const idx = (py * pw + px) * 4;
+      img.data[idx] = r; img.data[idx + 1] = g; img.data[idx + 2] = bl; img.data[idx + 3] = 255;
+    }
+  }
+  tctx.putImageData(img, 0, 0);
+  specCtx.imageSmoothingEnabled = false;
+  specCtx.drawImage(tmp, padL, padT);
+  const specMeta = specData;
+  specCtx.fillStyle = cssVar('--ink3'); specCtx.font = '9px ui-monospace, Menlo, monospace';
+  for (let f = 0; f <= specMeta.fMax; f += 3000) {
+    const y = padT + (1 - f / specMeta.fMax) * ph;
+    specCtx.fillText((f / 1000) + 'k', 2, y + 3);
+  }
+  const step = specMeta.tMax > 2000 ? 500 : 200;
+  for (let t = 0; t <= specMeta.tMax; t += step) {
+    const x = padL + t / specMeta.tMax * pw;
+    specCtx.fillText(t >= 1000 ? (t / 1000) + 's' : t + '', x + 1, H - 4);
+  }
+}
+
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr;
+                 const ti = im[i]; im[i] = im[j]; im[j] = ti; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k, b = a + len / 2;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti;
+        re[a] += tr; im[a] += ti;
+        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+}
+
+function drawSpectrum() {
+  if (!lastRes) return;
+  const out = lastRes.out, totalN = lastRes.totalN;
+  let center = specSample < 0 ? Math.floor(totalN * 0.55) : specSample;
+  let start = Math.max(1, Math.min(totalN - SPEC_N - 1, center - SPEC_N / 2));
+  // residual = value minus a 64-tap moving mean (isolate the noise from the
+  // envelope trend), then Hann-windowed
+  const re = new Float64Array(SPEC_N), im = new Float64Array(SPEC_N);
+  const mw = 64;
+  for (let k = 0; k < SPEC_N; k++) {
+    let m = 0;
+    for (let j = -mw; j <= mw; j++) m += out[start + k + j] || out[start + k];
+    m /= (2 * mw + 1);
+    const hann = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_N - 1));
+    re[k] = ((out[start + k] - m) / PEAK) * hann;
+  }
+  fft(re, im);
+  const bins = SPEC_N / 2;
+  let peak = 1e-9;
+  const mag = new Float64Array(bins);
+  for (let b = 0; b < bins; b++) { mag[b] = Math.hypot(re[b], im[b]); if (mag[b] > peak) peak = mag[b]; }
+
+  const dpr = window.devicePixelRatio || 1;
+  const W = specCv.clientWidth, H = specCv.clientHeight;
+  if (specCv.width !== W * dpr || specCv.height !== H * dpr) { specCv.width = W * dpr; specCv.height = H * dpr; }
+  specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  specCtx.clearRect(0, 0, W, H);
+  const padL = 30, padB = 14, padT = 4, padR = 4;
+  const pw = W - padL - padR, ph = H - padT - padB;
+  const nyq = FS / 2;
+  specCtx.strokeStyle = cssVar('--grid'); specCtx.fillStyle = cssVar('--ink3');
+  specCtx.font = '9px ui-monospace, Menlo, monospace'; specCtx.lineWidth = 1;
+  for (let db = 0; db >= -60; db -= 20) {
+    const y = padT + (-db / 60) * ph;
+    specCtx.beginPath(); specCtx.moveTo(padL, y); specCtx.lineTo(W - padR, y); specCtx.stroke();
+    specCtx.fillText(db + '', 2, y + 3);
+  }
+  for (let f = 0; f <= nyq; f += 5000) {
+    const x = padL + f / nyq * pw;
+    specCtx.beginPath(); specCtx.moveTo(x, padT); specCtx.lineTo(x, H - padB); specCtx.stroke();
+    specCtx.fillText((f / 1000) + 'k', x + 1, H - 4);
+  }
+  specCtx.strokeStyle = cssVar('--noise'); specCtx.lineWidth = 1.2; specCtx.beginPath();
+  for (let b = 1; b < bins; b++) {
+    const db = 20 * Math.log10(mag[b] / peak + 1e-9);
+    const x = padL + (b / bins) * pw;
+    const y = padT + Math.min(1, -db / 60) * ph;
+    if (b === 1) specCtx.moveTo(x, y); else specCtx.lineTo(x, y);
+  }
+  specCtx.stroke();
+  $('specInfo').textContent = 'window @ ' + (center / FS * 1000).toFixed(0) + ' ms'
+    + (specSample < 0 ? ' (default; hover trace to move)' : '');
+}
+
+// ---- controls: every value is a front-panel setting ----
+let seed = 0xCAFEBABE;
+function params() {
+  return {
+    attack: +$('atk').value,
+    decay: +$('dec').value,
+    sustain: +$('sus').value,
+    release: +$('rel').value,
+    amplitudeModVelocity: +$('ampmod').value,
+    velocity: +$('vel').value,
+    amount: +$('amt').value,
+    chiffDuration: +$('chiffDur').value,
+    gateMs: gateMsFromSlider(+$('gate').value),
+    tailMs: 1000,
+    seed: seed,
+  };
+}
+
+// Settings are the input; the engine tells us what they cost in samples, and
+// ms is shown purely as a readout.
+// Firmware units are AUTHORITATIVE and shown first; human units are a
+// translation, shown dimmed alongside. Never the other way round: a
+// millisecond value names lengths the module cannot produce (only 128 stage
+// lengths exist), which is how a real bug hid -- CHIFF DURATION 20 and 21 are
+// 185 and 199 samples but both round to "4 ms".
+function fwUnit(authoritative, translated) {
+  return '<b>' + authoritative + '</b>' +
+         (translated ? ' <small>= ' + translated + '</small>' : '');
+}
+const msOfSamples = n => fmtMs(n / FS * 1000);
+
+function labels() {
+  if (!ENGINE) return;
+  const stage = s => ENGINE.stageSamples(s);
+  for (const [slider, out] of [['atk','atkV'], ['dec','decV'], ['rel','relV']]) {
+    const setting = +$(slider).value;
+    const samples = stage(setting);
+    $(out).innerHTML = fwUnit(setting, samples + ' smp, ' + msOfSamples(samples));
+  }
+  // Sustain is a LEVEL setting, not a time.
+  const susSetting = +$('sus').value;
+  $('susV').innerHTML = fwUnit(susSetting,
+    ((susSetting << 6) / 8191 * 100).toFixed(0) + '% of peak');
+  // Already firmware units: a signed setting and a MIDI velocity.
+  $('ampmodV').innerHTML = fwUnit($('ampmod').value, '');
+  $('velV').innerHTML = fwUnit($('vel').value, '');
+  $('amtV').innerHTML = fwUnit($('amt').value + ' / 127', '');
+  const durSetting = +$('chiffDur').value;
+  const durSamples = ENGINE.durationSamples(durSetting);
+  $('chiffDurV').innerHTML = fwUnit(durSetting,
+    durSamples + ' smp, ' + msOfSamples(durSamples));
+  // Gate is a performance, not a setting, so its firmware unit is samples.
+  const gateSamples = Math.round(gateMsFromSlider(+$('gate').value) * FS / 1000);
+  $('gateV').innerHTML = fwUnit(gateSamples + ' smp', msOfSamples(gateSamples));
+  $('seedShow').textContent = 'seed 0x' + (seed >>> 0).toString(16);
+}
+let raf = null;
+function update() {
+  if (!ENGINE) return;
+  labels();
+  if (raf) cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(draw);
+}
+['atk','dec','sus','rel','ampmod','vel','gate','amt','chiffDur'].forEach(id =>
+  $(id).addEventListener('input', update));
+['showDialed','showNoise'].forEach(id =>
+  $(id).addEventListener('change', () => paint(null)));
+$('reroll').addEventListener('click', () => {
+  seed = (Math.random() * 0xFFFFFFFF) >>> 0; update();
+});
+
+ChiffEngine().then(mod => {
+  ENGINE = wrapChiffEngine(mod);
+  FS = ENGINE.frameHz;              // the firmware's own kFrameHz
+  update();
+});
+cv.addEventListener('mousemove', e => {
+  const r = cv.getBoundingClientRect(); paint((e.clientX - r.left));
+});
+cv.addEventListener('mouseleave', () => paint(null));
+window.addEventListener('resize', () => paint(null));
+update();
+</script>

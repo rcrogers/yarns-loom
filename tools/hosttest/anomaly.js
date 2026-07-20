@@ -15,6 +15,23 @@
 // also robust to the noise in a short-window mean estimate, which sinks
 // per-block step detectors at high amounts.
 //
+// The comparison is DIRECTIONAL. The gap's ideal value is zero -- the chiff
+// leaving the value exactly on the classic envelope -- and both failure modes
+// push |gap| UP: a bug displaces the value, and the rail-guard sag displaces it
+// too. So a SMALLER |gap| than baseline is an improvement, never a regression.
+// A design that sags less while still never breaching a rail is strictly
+// better, and must not be reported as a deviation just because it moved. Only
+// growth is flagged.
+//
+// Paired with a HARD invariant that sag may not trade away: RAIL DWELL. The
+// render loop clamps the value into the note's range, so a design cannot
+// overshoot a rail no matter what -- checking for that is vacuous (verified:
+// deleting the guard entirely produces zero breaches). What sag actually buys
+// is freedom from STICKING to a rail. Pinned samples are flat, the noise
+// stops, and the plan records that as the visible-stripe failure. So the
+// invariant is the longest run of consecutive samples sitting exactly on a
+// rail, and it is checked in both directions regardless of sag.
+//
 // It compares against a RECORDED BASELINE rather than an absolute threshold.
 // An absolute limit cannot work here: the designed rail-guard sag is itself
 // huge in some corners (a 4-sample attack under a max-amount chiff leaves the
@@ -47,10 +64,15 @@ const AMOUNT = +argOf('--amount', 127);
 const BINARY = argOf('--binary', 'test');
 const BASELINE = path.join(HERE, `anomaly_baseline_amt${AMOUNT}.json`);
 
-// How far a case may move from baseline before it is worth a look. Well under
+// How far |gap| may GROW past baseline before it is a regression. Well under
 // the 60-90 point swings the wrap bug produced, well over run-to-run jitter
 // (there is none -- the render is deterministic -- so this is pure margin).
 const TOLERANCE = 0.02;
+const PEAK_PCT = 75;
+// Longest tolerated run of consecutive samples pinned to a rail. The existing
+// battery's worst legitimate case is ~22 samples; 64 (one block) is clear of
+// that and still far below an audible flat spot.
+const MAX_RAIL_DWELL = 64;
 // Let the classic slew settle after the window closes before comparing.
 const SETTLE_BLOCKS = 10;
 
@@ -74,18 +96,35 @@ function run(attack, duration, amount) {
   const args = [
     'basic', amount, duration,
     `attack_setting=${attack}`, 'decay_setting=64', 'release_setting=64',
-    'sustain_setting=70', 'peak=100', 'gate=400', 'tail=300', 'range=32767',
+    'sustain_setting=70', `peak=${PEAK_PCT}`, 'gate=400', 'tail=300', 'range=32767',
   ].join(' ');
   return execSync(`./${BINARY} ${args}`, { cwd: HERE, maxBuffer: 1e9 })
     .toString().trim().split('\n').map(Number);
 }
 
 const results = [];
+const excursions = [];
 for (const attack of ATTACKS) {
   const classic = run(attack, 0, 0);
 
   for (const duration of DURATIONS) {
     const chiff = run(attack, duration, AMOUNT);
+
+    // Hard invariant: the chiff never DWELLS on a rail. Independent of sag,
+    // and not something a redesign may trade away.
+    let top = -Infinity;
+    for (const v of chiff) if (v > top) top = v;
+    let dwell = 0, longest = 0, prev = null;
+    for (const v of chiff) {
+      if ((v === top || v === 0) && v === prev) { dwell++; }
+      else { dwell = (v === top || v === 0) ? 1 : 0; }
+      if (dwell > longest) longest = dwell;
+      prev = v;
+    }
+    if (longest > MAX_RAIL_DWELL) {
+      excursions.push({ attack, duration, dwell: longest, rail: top });
+    }
+
     const from = durationLut[duration] + SETTLE_BLOCKS * BLOCK;
     const end = Math.min(classic.length, chiff.length);
     let worst = 0, worstAt = 0;
@@ -122,29 +161,56 @@ if (!fs.existsSync(BASELINE)) {
   process.exit(1);
 }
 const baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
-const moved = [];
+const worse = [], better = [];
 for (const r of results) {
   const was = baseline[key(r)];
-  if (was === undefined) { moved.push({ ...r, was: null, delta: Infinity }); continue; }
-  const delta = r.dev - was;
-  if (Math.abs(delta) > TOLERANCE) moved.push({ ...r, was, delta });
+  if (was === undefined) { worse.push({ ...r, was: null, growth: Infinity }); continue; }
+  // Directional: only GROWTH in displacement counts against us.
+  const growth = Math.abs(r.dev) - Math.abs(was);
+  if (growth > TOLERANCE) worse.push({ ...r, was, growth });
+  else if (growth < -TOLERANCE) better.push({ ...r, was, growth });
 }
 
-if (!moved.length) {
-  console.log(`PASS all ${results.length} cases within ${(TOLERANCE * 100).toFixed(0)} points of baseline`);
+if (better.length) {
+  console.log(`${better.length} case(s) IMPROVED (less displacement, not a failure):`);
+  better.sort((a, b) => a.growth - b.growth);
+  for (const b of better.slice(0, 8)) {
+    console.log(`  attack ${String(b.attack).padStart(3)}` +
+      ` duration ${String(b.duration).padStart(3)}` +
+      `  ${(b.was * 100).toFixed(1)}% -> ${(b.dev * 100).toFixed(1)}%` +
+      `  (${(b.growth * 100).toFixed(1)} points closer to the envelope)`);
+  }
+  console.log('  If this is a deliberate design change, re-record with --update.\n');
+}
+
+if (excursions.length) {
+  console.log(`FAIL ${excursions.length} case(s) DWELL ON A RAIL` +
+    ` (limit ${MAX_RAIL_DWELL} consecutive samples):`);
+  excursions.sort((a, b) => b.dwell - a.dwell);
+  for (const e of excursions.slice(0, 10)) {
+    console.log(`  attack ${String(e.attack).padStart(3)}` +
+      ` duration ${String(e.duration).padStart(3)}` +
+      `  pinned for ${e.dwell} samples (${(e.dwell / 45).toFixed(1)}ms)`);
+  }
+}
+
+if (!worse.length && !excursions.length) {
+  console.log(`PASS ${results.length} cases: no case displaced more than baseline` +
+    ` by over ${(TOLERANCE * 100).toFixed(0)} points, no rail dwell`);
   process.exit(0);
 }
+if (!worse.length) process.exit(1);
 
-console.log(`FAIL ${moved.length} of ${results.length} cases moved from baseline:`);
-moved.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-for (const m of moved.slice(0, 20)) {
+console.log(`FAIL ${worse.length} of ${results.length} cases displaced MORE than baseline:`);
+worse.sort((a, b) => b.growth - a.growth);
+for (const m of worse.slice(0, 20)) {
   console.log(`  attack ${String(m.attack).padStart(3)}` +
     ` duration ${String(m.duration).padStart(3)}` +
     `  ${m.was === null ? 'NEW' : (m.was * 100).toFixed(1) + '%'}` +
     ` -> ${(m.dev * 100).toFixed(1)}%` +
-    `  (${m.delta > 0 ? '+' : ''}${(m.delta * 100).toFixed(1)} points)`);
+    `  (+${(m.growth * 100).toFixed(1)} points further off)`);
 }
-const r = moved[0];
+const r = worse[0];
 console.log('\nLook at the worst one:');
 console.log(`  node plot.js /tmp/anomaly.png 200 \\\n` +
   `    "classic:basic 0 ${r.duration} attack_setting=${r.attack} decay_setting=64 ` +
