@@ -49,6 +49,8 @@ header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
 .knob:last-child { margin-bottom: 0; }
 .knob label { font-size: 12px; color: var(--ink2); }
 .knob output { font-size: 12px; color: var(--ink); }
+.knob output b, .chipbox .v b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.knob output small, .chipbox .v small { color: var(--ink3); font-weight: 400; }
 .knob input[type=range] { grid-column: 1 / -1; width: 100%; margin: 0;
   accent-color: var(--accent); height: 18px; }
 .knob input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -92,6 +94,8 @@ button.roll { width: 100%; padding: 6px 0; font: 12px system-ui; cursor: pointer
   color: var(--ink); }
 button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .note { font-size: 11px; color: var(--ink3); margin-top: 6px; line-height: 1.4; }
+/* .knob is a 2-column grid; without this the note is confined to column 1. */
+.knob .note { grid-column: 1 / -1; }
 @media (max-width: 760px) { .wrap { flex-direction: column; } .rail { width: 100%; } }
 </style>
 
@@ -115,11 +119,11 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
         <input type="range" id="ampmod" min="-64" max="63" value="0">
         <div class="note">Peak level is not a setting of its own: the firmware
           derives it from this and the note's velocity.</div></div>
-      <div class="knob"><label for="vel">Velocity</label><output class="mono" id="velV"></output>
-        <input type="range" id="vel" min="0" max="127" value="127"></div>
     </div>
 
     <div class="group"><h2>Note</h2>
+      <div class="knob"><label for="vel">Velocity</label><output class="mono" id="velV"></output>
+        <input type="range" id="vel" min="0" max="127" value="127"></div>
       <div class="knob"><label for="gate">Gate length</label><output class="mono" id="gateV"></output>
         <input type="range" id="gate" min="0" max="1000" value="707">
         <div class="note">How long the key is held -- a performance, not a
@@ -341,10 +345,10 @@ function draw() {
 
   const m = measure(res, dia);
   $('mLand').textContent = m.land.toFixed(1) + ' %';
-  $('mRel').innerHTML = (m.rel === null ? '&gt;window' : m.rel.toFixed(0) + ' ms')
-    + ' <small>(dialed ' + (m.relBase === null ? '?' : m.relBase.toFixed(0)) + ')</small>';
-  $('mWin').textContent = fmtMs(Math.round(m.winMs));
-  $('mShift').innerHTML = res.attackSamples + ' <small>smp</small>';
+  $('mRel').innerHTML = m.rel === null ? '&gt;window'
+    : fwUnit(Math.round(m.rel * FS / 1000) + ' smp', fmtMs(m.rel));
+  $('mWin').innerHTML = fwUnit(res.windowN + ' smp', msOfSamples(res.windowN));
+  $('mShift').innerHTML = fwUnit(res.attackSamples + ' smp', msOfSamples(res.attackSamples));
   $('mMs').textContent = dt.toFixed(0) + ' ms';
 
   paint(null);
@@ -625,27 +629,40 @@ function params() {
 
 // Settings are the input; the engine tells us what they cost in samples, and
 // ms is shown purely as a readout.
-function settingLabel(setting, samples) {
-  return setting + ' <small>(' + fmtMs(samples / FS * 1000) + ')</small>';
+// Firmware units are AUTHORITATIVE and shown first; human units are a
+// translation, shown dimmed alongside. Never the other way round: a
+// millisecond value names lengths the module cannot produce (only 128 stage
+// lengths exist), which is how a real bug hid -- CHIFF DURATION 20 and 21 are
+// 185 and 199 samples but both round to "4 ms".
+function fwUnit(authoritative, translated) {
+  return '<b>' + authoritative + '</b>' +
+         (translated ? ' <small>= ' + translated + '</small>' : '');
 }
+const msOfSamples = n => fmtMs(n / FS * 1000);
+
 function labels() {
   if (!ENGINE) return;
   const stage = s => ENGINE.stageSamples(s);
-  $('atkV').innerHTML = settingLabel(+$('atk').value, stage(+$('atk').value));
-  $('decV').innerHTML = settingLabel(+$('dec').value, stage(+$('dec').value));
-  $('relV').innerHTML = settingLabel(+$('rel').value, stage(+$('rel').value));
-  // Sustain is a LEVEL setting, not a time: show the level it resolves to.
+  for (const [slider, out] of [['atk','atkV'], ['dec','decV'], ['rel','relV']]) {
+    const setting = +$(slider).value;
+    const samples = stage(setting);
+    $(out).innerHTML = fwUnit(setting, samples + ' smp, ' + msOfSamples(samples));
+  }
+  // Sustain is a LEVEL setting, not a time.
   const susSetting = +$('sus').value;
-  $('susV').innerHTML = susSetting + ' <small>(' +
-    ((susSetting << 6) / 8191 * 100).toFixed(0) + '% of peak)</small>';
-  $('ampmodV').textContent = $('ampmod').value;
-  $('velV').textContent = $('vel').value;
-  $('amtV').textContent = $('amt').value + ' / 127';
+  $('susV').innerHTML = fwUnit(susSetting,
+    ((susSetting << 6) / 8191 * 100).toFixed(0) + '% of peak');
+  // Already firmware units: a signed setting and a MIDI velocity.
+  $('ampmodV').innerHTML = fwUnit($('ampmod').value, '');
+  $('velV').innerHTML = fwUnit($('vel').value, '');
+  $('amtV').innerHTML = fwUnit($('amt').value + ' / 127', '');
   const durSetting = +$('chiffDur').value;
   const durSamples = ENGINE.durationSamples(durSetting);
-  $('chiffDurV').innerHTML = durSetting + ' <small>(' +
-    fmtMs(durSamples / FS * 1000) + ', ' + durSamples + ' smp)</small>';
-  $('gateV').textContent = fmtMs(gateMsFromSlider(+$('gate').value));
+  $('chiffDurV').innerHTML = fwUnit(durSetting,
+    durSamples + ' smp, ' + msOfSamples(durSamples));
+  // Gate is a performance, not a setting, so its firmware unit is samples.
+  const gateSamples = Math.round(gateMsFromSlider(+$('gate').value) * FS / 1000);
+  $('gateV').innerHTML = fwUnit(gateSamples + ' smp', msOfSamples(gateSamples));
   $('seedShow').textContent = 'seed 0x' + (seed >>> 0).toString(16);
 }
 let raf = null;
