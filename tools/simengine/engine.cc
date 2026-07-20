@@ -1,0 +1,169 @@
+// Emscripten entry point for chiff_sim.html.
+//
+// This is the ONLY DSP the sim runs: it includes the real yarns/envelope.cc
+// (via tools/portable_envelope.py, which swaps nothing but the one ARM smull)
+// and reproduces Part::VoiceNoteOn's parameter chain exactly. The sim has no
+// model of its own to drift from the firmware.
+//
+// Every control is a front-panel SETTING, not a time. Milliseconds are an
+// OUTPUT (reported in the meta block), never an input.
+#define TEST 1
+// Pin the round-robin PRNG offset below: Envelope::Init hands out a new offset
+// per construction, so without this the same parameters render differently on
+// every call and nothing is reproducible.
+#define private public
+
+#include "stmlib/stmlib.h"
+#include "stmlib/utils/dsp.h"
+#include "yarns/drivers/dac.h"
+
+// Same translation unit as the envelope so the file-static PRNG can be seeded
+// for reproducible renders (the sim's re-roll button).
+#include "envelope_portable.cc"
+
+#include <emscripten/emscripten.h>
+#include <cstring>
+
+using namespace yarns;
+using namespace stmlib;
+
+namespace {
+
+// Part::VoiceNoteOn, verbatim in structure. Velocity modulation is included
+// because peak level is NOT a setting -- it falls out of AMPLITUDE MOD
+// VELOCITY and the note's velocity.
+void BuildAdsr(ADSR* adsr,
+               int attack_setting, int decay_setting,
+               int sustain_setting, int release_setting,
+               int amplitude_mod_velocity, int velocity,
+               int env_mod_attack, int env_mod_decay,
+               int env_mod_sustain, int env_mod_release) {
+  uint8_t vel = static_cast<uint8_t>(velocity);
+  uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
+  int32_t damping_22 = -amplitude_mod_velocity * vel_concave_up;
+  if (amplitude_mod_velocity >= 0) {
+    damping_22 += amplitude_mod_velocity << 16;
+  }
+  adsr->peak_u16 = UINT16_MAX - (damping_22 >> (22 - 16));
+  adsr->sustain_u16 = modulate_7_13(
+      static_cast<uint8_t>(sustain_setting),
+      static_cast<int8_t>(env_mod_sustain), vel) << (16 - 13);
+  adsr->attack_u32 = Interpolate88(
+      lut_envelope_phase_increments,
+      modulate_7_13(static_cast<uint8_t>(attack_setting),
+                    static_cast<int8_t>(env_mod_attack), vel) << (15 - 13));
+  adsr->decay_u32 = Interpolate88(
+      lut_envelope_phase_increments,
+      modulate_7_13(static_cast<uint8_t>(decay_setting),
+                    static_cast<int8_t>(env_mod_decay), vel) << (15 - 13));
+  adsr->release_u32 = Interpolate88(
+      lut_envelope_phase_increments,
+      modulate_7_13(static_cast<uint8_t>(release_setting),
+                    static_cast<int8_t>(env_mod_release), vel) << (15 - 13));
+}
+
+Envelope envelope;
+ADSR adsr;
+
+}  // namespace
+
+extern "C" {
+
+// meta[] layout, all in SAMPLES except where noted. The sim converts to ms
+// for display only.
+enum MetaField {
+  META_TOTAL_SAMPLES,
+  META_GATE_SAMPLES,
+  META_CHIFF_WINDOW_SAMPLES,
+  META_ATTACK_SAMPLES,
+  META_DECAY_SAMPLES,
+  META_RELEASE_SAMPLES,
+  META_PEAK_U16,
+  META_SUSTAIN_U16,
+  META_COUNT
+};
+
+EMSCRIPTEN_KEEPALIVE
+int chiff_meta_count() { return META_COUNT; }
+
+// Renders one note and returns the sample count written to `out`.
+// Levels span 0..INT16_MAX; `out` must hold max_samples int16s.
+EMSCRIPTEN_KEEPALIVE
+int chiff_render(
+    int attack_setting, int decay_setting,
+    int sustain_setting, int release_setting,
+    int amplitude_mod_velocity, int velocity,
+    int env_mod_attack, int env_mod_decay,
+    int env_mod_sustain, int env_mod_release,
+    int chiff_amount, int chiff_duration,
+    int gate_samples, int tail_samples, int max_target,
+    unsigned int seed,
+    int16_t* out, int max_samples, int32_t* meta) {
+  BuildAdsr(&adsr, attack_setting, decay_setting, sustain_setting,
+            release_setting, amplitude_mod_velocity, velocity,
+            env_mod_attack, env_mod_decay, env_mod_sustain, env_mod_release);
+
+  shared_prng_state = seed ? seed : 0xCAFEBABEu;
+
+  envelope.Init(0);
+  envelope.prng_offset_u32_ = 0;   // reproducible across calls
+  envelope.NoteOn(adsr, 0, max_target,
+                  static_cast<uint8_t>(chiff_amount),
+                  static_cast<uint8_t>(chiff_duration));
+
+  int total = gate_samples + tail_samples;
+  if (total > max_samples) total = max_samples;
+
+  int written = 0;
+  bool released = false;
+  int16_t block[kAudioBlockSize];
+  while (written < total) {
+    if (!released && written >= gate_samples) {
+      envelope.NoteOff();
+      released = true;
+    }
+    Envelope::FillSharedPrngBuffer();
+    envelope.RenderSamples(block, 0);
+    int n = total - written;
+    if (n > static_cast<int>(kAudioBlockSize)) n = kAudioBlockSize;
+    memcpy(out + written, block, n * sizeof(int16_t));
+    written += n;
+  }
+
+  meta[META_TOTAL_SAMPLES] = written;
+  meta[META_GATE_SAMPLES] = gate_samples;
+  meta[META_CHIFF_WINDOW_SAMPLES] =
+      chiff_amount ? static_cast<int32_t>(
+          lut_chiff_duration_samples[chiff_duration & 0x7F]) : 0;
+  meta[META_ATTACK_SAMPLES] =
+      adsr.attack_u32 ? static_cast<int32_t>(UINT32_MAX / adsr.attack_u32) : 0;
+  meta[META_DECAY_SAMPLES] =
+      adsr.decay_u32 ? static_cast<int32_t>(UINT32_MAX / adsr.decay_u32) : 0;
+  meta[META_RELEASE_SAMPLES] =
+      adsr.release_u32 ? static_cast<int32_t>(UINT32_MAX / adsr.release_u32) : 0;
+  meta[META_PEAK_U16] = adsr.peak_u16;
+  meta[META_SUSTAIN_U16] = adsr.sustain_u16;
+  return written;
+}
+
+// The audio rate the firmware runs at, so the sim never hardcodes it.
+EMSCRIPTEN_KEEPALIVE
+int chiff_frame_hz() { return kFrameHz; }
+
+// CHIFF DURATION setting -> window samples, straight from the firmware LUT,
+// so the UI can label a setting without reimplementing the mapping.
+EMSCRIPTEN_KEEPALIVE
+int chiff_duration_samples(int setting) {
+  return static_cast<int32_t>(lut_chiff_duration_samples[setting & 0x7F]);
+}
+
+// ENV stage setting -> stage length in samples, via the real LUT chain.
+EMSCRIPTEN_KEEPALIVE
+int chiff_stage_samples(int setting) {
+  uint32_t increment = Interpolate88(
+      lut_envelope_phase_increments,
+      modulate_7_13(static_cast<uint8_t>(setting), 0, 0) << (15 - 13));
+  return increment ? static_cast<int32_t>(UINT32_MAX / increment) : 0;
+}
+
+}  // extern "C"
