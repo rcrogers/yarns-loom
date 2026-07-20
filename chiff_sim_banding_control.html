@@ -291,7 +291,14 @@ const gateMsFromSlider = v => Math.round(Math.pow(8000, v / 1000));
 // Settings in, samples out. Shape matches what the drawing code expects.
 function render(p) {
   const gateSamples = Math.max(64, Math.round(p.gateMs * FS / 1000));
-  const tailSamples = Math.max(64, Math.round(p.tailMs * FS / 1000));
+  // Render only as far past the gate as the release actually needs. A fixed
+  // tail (this was hardcoded at 1s) wastes most of the x-axis when the release
+  // is short, which is exactly when the attack is short and detail matters.
+  // A timed stage spans 4 time constants, so it is ~98% done at its nominal
+  // length; a little margin covers the handoff into DEAD.
+  const tailSamples = p.tailSamples !== undefined
+    ? Math.max(64, p.tailSamples)
+    : Math.max(64, Math.round(ENGINE.stageSamples(p.release) * 1.1 + 0.01 * FS));
   const r = ENGINE.render({
     attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release,
     amplitudeModVelocity: p.amplitudeModVelocity, velocity: p.velocity,
@@ -442,7 +449,15 @@ function paint(hoverX) {
 }
 
 // ---- noise spectrogram (STFT of the residual: time x frequency) ----
-const SPEC_N = 512, SPEC_HOP = 64, SPEC_FMAX = FS / 2;  // finer time res (11ms window, 1.4ms hop)
+// SPEC_WINDOW sets harmonic fidelity and must not shrink: 512 samples is an
+// 11ms analysis window. SPEC_FFT zero-pads that window to twice the length,
+// which doubles bin DENSITY without touching the window -- finer frequency
+// display, identical resolving power. SPEC_HOP_MIN is pure time resolution
+// and costs only CPU, so it is 4x finer than the old 64.
+const SPEC_WINDOW = 512, SPEC_FFT = 1024, SPEC_HOP_MIN = 16, SPEC_FMAX = FS / 2;
+// Long renders would otherwise compute tens of thousands of columns for a
+// canvas ~1400px wide. Past this the hop widens instead.
+const SPEC_MAX_FRAMES = 2400;
 // FIXED brightness reference (~amount 127's residual peak) so the spectrogram
 // shows ABSOLUTE noise level -- amount 1 reads faint, 127 bright -- instead of
 // auto-normalizing each render to its own peak (which hid the amount scaling).
@@ -453,25 +468,30 @@ let specData = null;   // { frames, nFrames, maxBin, gPeak, tMax, fMax }
 function computeSpectrogram() {
   if (!lastRes) return;
   const out = lastRes.out, line = lastLine, totalN = lastRes.totalN;
-  const bins = SPEC_N / 2;
+  const bins = SPEC_FFT / 2;
   const maxBin = Math.max(1, Math.floor(bins * SPEC_FMAX / (FS / 2)));
-  const nFrames = Math.max(1, Math.floor((totalN - SPEC_N) / SPEC_HOP));
-  const re = new Float64Array(SPEC_N), im = new Float64Array(SPEC_N);
+  const span = Math.max(1, totalN - SPEC_WINDOW);
+  const hop = Math.max(SPEC_HOP_MIN, Math.ceil(span / SPEC_MAX_FRAMES));
+  const nFrames = Math.max(1, Math.floor(span / hop));
+  const re = new Float64Array(SPEC_FFT), im = new Float64Array(SPEC_FFT);
   const frames = new Array(nFrames);
   let gPeak = 1e-9;
   for (let f = 0; f < nFrames; f++) {
-    const s = f * SPEC_HOP;
-    for (let k = 0; k < SPEC_N; k++) {
-      const h = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_N - 1));
+    const s = f * hop;
+    // Window the real 512 samples, leave the rest of the 1024-point buffer at
+    // zero: that is the zero-pad.
+    for (let k = 0; k < SPEC_WINDOW; k++) {
+      const h = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_WINDOW - 1));
       re[k] = ((out[s + k] - line[s + k]) / PEAK) * h; im[k] = 0;
     }
+    for (let k = SPEC_WINDOW; k < SPEC_FFT; k++) { re[k] = 0; im[k] = 0; }
     fft(re, im);
     const m = new Float64Array(maxBin);
     for (let b = 0; b < maxBin; b++) { m[b] = Math.hypot(re[b], im[b]); if (m[b] > gPeak) gPeak = m[b]; }
     frames[f] = m;
   }
-  specData = { frames, nFrames, maxBin, gPeak,
-    tMax: (nFrames * SPEC_HOP) / FS * 1000, fMax: maxBin / bins * (FS / 2) };
+  specData = { frames, nFrames, maxBin, gPeak, hop,
+    tMax: (nFrames * hop) / FS * 1000, fMax: maxBin / bins * (FS / 2) };
 }
 
 function hslToRgb(h, s, l) {
@@ -504,10 +524,19 @@ function drawSpectrogram() {
     let b1 = Math.floor((1 - py / ph) * maxBin);
     if (b1 <= b0) b1 = b0 + 1;
     for (let px = 0; px < pw; px++) {
-      const col = frames[Math.min(nFrames - 1, Math.floor(px / pw * nFrames))];
+      // Average every frame landing in this pixel column, not just the nearest
+      // one. With the finer hop there are several per column, and picking one
+      // would alias the extra time resolution into moire instead of using it.
+      let f0 = Math.floor(px / pw * nFrames);
+      let f1 = Math.floor((px + 1) / pw * nFrames);
+      if (f1 <= f0) f1 = f0 + 1;
       let s = 0, cnt = 0;
-      for (let b = b0; b < b1 && b < maxBin; b++) { s += col[b]; cnt++; }
-      const mag = cnt ? s / cnt : col[Math.min(b0, maxBin - 1)];
+      for (let f = f0; f < f1 && f < nFrames; f++) {
+        const col = frames[f];
+        for (let b = b0; b < b1 && b < maxBin; b++) { s += col[b]; cnt++; }
+      }
+      const mag = cnt ? s / cnt
+        : frames[Math.min(nFrames - 1, f0)][Math.min(b0, maxBin - 1)];
       const db = 20 * Math.log10(mag / SPEC_REF + 1e-9);
       const t = Math.max(0, Math.min(1, (db + 60) / 60));
       const [r, g, bl] = hslToRgb(150, 55 + t * 20, 8 + t * 74);
@@ -559,20 +588,20 @@ function drawSpectrum() {
   if (!lastRes) return;
   const out = lastRes.out, totalN = lastRes.totalN;
   let center = specSample < 0 ? Math.floor(totalN * 0.55) : specSample;
-  let start = Math.max(1, Math.min(totalN - SPEC_N - 1, center - SPEC_N / 2));
+  let start = Math.max(1, Math.min(totalN - SPEC_WINDOW - 1, center - SPEC_WINDOW / 2));
   // residual = value minus a 64-tap moving mean (isolate the noise from the
   // envelope trend), then Hann-windowed
-  const re = new Float64Array(SPEC_N), im = new Float64Array(SPEC_N);
+  const re = new Float64Array(SPEC_WINDOW), im = new Float64Array(SPEC_WINDOW);
   const mw = 64;
-  for (let k = 0; k < SPEC_N; k++) {
+  for (let k = 0; k < SPEC_WINDOW; k++) {
     let m = 0;
     for (let j = -mw; j <= mw; j++) m += out[start + k + j] || out[start + k];
     m /= (2 * mw + 1);
-    const hann = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_N - 1));
+    const hann = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_WINDOW - 1));
     re[k] = ((out[start + k] - m) / PEAK) * hann;
   }
   fft(re, im);
-  const bins = SPEC_N / 2;
+  const bins = SPEC_WINDOW / 2;
   let peak = 1e-9;
   const mag = new Float64Array(bins);
   for (let b = 0; b < bins; b++) { mag[b] = Math.hypot(re[b], im[b]); if (mag[b] > peak) peak = mag[b]; }
@@ -622,7 +651,6 @@ function params() {
     amount: +$('amt').value,
     chiffDuration: +$('chiffDur').value,
     gateMs: gateMsFromSlider(+$('gate').value),
-    tailMs: 1000,
     seed: seed,
   };
 }
