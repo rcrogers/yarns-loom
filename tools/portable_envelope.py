@@ -6,23 +6,20 @@ off-target consumer (the clang test harness, the Emscripten engine that drives
 chiff_sim.html) is compiled from this transform rather than reimplementing the
 model, so none of them can drift from the firmware.
 
-The only thing that cannot survive off ARM is the inline `smull`; it is
-replaced by the identical 64-bit expression. Everything else is byte-identical
-to yarns/envelope.cc.
+The render loop's ARM asm is guarded by `#if defined(__arm__) && __ARM_ARCH
+>= 7`, so off-target compilers (the clang host harness, the Emscripten sim)
+define no __arm__ and take the pure-C `#else` reference -- nothing to swap.
+This stays the single entry point (build.sh and simengine call it); SWAPS
+below stays empty unless an *unguarded* ARM-only construct is introduced.
 
 Usage: portable_envelope.py <repo_root> <output.cc>
 """
 import sys
 
-SMULL_ASM = '''      int32_t ramp_lo, ramp_hi;
-      __asm__("smull %0, %1, %2, %3"
-              : "=&r"(ramp_lo), "=r"(ramp_hi)
-              : "r"(slew_alpha_q31), "r"(decay_q32));
-      slew_alpha_q31 -= ramp_hi;'''
-
-SMULL_C = '''      int32_t ramp_hi = (int32_t)(
-        ((int64_t)slew_alpha_q31 * (int32_t)decay_q32) >> 32);
-      slew_alpha_q31 -= ramp_hi;'''
+# (arm_asm, portable_c) pairs for any *unguarded* ARM-only construct. Empty:
+# the render loop's asm is behind `#if defined(__arm__) && __ARM_ARCH >= 7`,
+# so the host preprocessor already takes the pure-C #else -- nothing to swap.
+SWAPS = []
 
 
 def main():
@@ -30,10 +27,12 @@ def main():
         sys.exit(__doc__)
     repo_root, output = sys.argv[1], sys.argv[2]
     source = open(repo_root + '/yarns/envelope.cc').read()
-    if SMULL_ASM not in source:
-        sys.exit('portable_envelope: smull anchor moved -- update this script '
-                 'to match yarns/envelope.cc')
-    open(output, 'w').write(source.replace(SMULL_ASM, SMULL_C))
+    for arm_asm, portable_c in SWAPS:
+        if arm_asm not in source:
+            sys.exit('portable_envelope: a SWAP anchor moved -- update this '
+                     'script to match yarns/envelope.cc')
+        source = source.replace(arm_asm, portable_c)
+    open(output, 'w').write(source)
 
 
 if __name__ == '__main__':

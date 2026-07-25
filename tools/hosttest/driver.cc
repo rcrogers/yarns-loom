@@ -1,6 +1,9 @@
-// Host driver for the REAL yarns envelope (dart-model port). Renders
-// scenarios and dumps per-sample value_q30-scale outputs as text for
-// analysis. Usage: ./test <scenario> ; output: one sample (int) per line.
+// Host/QEMU driver for the REAL yarns envelope (dart-model port). Renders
+// scenarios and streams per-sample int16 outputs as text (one per line).
+// Shared by the clang host harness (C path) and the bare-metal QEMU harness
+// (asm path): identical scenarios, inputs, and PRNG, so the two dumps diff
+// bit-for-bit. Streamed (not buffered into a full-take array) so it also fits
+// the QEMU M3 machine's small RAM. Usage: ./test <scenario> ; one int/line.
 #define private public
 #define TEST 1
 #include "yarns/envelope.h"
@@ -15,6 +18,15 @@ using namespace stmlib;
 
 static Envelope env;
 static ADSR adsr;
+
+// Verify mode ("hash=1" arg): fold the whole sample stream into one FNV-1a
+// value and print only that, instead of one line per sample. The QEMU
+// differential renders ~1M samples through double-emulated semihosting, where
+// per-sample text I/O drowns the run; a single hash line does not, and a hash
+// mismatch still flags any bit divergence (fall back to the default per-sample
+// dump, below, to locate it).
+static bool g_hash_mode = false;
+static uint32_t g_hash = 2166136261u;  // FNV-1a offset basis
 
 static uint32_t IncFromSamples(uint32_t samples) {
   return samples ? (UINT32_MAX / samples) : 0;
@@ -33,13 +45,20 @@ static uint16_t SustainFromSetting(int setting) {
   return stmlib::modulate_7_13(static_cast<uint8_t>(setting), 0, 0) << (16 - 13);
 }
 
-static void RenderMs(double ms, int16_t* out, size_t* pos) {
+// Stream each rendered sample as one line -- no full-take buffer, so the same
+// driver fits the QEMU M3 machine's small RAM. Byte-identical output to the
+// previous buffer-then-dump form (same samples, same order). In hash mode the
+// samples fold into g_hash instead of printing.
+static void RenderMs(double ms) {
   size_t n = (size_t)(ms * 45.0);
   for (size_t i = 0; i < n; i += kAudioBlockSize) {
     Envelope::FillSharedPrngBuffer();
     int16_t buffer[kAudioBlockSize];
     env.RenderSamples(buffer, 0);
-    for (size_t j = 0; j < kAudioBlockSize; ++j) out[(*pos)++] = buffer[j];
+    for (size_t j = 0; j < kAudioBlockSize; ++j) {
+      if (g_hash_mode) g_hash = (g_hash ^ (uint16_t)buffer[j]) * 16777619u;
+      else printf("%d\n", buffer[j]);
+    }
   }
 }
 
@@ -58,6 +77,8 @@ int main(int argc, char** argv) {
   const char* scenario = argc > 1 ? argv[1] : "basic";
   uint8_t amount = argc > 2 ? atoi(argv[2]) : 96;
   uint8_t duration = argc > 3 ? atoi(argv[3]) : 90;
+  // KEY=VALUE flag so it never lands in the positional attack_ms slot.
+  g_hash_mode = OptInt(argc, argv, "hash", 0) != 0;
 
   int peak_pct = OptInt(argc, argv, "peak", 100);
   int sustain_pct = OptInt(argc, argv, "sustain", 60);
@@ -90,37 +111,34 @@ int main(int argc, char** argv) {
             lut_chiff_duration_samples[duration]);
   }
 
-  static int16_t out[45 * 20000];
-  size_t pos = 0;
   env.Init(strcmp(scenario, "inverted") == 0 ? 16383 : 0);  // rest = release level
 
   if (strcmp(scenario, "basic") == 0) {
     // gate, then release to the end
     env.NoteOn(adsr, 0, max_target, amount, duration);
-    RenderMs(gatems, out, &pos);
+    RenderMs(gatems);
     env.NoteOff();
-    RenderMs(OptInt(argc, argv, "tail", relms > 1000 ? relms + 200 : 1000),
-             out, &pos);
+    RenderMs(OptInt(argc, argv, "tail", relms > 1000 ? relms + 200 : 1000));
   } else if (strcmp(scenario, "early_release") == 0) {
     // release 60ms into the attack
     env.NoteOn(adsr, 0, 16383, amount, duration);
-    RenderMs(60, out, &pos);
+    RenderMs(60);
     env.NoteOff();
-    RenderMs(1000, out, &pos);
+    RenderMs(1000);
   } else if (strcmp(scenario, "retrigger") == 0) {
     // note, release, retrigger mid-release
     env.NoteOn(adsr, 0, 16383, amount, duration);
-    RenderMs(500, out, &pos);
+    RenderMs(500);
     env.NoteOff();
-    RenderMs(100, out, &pos);
+    RenderMs(100);
     env.NoteOn(adsr, 0, 16383, amount, duration);
-    RenderMs(1500, out, &pos);
+    RenderMs(1500);
   } else if (strcmp(scenario, "inverted") == 0) {
     // Numerically inverted range (CV DAC / negative timbre): min > max
     env.NoteOn(adsr, 16383, 0, amount, duration);
-    RenderMs(2000, out, &pos);
+    RenderMs(2000);
     env.NoteOff();
-    RenderMs(1000, out, &pos);
+    RenderMs(1000);
   } else if (strcmp(scenario, "latehang") == 0) {
     // Early release near the dark end of a long window: 100ms release at 7s
     // into an 8s chiff. Must fall with the release, not hang.
@@ -128,16 +146,16 @@ int main(int argc, char** argv) {
     adsr.decay_u32 = IncFromSamples(200 * 45);
     adsr.release_u32 = IncFromSamples(100 * 45);
     env.NoteOn(adsr, 0, 16383, amount, duration);
-    RenderMs(7000, out, &pos);
+    RenderMs(7000);
     env.NoteOff();
-    RenderMs(400, out, &pos);
+    RenderMs(400);
   } else if (strcmp(scenario, "held") == 0) {
     // long hold: chiff through attack into sustain
     env.NoteOn(adsr, 0, 16383, amount, duration);
-    RenderMs(9000, out, &pos);
+    RenderMs(9000);
     env.NoteOff();
-    RenderMs(600, out, &pos);
+    RenderMs(600);
   }
-  for (size_t i = 0; i < pos; ++i) printf("%d\n", out[i]);
+  if (g_hash_mode) printf("%08x\n", g_hash);
   return 0;
 }

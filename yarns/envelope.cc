@@ -517,7 +517,13 @@ void Envelope::RenderStage(
     // the index into the shared PRNG block.
     const uint32_t* prng = &shared_prng_buffer[
       prng_offset_u32_ + (kAudioBlockSize - block_samples_left)];
-#if defined(GCC_ARMCM3)
+    // 32-bit ARMv7+ only (Thumb-2: smull / sbfx / usat / IT). Gate on __arm__,
+    // NOT bare __ARM_ARCH: the build host is arm64 (Apple Silicon), which
+    // defines __ARM_ARCH == 8 but not __arm__ -- so the host harness and the
+    // Emscripten sim take the C #else (the reference). The firmware (Cortex-M3)
+    // and the off-hardware QEMU harness use the same arm-none-eabi Cortex-M3
+    // build, which defines __arm__ && __ARM_ARCH == 7, and take this asm.
+#if defined(__arm__) && __ARM_ARCH >= 7
     // HAND-ALLOCATED loop. The 12 values live across this loop fit in r0-r11
     // with ip/lr as scratch, but GCC 4.8 spills 5 of them from poor
     // allocation, paying ~5 reload ldrs per sample. Presenting them all as asm
