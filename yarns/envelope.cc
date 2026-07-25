@@ -89,6 +89,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   stage_samples_left_ = 0;
   stage_nominal_slew_shift_q5_27_ = 0;
   slew_alpha_q31_ = 0;
+  slew_alpha_decay_q32_ = 0;
   slew_shift_q5_27_ = 0;
   slew_shift_increment_q5_27_ = 0;
   chiff_dark_shift_q5_27_ = 0;
@@ -260,6 +261,16 @@ static inline int32_t AlphaFromShift_q31(uint32_t shift_q5_27) {
   return (two_pow_neg_fraction_u16 << 15) >> shift_int;
 }
 
+// decay = 1 - 2^-increment in Q32, via 2-term Taylor of 1 - 2^-x about x = 0
+// (u = x*ln2): decay ~ u - u^2/2. Exact enough since `increment` is a tiny
+// per-sample shift step. Q32 (small positive) so the ramp step is a single
+// SMMUL: alpha -= (alpha * decay) >> 32.
+static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
+  const uint32_t kLn2_q28 = 186065279u;  // round(ln2 * 2^28)
+  int64_t u_q32 = (static_cast<int64_t>(increment_q5_27) * kLn2_q28) >> 23;
+  return static_cast<int32_t>(u_q32 - ((u_q32 * u_q32) >> 33));
+}
+
 void Envelope::ReSlopeSlewShift() {
   // The dialed (chiff-free mean / classic) slew always runs at the stage's
   // own nominal rate.
@@ -275,10 +286,12 @@ void Envelope::ReSlopeSlewShift() {
       (chiff_dark_shift_q5_27_ - slew_shift_q5_27_)
         / chiff_duration_samples_left_;
     slew_alpha_q31_ = AlphaFromShift_q31(slew_shift_q5_27_);
+    slew_alpha_decay_q32_ = DecayFromIncrement_q32(slew_shift_increment_q5_27_);
   } else {
     slew_shift_q5_27_ = stage_nominal_slew_shift_q5_27_;
     slew_shift_increment_q5_27_ = 0;
     slew_alpha_q31_ = dialed_alpha_q31_;
+    slew_alpha_decay_q32_ = 0;
   }
 }
 
@@ -428,30 +441,30 @@ void Envelope::RenderStage(
   {
     const int32_t floor_q30 = chiff_floor_q30_;
     const int32_t top_q30 = chiff_top_q30_;
-    // PER-BLOCK ALPHA: the noise-slew coefficient is held constant across the
-    // run and advanced ONCE in the tail (below), not ramped per sample. The
-    // per-sample ramp was a smull + subtract on every sample; advancing the
-    // shift once per block and reading alpha from it is the same trajectory
-    // sampled per block instead of per sample -- 64x less work and one fewer
-    // live value in the loop. slew_alpha_q31 stays the chiff's OWN alpha;
-    // loop_alpha_q31 is what the sample loop uses -- that same alpha, or the
-    // stage-rate floor when it binds.
+    // Noise-slew floor (timed stages): never slower than the stage's own
+    // rate, else the value hangs on a moving stage near the window's dark
+    // end. Monotone (alpha only darkens), so flooring freezes the ramp.
+    int32_t decay_q32 = slew_alpha_decay_q32_;
+    // The floor exists to TRACK the mean, not to energize darts: floored,
+    // full-depth noise would ride the stage rate and amount 1 would sound
+    // like attack-speed noise (a 0 -> 1 discontinuity). Scale the dart span
+    // by the realized-reach ratio so the noise carries only what the
+    // un-floored chiff alpha affords -- continuous at the floor boundary,
+    // and amount -> 0 sends the noise to 0 smoothly.
     //
-    // Noise-slew floor (timed stages): never slower than the stage's own rate,
-    // else the value hangs on a moving stage near the window's dark end. The
-    // floor exists to TRACK the mean, not to energize darts: floored,
-    // full-depth noise would ride the stage rate and amount 1 would sound like
-    // attack-speed noise. Scale the dart span by the realized-reach ratio so
-    // the noise carries only what the un-floored chiff alpha affords. The
-    // scale is PER-RUN scratch (see dart_q30); the chiff alpha keeps ramping
-    // on its own schedule regardless. Sentinel 1<<15 means "scale is exactly
-    // 1.0, skip the multiply".
-    int32_t loop_alpha_q31 = slew_alpha_q31;
+    // Both the floor and the scale are PER-RUN scratch: neither may be
+    // written back into the persistent state. The chiff's own alpha keeps
+    // ramping on its own schedule (recovered from the shift below), and the
+    // dart depth keeps fading linearly -- persisting either one compounds it
+    // every block and collapses the burst in a few blocks.
+    // Sentinel 1<<15 means "scale is exactly 1.0, skip the multiply" -- which
+    // is also what the ratio computes to when both reaches cap at 1.0.
     uint32_t dart_scale_q15_5 = 1u << 15;
     if (timed && slew_alpha_q31 < dialed_alpha_q31_) {
       dart_scale_q15_5 = (ReachFactor_q15_5(slew_alpha_q31) << 15)
         / std::max<uint32_t>(ReachFactor_q15_5(dialed_alpha_q31_), 1u);
-      loop_alpha_q31 = dialed_alpha_q31_;
+      slew_alpha_q31 = dialed_alpha_q31_;
+      decay_q32 = 0;
     }
     // Aim base: the mean is CLOSED-FORM from the stage phase -- start +
     // (target - start) * lut_env_expo[phase], no iterated level state --
@@ -467,11 +480,11 @@ void Envelope::RenderStage(
       const int32_t mean_q30 = stage_start_q30_ + static_cast<int32_t>(
         (static_cast<int64_t>(stage_target_q30 - stage_start_q30_) *
          expo_u16) >> 16);
-      uint32_t ratio_q31 = loop_alpha_q31 == dialed_alpha_q31_
+      uint32_t ratio_q31 = slew_alpha_q31 == dialed_alpha_q31_
         ? static_cast<uint32_t>(INT32_MAX)
         : DivU64ByU32(static_cast<uint32_t>(dialed_alpha_q31_) >> 1,
                       static_cast<uint32_t>(dialed_alpha_q31_) << 31,
-                      static_cast<uint32_t>(loop_alpha_q31));
+                      static_cast<uint32_t>(slew_alpha_q31));
       base_q30 = mean_q30 + static_cast<int32_t>(
         (static_cast<int64_t>(stage_target_q30 - mean_q30) * ratio_q31)
         >> 31);
@@ -505,8 +518,15 @@ void Envelope::RenderStage(
     const uint32_t* prng = &shared_prng_buffer[
       prng_offset_u32_ + (kAudioBlockSize - block_samples_left)];
     while (sample_buffer != segment_end) {
-      // PRNG budget: bit 16 = dart sign (bit 15 was dart-or-relax, now unused).
+      // PRNG budget: bit 15 = dart-or-relax, bit 16 = dart sign.
       uint32_t chiff_draw_u32 = *prng++;
+      // Geometric coefficient ramp: alpha *= 2^-increment. Explicit SMULL
+      // high word so GCC 4.8 keeps the product 32-bit (else it spills).
+      int32_t ramp_lo, ramp_hi;
+      __asm__("smull %0, %1, %2, %3"
+              : "=&r"(ramp_lo), "=r"(ramp_hi)
+              : "r"(slew_alpha_q31), "r"(decay_q32));
+      slew_alpha_q31 -= ramp_hi;
       // Every draw is a dart, up or down: one branchless sign-mask blend.
       // There is no relax aim -- it existed to damp dwell at the rails, and
       // measurement showed it does not (removing it leaves floor dwell no
@@ -514,10 +534,9 @@ void Envelope::RenderStage(
       int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
       int32_t aim_q30 =
         aim_up_q30 ^ ((aim_up_q30 ^ aim_down_q30) & sign_mask);
-      // Never overshoots: alpha <= 1, so |step| <= |delta|. loop_alpha_q31 is
-      // constant across the run (advanced once in the tail).
+      // Never overshoots: alpha <= 1, so |step| <= |delta|.
       value_q30 += static_cast<int32_t>(
-        (static_cast<int64_t>(aim_q30 - value_q30) * loop_alpha_q31) >> 31);
+        (static_cast<int64_t>(aim_q30 - value_q30) * slew_alpha_q31) >> 31);
       // Clamp to the note's range: never clips; contact stays in the reach
       // fit's rare 3-sigma tail.
       if (value_q30 < floor_q30) value_q30 = floor_q30;
@@ -541,16 +560,18 @@ void Envelope::RenderStage(
         chiff_amp_q30_ = 0;
         slew_shift_q5_27_ = stage_nominal_slew_shift_q5_27_;
         slew_alpha_q31 = dialed_alpha_q31_;
+        slew_alpha_decay_q32_ = 0;
       } else {
-        // Advance the noise-slew coefficient ONCE for the whole run: the shift
-        // ramped linearly to shift_end, so alpha = 2^-shift_end is the run's
-        // end value. This is the per-block ramp -- the loop held alpha
-        // constant, and each block steps it down one increment*run notch.
-        // slew_alpha_q31 is the chiff's OWN alpha (the loop used loop_alpha_q31
-        // for the stage-rate floor), so it carries the ramp across the floor
-        // regime with no separate re-derivation.
         slew_shift_q5_27_ = shift_end;
-        slew_alpha_q31 = AlphaFromShift_q31(shift_end);
+        // If the floor bound, the loop ran at the stage rate, so the register
+        // no longer carries the chiff's own alpha. Re-derive it from the
+        // shift -- which ramped untouched -- so the two stay two encodings of
+        // ONE rate. The floor test is re-read from the members rather than
+        // remembered in a flag: both are untouched until this run's final
+        // store, and a flag would pin a register across the sample loop.
+        if (timed && slew_alpha_q31_ < dialed_alpha_q31_) {
+          slew_alpha_q31 = AlphaFromShift_q31(shift_end);
+        }
       }
     }
   }

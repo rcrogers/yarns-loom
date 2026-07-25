@@ -139,6 +139,11 @@ class Envelope {
   // Positive, <= 0x7FFF8000 < 2^31 (single signed SMULL vs the signed delta).
   int32_t slew_alpha_q31_;
 
+  // Geometric ramp of the coefficient while chiff runs: decay = 1 - 2^-increment
+  // (Q32), so alpha -= (alpha*decay)>>32 each sample == alpha *= 2^-increment,
+  // reproducing the linear-shift ramp with no per-sample LUT. Zero = hold.
+  int32_t slew_alpha_decay_q32_;
+
   // Per-instance start offset into the double-length shared PRNG buffer.
   // Distinct offsets mean co-triggered envelopes never consume the same
   // random word on the same sample, so their chiff draws are decorrelated
