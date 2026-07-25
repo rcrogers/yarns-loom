@@ -517,33 +517,72 @@ void Envelope::RenderStage(
     // the index into the shared PRNG block.
     const uint32_t* prng = &shared_prng_buffer[
       prng_offset_u32_ + (kAudioBlockSize - block_samples_left)];
+#if defined(GCC_ARMCM3)
+    // HAND-ALLOCATED loop. The 12 values live across this loop fit in r0-r11
+    // with ip/lr as scratch, but GCC 4.8 spills 5 of them from poor
+    // allocation, paying ~5 reload ldrs per sample. Presenting them all as asm
+    // operands forces GCC to pin them; the loop then runs with 0 spills. The
+    // behaviour is the C loop in #else (kept as the host reference, golden-
+    // verified) -- this block must be flash-verified bit-identical.
+    //
+    // Per sample: geometric alpha ramp (alpha -= (alpha*decay)>>32), dart aim
+    // select (aim_up ^ (aim_xor & sign)), one-pole slew (value +=
+    // (aim-value)*alpha>>31), rail clamp, bias ramp, and the EnvelopeSample
+    // mix+usat. `end == buf` (run_samples 0) is handled by the leading guard.
+    const int32_t aim_xor_q30 = aim_up_q30 ^ aim_down_q30;
+    int16_t* const segment_end_asm = segment_end;
+    __asm__ volatile(
+      "  cmp   %[buf], %[end]\n"
+      "  beq   2f\n"
+      "1:\n"
+      "  smull ip, lr, %[alpha], %[decay]\n"     // (alpha*decay), lr = hi word
+      "  sub   %[alpha], %[alpha], lr\n"         // alpha -= (alpha*decay)>>32
+      "  ldr   ip, [%[prng]], #4\n"              // draw = *prng++
+      "  sbfx  ip, ip, #16, #1\n"                // sign mask from bit 16
+      "  and   ip, %[aimxor], ip\n"
+      "  eor   ip, ip, %[aimup]\n"               // aim = up ^ (xor & sign)
+      "  sub   ip, ip, %[value]\n"               // delta = aim - value
+      "  smull ip, lr, ip, %[alpha]\n"           // delta*alpha (ip=lo, lr=hi)
+      "  add   %[value], %[value], lr, lsl #1\n" // value += (product>>31): hi<<1
+      "  add   %[value], %[value], ip, lsr #31\n"//               + lo>>31
+      "  cmp   %[value], %[floor]\n"
+      "  it    lt\n"
+      "  movlt %[value], %[floor]\n"             // clamp to floor
+      "  cmp   %[value], %[top]\n"
+      "  it    gt\n"
+      "  movgt %[value], %[top]\n"               // clamp to top
+      "  add   %[bias], %[bias], %[slope]\n"     // bias += bias_slope
+      "  asr   ip, %[bias], #15\n"               // bias >> 15
+      "  add   ip, ip, %[value], asr #14\n"      // + value >> 14
+      "  usat  ip, #15, ip, asr #1\n"            // EnvelopeSample saturate
+      "  strh  ip, [%[buf]], #2\n"               // *sample_buffer++
+      "  cmp   %[buf], %[end]\n"
+      "  bne   1b\n"
+      "2:\n"
+      : [value] "+r"(value_q30), [alpha] "+r"(slew_alpha_q31),
+        [bias] "+r"(bias_q31), [prng] "+r"(prng), [buf] "+r"(sample_buffer)
+      : [decay] "r"(decay_q32), [aimup] "r"(aim_up_q30),
+        [aimxor] "r"(aim_xor_q30), [floor] "r"(floor_q30), [top] "r"(top_q30),
+        [slope] "r"(bias_slope_q31), [end] "r"(segment_end_asm)
+      : "ip", "lr", "cc", "memory");
+#else
     while (sample_buffer != segment_end) {
-      // PRNG budget: bit 15 = dart-or-relax, bit 16 = dart sign.
+      // PRNG budget: bit 16 = dart sign.
       uint32_t chiff_draw_u32 = *prng++;
-      // Geometric coefficient ramp: alpha *= 2^-increment. Explicit SMULL
-      // high word so GCC 4.8 keeps the product 32-bit (else it spills).
-      int32_t ramp_lo, ramp_hi;
-      __asm__("smull %0, %1, %2, %3"
-              : "=&r"(ramp_lo), "=r"(ramp_hi)
-              : "r"(slew_alpha_q31), "r"(decay_q32));
+      int32_t ramp_hi = static_cast<int32_t>(
+        (static_cast<int64_t>(slew_alpha_q31) * decay_q32) >> 32);
       slew_alpha_q31 -= ramp_hi;
-      // Every draw is a dart, up or down: one branchless sign-mask blend.
-      // There is no relax aim -- it existed to damp dwell at the rails, and
-      // measurement showed it does not (removing it leaves floor dwell no
-      // worse), so it was costing per-sample work for nothing.
       int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
       int32_t aim_q30 =
         aim_up_q30 ^ ((aim_up_q30 ^ aim_down_q30) & sign_mask);
-      // Never overshoots: alpha <= 1, so |step| <= |delta|.
       value_q30 += static_cast<int32_t>(
         (static_cast<int64_t>(aim_q30 - value_q30) * slew_alpha_q31) >> 31);
-      // Clamp to the note's range: never clips; contact stays in the reach
-      // fit's rare 3-sigma tail.
       if (value_q30 < floor_q30) value_q30 = floor_q30;
       if (value_q30 > top_q30) value_q30 = top_q30;
       bias_q31 += bias_slope_q31;
       *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
     }
+#endif
     if (chiff_live) {
       chiff_amp_q30_ = amp_q30 - chiff_amp_step_q30_
         * static_cast<int32_t>(run_samples);
