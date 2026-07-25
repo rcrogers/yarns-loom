@@ -7,8 +7,29 @@ firmware it was last spliced with. build.sh calls it automatically.
 
 Usage: inline_engine.py <engine.js> <source.html> [output.html]
 """
+import os
 import re
+import subprocess
 import sys
+
+
+def firmware_version():
+    """git short SHA of HEAD, plus -dirty if the firmware/engine sources have
+    uncommitted changes. Stamped into the page so a published artifact
+    self-identifies its firmware (published snapshots have no other marker)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        sha = subprocess.check_output(
+            ['git', '-C', here, 'rev-parse', '--short', 'HEAD']).decode().strip()
+    except Exception:
+        return 'unknown'
+    # ':/' magic prefix = repo-root-relative, so this works from any subdir
+    # (git -C here makes plain paths relative to here, which misses them).
+    tracked = [':/yarns/envelope.cc', ':/yarns/envelope.h',
+               ':/yarns/resources.cc', ':/tools/simengine/engine.cc']
+    dirty = subprocess.check_output(
+        ['git', '-C', here, 'status', '--porcelain', '--'] + tracked).decode().strip()
+    return sha + ('-dirty' if dirty else '')
 
 
 def main():
@@ -22,8 +43,14 @@ def main():
         sys.exit('expected 2 script blocks (engine + sim), got %d' % len(blocks))
     spliced = (html[:blocks[0].start()] + '<script>\n' + engine + '\n</script>'
                + html[blocks[0].end():])
+    # Stamp the firmware version (idempotent: matches any prior value).
+    version = firmware_version()
+    spliced, n = re.subn(r"const FW_VERSION = '[^']*';",
+                         "const FW_VERSION = '%s';" % version, spliced)
+    if n != 1:
+        sys.exit('inline_engine: FW_VERSION marker not found in the sim script')
     open(output, 'w').write(spliced)
-    print('inlined %s into %s' % (engine_path, output))
+    print('inlined %s into %s (firmware %s)' % (engine_path, output, version))
 
 
 if __name__ == '__main__':

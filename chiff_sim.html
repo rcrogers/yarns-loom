@@ -104,6 +104,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     <header>
       <h1>Chiff Envelope Simulator</h1>
       <p>Runs the compiled <code>yarns/envelope.cc</code> itself &mdash; no separate model</p>
+      <p class="mono" id="fwver" style="color:var(--ink3);font-size:11px;margin-top:3px"></p>
     </header>
 
     <div class="group"><h2>ADSR <small>(front-panel settings)</small></h2>
@@ -212,6 +213,11 @@ e=z;p(q);var T=c([]);function U(){return v.byteLength>>16}function Z(_){_=_|0;va
 // All timing inputs are SETTINGS or samples. Milliseconds appear only in the
 // returned meta block, as output.
 'use strict';
+
+// Firmware revision this page's inlined engine was built from. Rewritten by
+// tools/simengine/inline_engine.py at every re-inline, so a published artifact
+// self-identifies its firmware -- do not edit the value by hand.
+const FW_VERSION = 'd605c3df';
 
 // Wraps a loaded Emscripten module into the engine API. Kept separate from the
 // node-specific require() so the browser can reuse it verbatim.
@@ -735,6 +741,7 @@ $('reroll').addEventListener('click', () => {
 ChiffEngine().then(mod => {
   ENGINE = wrapChiffEngine(mod);
   FS = ENGINE.frameHz;              // the firmware's own kFrameHz
+  $('fwver').textContent = 'firmware ' + FW_VERSION;
   update();
 });
 cv.addEventListener('mousemove', e => {
