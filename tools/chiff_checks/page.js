@@ -68,7 +68,12 @@ function makeSandbox(values) {
 
 // Resolves to { render, dialed, fft, ENGINE, FS, values }.
 // `values` is the live control map -- set values.atk etc. to move a slider.
-function loadPage(htmlPath) {
+//
+// opts.strict runs both script blocks in STRICT mode, which is how the
+// published artifact runs them. A sloppy-only check once shipped blank graphs,
+// so strictmode.js uses this before every republish.
+function loadPage(htmlPath, opts) {
+  const strict = !!(opts && opts.strict);
   const html = fs.readFileSync(htmlPath || path.join(ROOT, 'chiff_sim.html'), 'utf8');
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
   if (scripts.length !== 2) {
@@ -78,7 +83,9 @@ function loadPage(htmlPath) {
   const values = {};
   const sandbox = makeSandbox(values);
   vm.createContext(sandbox);
-  for (const s of scripts) vm.runInContext(s, sandbox);
+  for (const s of scripts) {
+    vm.runInContext(strict ? '"use strict";\n' + s : s, sandbox);
+  }
 
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + 20000;
