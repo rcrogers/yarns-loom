@@ -37,9 +37,12 @@ namespace yarns {
 STATIC_ASSERT(kPackedSize % 4 == 0, flash_aligns_packed);
 STATIC_ASSERT(kPackedSize <= FlashStorage::MAX_DATA_SIZE, flash_fits_packed);
 
-// Uncomment and build to see current packed size
+// Not a constraint -- a tripwire, so that a packed-layout change (which
+// invalidates every saved patch) has to be deliberate. When it fires:
+// uncomment the probe below to make the compiler name the new size in its
+// error, then update the assert.
 // char (*__debug_packed)[kPackedSize] = 1;
-STATIC_ASSERT(kPackedSize == 1016, i_just_want_to_know_if_this_changes);
+STATIC_ASSERT(kPackedSize == 1016, uncomment_debug_packed_above_to_see_new_size);
 
 STATIC_ASSERT(kStreamBufferSize >= kPackedSize, buffer_fits_packed);
 STATIC_ASSERT(kStreamBufferSize >= Multi::kTaggedPayloadSize, buffer_fits_tagged);
