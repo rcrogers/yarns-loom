@@ -38,6 +38,7 @@ qemu:
 # up as a simparity failure rather than being silently refreshed.
 check: host qemu
 	node tools/chiff_checks/simparity.js chiff_sim.html
+	node tools/chiff_checks/peakfloor.js
 
 firmware:
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh make -f yarns/makefile syx

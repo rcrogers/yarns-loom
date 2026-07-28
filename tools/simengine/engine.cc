@@ -22,6 +22,7 @@
 #include "envelope_portable.cc"
 
 #include <emscripten/emscripten.h>
+#include <algorithm>
 #include <cstring>
 
 using namespace yarns;
@@ -44,7 +45,11 @@ void BuildAdsr(ADSR* adsr,
   if (amplitude_mod_velocity >= 0) {
     damping_22 += amplitude_mod_velocity << 16;
   }
-  adsr->peak_u16 = UINT16_MAX - (damping_22 >> (22 - 16));
+  // Mirrors part.cc: floor the peak so a zero peak never collapses the attack
+  // stage (see the comment there for the AMPLITUDE MOD VELOCITY -64 corner).
+  const int32_t kMinPeak_u16 = 1;
+  adsr->peak_u16 =
+      std::max(kMinPeak_u16, UINT16_MAX - (damping_22 >> (22 - 16)));
   adsr->sustain_u16 = modulate_7_13(
       static_cast<uint8_t>(sustain_setting),
       static_cast<int8_t>(env_mod_sustain), vel) << (16 - 13);

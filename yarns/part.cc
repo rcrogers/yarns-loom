@@ -816,7 +816,16 @@ void Part::VoiceNoteOn(
   }
 
   ADSR adsr;
-  adsr.peak_u16 = UINT16_MAX - (damping_22 >> (22 - 16));
+  // A zero peak lands the attack's target exactly on the release level, and the
+  // envelope's "nothing to do this stage" early-out then drops the attack
+  // outright -- losing the stage's DURATION, not just its height, so the note
+  // slews to sustain at the DECAY rate. Only AMPLITUDE MOD VELOCITY -64 at
+  // velocity 127 reaches exactly 0 (-63 bottoms out at 1023, and the positive
+  // side at 1023), so without this floor that single corner snaps to a
+  // different trajectory than velocity 126.
+  const int32_t kMinPeak_u16 = 1;
+  adsr.peak_u16 =
+    std::max(kMinPeak_u16, UINT16_MAX - (damping_22 >> (22 - 16)));
   adsr.sustain_u16 = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
   // NB: this LUT only has 128 values, so we use a 15-bit index
   adsr.attack_u32   = Interpolate88(
