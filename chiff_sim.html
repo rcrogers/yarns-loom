@@ -131,6 +131,8 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
         <input type="range" id="amt" min="0" max="127" value="96"></div>
       <div class="knob"><label for="chiffDur">EXCITER DURATION</label><output class="mono" id="chiffDurV"></output>
         <input type="range" id="chiffDur" min="0" max="127" value="90"></div>
+      <div class="knob"><label for="amtMod">EXCITER AMT VEL MOD</label><output class="mono" id="amtModV"></output>
+        <input type="range" id="amtMod" min="-64" max="63" value="0"></div>
     </div>
 
     <div class="group"><h2>Randomness</h2>
@@ -215,7 +217,7 @@ const FW_VERSION = '185dd059-dirty';
 // node-specific require() so the browser can reuse it verbatim.
 function wrapChiffEngine(Module) {
   const render = Module.cwrap('chiff_render', 'number',
-    Array(19).fill('number'));
+    Array(20).fill('number'));
   const metaCount = Module.cwrap('chiff_meta_count', 'number', [])();
   const frameHz = Module.cwrap('chiff_frame_hz', 'number', [])();
   const durationSamples = Module.cwrap('chiff_duration_samples', 'number', ['number','number','number','number']);
@@ -223,7 +225,8 @@ function wrapChiffEngine(Module) {
 
   const META = ['totalSamples', 'gateSamples', 'chiffWindowSamples',
                 'attackSamples', 'decaySamples', 'releaseSamples',
-                'peak_u16', 'sustain_u16', 'ceiling', 'floor'];
+                'peak_u16', 'sustain_u16', 'chiffAmount',
+                'ceiling', 'floor'];
 
   let bufPtr = 0, bufCap = 0, metaPtr = 0;
 
@@ -233,7 +236,7 @@ function wrapChiffEngine(Module) {
     stageSamples,
     // p: attack, decay, sustain, release, amplitudeModVelocity, velocity,
     //    envModAttack/Decay/Sustain/Release, amount, chiffDuration,
-    //    gateSamples, tailSamples, maxTarget, seed
+    //    amountModVelocity, gateSamples, tailSamples, maxTarget, seed
     render(p) {
       const gateSamples = p.gateSamples | 0;
       const tailSamples = p.tailSamples | 0;
@@ -250,7 +253,7 @@ function wrapChiffEngine(Module) {
         p.amplitudeModVelocity | 0, p.velocity === undefined ? 127 : p.velocity | 0,
         p.envModAttack | 0, p.envModDecay | 0,
         p.envModSustain | 0, p.envModRelease | 0,
-        p.amount | 0, p.chiffDuration | 0,
+        p.amount | 0, p.chiffDuration | 0, p.amountModVelocity | 0,
         gateSamples, tailSamples,
         p.maxTarget === undefined ? 32767 : p.maxTarget | 0,
         p.seed >>> 0,
@@ -301,6 +304,7 @@ function render(p) {
     attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release,
     amplitudeModVelocity: p.amplitudeModVelocity, velocity: p.velocity,
     amount: p.amount, chiffDuration: p.chiffDuration,
+    amountModVelocity: p.amountModVelocity,
     gateSamples: gateSamples, tailSamples: tailSamples,
     maxTarget: PEAK, seed: p.seed,
   });
@@ -322,7 +326,10 @@ function render(p) {
 }
 
 function dialed(p, totalN, gateN) {   // chiff-free reference (amount 0)
-  return render(Object.assign({}, p, { amount: 0 })).out.subarray(0, totalN);
+  // Zero the VEL MOD too: modulate_7_13(0, scale, vel) is vel*scale, so an
+  // amount of 0 alone still yields chiff whenever EXCITER AMT VEL MOD is up.
+  return render(Object.assign({}, p, { amount: 0, amountModVelocity: 0 }))
+    .out.subarray(0, totalN);
 }
 
 // ---- measurements ----
@@ -672,6 +679,7 @@ function params() {
     velocity: +$('vel').value,
     amount: +$('amt').value,
     chiffDuration: +$('chiffDur').value,
+    amountModVelocity: +$('amtMod').value,
     gateMs: gateMsFromSlider(+$('gate').value),
     seed: seed,
   };
@@ -706,6 +714,7 @@ function labels() {
   $('ampmodV').innerHTML = fwUnit($('ampmod').value, '');
   $('velV').innerHTML = fwUnit($('vel').value, '');
   $('amtV').innerHTML = fwUnit($('amt').value + ' / 127', '');
+  $('amtModV').innerHTML = fwUnit($('amtMod').value, '');
   const durSetting = +$('chiffDur').value;
   const atkSamples = ENGINE.stageSamples(+$('atk').value);
   const durSamples = ENGINE.durationSamples(durSetting, +$('atk').value, 0, +$('vel').value);
@@ -724,7 +733,7 @@ function update() {
   if (raf) cancelAnimationFrame(raf);
   raf = requestAnimationFrame(draw);
 }
-['atk','dec','sus','rel','ampmod','vel','gate','amt','chiffDur'].forEach(id =>
+['atk','dec','sus','rel','ampmod','vel','gate','amt','chiffDur','amtMod'].forEach(id =>
   $(id).addEventListener('input', update));
 ['showDialed','showNoise'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));

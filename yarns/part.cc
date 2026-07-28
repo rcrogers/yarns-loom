@@ -113,6 +113,7 @@ void Part::Init() {
   voicing_.env_mod_release = 32;
   voicing_.chiff_amount = 32;
   voicing_.chiff_duration = 90;  // ~2.8x the attack (see ChiffWindowSamples)
+  voicing_.chiff_amount_mod_velocity = 0;
 
   seq_.clock_division = 20;
   seq_.gate_length = 3;
@@ -841,9 +842,14 @@ void Part::VoiceNoteOn(
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
 
+  // EXCITER AMT VEL MOD. modulate_7_13 works in 13 bits, so shift back to the
+  // 7-bit 0..127 the amount is; a zero mod leaves the setting untouched.
+  uint8_t chiff_amount = modulate_7_13(
+    voicing_.chiff_amount, voicing_.chiff_amount_mod_velocity, vel) >> 6;
+
   voice->NoteOn(Tune(pitch), vel, portamento,
     voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2,
-    voicing_.chiff_amount, voicing_.chiff_duration);
+    chiff_amount, voicing_.chiff_duration);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {

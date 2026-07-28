@@ -85,6 +85,8 @@ enum MetaField {
   META_RELEASE_SAMPLES,
   META_PEAK_U16,
   META_SUSTAIN_U16,
+  // The amount actually handed to NoteOn, i.e. after EXCITER AMT VEL MOD.
+  META_CHIFF_AMOUNT,
   // The chiff's actual rails, straight from the envelope. Recomputing these
   // in JS was off by one: scale_s16 * peak_u16 falls just short of 2^31, so
   // the real ceiling is 32766, not INT16_MAX.
@@ -105,7 +107,7 @@ int chiff_render(
     int amplitude_mod_velocity, int velocity,
     int env_mod_attack, int env_mod_decay,
     int env_mod_sustain, int env_mod_release,
-    int chiff_amount, int chiff_duration,
+    int chiff_amount, int chiff_duration, int chiff_amount_mod_velocity,
     int gate_samples, int tail_samples, int max_target,
     unsigned int seed,
     int16_t* out, int max_samples, int32_t* meta) {
@@ -115,10 +117,17 @@ int chiff_render(
 
   shared_prng_state = seed ? seed : 0xCAFEBABEu;
 
+  // EXCITER AMT VEL MOD, mirroring Part::VoiceNoteOn: modulate_7_13 works in
+  // 13 bits, so shift back to the 7-bit 0..127 the amount is.
+  uint8_t modulated_chiff_amount = modulate_7_13(
+      static_cast<uint8_t>(chiff_amount),
+      static_cast<int8_t>(chiff_amount_mod_velocity),
+      static_cast<uint8_t>(velocity)) >> 6;
+
   envelope.Init(0);
   envelope.prng_offset_u32_ = 0;   // reproducible across calls
   envelope.NoteOn(adsr, 0, max_target,
-                  static_cast<uint8_t>(chiff_amount),
+                  modulated_chiff_amount,
                   static_cast<uint8_t>(chiff_duration));
   // The window is now attack-relative (computed in NoteOn); capture it before
   // the render loop below decrements it.
@@ -155,6 +164,7 @@ int chiff_render(
       adsr.release_u32 ? static_cast<int32_t>(UINT32_MAX / adsr.release_u32) : 0;
   meta[META_PEAK_U16] = adsr.peak_u16;
   meta[META_SUSTAIN_U16] = adsr.sustain_u16;
+  meta[META_CHIFF_AMOUNT] = modulated_chiff_amount;
   // Convert the Q30 rails into the same units the rendered samples use, by
   // the same path EnvelopeSample takes (>>14 then the saturating >>1).
   meta[META_CEILING] = static_cast<int32_t>(
