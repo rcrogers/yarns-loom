@@ -3,29 +3,29 @@
 # Most consumers self-freshen: the host battery (tools/hosttest) and the QEMU
 # differential (tools/qemutest) recompile envelope.cc on every run, so they
 # cannot go stale. The SIM is the exception -- its engine is compiled once and
-# inlined into the committed chiff_sim.html -- so it gets real dependency
-# tracking here and is the only thing `make` actually rebuilds.
+# inlined into the committed chiff_sim.html -- so it is the only thing `make`
+# rebuilds, and it rebuilds unconditionally (see `sim` below for why).
 #
-#   make            rebuild the sim if stale, then verify (host + qemu + parity)
-#   make sim        rebuild + re-inline the sim engine (if envelope.cc changed)
+#   make            rebuild the sim, then verify (host + qemu + parity)
+#   make sim        rebuild + re-inline the sim engine (always)
 #   make host       host C-reference battery
 #   make qemu       differential: render-loop asm == C reference, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
 
-ENVELOPE_SRC := yarns/envelope.cc yarns/envelope.h yarns/resources.cc
-SIM_SRC := $(ENVELOPE_SRC) tools/simengine/engine.cc \
-           tools/portable_envelope.py tools/simengine/inline_engine.py
-
 .PHONY: all sim host qemu check firmware
 
-# Rebuild the sim if stale, then run the full verification.
+# Rebuild the sim, then run the full verification.
 all: sim check
 
-# The sim's engine is inlined into the committed page, so it can drift. Rebuild
-# whenever the firmware or the engine wrapper changes. (Needs Docker/emscripten.)
-sim: chiff_sim.html
-chiff_sim.html: $(SIM_SRC)
+# The sim's engine is Emscripten-compiled and inlined into the committed
+# chiff_sim.html. That page is ALSO a source (its hand-edited UI), so mtime
+# dependency tracking is UNSOUND: editing the page makes it look newer than the
+# engine sources and the rebuild gets skipped, silently keeping a stale engine.
+# So `sim` always rebuilds (needs Docker / emscripten). `make check` verifies
+# the current tree WITHOUT rebuilding, so it still catches staleness as a
+# simparity failure.
+sim:
 	sh tools/simengine/build.sh
 
 host:
