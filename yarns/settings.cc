@@ -742,13 +742,13 @@ const Setting Settings::settings_[] = {
     33, 0xff,
   },
   {
-    "CH", "CHIFF AMOUNT",
+    "XA", "EXCITER AMOUNT",
     SETTING_DOMAIN_PART, { PART_VOICING_CHIFF_AMOUNT, 0 },
     SETTING_UNIT_UINT8, 0, 127, NULL,
     0xff, 0xff,
   },
   {
-    "CD", "CHIFF DURATION",
+    "XD", "EXCITER DURATION",
     SETTING_DOMAIN_PART, { PART_VOICING_CHIFF_DURATION, 0 },
     SETTING_UNIT_UINT8, 0, 127, NULL,
     0xff, 0xff,

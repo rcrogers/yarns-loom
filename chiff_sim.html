@@ -1,4 +1,4 @@
-<title>Chiff Envelope Simulator</title>
+<title>Exciter Envelope Simulator</title>
 <style>
 :root {
   --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
@@ -102,7 +102,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
 <div class="wrap">
   <div class="rail">
     <header>
-      <h1>Chiff Envelope Simulator</h1>
+      <h1>Exciter Envelope Simulator</h1>
       <p class="mono" id="fwver" style="color:var(--ink3);font-size:11px;margin-top:3px"></p>
     </header>
 
@@ -126,10 +126,10 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
         <input type="range" id="gate" min="0" max="1000" value="707"></div>
     </div>
 
-    <div class="group"><h2>Chiff <small>(front-panel settings)</small></h2>
-      <div class="knob"><label for="amt">CHIFF AMOUNT</label><output class="mono" id="amtV"></output>
+    <div class="group"><h2>Exciter <small>(front-panel settings)</small></h2>
+      <div class="knob"><label for="amt">EXCITER AMOUNT</label><output class="mono" id="amtV"></output>
         <input type="range" id="amt" min="0" max="127" value="96"></div>
-      <div class="knob"><label for="chiffDur">CHIFF DURATION</label><output class="mono" id="chiffDurV"></output>
+      <div class="knob"><label for="chiffDur">EXCITER DURATION</label><output class="mono" id="chiffDurV"></output>
         <input type="range" id="chiffDur" min="0" max="127" value="90"></div>
     </div>
 
@@ -147,7 +147,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
   <div class="stage">
     <div class="scope">
       <div class="legend">
-        <span><i style="background:var(--trace)"></i>chiff envelope</span>
+        <span><i style="background:var(--trace)"></i>exciter envelope</span>
         <span><i style="background:var(--dialed)"></i>dialed</span>
         <span><i style="background:var(--noise)"></i>noise</span>
         <span><i style="background:var(--mark)"></i>release</span>
@@ -167,7 +167,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
         <div class="v mono" id="mLand">–</div></div>
       <div class="chipbox"><div class="k">Release to 1%</div>
         <div class="v mono" id="mRel">–</div></div>
-      <div class="chipbox"><div class="k">Chiff window</div>
+      <div class="chipbox"><div class="k">Exciter window</div>
         <div class="v mono" id="mWin">–</div></div>
       <div class="chipbox"><div class="k">Attack shift (nominal)</div>
         <div class="v mono" id="mShift">–</div></div>
@@ -463,7 +463,7 @@ function paint(hoverX) {
     ctx.strokeStyle = cssVar('--ink3'); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(hoverX, padT); ctx.lineTo(hoverX, H - padB); ctx.stroke();
     const tMs = i / FS * 1000;
-    $('readout').textContent = tMs.toFixed(1) + ' ms · chiff ' +
+    $('readout').textContent = tMs.toFixed(1) + ' ms · exciter ' +
       (out[i] / PEAK * 100).toFixed(1) + '% · dialed ' +
       (lastDialed[i] / PEAK * 100).toFixed(1) + '%';
   } else $('readout').textContent = '';
