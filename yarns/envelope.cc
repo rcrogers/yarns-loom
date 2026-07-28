@@ -64,6 +64,13 @@ const uint32_t kMaxSlewShift_q5_27 = 27u << 27;
 const uint32_t kChiffAmountBits = 7;
 const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 
+// Chiff window as a multiple of the ATTACK duration: at kChiffDurationCenter the
+// window equals the attack; each side spans +-kChiffOctaves octaves (setting 127
+// ~= 8x, setting 0 = 1/8x). Center is the 0..127 setting midpoint, and the
+// divisor for the octave map (see ChiffWindowSamples) -- a power of two.
+const int32_t kChiffDurationCenter = 64;
+const int32_t kChiffOctaves = 3;
+
 // Where a timed stage's slew actually lands: 1 - e^-k for k time constants
 // (kStageTimeConstantsLog2 = 2 -> k = 4). lut_env_expo is normalized to land
 // at 1.0, so closed-form means read through it are scaled by this fraction
@@ -166,6 +173,10 @@ static uint32_t ReachFactor_q15_5(int32_t alpha_q31) {
 // Defined below (Hacker's Delight divlu); used by the aim-base blend.
 static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
+// Defined below; chiff window in samples, scaled off the attack duration.
+static uint32_t ChiffWindowSamples(
+  uint32_t attack_increment_u32, uint8_t chiff_duration);
+
 void Envelope::NoteOn(
   ADSR& adsr,
   // Bounds stored as s32 but semantically s16
@@ -207,9 +218,10 @@ void Envelope::NoteOn(
       // (nominal shift, dialed rate) is set up for the attack; the slewed
       // value carries across a retrigger for continuity.
       Trigger(ENV_STAGE_ATTACK);
-      // The chiff window is its own duration -- independent of the ADSR --
-      // from the CHIFF DURATION setting (log map, ~1ms..8s).
-      uint32_t window_samples = lut_chiff_duration_samples[chiff_duration];
+      // The chiff window is a MULTIPLE of the attack, set by CHIFF DURATION
+      // (center = 1x the attack, +-kChiffOctaves octaves across the range).
+      uint32_t window_samples =
+        ChiffWindowSamples(adsr.attack_u32, chiff_duration);
       chiff_duration_samples_left_ = chiff_amount ? window_samples : 0;
       if (!chiff_duration_samples_left_) {
         ReSlopeSlewShift();
@@ -259,6 +271,32 @@ static inline int32_t AlphaFromShift_q31(uint32_t shift_q5_27) {
   uint32_t two_pow_neg_fraction_u16 = Interpolate824(
     lut_expo2_neg, (shift_q5_27 & 0x07FFFFFFu) << 5);
   return (two_pow_neg_fraction_u16 << 15) >> shift_int;
+}
+
+// Chiff window in samples, as a multiple of the attack duration. The exponent
+// (setting - center) * kChiffOctaves / center is octaves relative to the
+// attack, Q5.27 signed; the window is attack_samples * 2^exponent. AlphaFromShift
+// gives 2^-magnitude, so the <= attack side (exponent <= 0) is one multiply; the
+// > attack side factors 2^e into 2^(int+1) * 2^-(1-frac). Clamped to >= 1 sample
+// -- equivalently, the chiff's phase increment capped at UINT32_MAX.
+static uint32_t ChiffWindowSamples(
+    uint32_t attack_increment_u32, uint8_t chiff_duration) {
+  uint32_t attack_samples = attack_increment_u32
+    ? (UINT32_MAX / attack_increment_u32) : UINT32_MAX;
+  int32_t exponent_q5_27 = static_cast<int32_t>(
+    (static_cast<int64_t>(chiff_duration) - kChiffDurationCenter)
+      * kChiffOctaves * (1 << 27) / kChiffDurationCenter);
+  if (exponent_q5_27 <= 0) {
+    int32_t scale_q31 = AlphaFromShift_q31(static_cast<uint32_t>(-exponent_q5_27));
+    uint32_t window = static_cast<uint32_t>(
+      (static_cast<uint64_t>(attack_samples) * scale_q31) >> 31);
+    return window ? window : 1;
+  }
+  uint32_t int_part = static_cast<uint32_t>(exponent_q5_27) >> 27;
+  uint32_t frac_q27 = static_cast<uint32_t>(exponent_q5_27) & 0x07FFFFFFu;
+  int32_t scale_q31 = AlphaFromShift_q31((1u << 27) - frac_q27);
+  return static_cast<uint32_t>(
+    ((static_cast<uint64_t>(attack_samples) << (int_part + 1)) * scale_q31) >> 31);
 }
 
 // decay = 1 - 2^-increment in Q32, via 2-term Taylor of 1 - 2^-x about x = 0

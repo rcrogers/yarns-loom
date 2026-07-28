@@ -16,8 +16,10 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   check('amt0 attack monotone', steps===0, steps+' down-steps');
   check('amt0 no noise', noiseWin(s,1300,1900)<1, noiseWin(s,1300,1900).toFixed(2));
 }
-// 2. basic chiff: noise at onset, gone by ~window end (dur 90 ~ 580ms), mean near dialed
-{ const s=run('basic 96 90'), d=run('basic 0 90');
+// 2. basic chiff: noise at onset, gone by ~window end, mean near dialed. The
+// window is now attack-relative; attack=249ms makes dur 90 (2.33x attack) land
+// at ~580ms, so the fixed measurement windows below still bracket it.
+{ const s=run('basic 96 90 attack=249'), d=run('basic 0 90 attack=249');
   const n0=noiseWin(s,0,100), n1=noiseWin(s,300,500), n2=noiseWin(s,700,1100);
   check('onset noise present', n0>50, n0.toFixed(1));
   check('noise fades by window end', n2<n0/50, n2.toFixed(2)+' vs onset '+n0.toFixed(1));
@@ -66,13 +68,17 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
   let flat=0,run_=0; for(let i=45*100;i<45*1000;i++){ if(s[i]===s[i-1]){run_++;flat=Math.max(flat,run_);} else run_=0; }
   check('inverted amt0 no long plateaus', flat<200, 'longest flat '+flat+' samples');
 }
-{ const s=run('inverted 96 90'), d=run('inverted 0 90');
+{ const s=run('inverted 96 90 attack=249'), d=run('inverted 0 90 attack=249');
   const n0=noiseWin(s,0,100), n2=noiseWin(s,700,1100);
   check('inverted chiff onset noise', n0>50, n0.toFixed(1));
   check('inverted noise fades', n2<n0/50, n2.toFixed(2));
   const bias=(meanWin(s,700,1100)-meanWin(d,700,1100))/FS_OUT*100;
   check('inverted post-window mean == dialed', Math.abs(bias)<1, bias.toFixed(2)+'%');
-  let flat=0,run_=0; for(let i=45*100;i<45*1000;i++){ if(s[i]===s[i-1]){run_++;flat=Math.max(flat,run_);} else run_=0; }
+  // Pinning check wants a slow (default) attack so 100-1000ms is still the
+  // rising attack -- a short attack would reach a flat sustain there and this
+  // measures dwell, not attack rate.
+  const sp=run('inverted 96 90');
+  let flat=0,run_=0; for(let i=45*100;i<45*1000;i++){ if(sp[i]===sp[i-1]){run_++;flat=Math.max(flat,run_);} else run_=0; }
   check('inverted chiff no pinning plateaus', flat<500, 'longest flat '+flat);
 }
 // 7. Late-window early release must not hang (restructure regression trap)
@@ -81,8 +87,8 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
   check('latehang release falls', relEnd < relStart*0.15,
     (relStart/FS_OUT*100).toFixed(1)+'% -> '+(relEnd/FS_OUT*100).toFixed(1)+'%');
 }
-// 8. No kink at window end (basic: window ends mid-attack at ~580ms)
-{ const s=run('basic 96 90'), d=run('basic 0 90');
+// 8. No kink at window end (attack=249 -> attack-relative window ~= 580ms)
+{ const s=run('basic 96 90 attack=249'), d=run('basic 0 90 attack=249');
   let worst=0;
   for(let w=590;w<730;w+=10){ let m=0,n=0;
     for(let i=w*45;i<(w+10)*45;i++){m+=s[i]-d[i];n++;}

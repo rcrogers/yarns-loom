@@ -115,6 +115,10 @@ int chiff_render(
   envelope.NoteOn(adsr, 0, max_target,
                   static_cast<uint8_t>(chiff_amount),
                   static_cast<uint8_t>(chiff_duration));
+  // The window is now attack-relative (computed in NoteOn); capture it before
+  // the render loop below decrements it.
+  int32_t chiff_window_samples =
+      static_cast<int32_t>(envelope.chiff_duration_samples_left_);
 
   int total = gate_samples + tail_samples;
   if (total > max_samples) total = max_samples;
@@ -137,9 +141,7 @@ int chiff_render(
 
   meta[META_TOTAL_SAMPLES] = written;
   meta[META_GATE_SAMPLES] = gate_samples;
-  meta[META_CHIFF_WINDOW_SAMPLES] =
-      chiff_amount ? static_cast<int32_t>(
-          lut_chiff_duration_samples[chiff_duration & 0x7F]) : 0;
+  meta[META_CHIFF_WINDOW_SAMPLES] = chiff_window_samples;
   meta[META_ATTACK_SAMPLES] =
       adsr.attack_u32 ? static_cast<int32_t>(UINT32_MAX / adsr.attack_u32) : 0;
   meta[META_DECAY_SAMPLES] =
@@ -161,11 +163,19 @@ int chiff_render(
 EMSCRIPTEN_KEEPALIVE
 int chiff_frame_hz() { return kFrameHz; }
 
-// CHIFF DURATION setting -> window samples, straight from the firmware LUT,
-// so the UI can label a setting without reimplementing the mapping.
+// CHIFF DURATION setting -> window samples. The window is now a multiple of the
+// ATTACK duration, so this takes the attack settings too (the same chain
+// BuildAdsr uses) -- there is no standalone duration table any more.
 EMSCRIPTEN_KEEPALIVE
-int chiff_duration_samples(int setting) {
-  return static_cast<int32_t>(lut_chiff_duration_samples[setting & 0x7F]);
+int chiff_duration_samples(int setting, int attack_setting, int env_mod_attack,
+                           int velocity) {
+  uint32_t attack_u32 = Interpolate88(
+      lut_envelope_phase_increments,
+      modulate_7_13(static_cast<uint8_t>(attack_setting),
+                    static_cast<int8_t>(env_mod_attack),
+                    static_cast<uint8_t>(velocity)) << (15 - 13));
+  return static_cast<int32_t>(
+      ChiffWindowSamples(attack_u32, static_cast<uint8_t>(setting)));
 }
 
 // ENV stage setting -> stage length in samples, via the real LUT chain.

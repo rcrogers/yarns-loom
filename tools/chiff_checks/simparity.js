@@ -153,22 +153,17 @@ new Promise((resolve, reject) => {
         : `${diffs} differ, first at ${first}`);
   }
 
-  // Settings must resolve through the firmware LUTs, not a JS reimplementation.
-  const lut = (() => {
-    const src = fs.readFileSync(path.join(ROOT, 'yarns', 'resources.cc'), 'utf8');
-    const s = src.indexOf('const uint32_t lut_chiff_duration_samples[] = {');
-    return src.slice(src.indexOf('{', s) + 1, src.indexOf('};', s))
-      .split(',').map(x => x.trim()).filter(Boolean).map(Number);
-  })();
-  let bad = null;
-  for (let d = 0; d <= 127; d++) {
-    if (page.ENGINE.durationSamples(d) !== lut[d]) { bad = d; break; }
-  }
-  check('CHIFF DURATION settings resolve via the firmware LUT', bad === null,
-    bad === null ? 'all 128 settings match resources.cc' : `mismatch at ${bad}`);
+  // CHIFF DURATION is attack-relative now (no table): setting 64 == the attack,
+  // 0 == 1/8x, 127 == ~7.7x, via the firmware ChiffWindowSamples. Resolve
+  // through the engine (firmware code), not a JS reimplementation.
+  const atk = 40, atkSmp = page.ENGINE.stageSamples(atk);
+  const durAt = (d) => page.ENGINE.durationSamples(d, atk, 0, 0);
+  check('CHIFF DURATION 64 == attack duration', Math.abs(durAt(64) - atkSmp) <= 1,
+    `${durAt(64)} vs attack ${atkSmp}`);
+  check('CHIFF DURATION 0 == 1/8 attack', Math.abs(durAt(0) - Math.round(atkSmp / 8)) <= 2,
+    `${durAt(0)} vs ${Math.round(atkSmp / 8)}`);
   check('settings 20 and 21 are distinguishable',
-    page.ENGINE.durationSamples(20) !== page.ENGINE.durationSamples(21),
-    `${page.ENGINE.durationSamples(20)} vs ${page.ENGINE.durationSamples(21)} samples`);
+    durAt(20) !== durAt(21), `${durAt(20)} vs ${durAt(21)} samples`);
   check('ENV ATTACK setting 16 resolves to the firmware stage length',
     page.ENGINE.stageSamples(16) === 409, `${page.ENGINE.stageSamples(16)} samples`);
 

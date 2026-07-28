@@ -104,11 +104,18 @@ int main(int argc, char** argv) {
   if (rel_set >= 0) adsr.release_u32 = IncFromSetting(rel_set);
   if (sus_set >= 0) adsr.sustain_u16 = SustainFromSetting(sus_set);
   if (OptInt(argc, argv, "report", 0)) {
-    fprintf(stderr, "attack %u smp, decay %u smp, release %u smp, chiff %u smp\n",
-            adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 0,
-            adsr.decay_u32 ? UINT32_MAX / adsr.decay_u32 : 0,
-            adsr.release_u32 ? UINT32_MAX / adsr.release_u32 : 0,
-            lut_chiff_duration_samples[duration]);
+    // Diagnostic: the chiff window is now attack-relative, so read it back
+    // from the envelope after a NoteOn rather than any absolute table.
+    env.Init(0);
+    env.NoteOn(adsr, 0, 16383, amount, duration);
+    uint32_t attack_smp = adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 0;
+    fprintf(stderr,
+      "attack %u smp, chiff %u smp (%.3fx attack), decay %u smp, release %u smp\n",
+      attack_smp, env.chiff_duration_samples_left_,
+      attack_smp ? double(env.chiff_duration_samples_left_) / attack_smp : 0.0,
+      adsr.decay_u32 ? UINT32_MAX / adsr.decay_u32 : 0,
+      adsr.release_u32 ? UINT32_MAX / adsr.release_u32 : 0);
+    return 0;
   }
 
   env.Init(strcmp(scenario, "inverted") == 0 ? 16383 : 0);  // rest = release level
