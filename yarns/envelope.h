@@ -159,20 +159,28 @@ class Envelope {
   //                 start set by AMOUNT to an end set by the window
   //
   // NOTHING NAMES THE OUTPUT. What you hear is the perturbation times the
-  // slew's response to it, which falls as sqrt(rate) -- about 3 dB per
-  // octave. Input and output must not share vocabulary: conflating them is
-  // the most repeated error in this design.
+  // slew's response to it, which falls as sqrt(rate) -- about 3 dB per octave.
+  //
+  // KEEP THE CAUSAL CHAIN VISIBLE. There are exactly two mechanisms here --
+  // the slew slowing and the perturbation shrinking. Everything else described
+  // below is downstream of them and is written with its cause attached. An
+  // effect may perfectly well cause a further effect; what must not happen is
+  // an effect being promoted into a thing that acts on its own, with the chain
+  // back to a mechanism lost. That is where the recurring confusions came
+  // from: input mistaken for output, and one effect assumed to have one cause
+  // when two mechanisms were producing it jointly.
   //
   // TWO THINGS DECAY, and they divide the work by TIME rather than by
   // proportion: the slew slowing, and the perturbation shrinking. MEASURED in
   // the sim by rendering the full curve with the perturbation shrinking and
   // held constant, then subtracting:
   //
-  //   THE SLEW SLOWING alone is straight in dB -- about -4 dB per 10% of the
-  //   window -- for the first 80%, then STALLS FLAT at -30 dB and stays there.
-  //   Amount-independent: -30.7 at AMOUNT 96, -31.0 at AMOUNT 127.
+  //   THE SLEW SLOWING, on its own, CONTRIBUTES a curve that is straight in
+  //   dB -- about -4 dB per 10% of the window -- for the first 80%, and then
+  //   goes flat at -30 dB. (That flattening is a consequence, not a thing the
+  //   code does.) Amount-independent: -30.7 at AMOUNT 96, -31.0 at 127.
   //
-  //   It stalls because two rates compete. Hold the slew rate and the
+  //   It flattens because two rates compete. Hold the slew rate and the
   //   perturbation fixed and the value's wandering settles to an RMS of
   //   perturbation * sqrt(rate/2). The rate is NOT fixed -- it collapses
   //   exponentially by design -- so where the wandering would settle keeps
@@ -182,12 +190,13 @@ class Envelope {
   //   excursion it can no longer shed. Nothing here is a "target" -- the
   //   value is not chasing a point, it just arrives at an amplitude.
   //
-  //   THE PERTURBATION SHRINKING carries the chiff from that -30 dB floor to
+  //   THE PERTURBATION SHRINKING carries the output from that -30 dB floor to
   //   silence, contributing 20log10(1 - t/window): gentle early, steep at the
-  //   edge. That terminal steepening is the mechanism finishing the job, NOT
-  //   an artifact -- soften it and the stall is left exposed, which is exactly
-  //   what shrinking the perturbation exponentially was measured to do (fast
-  //   decay, then a plateau near -40 dB).
+  //   edge. The steepening you see at the end is a CONSEQUENCE of that, not an
+  //   artifact to smooth away -- it is what the second mechanism finishing the
+  //   job looks like. Soften it and the flattening above is left exposed,
+  //   which is exactly what shrinking the perturbation exponentially was
+  //   measured to do (fast decay, then a plateau near -40 dB).
   //
   // So neither covers for the other, and how the perturbation shrinks is not
   // free to change without re-measuring where the slew gives up.

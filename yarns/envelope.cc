@@ -362,7 +362,7 @@ void Envelope::RederiveSlewState() {
 // closer to the target just means arriving (proportionally) closer to it
 // when the stage's sample countdown expires. The dialed level (the mean)
 // carries across the transition untouched -- the chiff needs no anchor
-// bookkeeping; the noise rides wherever dialed goes.
+// bookkeeping; the perturbation is applied about wherever dialed goes.
 void Envelope::Trigger(EnvelopeStage stage) {
   // Anchor the new stage's start on the leaving stage's MEAN: with the chiff
   // off the value is the exact classic slew, so use it directly; a timed
@@ -437,9 +437,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
           kMaxSlewTimeLog2_q5_27
         );
   }
-  // Chiff compression: a stage shorter than the remaining window compresses
-  // the burst so it lands at nothing by the stage's end instead of being cut
-  // off mid-fizz. Release-only: the window deliberately spans attack/decay/
+  // Chiff compression: a stage shorter than the remaining window re-slopes
+  // both the perturbation and the slew time so they reach their ends by the
+  // stage's end, rather than being cut off part-way through. Release-only: the window deliberately spans attack/decay/
   // sustain on its own timetable (a fresh attack re-arms its window in
   // NoteOn, after this Trigger returns).
   if (stage == ENV_STAGE_RELEASE
@@ -502,7 +502,7 @@ void Envelope::RenderStage(
   {
     const int32_t floor_q30 = chiff_floor_q30_;
     const int32_t top_q30 = chiff_top_q30_;
-    // Noise-slew floor (timed stages): never slower than the stage's own
+    // Slew-rate floor (timed stages): never slower than the stage's own
     // rate, else the value hangs on a moving stage near the window's slow
     // end. Monotone (the rate only falls), so flooring freezes the sweep.
     int32_t decay_q32 = chiff_slew_rate_decay_q32_;
@@ -516,7 +516,7 @@ void Envelope::RenderStage(
     // written back into the persistent state. The chiff's own rate keeps
     // ramping on its own schedule (recovered from the slew time below), and
     // the perturbation keeps shrinking linearly -- persisting either compounds
-    // it every block and collapses the burst in a few blocks.
+    // it every block and drives the perturbation to zero in a few blocks.
     // Sentinel 1<<15 means "scale is exactly 1.0, skip the multiply" -- also
     // what the ratio computes to when both responses cap at 1.0.
     uint32_t chiff_perturb_scale_q15_5 = 1u << 15;
