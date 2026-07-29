@@ -153,7 +153,7 @@ class Envelope {
   //
   //   slew input    what the slew chases: base +/- the perturbation, sign
   //                 drawn per sample from the shared PRNG
-  //   perturbation  chiff_input_perturb_q30_, 0.9 * (top - floor), fading
+  //   perturbation  chiff_input_perturb_q30_, 0.9 * (top - floor), shrinking
   //                 linearly to 0 across the window
   //   slew time     ramped linearly (so the RATE decays exponentially) from a
   //                 start set by AMOUNT to an end set by the window
@@ -163,15 +163,34 @@ class Envelope {
   // octave. Input and output must not share vocabulary: conflating them is
   // the most repeated error in this design.
   //
-  // BOTH decay mechanisms are load-bearing; neither alone is enough. MEASURED
-  // in the sim, residual at window end against onset:
-  //   slew slowing alone (perturbation fade disabled)   -19 to -32 dB
-  //   with the fade, as shipped                         -34 to -54 dB
-  // The slowing stalls because the value sheds leftover excursion only at the
-  // slew rate, and that rate is itself collapsing -- so it stops keeping up.
-  // The fade supplies the remaining 15-22 dB and collapses the input onto the
-  // dialed level, leaving nothing to unwind at the handoff. Do not delete
-  // either one on the theory that the other covers it.
+  // TWO THINGS DECAY, and they divide the work by TIME rather than by
+  // proportion: the slew slowing, and the perturbation shrinking. MEASURED in
+  // the sim by rendering the full curve with the perturbation shrinking and
+  // held constant, then subtracting:
+  //
+  //   THE SLEW SLOWING alone is straight in dB -- about -4 dB per 10% of the
+  //   window -- for the first 80%, then STALLS FLAT at -30 dB and stays there.
+  //   Amount-independent: -30.7 at AMOUNT 96, -31.0 at AMOUNT 127.
+  //
+  //   It stalls because two rates compete. Hold the slew rate and the
+  //   perturbation fixed and the value's wandering settles to an RMS of
+  //   perturbation * sqrt(rate/2). The rate is NOT fixed -- it collapses
+  //   exponentially by design -- so where the wandering would settle keeps
+  //   dropping, a constant dB per second. Meanwhile the value can only shed
+  //   its excess AT the slew rate, which is collapsing too. Early on it keeps
+  //   up; past ~80% of the window it cannot, and the curve flattens carrying
+  //   excursion it can no longer shed. Nothing here is a "target" -- the
+  //   value is not chasing a point, it just arrives at an amplitude.
+  //
+  //   THE PERTURBATION SHRINKING carries the chiff from that -30 dB floor to
+  //   silence, contributing 20log10(1 - t/window): gentle early, steep at the
+  //   edge. That terminal steepening is the mechanism finishing the job, NOT
+  //   an artifact -- soften it and the stall is left exposed, which is exactly
+  //   what shrinking the perturbation exponentially was measured to do (fast
+  //   decay, then a plateau near -40 dB).
+  //
+  // So neither covers for the other, and how the perturbation shrinks is not
+  // free to change without re-measuring where the slew gives up.
   //
   // AMOUNT sets the STARTING slew time and nothing else -- it does NOT scale
   // the perturbation. Low amounts are quiet because a slow slew realizes less
@@ -188,8 +207,8 @@ class Envelope {
   // exempt so the chiff still closes on its own schedule.
   //
   // The window spans stages (sustain included). Only a stage shorter than the
-  // remaining window (in practice the release) compresses it: fade and slew
-  // time ramp re-sloped to land by stage end.
+  // remaining window (in practice the release) compresses it: both the
+  // perturbation and the slew time re-sloped to land by stage end.
   //
   // While the chiff runs, slew_rate_q31_/slew_time_log2_q5_27_ are the
   // chiff's (ramping); stage_slew_rate_q31_ carries the stage rate. With the
@@ -208,7 +227,7 @@ class Envelope {
   int32_t stage_start_q30_;
   int32_t stage_slew_rate_q31_;               // Stage rate (floor/blend)
   int32_t chiff_input_perturb_q30_;           // Current +/- on the slew input
-  int32_t chiff_input_perturb_step_q30_;      // Per-sample fade of the above
+  int32_t chiff_input_perturb_step_q30_;      // Per-sample shrink of the above
   // Ordered clamp bounds over the note's stage targets. The envelope's range
   // may be numerically inverted (CV DAC codes fall as volts rise; a warped
   // timbre target may be negative), so these are min/max, not release/peak.

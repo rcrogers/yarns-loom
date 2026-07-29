@@ -274,7 +274,7 @@ void Envelope::NoteOn(
       chiff_slew_time_log2_end_q5_27_ = SlewTimeLog2FromDuration_q5_27(window_samples);
       slew_time_log2_q5_27_ = ChiffStartSlewTimeLog2_q5_27(
         chiff_amount, chiff_slew_time_log2_end_q5_27_);
-      // Perturbation: kChiffPerturbFraction of the note's range, fading
+      // Perturbation: kChiffPerturbFraction of the note's range, shrinking
       // linearly to 0 over the window.
       chiff_input_perturb_q30_ = static_cast<int32_t>(
         (static_cast<int64_t>(chiff_top_q30_ - chiff_floor_q30_) *
@@ -515,7 +515,7 @@ void Envelope::RenderStage(
     // Both the floor and the scale are PER-RUN scratch: neither may be
     // written back into the persistent state. The chiff's own rate keeps
     // ramping on its own schedule (recovered from the slew time below), and
-    // the perturbation keeps fading linearly -- persisting either compounds
+    // the perturbation keeps shrinking linearly -- persisting either compounds
     // it every block and collapses the burst in a few blocks.
     // Sentinel 1<<15 means "scale is exactly 1.0, skip the multiply" -- also
     // what the ratio computes to when both responses cap at 1.0.
