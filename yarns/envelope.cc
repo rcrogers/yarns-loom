@@ -74,7 +74,8 @@ const int32_t kChiffOctaves = 3;
 // Where a timed stage's slew actually lands: 1 - e^-k for k time constants
 // (kSlewTimesPerStageLog2 = 2 -> k = 4). lut_env_expo is normalized to land
 // at 1.0, so closed-form means read through it are scaled by this fraction
-// to match the true slew (else the mean leads the value near stage ends).
+// to match the true slew (else the nominal value leads the true one near
+// stage ends).
 const uint16_t kStageLandingFraction_u16 = 64335;  // round((1 - e^-4) * 2^16)
 
 // The +/- perturbation on the slew input, as a fraction of the note's
@@ -256,7 +257,7 @@ void Envelope::NoteOn(
     case ENV_STAGE_DEAD:
     case ENV_NUM_STAGES: {
       // Fresh attack: arm the chiff. Trigger first so the stage machinery
-      // (nominal shift, dialed rate) is set up for the attack; the slewed
+      // (slew time and rate) is set up for the attack; the slewed
       // value carries across a retrigger for continuity.
       Trigger(ENV_STAGE_ATTACK);
       // The chiff window is a MULTIPLE of the attack, set by CHIFF DURATION
@@ -333,8 +334,7 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
 }
 
 void Envelope::RederiveSlewState() {
-  // The dialed (chiff-free mean / classic) slew always runs at the stage's
-  // own nominal rate.
+  // The chiff-free (classic) slew always runs at the stage's own rate.
   stage_slew_rate_q31_ = SlewRateFromTimeLog2_q31(stage_slew_time_log2_q5_27_);
   if (chiff_duration_samples_left_) {
     // Chiff sweep: from the current slew time up to the chiff's own end,
@@ -360,14 +360,15 @@ void Envelope::RederiveSlewState() {
 // value toward the stage target at a rate set by the stage's nominal
 // duration, so there is no nominal-vs-actual delta bookkeeping: starting
 // closer to the target just means arriving (proportionally) closer to it
-// when the stage's sample countdown expires. The dialed level (the mean)
+// when the stage's sample countdown expires. The nominal value
 // carries across the transition untouched -- the chiff needs no anchor
-// bookkeeping; the perturbation is applied about wherever dialed goes.
+// bookkeeping; the perturbation is applied about wherever the nominal value goes.
 void Envelope::Trigger(EnvelopeStage stage) {
-  // Anchor the new stage's start on the leaving stage's MEAN: with the chiff
+  // Anchor the new stage's start on where the leaving stage's NOMINAL VALUE
+  // reached: with the chiff
   // off the value is the exact classic slew, so use it directly; a timed
-  // stage's mean is closed-form from its phase (the same lut_env_expo curve
-  // the slew traces); a hold's mean has converged to its target.
+  // stage's nominal value is closed-form from its phase (the same lut_env_expo
+  // curve the slew traces); a hold's has converged to its target.
   if (!chiff_duration_samples_left_) {
     stage_start_q30_ = value_q30_;
   } else if (phase_increment_u32_) {
@@ -375,7 +376,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
     // completion leaves stage_samples_left_ == 0, which WRAPS the product back
     // to phase 0 -- aliasing "fully elapsed" onto "not started" and anchoring
     // the new stage at the old stage's START instead of where it landed. That
-    // collapses the next stage's mean (and yanks the value down with it)
+    // collapses the next stage's nominal value (and yanks the value with it)
     // whenever the chiff is still live at a handoff. Saturate instead.
     uint32_t phase_u32 = stage_samples_left_
       ? 0u - stage_samples_left_ * phase_increment_u32_
@@ -506,7 +507,7 @@ void Envelope::RenderStage(
     // rate, else the value hangs on a moving stage near the window's slow
     // end. Monotone (the rate only falls), so flooring freezes the sweep.
     int32_t decay_q32 = chiff_slew_rate_decay_q32_;
-    // The floor exists to TRACK the dialed level, not to energize the chiff:
+    // The floor exists to TRACK the nominal value, not to energize the chiff:
     // floored, a full perturbation would ride the stage rate and AMOUNT 1
     // would sound like attack-speed noise (a 0 -> 1 discontinuity). Shrinking
     // the perturbation by the response ratio keeps the output continuous
@@ -526,18 +527,20 @@ void Envelope::RenderStage(
       slew_rate_q31 = stage_slew_rate_q31_;
       decay_q32 = 0;
     }
-    // Input base: the dialed level is CLOSED-FORM from the stage phase -- start +
-    // (target - start) * lut_env_expo[phase], no iterated level state --
-    // blended toward the stage target by alphaStage/alphaEff so the value's
-    // expected step equals the mean's step in every regime (else it trails
-    // the envelope: the kink at the window's end). Holds and a closed
-    // window feed the slew the stage target (the classic asymptotic slew).
-    int32_t base_q30 = stage_target_q30;
+    // Slew input centre. The NOMINAL VALUE (what value_q30_ would be with no
+    // chiff) is closed-form from the stage phase -- start + (target - start) *
+    // lut_env_expo[phase] -- so it needs no state of its own. The centre is
+    // then that value blended toward the stage target by stage_rate/slew_rate,
+    // which is what stops the sped-up slew from also speeding up the envelope:
+    // it makes the value's expected step equal the nominal value's step. Get
+    // this wrong and the value trails the envelope (a kink at the window's
+    // end). Holds and a closed window feed the slew the stage target directly.
+    int32_t slew_input_center_q30 = stage_target_q30;
     if (chiff_live && timed) {
       uint32_t phase_u32 = 0u - stage_samples_left_ * phase_increment_u32_;
       const uint32_t expo_u16 = (Interpolate824(lut_env_expo, phase_u32) *
         static_cast<uint32_t>(kStageLandingFraction_u16)) >> 16;
-      const int32_t mean_q30 = stage_start_q30_ + static_cast<int32_t>(
+      const int32_t nominal_value_q30 = stage_start_q30_ + static_cast<int32_t>(
         (static_cast<int64_t>(stage_target_q30 - stage_start_q30_) *
          expo_u16) >> 16);
       uint32_t ratio_q31 = slew_rate_q31 == stage_slew_rate_q31_
@@ -545,8 +548,8 @@ void Envelope::RenderStage(
         : DivU64ByU32(static_cast<uint32_t>(stage_slew_rate_q31_) >> 1,
                       static_cast<uint32_t>(stage_slew_rate_q31_) << 31,
                       static_cast<uint32_t>(slew_rate_q31));
-      base_q30 = mean_q30 + static_cast<int32_t>(
-        (static_cast<int64_t>(stage_target_q30 - mean_q30) * ratio_q31)
+      slew_input_center_q30 = nominal_value_q30 + static_cast<int32_t>(
+        (static_cast<int64_t>(stage_target_q30 - nominal_value_q30) * ratio_q31)
         >> 31);
     }
     const int32_t perturb_q30 = chiff_input_perturb_q30_;
@@ -555,15 +558,14 @@ void Envelope::RenderStage(
       scaled_perturb_q30 = static_cast<int32_t>(
         (static_cast<int64_t>(perturb_q30) * chiff_perturb_scale_q15_5) >> 15);
     }
-    // No rail guard: the input centre IS the base. The guard used to hold the
-    // centre a guarded run's excursion off the acoustic-peak rail, costing
+    // No rail guard: the centre is used as computed. The guard used to hold it
+    // a guarded run's excursion off the acoustic-peak rail, costing
     // sag everywhere to protect against a tail event the output clamp already
     // handles. Removing it was checked against the sim by ear (no banding, no
     // excursions) and by measurement: rail contact cannot exceed the clamp,
     // and floor dwell at low sustain is no worse than with the guard present.
-    const int32_t center_q30 = base_q30;
-    const int32_t slew_input_up_q30 = center_q30 + scaled_perturb_q30;
-    const int32_t slew_input_down_q30 = center_q30 - scaled_perturb_q30;
+    const int32_t slew_input_up_q30 = slew_input_center_q30 + scaled_perturb_q30;
+    const int32_t slew_input_down_q30 = slew_input_center_q30 - scaled_perturb_q30;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.

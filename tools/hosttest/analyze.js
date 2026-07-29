@@ -16,7 +16,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   check('amt0 attack monotone', steps===0, steps+' down-steps');
   check('amt0 no noise', noiseWin(s,1300,1900)<1, noiseWin(s,1300,1900).toFixed(2));
 }
-// 2. basic chiff: noise at onset, gone by ~window end, mean near dialed. The
+// 2. basic chiff: noise at onset, gone by ~window end, mean near the nominal value. The
 // window is now attack-relative; attack=249ms makes dur 90 (2.33x attack) land
 // at ~580ms, so the fixed measurement windows below still bracket it.
 { const s=run('basic 96 90 attack=249'), d=run('basic 0 90 attack=249');
@@ -24,7 +24,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   check('onset noise present', n0>50, n0.toFixed(1));
   check('noise fades by window end', n2<n0/50, n2.toFixed(2)+' vs onset '+n0.toFixed(1));
   const bias=(meanWin(s,700,1100)-meanWin(d,700,1100))/FS_OUT*100;
-  check('post-window mean == dialed', Math.abs(bias)<1, bias.toFixed(2)+'%');
+  check('post-window mean == nominal', Math.abs(bias)<1, bias.toFixed(2)+'%');
   const biasLoud=(meanWin(s,100,300)-meanWin(d,100,300))/FS_OUT*100;
   check('loud-phase dip bounded', biasLoud>-40 && biasLoud<5, biasLoud.toFixed(1)+'%');
   let mx=0; for(const v of s) if(v>mx)mx=v;
@@ -73,7 +73,7 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
   check('inverted chiff onset noise', n0>50, n0.toFixed(1));
   check('inverted noise fades', n2<n0/50, n2.toFixed(2));
   const bias=(meanWin(s,700,1100)-meanWin(d,700,1100))/FS_OUT*100;
-  check('inverted post-window mean == dialed', Math.abs(bias)<1, bias.toFixed(2)+'%');
+  check('inverted post-window mean == nominal', Math.abs(bias)<1, bias.toFixed(2)+'%');
   // Pinning check wants a slow (default) attack so 100-1000ms is still the
   // rising attack -- a short attack would reach a flat sustain there and this
   // measures dwell, not attack rate.

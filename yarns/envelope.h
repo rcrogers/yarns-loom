@@ -68,7 +68,7 @@ class Envelope {
   // live) is the only case that matters; a lean chiff-off variant would only
   // optimize the best case. With the window closed the same loop degenerates
   // correctly by itself: perturbation 0 -> slew input is the target -> output
-  // = dialed, clamp transparent.
+  // = the nominal value, clamp transparent.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
@@ -83,7 +83,7 @@ class Envelope {
   void Rescale(int32_t numerator, int32_t denominator);
 
  private:
-  // Re-derive the slew coefficients after a stage change: the classic/dialed
+  // Re-derive the slew coefficients after a stage change: the classic
   // rate from the new stage's slew time and, if the chiff is live, the
   // chiff's sweep (toward its end slew time, compressed into
   // the remaining stage when the stage is shorter than the chiff).
@@ -206,10 +206,10 @@ class Envelope {
   // of the same perturbation. At AMOUNT 0 (or window closed) the input
   // collapses to the stage target: the classic per-sample slew, exactly.
   //
-  // The input base is derived so the value's EXPECTED step equals the dialed
-  // level's step in every regime: base = dialed + (target - dialed) *
-  // stage_rate/effective_rate (timed stages; holds use dialed). Anything else
-  // makes the value chase the moving dialed level through its own slew -- two
+  // The slew input centre is derived so the value's EXPECTED step equals the
+  // value's step in every regime: centre = nominal + (target - nominal) *
+  // stage_rate/effective_rate (timed stages; holds use the target). Anything
+  // else makes the value chase the moving nominal value through its slew -- two
   // cascaded one-poles -- so it trails the envelope (a kink wherever the
   // window ends). The rate is also floored at the stage rate on timed stages
   // (else an early release near the window's slow end hangs); hold stages are
@@ -230,7 +230,7 @@ class Envelope {
   uint32_t chiff_slew_time_log2_end_q5_27_;   // Sweep end, set by the window
   uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
   // Where the current stage began: with the stage phase (closed-form from
-  // the countdown), this anchors the mean -- start + (target - start) *
+  // the countdown), this anchors the nominal value -- start + (target - start) *
   // lut_env_expo[phase] -- with no iterated level state, the same
   // construction the duty-binary core used for its duty curve.
   int32_t stage_start_q30_;

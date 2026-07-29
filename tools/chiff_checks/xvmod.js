@@ -32,7 +32,7 @@ loadPage().then(page => {
       maxTarget: page.PEAK,
     })).meta.chiffAmount;
 
-  // Identity: a zero mod must leave the setting exactly as dialed, at every
+  // Identity: a zero mod must leave the setting exactly as set, at every
   // velocity. This is what keeps existing patches sounding unchanged.
   const velocities = [0, 1, 63, 64, 126, 127];
   const amounts = [0, 1, 32, 96, 127];
@@ -69,9 +69,9 @@ loadPage().then(page => {
     extremes.every(v => v >= 0 && v <= 127),
     `min ${Math.min(...extremes)}, max ${Math.max(...extremes)}`);
 
-  // A dialed amount of 0 is not a hard off: mod*velocity alone can open it,
+  // An amount of 0 is not a hard off: mod*velocity alone can open it,
   // exactly as timbre/env mods lift a zeroed init. Worth pinning, because the
-  // sim's chiff-free "dialed" trace has to zero the mod as well as the amount.
+  // sim's chiff-free trace has to zero the mod as well as the amount.
   check('amount 0 with positive mod still opens at high velocity',
     resolve(0, 63, 127) > 0 && resolve(0, 63, 0) === 0,
     `vel 0 -> ${resolve(0, 63, 0)}, vel 127 -> ${resolve(0, 63, 127)}`);

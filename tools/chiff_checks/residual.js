@@ -1,7 +1,7 @@
 // Splits the chiff's effect into the two things that must not be confused:
 //
-//   OFFSET  the per-block MEAN of (chiff - dialed). A standing error: the
-//           value sitting off the dialed level. This is the failure mode the
+//   OFFSET  the per-block mean of (chiff - nominal value). A standing error:
+//           the value sitting off its nominal value. This is the failure the
 //           slew-rate floor exists to prevent, and it is what a frozen value
 //           looks like.
 //   WANDER  the per-block STANDARD DEVIATION of the same. The excursion, i.e.

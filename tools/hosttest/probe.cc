@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
   env.Init(0);
   env.NoteOn(adsr, 0, 16383, amount, duration);
 
-  printf("blk stage  chiffLeft  shift  alphaAsShift  dialedAsShift  amp"
+  printf("blk stage  chiffLeft  shift  alphaAsShift  nominalSlewTime  amp"
          "  ampAsFracOfInitial floorBinds | stageStart  target  value\n");
   const int32_t amp0 = env.chiff_input_perturb_q30_;
   int16_t buffer[kAudioBlockSize];

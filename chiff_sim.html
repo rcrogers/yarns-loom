@@ -3,27 +3,27 @@
 :root {
   --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
   --ink: #1b1d1f; --ink2: #5c5f63; --ink3: #92959a;
-  --trace: #2a78d6; --dialed: #eda100; --noise: #1baf7a; --mark: #e34948;
+  --trace: #2a78d6; --nominal: #eda100; --noise: #1baf7a; --mark: #e34948;
   --chip: #f0efe9; --accent: #2a78d6;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #14171a; --panel: #1d2126; --line: #2b3037; --grid: #232830;
     --ink: #e8eaec; --ink2: #a2a7ad; --ink3: #6b7077;
-    --trace: #3987e5; --dialed: #c98500; --noise: #199e70; --mark: #e66767;
+    --trace: #3987e5; --nominal: #c98500; --noise: #199e70; --mark: #e66767;
     --chip: #242932; --accent: #3987e5;
   }
 }
 :root[data-theme="dark"] {
   --bg: #14171a; --panel: #1d2126; --line: #2b3037; --grid: #232830;
   --ink: #e8eaec; --ink2: #a2a7ad; --ink3: #6b7077;
-  --trace: #3987e5; --dialed: #c98500; --noise: #199e70; --mark: #e66767;
+  --trace: #3987e5; --nominal: #c98500; --noise: #199e70; --mark: #e66767;
   --chip: #242932; --accent: #3987e5;
 }
 :root[data-theme="light"] {
   --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
   --ink: #1b1d1f; --ink2: #5c5f63; --ink3: #92959a;
-  --trace: #2a78d6; --dialed: #eda100; --noise: #1baf7a; --mark: #e34948;
+  --trace: #2a78d6; --nominal: #eda100; --noise: #1baf7a; --mark: #e34948;
   --chip: #f0efe9; --accent: #2a78d6;
 }
 * { box-sizing: border-box; }
@@ -141,7 +141,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     </div>
 
     <div class="group checks"><h2>Overlays</h2>
-      <label><input type="checkbox" id="showDialed" checked> Dialed (chiff-free) envelope</label>
+      <label><input type="checkbox" id="showNominal" checked> Nominal (chiff-free) value</label>
       <label><input type="checkbox" id="showNoise" checked> Noise band (|step|, smoothed)</label>
     </div>
   </div>
@@ -150,7 +150,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     <div class="scope">
       <div class="legend">
         <span><i style="background:var(--trace)"></i>exciter envelope</span>
-        <span><i style="background:var(--dialed)"></i>dialed</span>
+        <span><i style="background:var(--nominal)"></i>nominal</span>
         <span><i style="background:var(--noise)"></i>noise</span>
         <span><i style="background:var(--mark)"></i>release</span>
         <span class="mono" id="readout" style="margin-left:auto;color:var(--ink2)"></span>
@@ -211,7 +211,7 @@ e=z;p(q);var T=c([]);function U(){return v.byteLength>>16}function Z(_){_=_|0;va
 // Firmware revision this page's inlined engine was built from. Rewritten by
 // tools/simengine/inline_engine.py at every re-inline, so a published artifact
 // self-identifies its firmware -- do not edit the value by hand.
-const FW_VERSION = 'f2f8ce1e';
+const FW_VERSION = '93d3ae81-dirty';
 
 // Wraps a loaded Emscripten module into the engine API. Kept separate from the
 // node-specific require() so the browser can reuse it verbatim.
@@ -325,7 +325,7 @@ function render(p) {
   };
 }
 
-function dialed(p, totalN, gateN) {   // chiff-free reference (amount 0)
+function nominalValue(p, totalN, gateN) {   // chiff-free reference (amount 0)
   // Zero the VEL MOD too: modulate_7_13(0, scale, vel) is vel*scale, so an
   // amount of 0 alone still yields chiff whenever EXCITER AMT VEL MOD is up.
   return render(Object.assign({}, p, { amount: 0, amountModVelocity: 0 }))
@@ -333,31 +333,31 @@ function dialed(p, totalN, gateN) {   // chiff-free reference (amount 0)
 }
 
 // ---- measurements ----
-function measure(res, dialedTrace) {
+function measure(res, nominalTrace) {
   const { out, gateN, aN, windowN } = res;
   const land = out[Math.min(aN - 1, out.length - 1)] / PEAK * 100;
   const thr = PEAK * 0.01;
   let rel = null;
   for (let i = gateN; i < out.length; i++) if (out[i] < thr) { rel = (i - gateN) / FS * 1000; break; }
   let relBase = null;
-  for (let i = gateN; i < dialedTrace.length; i++) if (dialedTrace[i] < thr) { relBase = (i - gateN) / FS * 1000; break; }
+  for (let i = gateN; i < nominalTrace.length; i++) if (nominalTrace[i] < thr) { relBase = (i - gateN) / FS * 1000; break; }
   return { land, rel, relBase, winMs: windowN / FS * 1000 };
 }
 
 // ---- drawing ----
 const cv = $('cv'), ctx = cv.getContext('2d');
 function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
-let lastRes = null, lastDialed = null, lastLine = null, lastP = null;
+let lastRes = null, lastNominal = null, lastLine = null, lastP = null;
 
 function draw() {
   if (!ENGINE) return;
   const p = params();
   const t0 = performance.now();
   const res = render(p);
-  const dia = dialed(p, res.totalN, res.gateN);
-  const line = dia; // the chiff perturbs about the dialed envelope
+  const dia = nominalValue(p, res.totalN, res.gateN);
+  const line = dia; // the chiff perturbs about the nominal value
   const dt = performance.now() - t0;
-  lastRes = res; lastDialed = dia; lastLine = line; lastP = p;
+  lastRes = res; lastNominal = dia; lastLine = line; lastP = p;
   computeSpectrogram();
 
   const m = measure(res, dia);
@@ -439,7 +439,7 @@ function paint(hoverX) {
     ctx.stroke();
   };
 
-  if ($('showDialed').checked) plot(lastDialed, cssVar('--dialed'), 1.4);
+  if ($('showNominal').checked) plot(lastNominal, cssVar('--nominal'), 1.4);
   plot(out, cssVar('--trace'), 1.2);
 
   // Noise band from the bottom: smoothed mean |per-sample step|, as a
@@ -471,8 +471,8 @@ function paint(hoverX) {
     ctx.beginPath(); ctx.moveTo(hoverX, padT); ctx.lineTo(hoverX, H - padB); ctx.stroke();
     const tMs = i / FS * 1000;
     $('readout').textContent = tMs.toFixed(1) + ' ms · exciter ' +
-      (out[i] / PEAK * 100).toFixed(1) + '% · dialed ' +
-      (lastDialed[i] / PEAK * 100).toFixed(1) + '%';
+      (out[i] / PEAK * 100).toFixed(1) + '% · nominal ' +
+      (lastNominal[i] / PEAK * 100).toFixed(1) + '%';
   } else $('readout').textContent = '';
   drawSpectrogram();
 }
@@ -735,7 +735,7 @@ function update() {
 }
 ['atk','dec','sus','rel','ampmod','vel','gate','amt','chiffDur','amtMod'].forEach(id =>
   $(id).addEventListener('input', update));
-['showDialed','showNoise'].forEach(id =>
+['showNominal','showNoise'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));
 $('reroll').addEventListener('click', () => {
   seed = (Math.random() * 0xFFFFFFFF) >>> 0; update();

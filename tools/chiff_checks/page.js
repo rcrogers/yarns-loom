@@ -66,7 +66,7 @@ function makeSandbox(values) {
   return sandbox;
 }
 
-// Resolves to { render, dialed, fft, ENGINE, FS, values }.
+// Resolves to { render, nominalValue, fft, ENGINE, FS, values }.
 // `values` is the live control map -- set values.atk etc. to move a slider.
 //
 // opts.strict runs both script blocks in STRICT mode, which is how the
@@ -94,7 +94,8 @@ function loadPage(htmlPath, opts) {
       // globalThis, so readiness has to be evaluated inside the context.
       if (vm.runInContext('typeof ENGINE !== "undefined" && ENGINE !== null', sandbox)) {
         vm.runInContext(
-          'globalThis.__page = { render: render, dialed: dialed, fft: fft,' +
+          'globalThis.__page = { render: render, nominalValue: nominalValue,' +
+          ' fft: fft,' +
           ' get FS() { return FS; }, get ENGINE() { return ENGINE; },' +
           ' get PEAK() { return PEAK; } };', sandbox);
         const page = sandbox.__page;
