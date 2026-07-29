@@ -228,7 +228,8 @@ class Envelope {
   uint32_t slew_time_log2_q5_27_;             // Current slew time, log2 samples
   uint32_t chiff_slew_time_log2_step_q5_27_;  // Per-sample sweep step (>= 0)
   uint32_t chiff_slew_time_log2_end_q5_27_;   // Sweep end, set by the window
-  uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
+  uint32_t chiff_duration_samples_left_;
+  uint32_t exp_target_samples_;  // EXPERIMENT ONLY  // 0 = chiff inactive
   // Where the current stage began: with the stage phase (closed-form from
   // the countdown), this anchors the nominal value -- start + (target - start) *
   // lut_env_expo[phase] -- with no iterated level state, the same

@@ -131,8 +131,11 @@ int chiff_render(
                   static_cast<uint8_t>(chiff_duration));
   // The window is now attack-relative (computed in NoteOn); capture it before
   // the render loop below decrements it.
-  int32_t chiff_window_samples =
-      static_cast<int32_t>(envelope.chiff_duration_samples_left_);
+  // EXPERIMENT: report the TARGET duration, not the extended liveness count,
+  // so the sim's "dialled duration" marker lands where the user dialled it.
+  int32_t chiff_window_samples = static_cast<int32_t>(
+      envelope.exp_target_samples_ ? envelope.exp_target_samples_
+                                   : envelope.chiff_duration_samples_left_);
 
   int total = gate_samples + tail_samples;
   if (total > max_samples) total = max_samples;

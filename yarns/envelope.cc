@@ -103,6 +103,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_slew_time_log2_step_q5_27_ = 0;
   chiff_slew_time_log2_end_q5_27_ = 0;
   chiff_duration_samples_left_ = 0;
+  exp_target_samples_ = 0;
   stage_slew_rate_q31_ = 0;
   chiff_input_perturb_q30_ = 0;
   chiff_input_perturb_step_q30_ = 0;
@@ -186,6 +187,42 @@ static uint32_t ChiffPerturbScaleForClampedRate_q15_5(
 static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
 // Defined below; chiff window in samples, scaled off the attack duration.
+static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
+
+// log2(x) in Q5.27 for x >= 1: integer bits plus a linear mantissa fraction,
+// the same approximation SlewTimeLog2FromDuration uses. Cold path.
+static uint32_t Log2_q5_27(uint64_t x) {
+  const uint32_t leading = __builtin_clzll(x);
+  const uint32_t integer_bits = 63 - leading;
+  const uint64_t shifted = x << leading;
+  const uint32_t mantissa_frac_q5_27 =
+      static_cast<uint32_t>((shifted & 0x7FFFFFFFFFFFFFFFull) >> 36);
+  return (integer_bits << 27) + mantissa_frac_q5_27;
+}
+
+// EXPERIMENT: below 2^-13 of full scale the chiff is inaudible (-78 dBFS).
+const uint32_t kChiffInaudibleShift = 13;
+const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
+
+// EXPERIMENT: octaves the perturbation must shrink for the OUTPUT to reach
+// inaudibility, given the slew rate it will end at. Callers must pass the
+// EFFECTIVE end slew time -- min(chiff end, stage) -- because the floor raises
+// the rate to the stage's, so sizing against the chiff's nominal end rate asks
+// for far too little shrink whenever the floor will bind. Q5.27. Adapts to the
+// target (via the end rate) and to the note's range (via the perturbation),
+// which is what a constant octave count cannot do.
+static uint32_t ChiffShrinkOctaves_q5_27(
+    int32_t perturb_q30, uint32_t end_slew_time_log2_q5_27) {
+  const uint32_t response_q15_5 = SlewPerturbResponse_q15_5(
+    SlewRateFromTimeLog2_q31(end_slew_time_log2_q5_27));
+  const uint64_t reached = static_cast<uint64_t>(perturb_q30)
+    * (response_q15_5 ? response_q15_5 : 1u);
+  const uint64_t inaudible =
+    (1ull << (30 - kChiffInaudibleShift)) * kResponseOne_q15_5;
+  return reached > inaudible
+    ? Log2_q5_27(reached) - Log2_q5_27(inaudible) : 0u;
+}
+
 static uint32_t ChiffWindowSamples(
   uint32_t attack_increment_u32, uint8_t chiff_duration);
 
@@ -280,8 +317,20 @@ void Envelope::NoteOn(
       chiff_input_perturb_q30_ = static_cast<int32_t>(
         (static_cast<int64_t>(chiff_top_q30_ - chiff_floor_q30_) *
          kChiffPerturbFraction_q15) >> 15);
-      chiff_input_perturb_step_q30_ =
-        chiff_input_perturb_q30_ / static_cast<int32_t>(window_samples);
+      // EXPERIMENT: size the shrink so the OUTPUT reaches the inaudibility
+      // threshold exactly at the target, whatever the target and whatever the
+      // note's range. Output at the target, with no shrink, would be
+      // perturbation * the slew's response at the END rate; the octaves needed
+      // are log2 of that over the threshold. Adapts where a constant cannot: a
+      // long target needs fewer octaves (its slew has already done more of the
+      // work), a short target more, a quiet note fewer.
+      exp_target_samples_ = window_samples;
+      chiff_input_perturb_step_q30_ = static_cast<int32_t>(
+        ChiffShrinkOctaves_q5_27(chiff_input_perturb_q30_,
+          std::min(chiff_slew_time_log2_end_q5_27_,
+                   stage_slew_time_log2_q5_27_))
+        / window_samples);
+      chiff_duration_samples_left_ = window_samples * 8;
       RederiveSlewState();
       break;
     }
@@ -345,7 +394,8 @@ void Envelope::RederiveSlewState() {
     }
     chiff_slew_time_log2_step_q5_27_ =
       (chiff_slew_time_log2_end_q5_27_ - slew_time_log2_q5_27_)
-        / chiff_duration_samples_left_;
+        / (exp_target_samples_ ? exp_target_samples_
+                              : chiff_duration_samples_left_);
     slew_rate_q31_ = SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_);
     chiff_slew_rate_decay_q32_ = DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
   } else {
@@ -446,8 +496,13 @@ void Envelope::Trigger(EnvelopeStage stage) {
   if (stage == ENV_STAGE_RELEASE
       && chiff_duration_samples_left_ > stage_samples_left_) {
     chiff_duration_samples_left_ = stage_samples_left_;
-    chiff_input_perturb_step_q30_ = chiff_input_perturb_q30_
-      / static_cast<int32_t>(chiff_duration_samples_left_);
+    // EXPERIMENT: the step is octaves/sample now, so re-slope in the same
+    // domain -- shrink to inaudibility by stage end, not linearly to zero.
+    chiff_input_perturb_step_q30_ = static_cast<int32_t>(
+      ChiffShrinkOctaves_q5_27(chiff_input_perturb_q30_,
+        std::min(chiff_slew_time_log2_end_q5_27_,
+                 stage_slew_time_log2_q5_27_))
+      / chiff_duration_samples_left_);
   }
   // Re-derive slew coefficients for the new stage (and, if live, the chiff's
   // ramp over its possibly-compressed window).
@@ -644,9 +699,10 @@ void Envelope::RenderStage(
     }
 #endif
     if (chiff_live) {
-      chiff_input_perturb_q30_ = perturb_q30 - chiff_input_perturb_step_q30_
-        * static_cast<int32_t>(run_samples);
-      if (chiff_input_perturb_q30_ < 0) chiff_input_perturb_q30_ = 0;
+      chiff_input_perturb_q30_ = static_cast<int32_t>(
+        (static_cast<int64_t>(perturb_q30) * SlewRateFromTimeLog2_q31(
+           static_cast<uint32_t>(chiff_input_perturb_step_q30_) * run_samples))
+        >> 31);
       uint32_t slew_time_log2_end =
         slew_time_log2_q5_27_ + chiff_slew_time_log2_step_q5_27_ * run_samples;
       if (slew_time_log2_end > chiff_slew_time_log2_end_q5_27_) {
