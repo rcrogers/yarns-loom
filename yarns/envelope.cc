@@ -188,22 +188,34 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 static uint32_t ChiffWindowSamples(
   uint32_t attack_increment_u32, uint8_t chiff_duration);
 
-// CHIFF AMOUNT -> the slew time the chiff STARTS at, and nothing else. AMOUNT
-// does not scale the perturbation: low amounts are quiet because a slow slew
-// realizes less of the same perturbation. Warped by lut_env_expo (1 - e^-4x),
-// normalized so AMOUNT max lands exactly on the fastest start (the raw table
-// tops out just short). Slowest start is the slew time of a 1-second stage.
-static uint32_t ChiffSlewTimeLog2FromAmount_q5_27(uint8_t chiff_amount) {
+// AMOUNT places the chiff's START slew time, interpolating between the END
+// slew time (no motion at all) and the fastest the slew can run (most motion).
+// It does NOT scale the perturbation: low amounts are quiet because a slow
+// slew realizes less of the same perturbation.
+//
+// Anchoring the slow side on the END is what keeps the start a fixed
+// PROPORTION of the window. An absolute anchor put the start at a quarter of
+// a 30ms window, so the chiff spent its whole duration still rising and was
+// then truncated -- a click, not a chiff. Interpolating from the end also
+// makes start <= end by construction, so no clamp is needed.
+//
+// Warped by lut_env_expo (1 - e^-4x), normalized so AMOUNT max lands exactly
+// on the fastest slew time (the raw table tops out just short).
+static uint32_t ChiffStartSlewTimeLog2_q5_27(
+    uint8_t chiff_amount, uint32_t end_slew_time_log2_q5_27) {
+  const uint32_t kFastestSlewTimeLog2_q5_27 = 1u << 27;
+  // Window too short for the slew to move at all: start where it ends.
+  if (end_slew_time_log2_q5_27 <= kFastestSlewTimeLog2_q5_27) {
+    return end_slew_time_log2_q5_27;
+  }
   const uint32_t kWarpStep = (LUT_ENV_EXPO_SIZE - 1) >> kChiffAmountBits;
   const uint32_t warp_max_u16 = lut_env_expo[kChiffAmountMax * kWarpStep];
   const uint32_t warp_u16 =
     (static_cast<uint32_t>(lut_env_expo[chiff_amount * kWarpStep]) << 16)
       / warp_max_u16;
-  const uint32_t kFastestStart_q5_27 = 1u << 27;
-  const uint32_t slowest_start_q5_27 = SlewTimeLog2FromDuration_q5_27(kFrameHz);
-  return slowest_start_q5_27 - static_cast<uint32_t>(
-    (static_cast<uint64_t>(slowest_start_q5_27 - kFastestStart_q5_27) *
-     warp_u16) >> 16);
+  return end_slew_time_log2_q5_27 - static_cast<uint32_t>(
+    (static_cast<uint64_t>(
+       end_slew_time_log2_q5_27 - kFastestSlewTimeLog2_q5_27) * warp_u16) >> 16);
 }
 
 void Envelope::NoteOn(
@@ -256,18 +268,12 @@ void Envelope::NoteOn(
         RederiveSlewState();
         break;
       }
-      // The slew time sweeps from a start set by AMOUNT to an end set by the
-      // window. The SPAN between them is the whole audible effect.
-      uint32_t slew_time_log2_start = ChiffSlewTimeLog2FromAmount_q5_27(chiff_amount);
+      // The slew time moves from a start set by AMOUNT to an end set by the
+      // window; how far it travels is the whole audible effect. The end is
+      // computed first because AMOUNT interpolates the start from it.
       chiff_slew_time_log2_end_q5_27_ = SlewTimeLog2FromDuration_q5_27(window_samples);
-      // The two ends are anchored to unrelated references, so nothing makes the
-      // span positive. A slow start or a short window clamps it to zero and the
-      // chiff gets NO sweep at all -- e.g. AMOUNT 16 with any attack up to
-      // ~30ms. Known defect, not a degenerate corner.
-      if (slew_time_log2_start > chiff_slew_time_log2_end_q5_27_) {
-        slew_time_log2_start = chiff_slew_time_log2_end_q5_27_;
-      }
-      slew_time_log2_q5_27_ = slew_time_log2_start;
+      slew_time_log2_q5_27_ = ChiffStartSlewTimeLog2_q5_27(
+        chiff_amount, chiff_slew_time_log2_end_q5_27_);
       // Perturbation: kChiffPerturbFraction of the note's range, fading
       // linearly to 0 over the window.
       chiff_input_perturb_q30_ = static_cast<int32_t>(

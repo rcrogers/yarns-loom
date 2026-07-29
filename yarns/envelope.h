@@ -163,6 +163,16 @@ class Envelope {
   // octave. Input and output must not share vocabulary: conflating them is
   // the most repeated error in this design.
   //
+  // BOTH decay mechanisms are load-bearing; neither alone is enough. MEASURED
+  // in the sim, residual at window end against onset:
+  //   slew slowing alone (perturbation fade disabled)   -19 to -32 dB
+  //   with the fade, as shipped                         -34 to -54 dB
+  // The slowing stalls because the value sheds leftover excursion only at the
+  // slew rate, and that rate is itself collapsing -- so it stops keeping up.
+  // The fade supplies the remaining 15-22 dB and collapses the input onto the
+  // dialed level, leaving nothing to unwind at the handoff. Do not delete
+  // either one on the theory that the other covers it.
+  //
   // AMOUNT sets the STARTING slew time and nothing else -- it does NOT scale
   // the perturbation. Low amounts are quiet because a slow slew realizes less
   // of the same perturbation. At AMOUNT 0 (or window closed) the input
