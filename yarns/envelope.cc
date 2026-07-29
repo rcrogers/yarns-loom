@@ -64,6 +64,11 @@ const uint32_t kMaxSlewShift_q5_27 = 27u << 27;
 const uint32_t kChiffAmountBits = 7;
 const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 
+// Envelope full scale in Q30: the value that maps to a saturated output sample
+// (EnvelopeSample's clip ceiling). The release start-fill pins its upper
+// telegraph level here so the fill has the most headroom to move into.
+const int32_t kFullScale_q30 = (1 << 30) - (1 << 15);
+
 void Envelope::FillSharedPrngBuffer() {
   uint32_t state = shared_prng_state;
   for (size_t i = 0; i < 2 * kAudioBlockSize; ++i) {
@@ -86,6 +91,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_duration_samples_left_ = 0;
   chiff_stage_start_q30_ = 0;
   chiff_duty_phase_u32_ = 0;
+  chiff_release_duty_floor_u16_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   std::fill(
@@ -189,17 +195,27 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
 // P(stage target) as a u17: the exponential duty curve (lut_env_expo over
 // stage progress) with mixing depth crossfaded by beta = 1 - 2^-drop
 // (drop = nominal - shift). Evaluated at a run's start and end, then lerped.
-static inline uint32_t ChiffDutyU17(uint32_t duty_phase_u32, uint32_t drop_q5_27) {
+// floor_u16 remaps the result from [0, 1<<16] into [floor_u16, 1<<16] -- the
+// release start-fill opens the duty at its floor instead of 0; floor 0
+// (every other stage) leaves this an identity.
+static inline uint32_t ChiffDutyU17(
+    uint32_t duty_phase_u32, uint32_t drop_q5_27, uint32_t floor_u16) {
   uint32_t duty_u16 = Interpolate824(lut_env_expo, duty_phase_u32);
-  if (!drop_q5_27) return 1u << 16;
-  uint32_t drop_int = drop_q5_27 >> 27;
-  uint32_t two_pow_neg_drop_u16 = drop_int >= 16
-    ? 0
-    : Interpolate824(lut_expo2_neg,
-        (drop_q5_27 & 0x07FFFFFFu) << 5) >> drop_int;
-  uint32_t beta_u16 = (1u << 16) - two_pow_neg_drop_u16;
-  uint32_t effective_gap_u16 = ((65535u - duty_u16) * beta_u16) >> 16;
-  return (1u << 16) - effective_gap_u16;
+  uint32_t base_u17;
+  if (!drop_q5_27) {
+    base_u17 = 1u << 16;
+  } else {
+    uint32_t drop_int = drop_q5_27 >> 27;
+    uint32_t two_pow_neg_drop_u16 = drop_int >= 16
+      ? 0
+      : Interpolate824(lut_expo2_neg,
+          (drop_q5_27 & 0x07FFFFFFu) << 5) >> drop_int;
+    uint32_t beta_u16 = (1u << 16) - two_pow_neg_drop_u16;
+    uint32_t effective_gap_u16 = ((65535u - duty_u16) * beta_u16) >> 16;
+    base_u17 = (1u << 16) - effective_gap_u16;
+  }
+  return floor_u16 + static_cast<uint32_t>(
+      (static_cast<uint64_t>((1u << 16) - floor_u16) * base_u17) >> 16);
 }
 
 void Envelope::ReSlopeSlewShift() {
@@ -252,6 +268,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   stage_ = stage;
   target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
   chiff_stage_start_q30_ = stage_start_q30;
+  chiff_release_duty_floor_u16_ = 0; // Set below only for a chiff-live release
   switch (stage) {
     case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
     case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
@@ -308,6 +325,27 @@ void Envelope::Trigger(EnvelopeStage stage) {
           log2_stage_samples_q5_27 - kStageTimeConstantsLog2_q5_27,
           kMaxSlewShift_q5_27
         );
+  }
+  if (stage == ENV_STAGE_RELEASE && chiff_duration_samples_left_) {
+    // Release with chiff still live -- two fixes for the early-release artifacts:
+    //
+    // Finish within the release: cap the chiff window at this release's own
+    // length so the shift ramps back to nominal (and the noise winds down to
+    // nothing) BY release-end. Otherwise the window keeps the attack's much
+    // longer timetable and a short release chops the noise off mid-fizz.
+    if (chiff_duration_samples_left_ > stage_samples_left_) {
+      chiff_duration_samples_left_ = stage_samples_left_;
+    }
+    // Fill the start: pin the upper telegraph level to full scale and open the
+    // duty at 1 - L/fullscale (L = the carried level, the anchor above), so the
+    // release begins already in motion -- no dead-stop notch -- while the
+    // mixture mean, fullscale * (1 - floor), still lands exactly on L.
+    int32_t carried_level_q30 = stage_start_q30;
+    if (carried_level_q30 < 0) carried_level_q30 = 0;
+    if (carried_level_q30 > kFullScale_q30) carried_level_q30 = kFullScale_q30;
+    chiff_stage_start_q30_ = kFullScale_q30;
+    chiff_release_duty_floor_u16_ = (1u << 16) - static_cast<uint32_t>(
+      (static_cast<int64_t>(carried_level_q30) << 16) / kFullScale_q30);
   }
   // The nominal may have changed; keep the chiff ramp's original timetable,
   // re-aimed at this stage's nominal. Also re-syncs alpha and its decay.
@@ -387,8 +425,10 @@ void Envelope::RenderStage(
     uint32_t shift_end =
       slew_shift_q5_27_ + slew_shift_increment_q5_27_ * run_samples;
     if (shift_end > nominal) shift_end = nominal;
-    int32_t duty_start = ChiffDutyU17(phase_start, nominal - slew_shift_q5_27_);
-    int32_t duty_end = ChiffDutyU17(phase_end, nominal - shift_end);
+    int32_t duty_start = ChiffDutyU17(
+      phase_start, nominal - slew_shift_q5_27_, chiff_release_duty_floor_u16_);
+    int32_t duty_end = ChiffDutyU17(
+      phase_end, nominal - shift_end, chiff_release_duty_floor_u16_);
     int32_t duty_acc_q8 = duty_start << 8;
     const int32_t duty_inc_q8 =
       ((duty_end - duty_start) << 8) / static_cast<int32_t>(run_samples);

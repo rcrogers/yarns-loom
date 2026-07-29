@@ -186,6 +186,15 @@ class Envelope {
   int32_t chiff_stage_start_q30_;         // Value captured at Trigger
   uint32_t chiff_duty_phase_u32_;         // Stage progress phi, Q0.32
 
+  // Release start-fill: on release the chiff would otherwise open with the duty
+  // at ~0 (all samples aiming at the carried level), so the noise stops dead
+  // for an instant -- the audible early-release notch. Instead we pin the upper
+  // telegraph level to full scale and open the duty at this floor = 1 - L/full
+  // scale, so the release begins already in motion while the mixture mean still
+  // lands on the carried level L. The duty is remapped from [0,1] into
+  // [floor,1]. Zero for every non-release stage (leaving the remap an identity).
+  uint32_t chiff_release_duty_floor_u16_;
+
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
 
