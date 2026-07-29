@@ -22,7 +22,7 @@
 // are comparable -- roughly the first half of the chiff -- the offset column is
 // confounded by the wander and should not be read as a standing error.
 //
-// Usage: node residual.js [amount] [attack] [chiffDuration] [gateMs]
+// Usage: node residual.js [amount] [attack] [chiffDuration] [gateMs] [tailMs]
 'use strict';
 const { loadPage } = require('./page');
 
@@ -30,6 +30,7 @@ const amount = +(process.argv[2] || 96);
 const attack = +(process.argv[3] || 64);
 const chiffDuration = +(process.argv[4] || 64);
 const gateMs = +(process.argv[5] || 3000);
+const tailMs = +(process.argv[6] || 600);
 
 loadPage().then(page => {
   const E = page.ENGINE, FS = page.FS, FULL = page.PEAK;
@@ -39,7 +40,7 @@ loadPage().then(page => {
     envModAttack: 0, envModDecay: 0, envModSustain: 0, envModRelease: 0,
     amount, maxTarget: FULL, seed: 0xCAFEBABE,
     gateSamples: Math.round(gateMs * FS / 1000),
-    tailSamples: Math.round(0.6 * FS),
+    tailSamples: Math.round(tailMs * FS / 1000),
   };
   const r = E.render(p);
   const dry = E.render(Object.assign({}, p, { amount: 0 })).out;

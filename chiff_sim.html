@@ -153,6 +153,8 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
         <span><i style="background:var(--nominal)"></i>nominal</span>
         <span><i style="background:var(--noise)"></i>noise</span>
         <span><i style="background:var(--mark)"></i>release</span>
+        <span><i style="background:var(--ink3)"></i>chiff duration (dialled)</span>
+        <span><i style="background:var(--ink)"></i>excursion died out (measured)</span>
         <span class="mono" id="readout" style="margin-left:auto;color:var(--ink2)"></span>
       </div>
       <canvas id="cv"></canvas>
@@ -211,7 +213,7 @@ e=z;p(q);var T=c([]);function U(){return v.byteLength>>16}function Z(_){_=_|0;va
 // Firmware revision this page's inlined engine was built from. Rewritten by
 // tools/simengine/inline_engine.py at every re-inline, so a published artifact
 // self-identifies its firmware -- do not edit the value by hand.
-const FW_VERSION = '93d3ae81-dirty';
+const FW_VERSION = '3aee7a93';
 
 // Wraps a loaded Emscripten module into the engine API. Kept separate from the
 // node-specific require() so the browser can reuse it verbatim.
@@ -333,6 +335,28 @@ function nominalValue(p, totalN, gateN) {   // chiff-free reference (amount 0)
 }
 
 // ---- measurements ----
+// Time at which the chiff's excursion has died out, by the same definition
+// tools/chiff_checks/residual.js uses: the per-block STANDARD DEVIATION of
+// (chiff - nominal value) -- the audible excursion, not the standing offset --
+// falling below kDeadDbfs of full scale. Returned in samples, null if never.
+const kDeadDbfs = -80;
+function excursionDeadSample(out, nominalTrace) {
+  const thr = PEAK * Math.pow(10, kDeadDbfs / 20);
+  const blk = Math.max(32, Math.round(0.002 * FS));
+  const n = Math.min(out.length, nominalTrace.length);
+  for (let b = 0; (b + 1) * blk < n; b++) {
+    let sum = 0;
+    for (let i = b * blk; i < (b + 1) * blk; i++) sum += out[i] - nominalTrace[i];
+    const mean = sum / blk;
+    let sq = 0;
+    for (let i = b * blk; i < (b + 1) * blk; i++) {
+      const d = (out[i] - nominalTrace[i]) - mean; sq += d * d;
+    }
+    if (Math.sqrt(sq / blk) < thr) return b * blk;
+  }
+  return null;
+}
+
 function measure(res, nominalTrace) {
   const { out, gateN, aN, windowN } = res;
   const land = out[Math.min(aN - 1, out.length - 1)] / PEAK * 100;
@@ -348,6 +372,7 @@ function measure(res, nominalTrace) {
 const cv = $('cv'), ctx = cv.getContext('2d');
 function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 let lastRes = null, lastNominal = null, lastLine = null, lastP = null;
+let lastDead = null;
 
 function draw() {
   if (!ENGINE) return;
@@ -358,13 +383,17 @@ function draw() {
   const line = dia; // the chiff perturbs about the nominal value
   const dt = performance.now() - t0;
   lastRes = res; lastNominal = dia; lastLine = line; lastP = p;
+  lastDead = excursionDeadSample(res.out, dia);
   computeSpectrogram();
 
   const m = measure(res, dia);
   $('mLand').textContent = m.land.toFixed(1) + ' %';
   $('mRel').innerHTML = m.rel === null ? '&gt;window'
     : fwUnit(Math.round(m.rel * FS / 1000) + ' smp', fmtMs(m.rel));
-  $('mWin').innerHTML = fwUnit(res.windowN + ' smp', msOfSamples(res.windowN));
+  $('mWin').innerHTML = fwUnit(msOfSamples(res.windowN),
+    lastDead === null ? 'not yet dead'
+      : 'dead at ' + msOfSamples(lastDead) + ' = ' +
+        (lastDead / res.windowN * 100).toFixed(0) + '%');
   $('mShift').innerHTML = fwUnit(res.attackSamples + ' smp', msOfSamples(res.attackSamples));
   $('mMs').textContent = dt.toFixed(0) + ' ms';
 
@@ -419,6 +448,18 @@ function paint(hoverX) {
   ctx.strokeStyle = cssVar('--mark'); ctx.setLineDash([4, 4]);
   ctx.beginPath(); ctx.moveTo(X(gateN), padT); ctx.lineTo(X(gateN), H - padB); ctx.stroke();
   ctx.setLineDash([]);
+
+  // Chiff timing: where it is SUPPOSED to be done (the dialled duration) and
+  // where its excursion measurably HAS died out. The gap between them is the
+  // calibration -- they should coincide.
+  const vline = (smp, colour, dash) => {
+    if (smp === null || smp === undefined || smp > totalN) return;
+    ctx.strokeStyle = colour; ctx.setLineDash(dash); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(X(smp), padT); ctx.lineTo(X(smp), H - padB); ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  vline(lastRes.windowN, cssVar('--ink3'), [6, 3]);
+  vline(lastDead, cssVar('--ink'), [1, 3]);
 
   // Clip traces to the plot rect. The 100% gridline sits exactly at PEAK, so
   // a value AT the ceiling was drawn with half its stroke width above the
