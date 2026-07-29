@@ -67,7 +67,7 @@ class Envelope {
   // Single render path: this is a realtime system, so the worst case (chiff
   // live) is the only case that matters; a lean chiff-off variant would only
   // optimize the best case. With the window closed the same loop degenerates
-  // correctly by itself: amp = 0 -> dart targets 0 -> pert stays 0 -> output
+  // correctly by itself: perturbation 0 -> slew input is the target -> output
   // = dialed, clamp transparent.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
@@ -84,10 +84,10 @@ class Envelope {
 
  private:
   // Re-derive the slew coefficients after a stage change: the classic/dialed
-  // alpha from the new stage's nominal shift and, if the chiff is live, the
-  // noise-slew ramp (toward the chiff's own dark endpoint, compressed into
+  // rate from the new stage's slew time and, if the chiff is live, the
+  // chiff's sweep (toward its end slew time, compressed into
   // the remaining stage when the stage is shorter than the chiff).
-  void ReSlopeSlewShift();
+  void RederiveSlewState();
 
  public:
 
@@ -129,20 +129,19 @@ class Envelope {
   // next stage's slew continues seamlessly from the current value.
   uint32_t stage_samples_left_;
 
-  // Per-sample slew: value += (target - value) >> shift. The shift is a
-  // Q5.27 fixed-point value; the integer part is the base downshift, and
-  // the fraction dithers to the next integer shift via the sigma-delta
-  // accumulator below, interpolating time constants between powers of two.
-  uint32_t stage_nominal_slew_shift_q5_27_;
+  // The stage's own slew time, log2 samples, Q5.27. Integer part is the base
+  // downshift; the fraction dithers to the next integer via the sigma-delta
+  // accumulator, interpolating slew times between powers of two.
+  uint32_t stage_slew_time_log2_q5_27_;
 
-  // Slew rate 2^-shift in Q31 (2^31 == 1.0): value += (target-value)*alpha>>31.
+  // Slew rate 2^-slew_time_log2, Q31 (1.0 == 2^31): value += (input-value)*rate>>31.
   // Positive, <= 0x7FFF8000 < 2^31 (single signed SMULL vs the signed delta).
-  int32_t slew_alpha_q31_;
+  int32_t slew_rate_q31_;
 
-  // Geometric ramp of the coefficient while chiff runs: decay = 1 - 2^-increment
-  // (Q32), so alpha -= (alpha*decay)>>32 each sample == alpha *= 2^-increment,
-  // reproducing the linear-shift ramp with no per-sample LUT. Zero = hold.
-  int32_t slew_alpha_decay_q32_;
+  // Sweep of the rate while the chiff runs: decay = 1 - 2^-step (Q32), so
+  // rate -= (rate*decay)>>32 each sample == rate *= 2^-step, reproducing the
+  // linear slew-time sweep with no per-sample LUT. Zero = hold.
+  int32_t chiff_slew_rate_decay_q32_;
 
   // Per-instance start offset into the double-length shared PRNG buffer.
   // Distinct offsets mean co-triggered envelopes never consume the same
@@ -150,54 +149,56 @@ class Envelope {
   // without per-sample work. Assigned round-robin in Init().
   uint32_t prng_offset_u32_;
 
-  // Chiff (dart model): ONE slewed value aims at three ABSOLUTE per-run-held
-  // points -- center +- depth (random-sign darts, ~half the samples) and a
-  // relax base -- and the output is that value clamped to the note's range.
-  // The mean rides the aim statistics; `dialed` (the chiff-free classic
-  // slew) is advanced run-exact purely to place the aims.
+  // CHIFF. The envelope's own slew, sped up and fed a perturbed input.
   //
-  // The aim base is derived so the value's EXPECTED step equals the mean's
-  // step in every regime: base = dialed + (target - dialed) *
-  // alphaStage/alphaEff (timed stages; holds use dialed). Anything else
-  // makes the value chase the moving mean through its own slew -- two
-  // cascaded one-poles -- and it trails the envelope (a kink wherever the
-  // window ends). The noise slew is also floored at the stage rate on timed
-  // stages (else an early release near the window's dark end hangs); hold
-  // stages are exempt so the LPF still closes on the chiff's own schedule.
+  //   slew input    what the slew chases: base +/- the perturbation, sign
+  //                 drawn per sample from the shared PRNG
+  //   perturbation  chiff_input_perturb_q30_, 0.9 * (top - floor), fading
+  //                 linearly to 0 across the window
+  //   slew time     ramped linearly (so the RATE decays exponentially) from a
+  //                 start set by AMOUNT to an end set by the window
   //
-  // The dart depth amp = 0.9*(top - floor) fades linearly over the chiff
-  // window; the noise slew's shift ramps linearly from an amount-warped
-  // bright onset to the chiff's OWN dark endpoint (log2(window) - k), so the
-  // burst darkens to ~DC by its own end regardless of stage. Near the
-  // acoustic-peak rail the aim center shifts off the rail by the noise's
-  // realized reach (amp * lut_chiff_reach_factor[shift]). At amount 0 (or
-  // window closed) the aims collapse to the stage target: the classic
-  // per-sample exponential slew, exactly.
+  // NOTHING NAMES THE OUTPUT. What you hear is the perturbation times the
+  // slew's response to it, which falls as sqrt(rate) -- about 3 dB per
+  // octave. Input and output must not share vocabulary: conflating them is
+  // the most repeated error in this design.
   //
-  // The chiff window spans stages (sustain included). Only a stage shorter
-  // than the remaining window (in practice the release) compresses it: fade
-  // and shift ramp re-sloped to land by stage end.
+  // AMOUNT sets the STARTING slew time and nothing else -- it does NOT scale
+  // the perturbation. Low amounts are quiet because a slow slew realizes less
+  // of the same perturbation. At AMOUNT 0 (or window closed) the input
+  // collapses to the stage target: the classic per-sample slew, exactly.
   //
-  // While the chiff runs, slew_alpha_q31_/slew_shift_q5_27_ describe the
-  // NOISE slew (ramping); dialed_alpha_q31_ carries the stage-nominal rate
-  // for the dialed slew. With the chiff off they describe the classic slew
-  // and the value is the exact classic slew.
+  // The input base is derived so the value's EXPECTED step equals the dialed
+  // level's step in every regime: base = dialed + (target - dialed) *
+  // stage_rate/effective_rate (timed stages; holds use dialed). Anything else
+  // makes the value chase the moving dialed level through its own slew -- two
+  // cascaded one-poles -- so it trails the envelope (a kink wherever the
+  // window ends). The rate is also floored at the stage rate on timed stages
+  // (else an early release near the window's slow end hangs); hold stages are
+  // exempt so the chiff still closes on its own schedule.
   //
-  // Shift is unsigned: a magnitude, 0..kMaxSlewShift. The max exceeds 2^31
-  // as Q5.27 (integer shift up to 27), so int32 would sign-flip and corrupt
-  // derived shifts.
-  uint32_t slew_shift_q5_27_;            // Noise-slew shift while chiff runs
-  uint32_t slew_shift_increment_q5_27_;  // Per-sample ramp step (>= 0)
-  uint32_t chiff_dark_shift_q5_27_;      // Ramp endpoint: the chiff's own dark
+  // The window spans stages (sustain included). Only a stage shorter than the
+  // remaining window (in practice the release) compresses it: fade and slew
+  // time ramp re-sloped to land by stage end.
+  //
+  // While the chiff runs, slew_rate_q31_/slew_time_log2_q5_27_ are the
+  // chiff's (ramping); stage_slew_rate_q31_ carries the stage rate. With the
+  // chiff off they are the classic slew and the value is exactly that.
+  //
+  // Slew time is unsigned: a magnitude, 0..kMaxSlewTimeLog2. The max exceeds
+  // 2^31 as Q5.27 (integer part up to 27), so int32 would sign-flip.
+  uint32_t slew_time_log2_q5_27_;             // Current slew time, log2 samples
+  uint32_t chiff_slew_time_log2_step_q5_27_;  // Per-sample sweep step (>= 0)
+  uint32_t chiff_slew_time_log2_end_q5_27_;   // Sweep end, set by the window
   uint32_t chiff_duration_samples_left_;  // 0 = chiff inactive
   // Where the current stage began: with the stage phase (closed-form from
   // the countdown), this anchors the mean -- start + (target - start) *
   // lut_env_expo[phase] -- with no iterated level state, the same
   // construction the duty-binary core used for its duty curve.
   int32_t stage_start_q30_;
-  int32_t dialed_alpha_q31_;             // Stage-nominal alpha (floor/blend)
-  int32_t chiff_amp_q30_;                // Current dart depth
-  int32_t chiff_amp_step_q30_;           // Per-sample depth fade
+  int32_t stage_slew_rate_q31_;               // Stage rate (floor/blend)
+  int32_t chiff_input_perturb_q30_;           // Current +/- on the slew input
+  int32_t chiff_input_perturb_step_q30_;      // Per-sample fade of the above
   // Ordered clamp bounds over the note's stage targets. The envelope's range
   // may be numerically inverted (CV DAC codes fall as volts rise; a warped
   // timbre target may be negative), so these are min/max, not release/peak.

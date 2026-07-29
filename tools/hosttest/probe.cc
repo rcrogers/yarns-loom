@@ -23,11 +23,12 @@ static uint32_t IncFromSetting(int setting) {
       stmlib::modulate_7_13(static_cast<uint8_t>(setting), 0, 0) << (15 - 13));
 }
 
-// shift (Q5.27) and alpha (Q31) are two encodings of the same slew rate.
+// Slew time log2 (Q5.27) and slew rate (Q31) are two encodings of the same
+// thing; print both as slew time so they must track.
 // They must stay consistent; printing both exposes any desync.
-static double ShiftOf(uint32_t q5_27) { return q5_27 / 134217728.0; }
-static double AlphaShift(int32_t alpha_q31) {
-  return alpha_q31 > 0 ? -log2(alpha_q31 / 2147483648.0) : 99.0;
+static double SlewTimeLog2Of(uint32_t q5_27) { return q5_27 / 134217728.0; }
+static double SlewTimeLog2OfRate(int32_t slew_rate_q31) {
+  return slew_rate_q31 > 0 ? -log2(slew_rate_q31 / 2147483648.0) : 99.0;
 }
 
 int main(int argc, char** argv) {
@@ -56,20 +57,20 @@ int main(int argc, char** argv) {
 
   printf("blk stage  chiffLeft  shift  alphaAsShift  dialedAsShift  amp"
          "  ampAsFracOfInitial floorBinds | stageStart  target  value\n");
-  const int32_t amp0 = env.chiff_amp_q30_;
+  const int32_t amp0 = env.chiff_input_perturb_q30_;
   int16_t buffer[kAudioBlockSize];
   for (int b = 0; b < blocks; ++b) {
     if (b == gate_off_block) env.NoteOff();
     bool floor_binds = env.phase_increment_u32_ != 0 &&
-                       env.slew_alpha_q31_ < env.dialed_alpha_q31_;
+                       env.slew_rate_q31_ < env.stage_slew_rate_q31_;
     if (b >= from_block) {
       printf("%3d %5d %10u %6.3f %13.3f %14.3f %11d %8.4f %s\n",
              b, (int)env.stage_, env.chiff_duration_samples_left_,
-             ShiftOf(env.slew_shift_q5_27_),
-             AlphaShift(env.slew_alpha_q31_),
-             AlphaShift(env.dialed_alpha_q31_),
-             env.chiff_amp_q30_,
-             amp0 ? (double)env.chiff_amp_q30_ / amp0 : 0.0,
+             SlewTimeLog2Of(env.slew_time_log2_q5_27_),
+             SlewTimeLog2OfRate(env.slew_rate_q31_),
+             SlewTimeLog2OfRate(env.stage_slew_rate_q31_),
+             env.chiff_input_perturb_q30_,
+             amp0 ? (double)env.chiff_input_perturb_q30_ / amp0 : 0.0,
              floor_binds ? "FLOOR" : "");
       printf("      -> stageStart %11d  target %11d  value %11d\n",
              env.stage_start_q30_, env.target_q30_, env.value_q30_);
