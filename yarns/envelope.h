@@ -85,7 +85,7 @@ class Envelope {
  private:
   // Re-derive the slew coefficients after a stage change: the classic
   // rate from the new stage's slew time and, if the chiff is live, the
-  // chiff's sweep (toward its end slew time, compressed into
+  // chiff's own slew slowing (toward the slowest it goes, compressed into
   // the remaining stage when the stage is shorter than the chiff).
   void RederiveSlewState();
 
@@ -93,14 +93,14 @@ class Envelope {
   // ALLOWED range times the shrink, so it does not follow the realized level.
   int32_t ChiffPerturb_q30() const;
 
-  // EXPERIMENT: where the chiff's slew-time sweep will be after `samples`
-  // more samples, capped at its end. The shrink is sized against this.
+  // EXPERIMENT: how slow the chiff's slew will have got after `samples` more
+  // samples, never past the slowest it goes. The shrink is sized against this.
   uint32_t ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const;
 
-  // EXPERIMENT: where the rate sweep stops -- the slower of the chiff's own
-  // end and the stage's own slew time, so the slew lands back on the
-  // envelope's own nominal rate.
-  uint32_t ChiffSweepEnd_q5_27() const;
+  // EXPERIMENT: the slowest the chiff's slew ever gets -- the larger of the
+  // slew time its own duration implies and the stage's, so the slew lands back
+  // on the envelope's own nominal rate.
+  uint32_t ChiffSlowestSlewTime_q5_27() const;
 
  public:
 
@@ -151,9 +151,9 @@ class Envelope {
   // Positive, <= 0x7FFF8000 < 2^31 (single signed SMULL vs the signed delta).
   int32_t slew_rate_q31_;
 
-  // Sweep of the rate while the chiff runs: decay = 1 - 2^-step (Q32), so
+  // How the rate falls while the chiff runs: decay = 1 - 2^-step (Q32), so
   // rate -= (rate*decay)>>32 each sample == rate *= 2^-step, reproducing the
-  // linear slew-time sweep with no per-sample LUT. Zero = hold.
+  // slew time rising linearly, with no per-sample LUT. Zero = hold.
   int32_t chiff_slew_rate_decay_q32_;
 
   // Per-instance start offset into the double-length shared PRNG buffer.
@@ -244,12 +244,14 @@ class Envelope {
   // Slew time is unsigned: a magnitude, 0..kMaxSlewTimeLog2. The max exceeds
   // 2^31 as Q5.27 (integer part up to 27), so int32 would sign-flip.
   uint32_t slew_time_log2_q5_27_;             // Current slew time, log2 samples
-  uint32_t chiff_slew_time_log2_step_q5_27_;  // Per-sample sweep step (>= 0)
-  uint32_t chiff_slew_time_log2_end_q5_27_;   // Sweep end, set by the window
+  uint32_t chiff_slew_time_log2_step_q5_27_;  // Per-sample rise, i.e. how fast
+                                             // the slew slows (>= 0)
+  uint32_t chiff_slew_time_log2_end_q5_27_;   // Slowest the chiff's own slew
+                                             // goes, from its duration
   // The NOMINAL chiff duration, in samples: a sizing reference for how fast
   // the slew slows and the perturbation shrinks. NOT a countdown -- nothing
   // observes it elapsing, and there is no window to be inside of.
-  // 0 = no chiff armed for this note (AMOUNT 0).
+  // 0 = no chiff on this note (AMOUNT 0).
   uint32_t chiff_target_samples_;
   // Where the current stage began: with the stage phase (closed-form from
   // the countdown), this anchors the nominal value -- start + (target - start) *

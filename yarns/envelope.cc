@@ -128,24 +128,25 @@ void Envelope::NoteOff() {
   Trigger(ENV_STAGE_RELEASE);
 }
 
-// EXPERIMENT: where the chiff's own slew-time sweep will have got to after
-// `samples` more samples, capped at the sweep's end. The sweep is sized to the
-// NOMINAL duration, so at a release deadline it is mid-sweep and its rate
-// there is neither the start nor the end -- and the rate is what decides how
-// much of the perturbation is audible, so the shrink must be sized against it.
-// EXPERIMENT: where the rate sweep actually stops -- the slower of the chiff's
-// own end and the STAGE's slew time. Landing on the stage rate is what returns
-// the envelope to exactly its nominal level curve once the chiff has
-// gone quiet; without it a short chiff leaves the slew running fast for the
-// rest of the note, because the sweep's end is derived from the chiff's
-// duration and a short duration means a fast end.
+// EXPERIMENT: how slow the chiff's slew will have got after `samples` more
+// samples, never past the slowest it goes. The slew slows on a schedule set by
+// the NOMINAL duration, so at a release deadline it is part-way down: its rate
+// there is neither the one it started at nor the one it ends at. That rate is
+// what decides how much of the perturbation is audible, so the shrink has to
+// be sized against it.
+// EXPERIMENT: the SLOWEST the chiff's slew ever gets -- the larger of the slew
+// time its own duration implies and the STAGE's slew time (larger = slower).
+// Stopping at the stage's is what returns the envelope to exactly its nominal
+// level curve once the chiff has gone quiet; without it a short chiff leaves
+// the slew running fast for the rest of the note, because the slew time its
+// duration implies is short and a short slew time is a fast slew.
 //
 // This is the rate FLOOR's mirror image, and it only became available when the
 // window went away: while a window existed its close reset the slew time, and
-// the sweep's end could not be tied to the stage without tying the chiff's
-// TIMING to the stage too. Now the shrink owns the timing, so the rate is free
-// to land wherever the envelope needs it.
-uint32_t Envelope::ChiffSweepEnd_q5_27() const {
+// stopping at the stage's slew time would have tied the chiff's TIMING to the
+// stage too. Now the shrink owns the timing, so the rate is free to land
+// wherever the envelope needs it.
+uint32_t Envelope::ChiffSlowestSlewTime_q5_27() const {
   return std::max(chiff_slew_time_log2_end_q5_27_, stage_slew_time_log2_q5_27_);
 }
 
@@ -154,7 +155,7 @@ uint32_t Envelope::ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const {
     * samples;
   const uint64_t at_deadline =
     static_cast<uint64_t>(slew_time_log2_q5_27_) + swept;
-  const uint32_t end = ChiffSweepEnd_q5_27();
+  const uint32_t end = ChiffSlowestSlewTime_q5_27();
   return at_deadline > end ? end : static_cast<uint32_t>(at_deadline);
 }
 
@@ -259,12 +260,12 @@ const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
 // out of the amplitude entirely. An earlier version passed
 // min(chiff end, stage) on the theory that the floor governs the output. It
 // does not, and on the COMPRESSION path that mistake was worth 5 octaves: a
-// release compresses the deadline without re-sloping the rate sweep, so the
-// chiff is still running FAST when the deadline arrives, while the release
-// stage's own slew time is slow. Sizing against the stage assumed an output
-// 32x smaller than the one actually produced, so the shrink stopped ~34 dB
-// short and the remaining excursion was cut off dead at the deadline -- an
-// audible chop at the end of the release.
+// release compresses the deadline without re-sloping how fast the slew slows,
+// so the chiff is still running FAST when the deadline arrives, while the
+// release stage's own slew time is slow. Sizing against the stage assumed an
+// output 32x smaller than the one actually produced, so the shrink stopped
+// ~34 dB short and the remaining excursion was cut off dead at the deadline
+// -- an audible chop at the end of the release.
 static uint32_t ChiffShrinkOctaves_q5_27(
     int32_t perturb_q30, uint32_t end_slew_time_log2_q5_27) {
   const uint32_t response_q15_5 = SlewPerturbResponse_q15_5(
@@ -390,7 +391,7 @@ void Envelope::NoteOn(
       // long target needs fewer octaves (its slew has already done more of the
       // work), a short target more, a quiet note fewer.
       //
-      // Sized to land on the sweep's end at the nominal duration, so the slew
+      // Sized to reach the slowest slew time at the nominal duration, so the slew
       // time at that moment IS that end.
       chiff_perturb_shrink_step_q5_27_ =
         ChiffShrinkOctaves_q5_27(chiff_perturb_full_q30_,
@@ -451,16 +452,16 @@ void Envelope::RederiveSlewState() {
   // The chiff-free (classic) slew always runs at the stage's own rate.
   stage_slew_rate_q31_ = SlewRateFromTimeLog2_q31(stage_slew_time_log2_q5_27_);
   if (chiff_target_samples_) {
-    // Chiff sweep: from the current slew time toward the chiff's own end, over
-    // the NOMINAL duration. That duration is a sizing reference, never a
-    // countdown -- nothing happens when it elapses. NoteOn guarantees
-    // start <= end; guard anyway.
-    const uint32_t sweep_end_q5_27 = ChiffSweepEnd_q5_27();
-    if (slew_time_log2_q5_27_ > sweep_end_q5_27) {
-      slew_time_log2_q5_27_ = sweep_end_q5_27;
+    // The chiff's slew slows from where it is now toward the slowest it goes,
+    // over the NOMINAL duration. That duration is a sizing reference, never a
+    // countdown -- nothing happens when it elapses. NoteOn guarantees the slew
+    // starts no slower than it ends; guard anyway.
+    const uint32_t slowest_slew_time_q5_27 = ChiffSlowestSlewTime_q5_27();
+    if (slew_time_log2_q5_27_ > slowest_slew_time_q5_27) {
+      slew_time_log2_q5_27_ = slowest_slew_time_q5_27;
     }
     chiff_slew_time_log2_step_q5_27_ =
-      (sweep_end_q5_27 - slew_time_log2_q5_27_) / chiff_target_samples_;
+      (slowest_slew_time_q5_27 - slew_time_log2_q5_27_) / chiff_target_samples_;
     slew_rate_q31_ = SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_);
     chiff_slew_rate_decay_q32_ = DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
   } else {
@@ -553,7 +554,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
           kMaxSlewTimeLog2_q5_27
         );
   }
-  // A RELEASE CAN ONLY HURRY THE SHRINK, NEVER SLOW IT. The chiff's own
+  // A RELEASE CAN ONLY MAKE THE SHRINK FASTER, NEVER SLOWER. The chiff's own
   // schedule is sovereign -- it is what CHIFF DURATION dials -- but a note
   // that ends before the chiff has gone quiet would leave audible noise with
   // nothing left to produce it, so the release imposes a DEADLINE: reach
@@ -564,12 +565,12 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // divide by the samples available, and take that step only if it is FASTER
   // than the one already running. A short release therefore compresses the
   // shrink; a long one changes nothing.
-  // Re-derive slew coefficients for the new stage, then let a release hurry
-  // the chiff (below) -- in that order, because the deadline work adjusts what
-  // RederiveSlewState just computed.
+  // Re-derive slew coefficients for the new stage, then let a release shorten
+  // the chiff's remaining time (below) -- in that order, because that work
+  // adjusts what RederiveSlewState just computed.
   RederiveSlewState();
   if (stage == ENV_STAGE_RELEASE && stage_samples_left_ && chiff_target_samples_) {
-    // BOTH mechanisms get the same deadline. Hurrying only the perturbation
+    // BOTH mechanisms get the same deadline. Speeding up only the perturbation
     // leaves the note ending with the slew still running at chiff speed, and
     // the ~2% of the stage's span that a slew has left at handoff is then
     // consumed in a fraction of a millisecond instead of gliding away over the
@@ -583,12 +584,12 @@ void Envelope::Trigger(EnvelopeStage stage) {
     if (shrink_step_q5_27 > chiff_perturb_shrink_step_q5_27_) {
       chiff_perturb_shrink_step_q5_27_ = shrink_step_q5_27;
     }
-    const uint32_t sweep_end_q5_27 = ChiffSweepEnd_q5_27();
-    if (sweep_end_q5_27 > slew_time_log2_q5_27_) {
-      const uint32_t sweep_step_q5_27 =
-        (sweep_end_q5_27 - slew_time_log2_q5_27_) / stage_samples_left_;
-      if (sweep_step_q5_27 > chiff_slew_time_log2_step_q5_27_) {
-        chiff_slew_time_log2_step_q5_27_ = sweep_step_q5_27;
+    const uint32_t slowest_slew_time_q5_27 = ChiffSlowestSlewTime_q5_27();
+    if (slowest_slew_time_q5_27 > slew_time_log2_q5_27_) {
+      const uint32_t slew_time_step_q5_27 =
+        (slowest_slew_time_q5_27 - slew_time_log2_q5_27_) / stage_samples_left_;
+      if (slew_time_step_q5_27 > chiff_slew_time_log2_step_q5_27_) {
+        chiff_slew_time_log2_step_q5_27_ = slew_time_step_q5_27;
         chiff_slew_rate_decay_q32_ =
           DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
       }
@@ -635,7 +636,7 @@ void Envelope::RenderStage(
   const bool timed = phase_increment_u32_ != 0;
   // NO CHIFF ON/OFF ANYWHERE IN HERE. There is no window to be inside of and no
   // mode to be in: with AMOUNT 0 the shrink is zero, so the perturbation is
-  // zero, the sweep step is zero and the rate is the stage's -- and every line
+  // zero, the slew stops slowing and the rate is the stage's -- and every line
   // below degenerates to the classic slew on its own. Branching on it would
   // only make the BEST case cheaper, which is worth nothing here; the worst
   // case is a live chiff and it pays this cost either way.
@@ -649,7 +650,7 @@ void Envelope::RenderStage(
     const int32_t top_q30 = chiff_top_q30_;
     // Slew-rate floor (timed stages): never slower than the stage's own
     // rate, else the value hangs on a moving stage near the window's slow
-    // end. Monotone (the rate only falls), so flooring freezes the sweep.
+    // end. Monotone (the rate only falls), so flooring holds it there.
     int32_t decay_q32 = chiff_slew_rate_decay_q32_;
     // The floor exists to TRACK the nominal value, not to energize the chiff:
     // floored, a full perturbation would ride the stage rate and AMOUNT 1
@@ -775,7 +776,7 @@ void Envelope::RenderStage(
     // behaviour is the C loop in #else (kept as the host reference, golden-
     // verified) -- this block must be flash-verified bit-identical.
     //
-    // Per sample: geometric rate sweep (rate -= (rate*decay)>>32), input
+    // Per sample: the rate decays geometrically (rate -= (rate*decay)>>32), input
     // select (up ^ (xor & sign)), one-pole slew (value +=
     // (input-value)*rate>>31), rail clamp, bias ramp, and the EnvelopeSample
     // mix+usat. `end == buf` (run_samples 0) is handled by the leading guard.
@@ -846,10 +847,10 @@ void Envelope::RenderStage(
         >> 31);
       uint32_t slew_time_log2_end =
         slew_time_log2_q5_27_ + chiff_slew_time_log2_step_q5_27_ * run_samples;
-      const uint32_t sweep_end_q5_27 = ChiffSweepEnd_q5_27();
-      if (slew_time_log2_end > sweep_end_q5_27) {
-        slew_time_log2_end = sweep_end_q5_27;
-        // Sweep done: stop decaying the rate, or the loop keeps taking it
+      const uint32_t slowest_slew_time_q5_27 = ChiffSlowestSlewTime_q5_27();
+      if (slew_time_log2_end > slowest_slew_time_q5_27) {
+        slew_time_log2_end = slowest_slew_time_q5_27;
+        // As slow as it goes: stop decaying the rate, or the loop keeps taking it
         // below the end it was told to stop at.
         chiff_slew_rate_decay_q32_ = 0;
       }
