@@ -37,8 +37,15 @@ cannot disagree — there is one implementation.
   duration 64 the window ends with the attack, so a rail-driven notch hides
   under the noise floor; the first version of this check swept ENV ATTACK alone
   and reported ALL PASS on a defect that was plainly visible in the sim.
-  Settings too short to judge (a 1.7 ms chiff is two blocks long) report SKIP,
-  never PASS. Takes an optional page path, so a prototype branch's
+  THE RESIDUAL IS HIGH-PASSED (20 Hz) BEFORE MEASURING, and that is
+  load-bearing: the chiff ends by its slew slowing until the motion leaves the
+  audible band, and a per-block standard deviation cannot tell "stopped
+  moving" from "moving slower than the block". Without the filter the metric
+  collapsed as the slew slowed and reported a 17 dB CLIFF where the engine is
+  provably smooth. It was caught by the drop MOVING with the block length
+  (54.4 ms at 3.4 ms blocks, 60.0 ms at 10 ms) -- a real discontinuity would
+  not move. Settings too short to judge (a 1.7 ms chiff is two blocks long)
+  report SKIP, never PASS. Takes an optional page path, so a prototype branch's
   `chiff_sim.html` can be measured against the current one.
   NOT in `make check`: it fails today (see the plan's OPEN ITEM 3), and a
   suite that is expected to be red stops being read. Wire it in once it passes.

@@ -15,7 +15,7 @@
 //          This is what the asymptotic prototype's release-end bug looked like
 //          (33 dB in 100 ms) and it was also found by eye, not by a check.
 //
-// Blocks scale with the DIALLED window, so a smooth exponential decay spends
+// Blocks scale with the NOMINAL window, so a smooth exponential decay spends
 // roughly the same dB per block at every setting and one threshold serves all.
 // Only blocks above the inaudibility floor count: below it nothing is audible,
 // so wiggles there are not defects.
@@ -57,6 +57,9 @@ const CLIFF_LIMIT_DB = 15;
 // chiff is over in two blocks, and calling that a cliff would be noise. Such
 // settings are reported SKIP, never PASS, so they cannot look like coverage.
 const MIN_BLOCKS = 8;
+// Below this the chiff's motion is not heard as noise but as drift on the
+// envelope, so it is not what this check is about.
+const HIGHPASS_HZ = 20;
 const ATTACKS = [24, 40, 64, 96, 127];
 // Duration 64 = window equals the attack; above it the window outlasts the
 // attack, which is what exposes a rail-driven notch. 90 is the sim's default.
@@ -106,14 +109,35 @@ loadPage(pagePath).then(page => {
     const blockMs = Math.max(1, Math.min(20, windowMs / 20));
     const BLOCK = Math.max(16, Math.round(blockMs * FS / 1000));
 
+    // HIGH-PASS THE RESIDUAL FIRST, and this is load-bearing. The chiff ends by
+    // its slew slowing until the motion leaves the audible band -- that is the
+    // whole design. But a per-block standard deviation cannot see the
+    // difference between "stopped moving" and "moving slower than the block",
+    // so as the slew slows the raw metric collapses and reports a CLIFF where
+    // the engine is provably smooth (the internal excursion falls ~1.4 dB per
+    // block right through it). Proof it was the metric: the reported drop MOVED
+    // with the block length -- 54.4 ms at 3.4 ms blocks, 60.0 ms at 10 ms --
+    // and a real discontinuity would not have moved.
+    //
+    // A one-pole high-pass at HIGHPASS_HZ keeps what is audible as noise and
+    // discards drift, so "fell out of the band" stops reading as "fell off a
+    // cliff" while a genuine collapse of in-band content still does.
+    const hpAlpha = 2 * Math.PI * HIGHPASS_HZ / FS;
+    const resid = new Float64Array(n);
+    let lp = 0;
+    for (let i = 0; i < n; i++) {
+      const x = wet.out[i] - dry[i];
+      lp += hpAlpha * (x - lp);
+      resid[i] = x - lp;
+    }
     const curve = [];
     for (let lo = 0; lo + BLOCK <= n; lo += BLOCK) {
       let sum = 0;
-      for (let i = lo; i < lo + BLOCK; i++) sum += wet.out[i] - dry[i];
+      for (let i = lo; i < lo + BLOCK; i++) sum += resid[i];
       const mean = sum / BLOCK;
       let sq = 0;
       for (let i = lo; i < lo + BLOCK; i++) {
-        const d = (wet.out[i] - dry[i]) - mean;
+        const d = resid[i] - mean;
         sq += d * d;
       }
       const sd = Math.sqrt(sq / BLOCK);
@@ -213,7 +237,7 @@ loadPage(pagePath).then(page => {
   fs.writeFileSync('/tmp/_decay.ppm',
     Buffer.concat([Buffer.from(`P6\n${W} ${H}\n255\n`), px]));
   execSync(`sips -s format png /tmp/_decay.ppm --out ${out} >/dev/null 2>&1`);
-  console.log(`\nwrote ${out}  x: 0..${X_MAX}% of the dialled window, ` +
+  console.log(`\nwrote ${out}  x: 0..${X_MAX}% of the nominal window, ` +
     `y: ${DB_TOP}..${DB_BOT} dBFS, line at ${INAUDIBLE_DB} (inaudible)`);
   console.log(`  swatches top to bottom: ${curves.map(c => 'attack ' + c.attack).join(', ')}` +
     ` (duration ${DURATIONS[1]}, long gate)`);
