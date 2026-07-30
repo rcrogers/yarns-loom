@@ -89,6 +89,14 @@ class Envelope {
   // the remaining stage when the stage is shorter than the chiff).
   void RederiveSlewState();
 
+  // EXPERIMENT: the +/- the chiff puts on the slew input -- half the note's
+  // ALLOWED range times the shrink, so it does not follow the realized level.
+  int32_t ChiffPerturb_q30() const;
+
+  // EXPERIMENT: where the chiff's slew-time sweep will be after `samples`
+  // more samples, capped at its end. The shrink is sized against this.
+  uint32_t ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const;
+
  public:
 
   // Step the running bias state directly, bypassing the per-block slew that
@@ -153,8 +161,13 @@ class Envelope {
   //
   //   slew input    what the slew chases: base +/- the perturbation, sign
   //                 drawn per sample from the shared PRNG
-  //   perturbation  chiff_input_perturb_q30_, 0.9 * (top - floor), shrinking
-  //                 linearly to 0 across the window
+  //   perturbation  half the note's ALLOWED range times
+  //                 chiff_perturb_shrink_q30_ -- independent of the level the
+  //                 note reaches, so a quiet note gets the same exciter. The
+  //                 shrink is what decays with time.
+  //   sag           near a rail the perturbation does not fit, so the CENTRE
+  //                 moves off the rail by the shortfall. Sized from the
+  //                 REALIZED excursion, so it vanishes with the noise
   //   slew time     ramped linearly (so the RATE decays exponentially) from a
   //                 start set by AMOUNT to an end set by the window
   //
@@ -236,8 +249,14 @@ class Envelope {
   // construction the duty-binary core used for its duty curve.
   int32_t stage_start_q30_;
   int32_t stage_slew_rate_q31_;               // Stage rate (floor/blend)
-  int32_t chiff_input_perturb_q30_;           // Current +/- on the slew input
-  int32_t chiff_input_perturb_step_q30_;      // Per-sample shrink of the above
+  // EXPERIMENT: how much of the available slack the perturbation uses, Q30
+  // (1<<30 == all of it), shrinking by chiff_perturb_shrink_step octaves per
+  // sample. Dimensionless, so unlike the levels it does not rescale.
+  int32_t chiff_perturb_shrink_q30_;
+  uint32_t chiff_perturb_shrink_step_q5_27_;
+  // EXPERIMENT: half the note's ALLOWED range -- the perturbation at full
+  // shrink. A LEVEL, so it rescales with the others.
+  int32_t chiff_perturb_full_q30_;
   // Ordered clamp bounds over the note's stage targets. The envelope's range
   // may be numerically inverted (CV DAC codes fall as volts rise; a warped
   // timbre target may be negative), so these are min/max, not release/peak.
