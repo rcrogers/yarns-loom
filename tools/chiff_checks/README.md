@@ -28,6 +28,20 @@ cannot disagree — there is one implementation.
   STRICT while these checks load them sloppy; that gap once shipped an artifact
   with blank graphs. Renders as well as boots, because booting alone would not
   have caught it.
+- `decay.js` — is the excursion's decay SMOOTH? Sweeps ENV ATTACK x EXCITER
+  DURATION x gate and reports two shape failures on the per-block wander
+  curve: a NOTCH (the curve falls, then recovers) and a CLIFF (it falls faster
+  than a decay could). Both had been found by eye, never by a check — a notch
+  is legal at every individual level, so `residual.js`, which reports levels,
+  cannot see it. **Sweeping EXCITER DURATION is what makes it work:** at
+  duration 64 the window ends with the attack, so a rail-driven notch hides
+  under the noise floor; the first version of this check swept ENV ATTACK alone
+  and reported ALL PASS on a defect that was plainly visible in the sim.
+  Settings too short to judge (a 1.7 ms chiff is two blocks long) report SKIP,
+  never PASS. Takes an optional page path, so a prototype branch's
+  `chiff_sim.html` can be measured against the current one.
+  NOT in `make check`: it fails today (see the plan's OPEN ITEM 3), and a
+  suite that is expected to be red stops being read. Wire it in once it passes.
 - `residual.js` — splits the chiff's effect into OFFSET (per-block mean of
   chiff minus nominal: the value sitting off where it should be) and WANDER
   (per-block standard deviation: what is audible), in absolute dBFS. RMS of the

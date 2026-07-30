@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 using namespace yarns;
 
 static Envelope env;
@@ -48,32 +49,42 @@ int main(int argc, char** argv) {
   adsr.attack_u32 = IncFromSetting(attack_setting);
   adsr.decay_u32 = IncFromSetting(decay_setting);
   adsr.release_u32 = IncFromSetting(release_setting);
-  fprintf(stderr, "attack %u smp, decay %u smp, chiff %u smp\n",
-          UINT32_MAX / adsr.attack_u32, UINT32_MAX / adsr.decay_u32,
-          lut_chiff_duration_samples[duration]);
+  fprintf(stderr, "attack %u smp, decay %u smp\n",
+          UINT32_MAX / adsr.attack_u32, UINT32_MAX / adsr.decay_u32);
 
   env.Init(0);
   env.NoteOn(adsr, 0, 16383, amount, duration);
 
-  printf("blk stage  chiffLeft  shift  alphaAsShift  nominalSlewTime  amp"
-         "  ampAsFracOfInitial floorBinds | stageStart  target  value\n");
-  const int32_t amp0 = env.chiff_input_perturb_q30_;
+  // EXPERIMENT-era columns: the perturbation is derived (shrink x half the
+  // allowed range), and what has to reach inaudibility is the OUTPUT it
+  // produces -- perturbation x the slew's response at the chiff's OWN rate,
+  // which is what the floor's rescale preserves. Printed in dBFS against the
+  // note's range so it compares directly with the residual/wander scripts.
+  printf("blk stage  chiffLeft  slewTime  rateAsTime  stageRateAsTime"
+         "  shrink  perturb  outDbfs  octLeft floorBinds\n");
+  const double kFullScale = 16383.0 * 32768.0;
   int16_t buffer[kAudioBlockSize];
   for (int b = 0; b < blocks; ++b) {
     if (b == gate_off_block) env.NoteOff();
     bool floor_binds = env.phase_increment_u32_ != 0 &&
                        env.slew_rate_q31_ < env.stage_slew_rate_q31_;
     if (b >= from_block) {
-      printf("%3d %5d %10u %6.3f %13.3f %14.3f %11d %8.4f %s\n",
+      const double rate = env.slew_rate_q31_ / 2147483648.0;
+      const double response = std::min(1.0, 3.0 * sqrt(rate / (2.0 * (2.0 - rate))));
+      const double perturb = env.ChiffPerturb_q30();
+      const double out = perturb * response;
+      const double oct_left = env.chiff_perturb_shrink_step_q5_27_
+        * (double)env.chiff_duration_samples_left_ / 134217728.0;
+      printf("%3d %5d %10u %8.3f %11.3f %15.3f %8.5f %9.0f %8.1f %8.2f %s\n",
              b, (int)env.stage_, env.chiff_duration_samples_left_,
              SlewTimeLog2Of(env.slew_time_log2_q5_27_),
              SlewTimeLog2OfRate(env.slew_rate_q31_),
              SlewTimeLog2OfRate(env.stage_slew_rate_q31_),
-             env.chiff_input_perturb_q30_,
-             amp0 ? (double)env.chiff_input_perturb_q30_ / amp0 : 0.0,
+             env.chiff_perturb_shrink_q30_ / 1073741824.0,
+             perturb,
+             out > 0 ? 20 * log10(out / kFullScale) : -999.0,
+             oct_left,
              floor_binds ? "FLOOR" : "");
-      printf("      -> stageStart %11d  target %11d  value %11d\n",
-             env.stage_start_q30_, env.target_q30_, env.value_q30_);
     }
     Envelope::FillSharedPrngBuffer();
     env.RenderSamples(buffer, 0);
