@@ -93,13 +93,11 @@ void Envelope::Init(int16_t zero_value_s16) {
   phase_increment_u32_ = 0;
   stage_samples_left_ = 0;
   stage_slew_time_log2_q5_27_ = 0;
-  slew_rate_q31_ = 0;
   chiff_slew_rate_decay_q32_ = 0;
   slew_time_log2_q5_27_ = 0;
   chiff_slew_time_log2_step_q5_27_ = 0;
   chiff_slew_time_log2_end_q5_27_ = 0;
   chiff_target_samples_ = 0;
-  stage_slew_rate_q31_ = 0;
   chiff_perturb_shrink_q30_ = 0;
   chiff_perturb_shrink_step_q5_27_ = 0;
   chiff_perturb_full_q30_ = 0;
@@ -227,7 +225,7 @@ static uint32_t ChiffPerturbScaleForClampedRate_q15_5(
     / std::max<uint32_t>(SlewPerturbResponse_q15_5(clamped_slew_rate_q31), 1u);
 }
 
-// Defined below (Hacker's Delight divlu); used by the input-base blend.
+// Defined below (Hacker's Delight divlu); used by Rescale.
 static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
 // Defined below; chiff window in samples, scaled off the attack duration.
@@ -449,8 +447,6 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
 }
 
 void Envelope::RederiveSlewState() {
-  // The chiff-free (classic) slew always runs at the stage's own rate.
-  stage_slew_rate_q31_ = SlewRateFromTimeLog2_q31(stage_slew_time_log2_q5_27_);
   if (chiff_target_samples_) {
     // The chiff's slew slows from where it is now toward the slowest it goes,
     // over the NOMINAL duration. That duration is a sizing reference, never a
@@ -462,12 +458,10 @@ void Envelope::RederiveSlewState() {
     }
     chiff_slew_time_log2_step_q5_27_ =
       (slowest_slew_time_q5_27 - slew_time_log2_q5_27_) / chiff_target_samples_;
-    slew_rate_q31_ = SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_);
     chiff_slew_rate_decay_q32_ = DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
   } else {
     slew_time_log2_q5_27_ = stage_slew_time_log2_q5_27_;
     chiff_slew_time_log2_step_q5_27_ = 0;
-    slew_rate_q31_ = stage_slew_rate_q31_;
     chiff_slew_rate_decay_q32_ = 0;
   }
 }
@@ -628,7 +622,6 @@ void Envelope::RenderStage(
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   int32_t value_q30 = value_q30_;
-  int32_t slew_rate_q31 = slew_rate_q31_;
 
   // One straight run, bounded by the block, the stage countdown, and (while
   // live) the chiff window. Whichever expires hands off or re-enters -- once,
@@ -670,6 +663,14 @@ void Envelope::RenderStage(
     // needs it too, and it is the expensive term in this function (a sqrt and
     // a divide). Computing it before the floor overwrites the rate is what
     // makes the sharing possible.
+    // ONE ENCODING OF THE SLEW IS STORED -- the slew TIME -- and the rate is
+    // derived here, once, for the loop to run on. They are the same quantity
+    // (rate = 2^-time), and keeping both as state meant keeping two
+    // accumulators for it: the loop decayed the rate per sample while the
+    // writeback raised the time per run, and they were reconciled only when
+    // the floor bound. Derived, the rate cannot drift from the schedule.
+    uint32_t slew_time_q5_27 = slew_time_log2_q5_27_;
+    int32_t slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
     const uint32_t chiff_response_q15_5 =
       SlewPerturbResponse_q15_5(slew_rate_q31);
     uint32_t chiff_perturb_scale_q15_5 = 1u << 15;
@@ -681,10 +682,15 @@ void Envelope::RenderStage(
     // audible as a burst right at the note's end. A hold's stage rate is the
     // one the last timed stage left behind, which is exactly the rate the
     // envelope should still be tracking at.
-    if (slew_rate_q31 < stage_slew_rate_q31_) {
+    // A larger slew time is a slower slew, so this is the floor: the chiff's
+    // slew never runs slower than the stage's. The stage's RATE is derived
+    // only here, in the branch that needs it -- the common case never pays for
+    // it, which is why storing it bought nothing.
+    if (slew_time_q5_27 > stage_slew_time_log2_q5_27_) {
+      slew_time_q5_27 = stage_slew_time_log2_q5_27_;
+      slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
       chiff_perturb_scale_q15_5 = ChiffPerturbScaleForClampedRate_q15_5(
-        chiff_response_q15_5, stage_slew_rate_q31_);
-      slew_rate_q31 = stage_slew_rate_q31_;
+        chiff_response_q15_5, slew_rate_q31);
       decay_q32 = 0;
     }
     // Slew input centre. The NOMINAL VALUE (what value_q30_ would be with no
@@ -703,11 +709,15 @@ void Envelope::RenderStage(
       const int32_t nominal_value_q30 = stage_start_q30_ + static_cast<int32_t>(
         (static_cast<int64_t>(stage_target_q30 - stage_start_q30_) *
          expo_u16) >> 16);
-      uint32_t ratio_q31 = slew_rate_q31 == stage_slew_rate_q31_
+      // stage_rate/slew_rate is 2^(slew_time - stage_time), so in the time
+      // domain the ratio is a subtraction through the same exp2 the rates come
+      // from -- where in the rate domain it was a 64-bit software division
+      // (DivU64ByU32: 51 instructions, four branches). The floor above has
+      // already made the times equal wherever it bound, so >= covers it.
+      uint32_t ratio_q31 = slew_time_q5_27 >= stage_slew_time_log2_q5_27_
         ? static_cast<uint32_t>(INT32_MAX)
-        : DivU64ByU32(static_cast<uint32_t>(stage_slew_rate_q31_) >> 1,
-                      static_cast<uint32_t>(stage_slew_rate_q31_) << 31,
-                      static_cast<uint32_t>(slew_rate_q31));
+        : SlewRateFromTimeLog2_q31(
+            stage_slew_time_log2_q5_27_ - slew_time_q5_27);
       slew_input_center_q30 = nominal_value_q30 + static_cast<int32_t>(
         (static_cast<int64_t>(stage_target_q30 - nominal_value_q30) * ratio_q31)
         >> 31);
@@ -854,23 +864,14 @@ void Envelope::RenderStage(
         // below the end it was told to stop at.
         chiff_slew_rate_decay_q32_ = 0;
       }
+      // Nothing to reconcile: the next run derives its rate from this time.
       slew_time_log2_q5_27_ = slew_time_log2_end;
-      // If the floor bound, the loop ran at the stage rate, so the register
-      // no longer carries the chiff's own rate. Re-derive it from the
-      // shift -- which ramped untouched -- so the two stay two encodings of
-      // ONE rate. The floor test is re-read from the members rather than
-      // remembered in a flag: both are untouched until this run's final
-      // store, and a flag would pin a register across the sample loop.
-      if (slew_rate_q31_ < stage_slew_rate_q31_) {
-        slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_log2_end);
-      }
     }
   }
 
   block_samples_left -= run_samples;
   value_q30_ = value_q30;
   bias_q31_ = bias_q31;
-  slew_rate_q31_ = slew_rate_q31;
 
   if (timed) {
     stage_samples_left_ -= run_samples;

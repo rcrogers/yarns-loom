@@ -147,10 +147,6 @@ class Envelope {
   // accumulator, interpolating slew times between powers of two.
   uint32_t stage_slew_time_log2_q5_27_;
 
-  // Slew rate 2^-slew_time_log2, Q31 (1.0 == 2^31): value += (input-value)*rate>>31.
-  // Positive, <= 0x7FFF8000 < 2^31 (single signed SMULL vs the signed delta).
-  int32_t slew_rate_q31_;
-
   // How the rate falls while the chiff runs: decay = 1 - 2^-step (Q32), so
   // rate -= (rate*decay)>>32 each sample == rate *= 2^-step, reproducing the
   // slew time rising linearly, with no per-sample LUT. Zero = hold.
@@ -237,9 +233,15 @@ class Envelope {
   // remaining window (in practice the release) compresses it: both the
   // perturbation and the slew time re-sloped to land by stage end.
   //
-  // While the chiff runs, slew_rate_q31_/slew_time_log2_q5_27_ are the
-  // chiff's (ramping); stage_slew_rate_q31_ carries the stage rate. With the
-  // chiff off they are the classic slew and the value is exactly that.
+  // ONLY THE SLEW TIME IS STORED. The rate is 2^-slew_time, so the two are one
+  // quantity in two encodings, and keeping both as state meant keeping two
+  // accumulators for it -- the loop decaying the rate per sample, the writeback
+  // raising the time per run -- which could drift apart between the moments
+  // they were reconciled. RenderStage derives the rate it needs, once per run.
+  // The rate is required only INSIDE the sample loop (the one-pole multiply and
+  // its per-sample decay); every other consumer is either a comparison, which
+  // is monotone in either encoding, or the centre blend's ratio, which is a
+  // difference of slew times and so is CHEAPER here than it was as a division.
   //
   // Slew time is unsigned: a magnitude, 0..kMaxSlewTimeLog2. The max exceeds
   // 2^31 as Q5.27 (integer part up to 27), so int32 would sign-flip.
@@ -258,7 +260,6 @@ class Envelope {
   // lut_env_expo[phase] -- with no iterated level state, the same
   // construction the duty-binary core used for its duty curve.
   int32_t stage_start_q30_;
-  int32_t stage_slew_rate_q31_;               // Stage rate (floor/blend)
   // EXPERIMENT: how much of the available slack the perturbation uses, Q30
   // (1<<30 == all of it), shrinking by chiff_perturb_shrink_step octaves per
   // sample. Dimensionless, so unlike the levels it does not rescale.
