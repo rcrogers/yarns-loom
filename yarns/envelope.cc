@@ -98,8 +98,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   slew_time_log2_q5_27_ = 0;
   chiff_slew_time_log2_step_q5_27_ = 0;
   chiff_slew_time_log2_end_q5_27_ = 0;
-  chiff_duration_samples_left_ = 0;
-  exp_target_samples_ = 0;
+  chiff_target_samples_ = 0;
   stage_slew_rate_q31_ = 0;
   chiff_perturb_shrink_q30_ = 0;
   chiff_perturb_shrink_step_q5_27_ = 0;
@@ -129,6 +128,36 @@ void Envelope::NoteOff() {
   Trigger(ENV_STAGE_RELEASE);
 }
 
+// EXPERIMENT: where the chiff's own slew-time sweep will have got to after
+// `samples` more samples, capped at the sweep's end. The sweep is sized to the
+// NOMINAL duration, so at a release deadline it is mid-sweep and its rate
+// there is neither the start nor the end -- and the rate is what decides how
+// much of the perturbation is audible, so the shrink must be sized against it.
+// EXPERIMENT: where the rate sweep actually stops -- the slower of the chiff's
+// own end and the STAGE's slew time. Landing on the stage rate is what returns
+// the envelope to exactly its nominal level curve once the chiff has
+// gone quiet; without it a short chiff leaves the slew running fast for the
+// rest of the note, because the sweep's end is derived from the chiff's
+// duration and a short duration means a fast end.
+//
+// This is the rate FLOOR's mirror image, and it only became available when the
+// window went away: while a window existed its close reset the slew time, and
+// the sweep's end could not be tied to the stage without tying the chiff's
+// TIMING to the stage too. Now the shrink owns the timing, so the rate is free
+// to land wherever the envelope needs it.
+uint32_t Envelope::ChiffSweepEnd_q5_27() const {
+  return std::max(chiff_slew_time_log2_end_q5_27_, stage_slew_time_log2_q5_27_);
+}
+
+uint32_t Envelope::ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const {
+  const uint64_t swept = static_cast<uint64_t>(chiff_slew_time_log2_step_q5_27_)
+    * samples;
+  const uint64_t at_deadline =
+    static_cast<uint64_t>(slew_time_log2_q5_27_) + swept;
+  const uint32_t end = ChiffSweepEnd_q5_27();
+  return at_deadline > end ? end : static_cast<uint32_t>(at_deadline);
+}
+
 // EXPERIMENT: the +/- the chiff puts on the slew input. Sized from the note's
 // ALLOWED range (set in NoteOn) and NOT from the level the note actually
 // reaches, so the noise does not thin out at a low sustain or a low peak --
@@ -139,21 +168,6 @@ void Envelope::NoteOff() {
 // excursion notched there and came back as the decay pulled the level away.
 // Making room is now the CENTRE's job (see the sag in RenderStage), not the
 // perturbation's.
-// EXPERIMENT: where the chiff's own slew-time sweep will have got to after
-// `samples` more samples, capped at the sweep's end. The sweep runs on its own
-// schedule (exp_target_samples_), so after a release compresses the deadline
-// the two no longer coincide and this is the only way to know the rate the
-// chiff will actually be running at when the deadline arrives.
-uint32_t Envelope::ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const {
-  const uint64_t swept = static_cast<uint64_t>(chiff_slew_time_log2_step_q5_27_)
-    * samples;
-  const uint64_t at_deadline =
-    static_cast<uint64_t>(slew_time_log2_q5_27_) + swept;
-  return at_deadline > chiff_slew_time_log2_end_q5_27_
-    ? chiff_slew_time_log2_end_q5_27_
-    : static_cast<uint32_t>(at_deadline);
-}
-
 int32_t Envelope::ChiffPerturb_q30() const {
   return static_cast<int32_t>(
     (static_cast<int64_t>(chiff_perturb_full_q30_) * chiff_perturb_shrink_q30_)
@@ -346,8 +360,13 @@ void Envelope::NoteOn(
       // (center = 1x the attack, +-kChiffOctaves octaves across the range).
       uint32_t window_samples =
         ChiffWindowSamples(adsr.attack_u32, chiff_duration);
-      chiff_duration_samples_left_ = chiff_amount ? window_samples : 0;
-      if (!chiff_duration_samples_left_) {
+      // The nominal duration is a SIZING REFERENCE, not a countdown: it sets
+      // how fast the perturbation shrinks and how fast the slew slows, and
+      // nothing observes it elapsing. AMOUNT 0 arms nothing, which is the one
+      // case that still degenerates to the classic slew by construction.
+      chiff_target_samples_ = chiff_amount ? window_samples : 0;
+      if (!chiff_target_samples_) {
+        chiff_perturb_shrink_q30_ = 0;
         RederiveSlewState();
         break;
       }
@@ -371,14 +390,12 @@ void Envelope::NoteOn(
       // long target needs fewer octaves (its slew has already done more of the
       // work), a short target more, a quiet note fewer.
       //
-      exp_target_samples_ = window_samples;
-      // Uncompressed, the sweep is sized to land exactly on its end at the
-      // window's end, so the slew time at the deadline IS that end.
+      // Sized to land on the sweep's end at the nominal duration, so the slew
+      // time at that moment IS that end.
       chiff_perturb_shrink_step_q5_27_ =
         ChiffShrinkOctaves_q5_27(chiff_perturb_full_q30_,
           chiff_slew_time_log2_end_q5_27_)
         / window_samples;
-      chiff_duration_samples_left_ = window_samples * 8;
       RederiveSlewState();
       break;
     }
@@ -433,17 +450,17 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
 void Envelope::RederiveSlewState() {
   // The chiff-free (classic) slew always runs at the stage's own rate.
   stage_slew_rate_q31_ = SlewRateFromTimeLog2_q31(stage_slew_time_log2_q5_27_);
-  if (chiff_duration_samples_left_) {
-    // Chiff sweep: from the current slew time up to the chiff's own end,
-    // over the remaining window (compressed windows just sweep
-    // faster). NoteOn guarantees start <= end; guard anyway.
-    if (slew_time_log2_q5_27_ > chiff_slew_time_log2_end_q5_27_) {
-      slew_time_log2_q5_27_ = chiff_slew_time_log2_end_q5_27_;
+  if (chiff_target_samples_) {
+    // Chiff sweep: from the current slew time toward the chiff's own end, over
+    // the NOMINAL duration. That duration is a sizing reference, never a
+    // countdown -- nothing happens when it elapses. NoteOn guarantees
+    // start <= end; guard anyway.
+    const uint32_t sweep_end_q5_27 = ChiffSweepEnd_q5_27();
+    if (slew_time_log2_q5_27_ > sweep_end_q5_27) {
+      slew_time_log2_q5_27_ = sweep_end_q5_27;
     }
     chiff_slew_time_log2_step_q5_27_ =
-      (chiff_slew_time_log2_end_q5_27_ - slew_time_log2_q5_27_)
-        / (exp_target_samples_ ? exp_target_samples_
-                              : chiff_duration_samples_left_);
+      (sweep_end_q5_27 - slew_time_log2_q5_27_) / chiff_target_samples_;
     slew_rate_q31_ = SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_);
     chiff_slew_rate_decay_q32_ = DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
   } else {
@@ -467,7 +484,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // off the value is the exact classic slew, so use it directly; a timed
   // stage's nominal value is closed-form from its phase (the same lut_env_expo
   // curve the slew traces); a hold's has converged to its target.
-  if (!chiff_duration_samples_left_) {
+  if (!chiff_perturb_shrink_q30_) {
     stage_start_q30_ = value_q30_;
   } else if (phase_increment_u32_) {
     // Phase runs 0 -> ~UINT32_MAX across the stage, but a stage that ran to
@@ -536,32 +553,47 @@ void Envelope::Trigger(EnvelopeStage stage) {
           kMaxSlewTimeLog2_q5_27
         );
   }
-  // Chiff compression: a stage shorter than the remaining window re-slopes
-  // both the perturbation and the slew time so they reach their ends by the
-  // stage's end, rather than being cut off part-way through. Release-only: the window deliberately spans attack/decay/
-  // sustain on its own timetable (a fresh attack re-arms its window in
-  // NoteOn, after this Trigger returns).
-  if (stage == ENV_STAGE_RELEASE
-      && chiff_duration_samples_left_ > stage_samples_left_) {
-    chiff_duration_samples_left_ = stage_samples_left_;
-    // EXPERIMENT: the step is octaves/sample now, so re-slope in the same
-    // domain -- shrink to inaudibility by stage end, not linearly to zero.
-    // The perturbation to shrink FROM is the current one, which no longer
-    // depends on the level -- so unlike the slack form this needs no estimate
-    // of where the value happens to be.
-    //
-    // The rate sweep is NOT re-sloped with it (it stays on the original
-    // window's schedule, exp_target_samples_), so the slew time at the new
-    // deadline is wherever the sweep has got to by then -- which is what the
-    // shrink must be sized against.
-    chiff_perturb_shrink_step_q5_27_ =
-      ChiffShrinkOctaves_q5_27(ChiffPerturb_q30(),
-        ChiffSlewTimeAtDeadline_q5_27(chiff_duration_samples_left_))
-      / chiff_duration_samples_left_;
-  }
-  // Re-derive slew coefficients for the new stage (and, if live, the chiff's
-  // ramp over its possibly-compressed window).
+  // A RELEASE CAN ONLY HURRY THE SHRINK, NEVER SLOW IT. The chiff's own
+  // schedule is sovereign -- it is what CHIFF DURATION dials -- but a note
+  // that ends before the chiff has gone quiet would leave audible noise with
+  // nothing left to produce it, so the release imposes a DEADLINE: reach
+  // inaudibility by the end of this stage.
+  //
+  // Expressed as octaves rather than as a countdown, which is what lets the
+  // window go: ask how many octaves are still owed at the stage's end rate,
+  // divide by the samples available, and take that step only if it is FASTER
+  // than the one already running. A short release therefore compresses the
+  // shrink; a long one changes nothing.
+  // Re-derive slew coefficients for the new stage, then let a release hurry
+  // the chiff (below) -- in that order, because the deadline work adjusts what
+  // RederiveSlewState just computed.
   RederiveSlewState();
+  if (stage == ENV_STAGE_RELEASE && stage_samples_left_ && chiff_target_samples_) {
+    // BOTH mechanisms get the same deadline. Hurrying only the perturbation
+    // leaves the note ending with the slew still running at chiff speed, and
+    // the ~2% of the stage's span that a slew has left at handoff is then
+    // consumed in a fraction of a millisecond instead of gliding away over the
+    // stage's own time constant -- a click at the end of every note. MEASURED
+    // before this was added: a burst to -53 dBFS at the release/DEAD boundary
+    // on a long chiff.
+    const uint32_t shrink_step_q5_27 =
+      ChiffShrinkOctaves_q5_27(ChiffPerturb_q30(),
+        ChiffSlewTimeAtDeadline_q5_27(stage_samples_left_))
+      / stage_samples_left_;
+    if (shrink_step_q5_27 > chiff_perturb_shrink_step_q5_27_) {
+      chiff_perturb_shrink_step_q5_27_ = shrink_step_q5_27;
+    }
+    const uint32_t sweep_end_q5_27 = ChiffSweepEnd_q5_27();
+    if (sweep_end_q5_27 > slew_time_log2_q5_27_) {
+      const uint32_t sweep_step_q5_27 =
+        (sweep_end_q5_27 - slew_time_log2_q5_27_) / stage_samples_left_;
+      if (sweep_step_q5_27 > chiff_slew_time_log2_step_q5_27_) {
+        chiff_slew_time_log2_step_q5_27_ = sweep_step_q5_27;
+        chiff_slew_rate_decay_q32_ =
+          DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
+      }
+    }
+  }
 }
 
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
@@ -601,12 +633,14 @@ void Envelope::RenderStage(
   // live) the chiff window. Whichever expires hands off or re-enters -- once,
   // not re-checked per sample.
   const bool timed = phase_increment_u32_ != 0;
-  const bool chiff_live = chiff_duration_samples_left_ != 0;
+  // NO CHIFF ON/OFF ANYWHERE IN HERE. There is no window to be inside of and no
+  // mode to be in: with AMOUNT 0 the shrink is zero, so the perturbation is
+  // zero, the sweep step is zero and the rate is the stage's -- and every line
+  // below degenerates to the classic slew on its own. Branching on it would
+  // only make the BEST case cheaper, which is worth nothing here; the worst
+  // case is a live chiff and it pays this cost either way.
   uint32_t run_samples = block_samples_left;
   if (timed) run_samples = std::min<uint32_t>(run_samples, stage_samples_left_);
-  if (chiff_live) {
-    run_samples = std::min<uint32_t>(run_samples, chiff_duration_samples_left_);
-  }
   int16_t* const segment_end = sample_buffer + run_samples;
   const int32_t stage_target_q30 = target_q30_;
 
@@ -636,9 +670,17 @@ void Envelope::RenderStage(
     // a divide). Computing it before the floor overwrites the rate is what
     // makes the sharing possible.
     const uint32_t chiff_response_q15_5 =
-      chiff_live ? SlewPerturbResponse_q15_5(slew_rate_q31) : 0u;
+      SlewPerturbResponse_q15_5(slew_rate_q31);
     uint32_t chiff_perturb_scale_q15_5 = 1u << 15;
-    if (timed && slew_rate_q31 < stage_slew_rate_q31_) {
+    // HOLD STAGES ARE NO LONGER EXEMPT. They used to be, "so the chiff still
+    // closes on its own schedule" -- but closing is the SHRINK's job now, and
+    // the exemption's real effect was that at the end of a release the floor
+    // vanished, the chiff's own very slow rate took over, and the value froze
+    // where it stood while the nominal level walked away from it. That is
+    // audible as a burst right at the note's end. A hold's stage rate is the
+    // one the last timed stage left behind, which is exactly the rate the
+    // envelope should still be tracking at.
+    if (slew_rate_q31 < stage_slew_rate_q31_) {
       chiff_perturb_scale_q15_5 = ChiffPerturbScaleForClampedRate_q15_5(
         chiff_response_q15_5, stage_slew_rate_q31_);
       slew_rate_q31 = stage_slew_rate_q31_;
@@ -653,7 +695,7 @@ void Envelope::RenderStage(
     // this wrong and the value trails the envelope (a kink at the window's
     // end). Holds and a closed window feed the slew the stage target directly.
     int32_t slew_input_center_q30 = stage_target_q30;
-    if (chiff_live && timed) {
+    if (timed) {
       uint32_t phase_u32 = 0u - stage_samples_left_ * phase_increment_u32_;
       const uint32_t expo_u16 = (Interpolate824(lut_env_expo, phase_u32) *
         static_cast<uint32_t>(kStageLandingFraction_u16)) >> 16;
@@ -791,38 +833,35 @@ void Envelope::RenderStage(
       *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
     }
 #endif
-    if (chiff_live) {
-      // The SHRINK advances, not the perturbation: the perturbation is
-      // re-derived from the slack next run, so writing it back would freeze
-      // this run's level into it.
+    {
+      // THE PERTURBATION SHRINKS FOREVER AND NEVER REACHES ZERO -- until Q30
+      // runs out of bits, which is the only ending there is. Nothing mutes it,
+      // nothing resets the slew: the term simply becomes too small to
+      // represent, and the loop it feeds is already the classic slew with a
+      // zero offset. That is the low-pass gate the design was after, and it is
+      // why there is no window here any more.
       chiff_perturb_shrink_q30_ = static_cast<int32_t>(
         (static_cast<int64_t>(chiff_perturb_shrink_q30_) * SlewRateFromTimeLog2_q31(
            chiff_perturb_shrink_step_q5_27_ * run_samples))
         >> 31);
       uint32_t slew_time_log2_end =
         slew_time_log2_q5_27_ + chiff_slew_time_log2_step_q5_27_ * run_samples;
-      if (slew_time_log2_end > chiff_slew_time_log2_end_q5_27_) {
-        slew_time_log2_end = chiff_slew_time_log2_end_q5_27_;
-      }
-      chiff_duration_samples_left_ -= run_samples;
-      if (chiff_duration_samples_left_ == 0) {
-        // Window closed: the slew input collapses to the stage target
-        // (exact classic slew); the value carries, no snap.
-        chiff_perturb_shrink_q30_ = 0;
-        slew_time_log2_q5_27_ = stage_slew_time_log2_q5_27_;
-        slew_rate_q31 = stage_slew_rate_q31_;
+      const uint32_t sweep_end_q5_27 = ChiffSweepEnd_q5_27();
+      if (slew_time_log2_end > sweep_end_q5_27) {
+        slew_time_log2_end = sweep_end_q5_27;
+        // Sweep done: stop decaying the rate, or the loop keeps taking it
+        // below the end it was told to stop at.
         chiff_slew_rate_decay_q32_ = 0;
-      } else {
-        slew_time_log2_q5_27_ = slew_time_log2_end;
-        // If the floor bound, the loop ran at the stage rate, so the register
-        // no longer carries the chiff's own rate. Re-derive it from the
-        // shift -- which ramped untouched -- so the two stay two encodings of
-        // ONE rate. The floor test is re-read from the members rather than
-        // remembered in a flag: both are untouched until this run's final
-        // store, and a flag would pin a register across the sample loop.
-        if (timed && slew_rate_q31_ < stage_slew_rate_q31_) {
-          slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_log2_end);
-        }
+      }
+      slew_time_log2_q5_27_ = slew_time_log2_end;
+      // If the floor bound, the loop ran at the stage rate, so the register
+      // no longer carries the chiff's own rate. Re-derive it from the
+      // shift -- which ramped untouched -- so the two stay two encodings of
+      // ONE rate. The floor test is re-read from the members rather than
+      // remembered in a flag: both are untouched until this run's final
+      // store, and a flag would pin a register across the sample loop.
+      if (slew_rate_q31_ < stage_slew_rate_q31_) {
+        slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_log2_end);
       }
     }
   }
@@ -841,8 +880,7 @@ void Envelope::RenderStage(
     }
   }
   if (block_samples_left) {
-    // The chiff window expired within this block: render the remainder
-    // (same path; the chiff state is now inert).
+    // Samples left with no stage handoff: re-enter for the remainder.
     return RenderStage(
       sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   }

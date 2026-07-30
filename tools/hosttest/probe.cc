@@ -60,8 +60,8 @@ int main(int argc, char** argv) {
   // produces -- perturbation x the slew's response at the chiff's OWN rate,
   // which is what the floor's rescale preserves. Printed in dBFS against the
   // note's range so it compares directly with the residual/wander scripts.
-  printf("blk stage  chiffLeft  slewTime  rateAsTime  stageRateAsTime"
-         "  shrink  perturb  outDbfs  octLeft floorBinds\n");
+  printf("blk stage  targetSmp  slewTime  rateAsTime  stageRateAsTime"
+         "  shrink  perturb  outDbfs  octPerTgt  sweepStep floorBinds\n");
   const double kFullScale = 16383.0 * 32768.0;
   int16_t buffer[kAudioBlockSize];
   for (int b = 0; b < blocks; ++b) {
@@ -73,17 +73,21 @@ int main(int argc, char** argv) {
       const double response = std::min(1.0, 3.0 * sqrt(rate / (2.0 * (2.0 - rate))));
       const double perturb = env.ChiffPerturb_q30();
       const double out = perturb * response;
-      const double oct_left = env.chiff_perturb_shrink_step_q5_27_
-        * (double)env.chiff_duration_samples_left_ / 134217728.0;
-      printf("%3d %5d %10u %8.3f %11.3f %15.3f %8.5f %9.0f %8.1f %8.2f %s\n",
-             b, (int)env.stage_, env.chiff_duration_samples_left_,
+      // Octaves the shrink spends across ONE nominal duration. With the
+      // window gone this is a rate, not a remaining budget: it does not run
+      // down, it just describes how fast the perturbation is collapsing.
+      const double oct_per_target = env.chiff_perturb_shrink_step_q5_27_
+        * (double)env.chiff_target_samples_ / 134217728.0;
+      printf("%3d %5d %10u %8.3f %11.3f %15.3f %8.5f %9.0f %8.1f %8.2f %10.6f %s\n",
+             b, (int)env.stage_, env.chiff_target_samples_,
              SlewTimeLog2Of(env.slew_time_log2_q5_27_),
              SlewTimeLog2OfRate(env.slew_rate_q31_),
              SlewTimeLog2OfRate(env.stage_slew_rate_q31_),
              env.chiff_perturb_shrink_q30_ / 1073741824.0,
              perturb,
              out > 0 ? 20 * log10(out / kFullScale) : -999.0,
-             oct_left,
+             oct_per_target,
+             env.chiff_slew_time_log2_step_q5_27_ / 134217728.0,
              floor_binds ? "FLOOR" : "");
     }
     Envelope::FillSharedPrngBuffer();

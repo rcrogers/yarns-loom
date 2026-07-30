@@ -97,6 +97,11 @@ class Envelope {
   // more samples, capped at its end. The shrink is sized against this.
   uint32_t ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const;
 
+  // EXPERIMENT: where the rate sweep stops -- the slower of the chiff's own
+  // end and the stage's own slew time, so the slew lands back on the
+  // envelope's own nominal rate.
+  uint32_t ChiffSweepEnd_q5_27() const;
+
  public:
 
   // Step the running bias state directly, bypassing the per-block slew that
@@ -241,8 +246,11 @@ class Envelope {
   uint32_t slew_time_log2_q5_27_;             // Current slew time, log2 samples
   uint32_t chiff_slew_time_log2_step_q5_27_;  // Per-sample sweep step (>= 0)
   uint32_t chiff_slew_time_log2_end_q5_27_;   // Sweep end, set by the window
-  uint32_t chiff_duration_samples_left_;
-  uint32_t exp_target_samples_;  // EXPERIMENT ONLY  // 0 = chiff inactive
+  // The NOMINAL chiff duration, in samples: a sizing reference for how fast
+  // the slew slows and the perturbation shrinks. NOT a countdown -- nothing
+  // observes it elapsing, and there is no window to be inside of.
+  // 0 = no chiff armed for this note (AMOUNT 0).
+  uint32_t chiff_target_samples_;
   // Where the current stage began: with the stage phase (closed-form from
   // the countdown), this anchors the nominal value -- start + (target - start) *
   // lut_env_expo[phase] -- with no iterated level state, the same

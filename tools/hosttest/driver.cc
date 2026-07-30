@@ -111,8 +111,8 @@ int main(int argc, char** argv) {
     uint32_t attack_smp = adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 0;
     fprintf(stderr,
       "attack %u smp, chiff %u smp (%.3fx attack), decay %u smp, release %u smp\n",
-      attack_smp, env.chiff_duration_samples_left_,
-      attack_smp ? double(env.chiff_duration_samples_left_) / attack_smp : 0.0,
+      attack_smp, env.chiff_target_samples_,
+      attack_smp ? double(env.chiff_target_samples_) / attack_smp : 0.0,
       adsr.decay_u32 ? UINT32_MAX / adsr.decay_u32 : 0,
       adsr.release_u32 ? UINT32_MAX / adsr.release_u32 : 0);
     return 0;
