@@ -49,6 +49,9 @@ namespace {
   uint32_t shared_prng_state = 0xCAFEBABE;
 }  // namespace
 
+// 1.0 for the slew's response to a perturbation, Q15.5.
+const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
+
 // Number of slew time constants a timed stage spans, as log2 in Q5.27.
 // log2(4) = 2: the stage hands off with e^-4 ~= 1.8% of its initial delta
 // remaining (absorbed by the next stage's slew). Tunable by ear: larger
@@ -189,47 +192,56 @@ static uint32_t SlewTimeLog2FromDuration_q5_27(uint32_t samples) {
       log2_q5_27 - kSlewTimesPerStageLog2_q5_27, kMaxSlewTimeLog2_q5_27);
 }
 
-// Integer square root of a u32 (bit-pair method); result is
-// sqrt(x) in the halved Q-domain (sqrt of Q31 -> ~Q15.5). Cold path.
-static uint32_t Sqrt32(uint32_t x) {
-  uint32_t result = 0, bit = 1u << 30;
-  while (bit > x) bit >>= 2;
-  while (bit) {
-    if (x >= result + bit) { x -= result + bit; result = (result >> 1) + bit; }
-    else result >>= 1;
-    bit >>= 2;
-  }
-  return result;
-}
+// Slew rate 2^-slew_time, Q31; defined below.
+static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 
 // How much of a +/- perturbation on the slew input survives to the slew's
-// output, ~Q15.5 (46341 == 1.0): min(1, 3*sqrt(r/(2*(2-r)))) -- three sigma,
-// clamped. Only ever wanted as a RATIO between two rates; see below.
-static uint32_t SlewPerturbResponse_q15_5(int32_t slew_rate_q31) {
-  int64_t denom = (4LL << 31) - 2 * static_cast<int64_t>(slew_rate_q31);
-  uint32_t t_q31 = static_cast<uint32_t>(
-    (static_cast<int64_t>(slew_rate_q31) << 31) / denom);
-  uint32_t root = 3 * Sqrt32(t_q31);
-  const uint32_t kOne_q15_5 = 46341;  // round(2^15.5)
-  return root > kOne_q15_5 ? kOne_q15_5 : root;
+// output, ~Q15.5 (46341 == 1.0). Three sigma of the wandering the slew settles
+// to, clamped at 1.0 -- it cannot realize more than it is given.
+//
+// TAKEN FROM THE SLEW TIME, which is the only encoding stored, so 2^(-t/2) is
+// sqrt(rate) for free through the same exp2 table the rate itself comes from:
+//   response = min(1, 1.5 * 2^(-t/2))
+// The exact form is min(1, 3*sqrt(r/(2*(2-r)))), which needed an integer sqrt
+// AND a 64-bit division -- 39 instructions plus a loop, ESTIMATED 250-400
+// cycles, once or twice EVERY RUN. This is about ten.
+//
+// WHAT THE APPROXIMATION COSTS, measured against the exact form: they agree
+// wherever it matters and differ only in a narrow band of slew times either
+// side of where the exact form clamps. approx/exact is sqrt((2-r)/2), so
+//   slew time  1.00  1.18  1.30  1.46  2.00  3.00  5.00  8.00
+//   error dB   0.00 -0.03 -0.39 -0.87 -0.58 -0.28 -0.07 -0.01
+// Worst case 0.87 dB LOW at slew time 1.46. AMOUNT's fastest start is slew
+// time 1.0 and the slew only ever slows, so that band is transited in a
+// chiff's first moments and never returned to; by the time the chiff is doing
+// its quiet work the two forms are the same number.
+static uint32_t SlewPerturbResponseFromTime_q15_5(
+    uint32_t slew_time_log2_q5_27) {
+  // 2^(-t/2) in Q31, then x1.5 and into Q15.5: 69512 == 1.5 * 2^15.5.
+  const uint32_t root_q31 = static_cast<uint32_t>(
+    SlewRateFromTimeLog2_q31(slew_time_log2_q5_27 >> 1));
+  const uint32_t response_q15_5 = static_cast<uint32_t>(
+    (static_cast<uint64_t>(root_q31) * 69512u) >> 31);
+  return response_q15_5 > kResponseOne_q15_5
+    ? kResponseOne_q15_5 : response_q15_5;
 }
 
-// When the slew rate is clamped up to the stage rate, the perturbation has to
-// shrink by the same factor the slew's response grew, or the floor energizes
-// the chiff at the stage rate. Q15.5, 1<<15 == 1.0. Cold path: only when the
-// floor binds. Takes the chiff's response already computed by the caller --
-// it needs the same value for the sag, and this is the costly term.
+// When the slew is clamped to the stage's, the perturbation has to shrink by
+// the same factor the slew's response grew, or the floor energizes the chiff
+// at the stage rate. Q15.5, 1<<15 == 1.0. Cold path: only when the floor
+// binds. Takes the chiff's response already computed by the caller -- it needs
+// the same value for the sag.
 static uint32_t ChiffPerturbScaleForClampedRate_q15_5(
-    uint32_t response_q15_5, int32_t clamped_slew_rate_q31) {
+    uint32_t response_q15_5, uint32_t clamped_slew_time_log2_q5_27) {
   return (response_q15_5 << 15)
-    / std::max<uint32_t>(SlewPerturbResponse_q15_5(clamped_slew_rate_q31), 1u);
+    / std::max<uint32_t>(
+        SlewPerturbResponseFromTime_q15_5(clamped_slew_time_log2_q5_27), 1u);
 }
 
 // Defined below (Hacker's Delight divlu); used by Rescale.
 static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
 // Defined below; chiff window in samples, scaled off the attack duration.
-static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 
 // log2(x) in Q5.27 for x >= 1: integer bits plus a linear mantissa fraction,
 // the same approximation SlewTimeLog2FromDuration uses. Cold path.
@@ -244,7 +256,6 @@ static uint32_t Log2_q5_27(uint64_t x) {
 
 // EXPERIMENT: below 2^-13 of full scale the chiff is inaudible (-78 dBFS).
 const uint32_t kChiffInaudibleShift = 13;
-const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
 
 // EXPERIMENT: octaves the perturbation must shrink for the OUTPUT to reach
 // inaudibility, given the slew time the chiff will have at the deadline.
@@ -266,8 +277,8 @@ const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
 // -- an audible chop at the end of the release.
 static uint32_t ChiffShrinkOctaves_q5_27(
     int32_t perturb_q30, uint32_t end_slew_time_log2_q5_27) {
-  const uint32_t response_q15_5 = SlewPerturbResponse_q15_5(
-    SlewRateFromTimeLog2_q31(end_slew_time_log2_q5_27));
+  const uint32_t response_q15_5 =
+    SlewPerturbResponseFromTime_q15_5(end_slew_time_log2_q5_27);
   const uint64_t reached = static_cast<uint64_t>(perturb_q30)
     * (response_q15_5 ? response_q15_5 : 1u);
   const uint64_t inaudible =
@@ -672,7 +683,7 @@ void Envelope::RenderStage(
     uint32_t slew_time_q5_27 = slew_time_log2_q5_27_;
     int32_t slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
     const uint32_t chiff_response_q15_5 =
-      SlewPerturbResponse_q15_5(slew_rate_q31);
+      SlewPerturbResponseFromTime_q15_5(slew_time_q5_27);
     uint32_t chiff_perturb_scale_q15_5 = 1u << 15;
     // HOLD STAGES ARE NO LONGER EXEMPT. They used to be, "so the chiff still
     // closes on its own schedule" -- but closing is the SHRINK's job now, and
@@ -690,7 +701,7 @@ void Envelope::RenderStage(
       slew_time_q5_27 = stage_slew_time_log2_q5_27_;
       slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
       chiff_perturb_scale_q15_5 = ChiffPerturbScaleForClampedRate_q15_5(
-        chiff_response_q15_5, slew_rate_q31);
+        chiff_response_q15_5, slew_time_q5_27);
       decay_q32 = 0;
     }
     // Slew input centre. The NOMINAL VALUE (what value_q30_ would be with no
