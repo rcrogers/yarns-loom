@@ -49,12 +49,27 @@ static uint16_t SustainFromSetting(int setting) {
 // driver fits the QEMU M3 machine's small RAM. Byte-identical output to the
 // previous buffer-then-dump form (same samples, same order). In hash mode the
 // samples fold into g_hash instead of printing.
+// Tremolo depth, as Oscillator::Render drives it: the bias TARGET is sampled
+// once per block from the envelope's own value, and RenderSamples then ramps
+// the bias linearly toward that (already stale) target across the block. Zero
+// -- the default -- reproduces the old bias-free behaviour exactly, so every
+// existing scenario and every QEMU hash is untouched.
+//
+// This exists because bias was a BLIND SPOT: every check here, in the sim and
+// in the QEMU differential rendered with bias == 0, so nothing could see an
+// artifact that needs a moving bias to appear. A per-block-sampled,
+// value-dependent input is exactly the shape of thing that can look smooth
+// per sample and rough per block.
+static uint16_t g_tremolo = 0;
+
 static void RenderMs(double ms) {
   size_t n = (size_t)(ms * 45.0);
   for (size_t i = 0; i < n; i += kAudioBlockSize) {
     Envelope::FillSharedPrngBuffer();
     int16_t buffer[kAudioBlockSize];
-    env.RenderSamples(buffer, 0);
+    int32_t bias_target_q31 = g_tremolo
+        ? static_cast<int32_t>(env.tremolo(g_tremolo)) << 16 : 0;
+    env.RenderSamples(buffer, bias_target_q31);
     for (size_t j = 0; j < kAudioBlockSize; ++j) {
       if (g_hash_mode) g_hash = (g_hash ^ (uint16_t)buffer[j]) * 16777619u;
       else printf("%d\n", buffer[j]);
@@ -79,6 +94,7 @@ int main(int argc, char** argv) {
   uint8_t duration = argc > 3 ? atoi(argv[3]) : 90;
   // KEY=VALUE flag so it never lands in the positional attack_ms slot.
   g_hash_mode = OptInt(argc, argv, "hash", 0) != 0;
+  g_tremolo = static_cast<uint16_t>(OptInt(argc, argv, "tremolo", 0));
 
   int peak_pct = OptInt(argc, argv, "peak", 100);
   int sustain_pct = OptInt(argc, argv, "sustain", 60);
