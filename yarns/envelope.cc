@@ -49,6 +49,12 @@ namespace {
   uint32_t shared_prng_state = 0xCAFEBABE;
 }  // namespace
 
+// The render state is envelope + bias in Q30, and the DAC range maps to
+// [0, 2^30): the s16 output 32767 is 32767 << 15, and (2^30 - 1) >> 15 is
+// 32767 exactly. A single USAT #30 therefore both bounds the integrator and
+// leaves a value whose top bits ARE the sample.
+const int32_t kStateMax_q30 = (1 << 30) - 1;
+
 // 1.0 for the slew's response to a perturbation, Q15.5.
 const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
 
@@ -608,14 +614,6 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31);
 }
 
-// Mix the envelope value (Q30) and the already-advanced bias (Q31) into a
-// 0..INT16_MAX output sample. ClipU16(x) >> 1 equals ClipUShifted(x, 15, 1) at
-// both saturation boundaries, but folds the final right-shift into the USAT.
-static inline int16_t EnvelopeSample(int32_t value_q30, int32_t bias_q31) {
-  int32_t sum_s16 = (value_q30 >> (30 - 16)) + (bias_q31 >> (31 - 16));
-  return ClipUShifted(sum_s16, 15, 1);
-}
-
 // Advance to the next stage and resume rendering this block's remaining
 // samples there. The caller saves value_q30_ first (so the re-entrant Trigger
 // sees the real start value). Even with no samples left, the re-entry saves
@@ -776,8 +774,22 @@ void Envelope::RenderStage(
     // handles. Removing it was checked against the sim by ear (no banding, no
     // excursions) and by measurement: rail contact cannot exceed the clamp,
     // and floor dwell at low sustain is no worse than with the guard present.
-    const int32_t slew_input_up_q30 = slew_input_center_q30 + scaled_perturb_q30;
-    const int32_t slew_input_down_q30 = slew_input_center_q30 - scaled_perturb_q30;
+    // THE STATE IS THE OUTPUT-DOMAIN VALUE -- envelope PLUS bias -- so the DAC
+    // range is a constant [0, 2^30) and ONE clamp does both jobs: it bounds the
+    // integrator (anti-windup, feeds back) and it produces the sample. Bias was
+    // the only thing keeping the two apart: it was added AFTER the state clamp,
+    // so the output saturate could not feed back and the state could wind up
+    // behind a saturated output. Folding it in closes that hole and costs no
+    // registers -- the constant bound needs none, where floor/top needed two.
+    //
+    // The slew still moves the ENVELOPE, not the sum: with state = value + bias
+    // and the input offset by the same bias, the delta is identical, and the
+    // bias ramp is added to both the state and the centre so it cancels out of
+    // that delta exactly.
+    const int32_t bias_q30 = bias_q31 >> 1;
+    const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
+    int32_t state_q30 = value_q30 + bias_q30;
+    int32_t slew_input_center_biased_q30 = slew_input_center_q30 + bias_q30;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
@@ -790,52 +802,46 @@ void Envelope::RenderStage(
     // and the off-hardware QEMU harness use the same arm-none-eabi Cortex-M3
     // build, which defines __arm__ && __ARM_ARCH == 7, and take this asm.
 #if defined(__arm__) && __ARM_ARCH >= 7
-    // HAND-ALLOCATED loop. The 12 values live across this loop fit in r0-r11
-    // with ip/lr as scratch, but GCC 4.8 spills 5 of them from poor
-    // allocation, paying ~5 reload ldrs per sample. Presenting them all as asm
-    // operands forces GCC to pin them; the loop then runs with 0 spills. The
-    // behaviour is the C loop in #else (kept as the host reference, golden-
-    // verified) -- this block must be flash-verified bit-identical.
+    // HAND-ALLOCATED loop. The values live across it fit in r0-r11 with ip/lr
+    // as scratch, but GCC 4.8 spills several from poor allocation, paying a
+    // reload per sample. Presenting them all as asm operands forces GCC to pin
+    // them; the loop then runs with 0 spills. The behaviour is the C loop in
+    // #else (kept as the host reference, golden-verified) -- this block must be
+    // flash-verified bit-identical, which the QEMU differential does.
     //
-    // Per sample: the rate decays geometrically (rate -= (rate*decay)>>32), input
-    // select (up ^ (xor & sign)), one-pole slew (value +=
-    // (input-value)*rate>>31), rail clamp, bias ramp, and the EnvelopeSample
-    // mix+usat. `end == buf` (run_samples 0) is handled by the leading guard.
-    const int32_t slew_input_xor_q30 = slew_input_up_q30 ^ slew_input_down_q30;
-    int16_t* const segment_end_asm = segment_end;
+    // Per sample: the rate decays geometrically (rate -= (rate*decay)>>32), the
+    // perturbation takes a sign from one PRNG bit, the one-pole moves the state
+    // toward the biased input, and ONE usat both bounds the state and leaves a
+    // value whose top bits are the sample. `end == buf` (run_samples 0) is
+    // handled by the leading guard.
     __asm__ volatile(
       "  cmp   %[buf], %[end]\n"
       "  beq   2f\n"
       "1:\n"
-      "  smull ip, lr, %[rate], %[decay]\n"     // (rate*decay), lr = hi word
-      "  sub   %[rate], %[rate], lr\n"         // rate -= (rate*decay)>>32
+      "  smull ip, lr, %[rate], %[decay]\n"      // (rate*decay), lr = hi word
+      "  sub   %[rate], %[rate], lr\n"           // rate -= (rate*decay)>>32
       "  ldr   ip, [%[prng]], #4\n"              // draw = *prng++
       "  sbfx  ip, ip, #16, #1\n"                // sign mask from bit 16
-      "  and   ip, %[inputxor], ip\n"
-      "  eor   ip, ip, %[inputup]\n"               // input = up ^ (xor & sign)
-      "  sub   ip, ip, %[value]\n"               // delta = input - value
-      "  smull ip, lr, ip, %[rate]\n"           // delta*rate (ip=lo, lr=hi)
-      "  add   %[value], %[value], lr, lsl #1\n" // value += (product>>31): hi<<1
-      "  add   %[value], %[value], ip, lsr #31\n"//               + lo>>31
-      "  cmp   %[value], %[floor]\n"
-      "  it    lt\n"
-      "  movlt %[value], %[floor]\n"             // clamp to floor
-      "  cmp   %[value], %[top]\n"
-      "  it    gt\n"
-      "  movgt %[value], %[top]\n"               // clamp to top
-      "  add   %[bias], %[bias], %[slope]\n"     // bias += bias_slope
-      "  asr   ip, %[bias], #15\n"               // bias >> 15
-      "  add   ip, ip, %[value], asr #14\n"      // + value >> 14
-      "  usat  ip, #15, ip, asr #1\n"            // EnvelopeSample saturate
+      "  eor   lr, %[perturb], ip\n"             // perturb ^ mask
+      "  sub   lr, lr, ip\n"                     //   - mask  => +/- perturb
+      "  add   %[center], %[center], %[slope]\n" // centre carries the bias ramp
+      "  add   lr, lr, %[center]\n"              // slew input, bias included
+      "  sub   lr, lr, %[state]\n"               // delta = input - state
+      "  smull ip, lr, lr, %[rate]\n"            // delta*rate (ip=lo, lr=hi)
+      "  add   %[state], %[state], lr, lsl #1\n" // state += (product>>31): hi<<1
+      "  add   %[state], %[state], ip, lsr #31\n"//                + lo>>31
+      "  add   %[state], %[state], %[slope]\n"   // bias ramp into the state
+      "  usat  %[state], #30, %[state]\n"        // the one clamp: DAC range
+      "  lsr   ip, %[state], #15\n"              // top bits ARE the sample
       "  strh  ip, [%[buf]], #2\n"               // *sample_buffer++
       "  cmp   %[buf], %[end]\n"
       "  bne   1b\n"
       "2:\n"
-      : [value] "+r"(value_q30), [rate] "+r"(slew_rate_q31),
-        [bias] "+r"(bias_q31), [prng] "+r"(prng), [buf] "+r"(sample_buffer)
-      : [decay] "r"(decay_q32), [inputup] "r"(slew_input_up_q30),
-        [inputxor] "r"(slew_input_xor_q30), [floor] "r"(floor_q30), [top] "r"(top_q30),
-        [slope] "r"(bias_slope_q31), [end] "r"(segment_end_asm)
+      : [state] "+r"(state_q30), [rate] "+r"(slew_rate_q31),
+        [center] "+r"(slew_input_center_biased_q30),
+        [prng] "+r"(prng), [buf] "+r"(sample_buffer)
+      : [decay] "r"(decay_q32), [perturb] "r"(scaled_perturb_q30),
+        [slope] "r"(bias_slope_q30), [end] "r"(segment_end)
       : "ip", "lr", "cc", "memory");
 #else
     while (sample_buffer != segment_end) {
@@ -845,14 +851,18 @@ void Envelope::RenderStage(
         (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);
       slew_rate_q31 -= ramp_hi;
       int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
-      int32_t slew_input_q30 =
-        slew_input_up_q30 ^ ((slew_input_up_q30 ^ slew_input_down_q30) & sign_mask);
-      value_q30 += static_cast<int32_t>(
-        (static_cast<int64_t>(slew_input_q30 - value_q30) * slew_rate_q31) >> 31);
-      if (value_q30 < floor_q30) value_q30 = floor_q30;
-      if (value_q30 > top_q30) value_q30 = top_q30;
-      bias_q31 += bias_slope_q31;
-      *sample_buffer++ = EnvelopeSample(value_q30, bias_q31);
+      // +/- the perturbation, branchless: (p ^ mask) - mask.
+      int32_t perturb_signed_q30 =
+        (scaled_perturb_q30 ^ sign_mask) - sign_mask;
+      slew_input_center_biased_q30 += bias_slope_q30;
+      int32_t delta_q30 =
+        (slew_input_center_biased_q30 + perturb_signed_q30) - state_q30;
+      state_q30 += static_cast<int32_t>(
+        (static_cast<int64_t>(delta_q30) * slew_rate_q31) >> 31)
+        + bias_slope_q30;
+      if (state_q30 < 0) state_q30 = 0;
+      if (state_q30 > kStateMax_q30) state_q30 = kStateMax_q30;
+      *sample_buffer++ = static_cast<int16_t>(state_q30 >> 15);
     }
 #endif
     {
@@ -878,6 +888,16 @@ void Envelope::RenderStage(
       // Nothing to reconcile: the next run derives its rate from this time.
       slew_time_log2_q5_27_ = slew_time_log2_end;
     }
+
+    // Unpick the state: the loop carried envelope PLUS bias, and everything
+    // outside it -- the nominal value, the centre, the sag, tremolo -- reasons
+    // about the pure envelope. The bias it accumulated is exactly the
+    // per-sample slope times the run, so both come back with one multiply
+    // instead of an add per sample.
+    const int32_t run_bias_q30 =
+      bias_q30 + bias_slope_q30 * static_cast<int32_t>(run_samples);
+    bias_q31 += bias_slope_q31 * static_cast<int32_t>(run_samples);
+    value_q30 = state_q30 - run_bias_q30;
   }
 
   block_samples_left -= run_samples;

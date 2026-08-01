@@ -62,6 +62,17 @@ static uint16_t SustainFromSetting(int setting) {
 // per sample and rough per block.
 static uint16_t g_tremolo = 0;
 
+// An INDEPENDENT bias, the way a timbre LFO drives it: not scaled to the
+// envelope, so envelope + bias can leave the DAC range and the clamp actually
+// has to bite. Tremolo cannot do this -- it is negative feedback proportional
+// to the envelope's own value, so the sum stays near range however deep it is
+// set, and a bias test built only on tremolo exercises the folding but never
+// the CLIP path. Amplitude in s16; the sign alternates every `g_bias_lfo_blocks`
+// blocks so the ramp is always live.
+static int32_t g_bias_lfo = 0;
+static int g_bias_lfo_blocks = 8;
+static int g_block_counter = 0;
+
 static void RenderMs(double ms) {
   size_t n = (size_t)(ms * 45.0);
   for (size_t i = 0; i < n; i += kAudioBlockSize) {
@@ -69,6 +80,11 @@ static void RenderMs(double ms) {
     int16_t buffer[kAudioBlockSize];
     int32_t bias_target_q31 = g_tremolo
         ? static_cast<int32_t>(env.tremolo(g_tremolo)) << 16 : 0;
+    if (g_bias_lfo) {
+      const bool high = ((g_block_counter / g_bias_lfo_blocks) & 1) == 0;
+      bias_target_q31 += (high ? g_bias_lfo : -g_bias_lfo) << 16;
+    }
+    ++g_block_counter;
     env.RenderSamples(buffer, bias_target_q31);
     for (size_t j = 0; j < kAudioBlockSize; ++j) {
       if (g_hash_mode) g_hash = (g_hash ^ (uint16_t)buffer[j]) * 16777619u;
@@ -95,6 +111,8 @@ int main(int argc, char** argv) {
   // KEY=VALUE flag so it never lands in the positional attack_ms slot.
   g_hash_mode = OptInt(argc, argv, "hash", 0) != 0;
   g_tremolo = static_cast<uint16_t>(OptInt(argc, argv, "tremolo", 0));
+  g_bias_lfo = OptInt(argc, argv, "bias_lfo", 0);
+  g_bias_lfo_blocks = OptInt(argc, argv, "bias_lfo_blocks", 8);
 
   int peak_pct = OptInt(argc, argv, "peak", 100);
   int sustain_pct = OptInt(argc, argv, "sustain", 60);

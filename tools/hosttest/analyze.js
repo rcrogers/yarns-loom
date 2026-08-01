@@ -30,7 +30,16 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   let mx=0; for(const v of s) if(v>mx)mx=v;
   let dmx=0; for(const v of d) if(v>dmx)dmx=v;
   
-  check('never exceeds note top rail', mx<=16384, mx+' (rail 16384, classic max '+dmx+')');
+  // The state clamp bounds the DAC range now, not the note's: bias is folded
+  // into the render state so ONE usat serves both the integrator and the
+  // output. A chiff can therefore push the envelope above its dialled peak --
+  // deliberately, and the user's call. What must still hold is that it stays
+  // inside the DAC and that the overshoot is a transient's worth, not a
+  // different level: worst MEASURED is +10.9% at AMOUNT 127 with high sustain.
+  const over=(mx-16383)*100/16383;
+  check('stays inside the DAC range', mx<=32767, mx+'');
+  check('peak overshoot is bounded', over<15,
+        over.toFixed(1)+'% above note top (classic max '+dmx+')');
 }
 // 3. early release: noise continues into release, lands ~0 by release end (400ms)
 { const s=run('early_release 96 127');  // long chiff forces compression
@@ -105,4 +114,58 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
   const step01=ladder[1]-ladder[0], step48=ladder[4]-ladder[3];
   check('amount 0->1 continuous', step01 < Math.max(1,step48*2),
     'steps 0->1: '+step01.toFixed(2)+' vs 4->8: '+step48.toFixed(2));
+}
+
+// BIAS PATH. Everything above renders with bias == 0, which for a long time
+// meant the bias arithmetic was never executed by any check -- including the
+// QEMU asm-vs-C differential. That matters most for the unified clamp, whose
+// whole mechanism is that the render state carries envelope PLUS bias: with
+// bias 0 the state is just the value, both ramp adds add nothing, and the
+// recovery after the loop subtracts nothing. `tremolo=` drives the bias the
+// way Oscillator::Render does -- target sampled per block from the envelope's
+// own value, then ramped toward it -- so the folding, the ramp and the
+// recovery all run.
+{ const s=run('basic 0 90 attack_setting=40 decay_setting=64 sustain_setting=70 '+
+              'release_setting=64 gate=2000 tail=1400 tremolo=24000');
+  let mn=32767, mx=0; for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v; }
+  check('bias path: output inside the DAC range', mn>=0 && mx<=32767, mn+'..'+mx);
+  // A recovery that is off by even a little would accumulate once per run and
+  // show up as the sustain walking; flat here means value = state - bias is
+  // exact across run boundaries.
+  const a=meanWin(s,1500,1600), b=meanWin(s,1900,2000);
+  check('bias path: sustain does not drift', Math.abs(a-b)<8,
+        'sustain '+a.toFixed(1)+' -> '+b.toFixed(1));
+  // Release setting 64 is 795 ms, so the note is not done until ~2795. What is
+  // left after that is NOT a bias artifact: a stage lands at 1 - e^-4 of its
+  // span and the rest is shed slowly in DEAD, so a residual proportional to
+  // the sustain level is expected (open item 6 in the plan is about removing
+  // it). MEASURED: 53 without tremolo, 33 with -- bias makes it SMALLER, so
+  // the check is against the sustain level, not against zero.
+  const tail=meanWin(s,3000,3100);
+  check('bias path: post-release residual is small vs sustain', tail < a*0.02,
+        tail.toFixed(1)+' vs sustain '+a.toFixed(0));
+}
+
+// THE CLIP PATH. Tremolo above cannot reach it: it is negative feedback scaled
+// to the envelope's own value, so envelope + bias stays near range however deep
+// it is set. A timbre-LFO-style bias is INDEPENDENT of the envelope, so the sum
+// leaves the DAC range and the clamp has to bite -- which is the whole point of
+// folding bias into the render state. MEASURED at bias_lfo 20000: 3732 samples
+// on the ceiling, 40546 on the floor.
+{ const args='basic 0 90 attack_setting=40 decay_setting=64 sustain_setting=70 '+
+             'release_setting=64 gate=1200 tail=800 bias_lfo=20000 bias_lfo_blocks=8';
+  const s=run(args);
+  let mn=99999, mx=-99999, hi=0, run_=0, worst=0;
+  for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v;
+    if(v>=32767){ hi++; run_++; if(run_>worst)worst=run_; } else run_=0; }
+  check('clip path: never leaves the DAC range', mn>=0 && mx<=32767, mn+'..'+mx);
+  check('clip path: the clamp actually bites', hi>100, hi+' samples on the ceiling');
+  // Anti-windup: the state is clamped, so when the bias reverses the output
+  // must come off the rail with the bias. The LFO holds each polarity for 8
+  // blocks = 512 samples, so a dwell much beyond that means the state wound up
+  // behind a saturated output and has to unwind before anything moves -- the
+  // failure the old output-only usat could not prevent, because it did not
+  // feed back.
+  check('clip path: no windup behind the rail', worst <= 640,
+        'longest ceiling dwell '+worst+' samples (bias holds 512)');
 }
