@@ -198,7 +198,7 @@ int32_t Envelope::ChiffPerturb_q30() const {
 // slew times per stage. log2 as integer bits plus a linear mantissa fraction
 // (max error ~0.09, same approximation spirit as Trigger's).
 static uint32_t SlewTimeLog2FromDuration_q5_27(uint32_t samples) {
-  if (samples < 4) return 0;  // log2 <= kSlewTimesPerStageLog2
+  if (samples < 4) return 0;  // the fastest slew, not a jump; see kMaxSlewRate
   uint32_t leading_zeros = __builtin_clz(samples);
   uint32_t integer_bits = 31 - leading_zeros;
   uint32_t mantissa_frac_q5_27 =
@@ -437,6 +437,34 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
   return (two_pow_neg_fraction_u16 << 15) >> integer_part;
 }
 
+// THE FASTEST THE SLEW MAY RUN: 1 - e^-1, the true one-pole coefficient for a
+// time constant of one sample.
+//
+// rate = 2^-t is the small-rate approximation of the true coefficient
+// 1 - e^(-1/tau). It is exact enough everywhere the module runs -- MEASURED
+// error 0.0% at slew time 13, +0.5% at 6.7, +2.5% at 4.25 -- and it hits its
+// ceiling at t = 0, where it says 1.0 while the truth is 0.632. A rate of 1.0
+// is not a slew at all: the value arrives in ONE sample. That is what used to
+// need a "stage too short to slew" special case.
+//
+// Capping here removes the special case instead, and lands the short stage
+// exactly where every other stage lands: 1 - 0.632 IS e^-1, so a 4-sample
+// stage covers 1 - (1 - 0.632)^4 = 1 - e^-4 = 98.17%, the same four time
+// constants as the rest. 4 samples is also the SHORTEST STAGE THAT EXISTS --
+// modulate_7_13 clamps its result to [0, 8191] so the increment table cannot
+// be indexed below entry 0, and that entry is UINT32_MAX/4 -- so nothing falls
+// off the bottom of this.
+//
+// NOT applied inside SlewRateFromTimeLog2_q31 itself: that is a general 2^-x,
+// and its other callers (the centre blend's ratio, the perturbation shrink,
+// and 2^(-t/2) in the response) all need to reach 1.0.
+const int32_t kMaxSlewRate_q31 = 1357468564;  // round((1 - e^-1) * 2^31)
+
+static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27) {
+  const int32_t rate_q31 = SlewRateFromTimeLog2_q31(slew_time_log2_q5_27);
+  return rate_q31 > kMaxSlewRate_q31 ? kMaxSlewRate_q31 : rate_q31;
+}
+
 // Chiff window in samples, as a multiple of the attack duration. The exponent
 // (setting - center) * kChiffOctaves / center is octaves relative to the
 // attack, Q5.27 signed; the window is attack_samples * 2^exponent.
@@ -571,7 +599,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
     uint32_t log2_stage_samples_q5_27 =
         (static_cast<uint32_t>(leading_zeros + 1) << 27) - mantissa_frac_q5_27;
     stage_slew_time_log2_q5_27_ = log2_stage_samples_q5_27 <= kSlewTimesPerStageLog2_q5_27
-      ? 0 // Stage too short for a meaningful slew; jump straight to target
+      ? 0 // Floor, not a special case: slew time 0 is one sample per time
+          // constant, the fastest the slew runs (see kMaxSlewRate_q31). The
+          // subtraction below is unsigned, so it needs this anyway.
       : std::min(
           log2_stage_samples_q5_27 - kSlewTimesPerStageLog2_q5_27,
           kMaxSlewTimeLog2_q5_27
@@ -699,7 +729,7 @@ void Envelope::RenderStage(
     // writeback raised the time per run, and they were reconciled only when
     // the floor bound. Derived, the rate cannot drift from the schedule.
     uint32_t slew_time_q5_27 = slew_time_log2_q5_27_;
-    int32_t slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
+    int32_t slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_q5_27);
     const uint32_t chiff_response_q15_5 =
       SlewPerturbResponseFromTime_q15_5(slew_time_q5_27);
     uint32_t chiff_perturb_scale_q15_5 = 1u << 15;
@@ -717,7 +747,7 @@ void Envelope::RenderStage(
     // it, which is why storing it bought nothing.
     if (slew_time_q5_27 > stage_slew_time_log2_q5_27_) {
       slew_time_q5_27 = stage_slew_time_log2_q5_27_;
-      slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
+      slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_q5_27);
       chiff_perturb_scale_q15_5 = ChiffPerturbScaleForClampedRate_q15_5(
         chiff_response_q15_5, slew_time_q5_27);
       decay_q32 = 0;
