@@ -690,16 +690,12 @@ void Envelope::RenderStage(
   const int32_t stage_target_q30 = target_q30_;
 
   {
-    // WHERE THE VALUE CAN ACTUALLY GO. Since bias was folded into the render
-    // state, the only thing that clips is the DAC range applied to
-    // envelope + bias -- the note's own [floor, top] bounds nothing any more.
-    // So the room the sag has to respect is the DAC range expressed in the
-    // ENVELOPE domain, which is the DAC range shifted by the bias. This also
-    // fixes something the old sag simply ignored: bias eats headroom, and a
-    // sag computed against the note's rails did not know that.
+    // THE RENDER STATE IS THE OUTPUT-DOMAIN VALUE: envelope plus bias, Q30, so
+    // the DAC range is a constant [0, kStateMax_q30) and one usat in the loop
+    // both bounds the integrator and yields the sample. Computed here rather
+    // than at the loop because the sag below asks its question in this domain.
     const int32_t bias_q30 = bias_q31 >> 1;
-    const int32_t floor_q30 = -bias_q30;
-    const int32_t top_q30 = kStateMax_q30 - bias_q30;
+    int32_t state_q30 = value_q30 + bias_q30;
     // Slew-rate floor (timed stages): never slower than the stage's own
     // rate, else the value hangs on a moving stage near the window's slow
     // end. Monotone (the rate only falls), so flooring holds it there.
@@ -814,21 +810,25 @@ void Envelope::RenderStage(
     const int32_t excursion_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(perturb_q30)
        * (chiff_response_q15_5 * kResponseOne_q15_5)) >> 31);
-    // ROOM IS MEASURED FROM THE VALUE, not from the centre. The centre may sit
-    // deliberately OUTSIDE the bounds -- a timed stage aims past its target so
-    // it lands on it -- and room measured from the centre goes negative there,
-    // which made the sag fire even with ZERO excursion and drag the aim back
-    // inside. That silently cancelled the whole aim-past-the-target mechanism.
-    // What has to fit inside the bounds is the VALUE's excursion, so the value
-    // is what the room is measured from, and with no excursion there is no sag
-    // however far the centre points.
-    const int32_t up_room_q30 = top_q30 - value_q30;
-    const int32_t down_room_q30 = value_q30 - floor_q30;
-    if (excursion_q30 > up_room_q30) {
-      slew_input_center_q30 -= excursion_q30 - up_room_q30;
+    // ASKED IN THE STATE'S OWN DOMAIN. What clips is the render state --
+    // envelope plus bias -- against the constants 0 and kStateMax_q30, so the
+    // question is simply whether the swing carries the state out of that range.
+    // Asking it here needs no bounds of its own: the state is already computed
+    // for the loop, and the two limits are literals rather than a floor and a
+    // top derived from the bias (which also removed the only place a bias near
+    // full scale could push a derived bound past what an int32 holds).
+    //
+    // MEASURED FROM THE STATE, never from the centre. The centre may sit
+    // deliberately OUTSIDE the range -- a timed stage aims past its target so
+    // it lands on it -- and a swing measured from the centre reads as
+    // overhanging there even when the excursion is ZERO, which made the sag
+    // fire and drag the aim back inside, silently cancelling the whole
+    // aim-past-the-target mechanism. What has to fit is where the VALUE goes.
+    if (excursion_q30 > kStateMax_q30 - state_q30) {
+      slew_input_center_q30 -= excursion_q30 - (kStateMax_q30 - state_q30);
     }
-    if (excursion_q30 > down_room_q30) {
-      slew_input_center_q30 += excursion_q30 - down_room_q30;
+    if (excursion_q30 > state_q30) {
+      slew_input_center_q30 += excursion_q30 - state_q30;
     }
     // No rail guard: the centre is used as computed. The guard used to hold it
     // a guarded run's excursion off the acoustic-peak rail, costing
@@ -849,7 +849,6 @@ void Envelope::RenderStage(
     // bias ramp is added to both the state and the centre so it cancels out of
     // that delta exactly.
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    int32_t state_q30 = value_q30 + bias_q30;
     int32_t slew_input_center_biased_q30 = slew_input_center_q30 + bias_q30;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
