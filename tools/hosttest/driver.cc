@@ -82,6 +82,11 @@ static int g_block_counter = 0;
 // look fine either way -- so this reads value_q30_ between blocks, which is
 // exactly where it is written.
 static int g_value_range = 0;
+// Print the envelope value per block instead of its extremes. If bias behaves
+// as a saturating add at the OUTPUT, the envelope's own trajectory must be
+// identical whatever the bias is; two traces that diverge are the clamp
+// feeding back into the envelope, i.e. accumulated damage to its state.
+static int g_value_trace = 0;
 static int32_t g_value_min = INT32_MAX;
 static int32_t g_value_max = INT32_MIN;
 
@@ -98,6 +103,7 @@ static void RenderMs(double ms) {
     }
     ++g_block_counter;
     env.RenderSamples(buffer, bias_target_q31);
+    if (g_value_trace) { printf("%d\n", env.value_q30_); continue; }
     if (g_value_range) {
       if (env.value_q30_ < g_value_min) g_value_min = env.value_q30_;
       if (env.value_q30_ > g_value_max) g_value_max = env.value_q30_;
@@ -130,6 +136,7 @@ int main(int argc, char** argv) {
   g_tremolo = static_cast<uint16_t>(OptInt(argc, argv, "tremolo", 0));
   g_bias_lfo = OptInt(argc, argv, "bias_lfo", 0);
   g_value_range = OptInt(argc, argv, "value_range", 0);
+  g_value_trace = OptInt(argc, argv, "value_trace", 0);
   g_bias_lfo_blocks = OptInt(argc, argv, "bias_lfo_blocks", 8);
 
   int peak_pct = OptInt(argc, argv, "peak", 100);
