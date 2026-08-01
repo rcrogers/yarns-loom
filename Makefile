@@ -12,8 +12,9 @@
 #   make qemu       differential: render-loop asm == C reference, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
+#   make cycles     per-sample cycle count of the render loop vs the baseline
 
-.PHONY: all sim host qemu check firmware
+.PHONY: all sim host qemu check firmware cycles
 
 # Rebuild the sim, then run the full verification.
 all: sim check
@@ -44,3 +45,8 @@ check: host qemu
 
 firmware:
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh make -f yarns/makefile syx
+
+# The render loop runs 12 times per sample, so one instruction there is ~0.7%
+# of the whole CPU. Needs a current build/yarns/yarns.elf, i.e. `make firmware`.
+cycles:
+	sh tools/cycles.sh
