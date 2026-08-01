@@ -73,6 +73,18 @@ static int32_t g_bias_lfo = 0;
 static int g_bias_lfo_blocks = 8;
 static int g_block_counter = 0;
 
+// Report the range of the RECOVERED envelope value instead of samples. The
+// render state carries envelope + bias and is clamped as a whole, so after a
+// clamp the envelope is recovered as state - bias and NOTHING bounds it
+// directly any more: state pinned at 0 under a positive bias recovers a
+// NEGATIVE value, and pinned at full under a negative bias recovers one above
+// the note's peak. The output samples cannot show this -- they are clamped and
+// look fine either way -- so this reads value_q30_ between blocks, which is
+// exactly where it is written.
+static int g_value_range = 0;
+static int32_t g_value_min = INT32_MAX;
+static int32_t g_value_max = INT32_MIN;
+
 static void RenderMs(double ms) {
   size_t n = (size_t)(ms * 45.0);
   for (size_t i = 0; i < n; i += kAudioBlockSize) {
@@ -86,6 +98,11 @@ static void RenderMs(double ms) {
     }
     ++g_block_counter;
     env.RenderSamples(buffer, bias_target_q31);
+    if (g_value_range) {
+      if (env.value_q30_ < g_value_min) g_value_min = env.value_q30_;
+      if (env.value_q30_ > g_value_max) g_value_max = env.value_q30_;
+      continue;
+    }
     for (size_t j = 0; j < kAudioBlockSize; ++j) {
       if (g_hash_mode) g_hash = (g_hash ^ (uint16_t)buffer[j]) * 16777619u;
       else printf("%d\n", buffer[j]);
@@ -112,6 +129,7 @@ int main(int argc, char** argv) {
   g_hash_mode = OptInt(argc, argv, "hash", 0) != 0;
   g_tremolo = static_cast<uint16_t>(OptInt(argc, argv, "tremolo", 0));
   g_bias_lfo = OptInt(argc, argv, "bias_lfo", 0);
+  g_value_range = OptInt(argc, argv, "value_range", 0);
   g_bias_lfo_blocks = OptInt(argc, argv, "bias_lfo_blocks", 8);
 
   int peak_pct = OptInt(argc, argv, "peak", 100);
@@ -196,6 +214,10 @@ int main(int argc, char** argv) {
     RenderMs(9000);
     env.NoteOff();
     RenderMs(600);
+  }
+  if (g_value_range) {
+    // s16 terms, the domain the note's range is dialled in.
+    printf("%d %d\n", g_value_min >> 15, g_value_max >> 15);
   }
   if (g_hash_mode) printf("%08x\n", g_hash);
   return 0;
