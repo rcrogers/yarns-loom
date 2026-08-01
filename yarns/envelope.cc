@@ -80,12 +80,23 @@ const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 const int32_t kChiffDurationCenter = 64;
 const int32_t kChiffOctaves = 3;
 
-// Where a timed stage's slew actually lands: 1 - e^-k for k time constants
-// (kSlewTimesPerStageLog2 = 2 -> k = 4). lut_env_expo is normalized to land
-// at 1.0, so closed-form means read through it are scaled by this fraction
-// to match the true slew (else the nominal value leads the true one near
-// stage ends).
-const uint16_t kStageLandingFraction_u16 = 64335;  // round((1 - e^-4) * 2^16)
+// A timed stage runs for kSlewTimesPerStageLog2 = 2, i.e. FOUR time constants,
+// and a one-pole covers only 1 - e^-4 = 98.17% of its span in that time. So the
+// slew AIMS PAST its target by the reciprocal: aim = start + (target - start) /
+// (1 - e^-4). It then lands EXACTLY on the target as the stage's countdown
+// expires, instead of handing off 1.8% short and cornering there.
+//
+// The aim overshoots the target by 1.9% of the stage's span, which is a level
+// the note may not have -- that is fine, because the value never reaches the
+// aim: it arrives at the target precisely when the stage ends. It does mean the
+// slew INPUT can sit outside the note's range, which the old note-range state
+// clamp would have fought; the clamp now bounds the DAC range instead.
+//
+// It also makes lut_env_expo read straight. The table is normalized to land at
+// 1.0, so it already describes (1 - e^-4t/T)/(1 - e^-4) -- exactly the true
+// slew once the aim carries the 1/(1 - e^-4). The landing-fraction scaling the
+// closed-form nominal value used to need therefore cancels out and is gone.
+const uint32_t kStageAimOvershoot_u16 = 66759;  // round(2^16 / (1 - e^-4))
 
 void Envelope::FillSharedPrngBuffer() {
   uint32_t state = shared_prng_state;
@@ -508,8 +519,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
     uint32_t phase_u32 = stage_samples_left_
       ? 0u - stage_samples_left_ * phase_increment_u32_
       : UINT32_MAX;
-    uint32_t expo_u16 = (Interpolate824(lut_env_expo, phase_u32) *
-      static_cast<uint32_t>(kStageLandingFraction_u16)) >> 16;
+    // No landing fraction any more: the slew aims past its target, so
+    // lut_env_expo's own normalization already describes where the value is.
+    uint32_t expo_u16 = Interpolate824(lut_env_expo, phase_u32);
     stage_start_q30_ += static_cast<int32_t>(
       (static_cast<int64_t>(target_q30_ - stage_start_q30_) * expo_u16) >> 16);
   } else {
@@ -648,8 +660,16 @@ void Envelope::RenderStage(
   const int32_t stage_target_q30 = target_q30_;
 
   {
-    const int32_t floor_q30 = chiff_floor_q30_;
-    const int32_t top_q30 = chiff_top_q30_;
+    // WHERE THE VALUE CAN ACTUALLY GO. Since bias was folded into the render
+    // state, the only thing that clips is the DAC range applied to
+    // envelope + bias -- the note's own [floor, top] bounds nothing any more.
+    // So the room the sag has to respect is the DAC range expressed in the
+    // ENVELOPE domain, which is the DAC range shifted by the bias. This also
+    // fixes something the old sag simply ignored: bias eats headroom, and a
+    // sag computed against the note's rails did not know that.
+    const int32_t bias_q30 = bias_q31 >> 1;
+    const int32_t floor_q30 = -bias_q30;
+    const int32_t top_q30 = kStateMax_q30 - bias_q30;
     // Slew-rate floor (timed stages): never slower than the stage's own
     // rate, else the value hangs on a moving stage near the window's slow
     // end. Monotone (the rate only falls), so flooring holds it there.
@@ -713,11 +733,15 @@ void Envelope::RenderStage(
     int32_t slew_input_center_q30 = stage_target_q30;
     if (timed) {
       uint32_t phase_u32 = 0u - stage_samples_left_ * phase_increment_u32_;
-      const uint32_t expo_u16 = (Interpolate824(lut_env_expo, phase_u32) *
-        static_cast<uint32_t>(kStageLandingFraction_u16)) >> 16;
+      const uint32_t expo_u16 = Interpolate824(lut_env_expo, phase_u32);
       const int32_t nominal_value_q30 = stage_start_q30_ + static_cast<int32_t>(
         (static_cast<int64_t>(stage_target_q30 - stage_start_q30_) *
          expo_u16) >> 16);
+      // What the slew actually chases: past the target, so it arrives ON the
+      // target as the countdown expires.
+      const int32_t stage_aim_q30 = stage_start_q30_ + static_cast<int32_t>(
+        (static_cast<int64_t>(stage_target_q30 - stage_start_q30_) *
+         kStageAimOvershoot_u16) >> 16);
       // stage_rate/slew_rate is 2^(slew_time - stage_time), so in the time
       // domain the ratio is a subtraction through the same exp2 the rates come
       // from -- where in the rate domain it was a 64-bit software division
@@ -728,7 +752,7 @@ void Envelope::RenderStage(
         : SlewRateFromTimeLog2_q31(
             stage_slew_time_log2_q5_27_ - slew_time_q5_27);
       slew_input_center_q30 = nominal_value_q30 + static_cast<int32_t>(
-        (static_cast<int64_t>(stage_target_q30 - nominal_value_q30) * ratio_q31)
+        (static_cast<int64_t>(stage_aim_q30 - nominal_value_q30) * ratio_q31)
         >> 31);
     }
     const int32_t perturb_q30 = ChiffPerturb_q30();
@@ -760,8 +784,16 @@ void Envelope::RenderStage(
     const int32_t excursion_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(perturb_q30)
        * (chiff_response_q15_5 * kResponseOne_q15_5)) >> 31);
-    const int32_t up_room_q30 = top_q30 - slew_input_center_q30;
-    const int32_t down_room_q30 = slew_input_center_q30 - floor_q30;
+    // ROOM IS MEASURED FROM THE VALUE, not from the centre. The centre may sit
+    // deliberately OUTSIDE the bounds -- a timed stage aims past its target so
+    // it lands on it -- and room measured from the centre goes negative there,
+    // which made the sag fire even with ZERO excursion and drag the aim back
+    // inside. That silently cancelled the whole aim-past-the-target mechanism.
+    // What has to fit inside the bounds is the VALUE's excursion, so the value
+    // is what the room is measured from, and with no excursion there is no sag
+    // however far the centre points.
+    const int32_t up_room_q30 = top_q30 - value_q30;
+    const int32_t down_room_q30 = value_q30 - floor_q30;
     if (excursion_q30 > up_room_q30) {
       slew_input_center_q30 -= excursion_q30 - up_room_q30;
     }
@@ -786,7 +818,6 @@ void Envelope::RenderStage(
     // and the input offset by the same bias, the delta is identical, and the
     // bias ramp is added to both the state and the centre so it cancels out of
     // that delta exactly.
-    const int32_t bias_q30 = bias_q31 >> 1;
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
     int32_t state_q30 = value_q30 + bias_q30;
     int32_t slew_input_center_biased_q30 = slew_input_center_q30 + bias_q30;
