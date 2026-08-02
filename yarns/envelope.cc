@@ -57,6 +57,13 @@ const int32_t kValueMax_q30 = (1 << 30) - 1;
 // The output sample is the s16 range, which USAT #15 states directly.
 const int kSampleBits = 15;
 
+// How far a mean must move to sit inside [lo, hi]; 0 when it already does.
+inline int32_t ClampOffset(int32_t mean, int32_t lo, int32_t hi) {
+  if (mean < lo) return lo - mean;
+  if (mean > hi) return hi - mean;
+  return 0;
+}
+
 // 1.0 for the slew's response to a perturbation, Q15.5.
 const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
 
@@ -133,6 +140,8 @@ void Envelope::Init(int16_t zero_value_s16) {
   bias_q31_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
+  nominal_q30_ = zero_value_q30;
+  chiff_state_q30_ = 0;
   stage_start_q30_ = zero_value_q30;
   chiff_floor_q30_ = zero_value_q30;
   chiff_top_q30_ = zero_value_q30;
@@ -254,17 +263,6 @@ static uint32_t SlewPerturbResponseFromTime_q15_5(
     ? kResponseOne_q15_5 : response_q15_5;
 }
 
-// When the slew is clamped to the stage's, the perturbation has to shrink by
-// the same factor the slew's response grew, or the floor energizes the chiff
-// at the stage rate. Q15.5, 1<<15 == 1.0. Cold path: only when the floor
-// binds. Takes the chiff's response already computed by the caller -- it needs
-// the same value for the sag.
-static uint32_t ChiffPerturbScaleForClampedRate_q15_5(
-    uint32_t response_q15_5, uint32_t clamped_slew_time_log2_q5_27) {
-  return (response_q15_5 << 15)
-    / std::max<uint32_t>(
-        SlewPerturbResponseFromTime_q15_5(clamped_slew_time_log2_q5_27), 1u);
-}
 
 // Defined below (Hacker's Delight divlu); used by Rescale.
 static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
@@ -548,7 +546,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // stage's nominal value is closed-form from its phase (the same lut_env_expo
   // curve the slew traces); a hold's has converged to its target.
   if (!chiff_perturb_shrink_q30_) {
-    stage_start_q30_ = value_q30_;
+    stage_start_q30_ = nominal_q30_;
   } else if (phase_increment_u32_) {
     // Phase runs 0 -> ~UINT32_MAX across the stage, but a stage that ran to
     // completion leaves stage_samples_left_ == 0, which WRAPS the product back
@@ -685,6 +683,8 @@ void Envelope::RenderStage(
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
   int32_t value_q30 = value_q30_;
+  int32_t nominal_q30 = nominal_q30_;
+  int32_t chiff_state_q30 = chiff_state_q30_;
 
   // One straight run, bounded by the block, the stage countdown, and (while
   // live) the chiff window. Whichever expires hands off or re-enters -- once,
@@ -723,8 +723,6 @@ void Envelope::RenderStage(
     // cannot move (every bias-0 scenario hash is unchanged). Only a range that
     // reaches below zero shifts it, and then floor..floor+2^30 covers the
     // note's whole range because a range is at most full scale wide.
-    const int32_t clamp_base_q30 = clamp_base_q30_;
-    value_q30 -= clamp_base_q30;
     // Slew-rate floor (timed stages): never slower than the stage's own
     // rate, else the value hangs on a moving stage near the window's slow
     // end. Monotone (the rate only falls), so flooring holds it there.
@@ -757,130 +755,88 @@ void Envelope::RenderStage(
     int32_t slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_q5_27);
     const uint32_t chiff_response_q15_5 =
       SlewPerturbResponseFromTime_q15_5(slew_time_q5_27);
-    uint32_t chiff_perturb_scale_q15_5 = 1u << 15;
-    // HOLD STAGES ARE NO LONGER EXEMPT. They used to be, "so the chiff still
-    // closes on its own schedule" -- but closing is the SHRINK's job now, and
-    // the exemption's real effect was that at the end of a release the floor
-    // vanished, the chiff's own very slow rate took over, and the value froze
-    // where it stood while the nominal level walked away from it. That is
-    // audible as a burst right at the note's end. A hold's stage rate is the
-    // one the last timed stage left behind, which is exactly the rate the
-    // envelope should still be tracking at.
-    // A larger slew time is a slower slew, so this is the floor: the chiff's
-    // slew never runs slower than the stage's. The stage's RATE is derived
-    // only here, in the branch that needs it -- the common case never pays for
-    // it, which is why storing it bought nothing.
-    if (slew_time_q5_27 > stage_slew_time_log2_q5_27_) {
-      slew_time_q5_27 = stage_slew_time_log2_q5_27_;
-      slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_q5_27);
-      chiff_perturb_scale_q15_5 = ChiffPerturbScaleForClampedRate_q15_5(
-        chiff_response_q15_5, slew_time_q5_27);
-      decay_q32 = 0;
-    }
-    // Slew input centre. The NOMINAL VALUE (what value_q30_ would be with no
-    // chiff) is closed-form from the stage phase -- start + (target - start) *
-    // lut_env_expo[phase] -- so it needs no state of its own. The centre is
-    // then that value blended toward the stage target by stage_rate/slew_rate,
-    // which is what stops the sped-up slew from also speeding up the envelope:
-    // it makes the value's expected step equal the nominal value's step. Get
-    // this wrong and the value trails the envelope (a kink at the window's
-    // end). Holds and a closed window feed the slew the stage target directly.
-    int32_t slew_input_center_q30 = stage_target_q30;
+    // NO SLEW-RATE FLOOR, and no perturbation rescale at it. Both existed
+    // because ONE slew had to track the nominal level AND carry the chiff: if
+    // the chiff's rate went below the stage's, the level stopped tracking. The
+    // nominal has its own one-pole now, so the chiff's rate is free to fall as
+    // far as it likes -- which is the low-pass gate the asymptotic design
+    // wanted and could not have while the filter was shared.
+    // WHAT NOMINAL CHASES: past the target by 1/(1 - e^-4), so it arrives ON
+    // the target as the stage's countdown expires. Holds chase the target.
+    int32_t stage_aim_q30 = stage_target_q30;
     if (timed) {
-      uint32_t phase_u32 = 0u - stage_samples_left_ * phase_increment_u32_;
-      const uint32_t expo_u16 = Interpolate824(lut_env_expo, phase_u32);
-      const int32_t nominal_value_q30 = stage_start_q30_ + static_cast<int32_t>(
-        (static_cast<int64_t>(stage_target_q30 - stage_start_q30_) *
-         expo_u16) >> 16);
-      // What the slew actually chases: past the target, so it arrives ON the
-      // target as the countdown expires.
-      const int32_t stage_aim_q30 = stage_start_q30_ + static_cast<int32_t>(
+      stage_aim_q30 = stage_start_q30_ + static_cast<int32_t>(
         (static_cast<int64_t>(stage_target_q30 - stage_start_q30_) *
          kStageAimOvershoot_u16) >> 16);
-      // stage_rate/slew_rate is 2^(slew_time - stage_time), so in the time
-      // domain the ratio is a subtraction through the same exp2 the rates come
-      // from -- where in the rate domain it was a 64-bit software division
-      // (DivU64ByU32: 51 instructions, four branches). The floor above has
-      // already made the times equal wherever it bound, so >= covers it.
-      uint32_t ratio_q31 = slew_time_q5_27 >= stage_slew_time_log2_q5_27_
-        ? static_cast<uint32_t>(INT32_MAX)
-        : SlewRateFromTimeLog2_q31(
-            stage_slew_time_log2_q5_27_ - slew_time_q5_27);
-      slew_input_center_q30 = nominal_value_q30 + static_cast<int32_t>(
-        (static_cast<int64_t>(stage_aim_q30 - nominal_value_q30) * ratio_q31)
-        >> 31);
     }
-    // Into the same domain as the value, so the sag and the loop agree.
-    slew_input_center_q30 -= clamp_base_q30;
+    // NOT SMMLA, which would make each one-pole two instructions instead of
+    // four: SMMLA is the ARMv7E-M DSP extension (Cortex-M4). The assembler
+    // rejects it for -mcpu=cortex-m3, which is what this builds for.
+    const int32_t stage_rate_q31 =
+      SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27_);
     const int32_t perturb_q30 = ChiffPerturb_q30();
-    int32_t scaled_perturb_q30 = perturb_q30;
-    if (chiff_perturb_scale_q15_5 != (1u << 15)) {
-      scaled_perturb_q30 = static_cast<int32_t>(
-        (static_cast<int64_t>(perturb_q30) * chiff_perturb_scale_q15_5) >> 15);
-    }
-    // EXPERIMENT -- THE SAG. The perturbation is sized from the note's range,
-    // not from the room left between the level and a rail, so near a rail it
-    // does not fit. Rather than let it be clipped (which thinned the noise
-    // exactly at the peak -- an audible notch), the CENTRE moves off the rail
-    // far enough for the excursion to fit: the level sags, the noise does not.
-    //
-    // THE SAG IS SIZED FROM WHAT THE SLEW REALIZES, NOT FROM THE INPUT
-    // PERTURBATION, and that is the whole point. AMOUNT does not scale the
-    // perturbation -- it sets the starting slew time -- so a sag sized from
-    // the input would be full-depth at AMOUNT 1, where the slow slew realizes
-    // almost none of it: the level would dip for a chiff nobody can hear. Past
-    // versions did exactly that and the sag arrived long before the noise.
-    // Sized from the realized excursion instead, it vanishes with the noise:
-    // AMOUNT 1 looks like AMOUNT 0, and the sag closes as the shrink runs out.
-    // The excursion is the perturbation times the chiff's own response -- the
-    // same product in either regime, because the floor's rescale is exactly
-    // the response ratio. Dividing by 2^15.5 would cost a 64-bit division
-    // (__aeabi_ldivmod, and it showed up in the disassembly); instead multiply
-    // by the same constant and shift 31, since 46341^2 is 2^31 to within
-    // 3 parts per million.
+    const int32_t scaled_perturb_q30 = perturb_q30;
+    // How far the chiff actually swings: the perturbation times the slew's own
+    // response. Dividing by 2^15.5 would cost a 64-bit division, so multiply by
+    // the same constant and shift 31 (46341^2 is 2^31 to 3 parts per million).
     const int32_t excursion_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(perturb_q30)
        * (chiff_response_q15_5 * kResponseOne_q15_5)) >> 31);
-    // ASKED IN THE VALUE'S OWN DOMAIN, against the constants 0 and
-    // kValueMax_q30: the question is whether the swing carries the ENVELOPE out
-    // of the range its integrator is clamped to. The bias is not part of it.
-    // Asking it against the biased sum would move the centre by an amount that
-    // depends on the bias, which is the sag becoming a second path from bias
-    // into the envelope's trajectory.
+    // THE CHIFF GETS ITS HEADROOM BY THE MEAN MOVING, NOT BY BEING CLIPPED --
+    // the same rule as before, stated where it can be met exactly: hold
+    // nominal + bias far enough inside the DAC rails for the excursion to fit,
+    // then ADD the chiff, which is therefore never clipped.
     //
-    // MEASURED FROM THE VALUE, never from the centre. The centre may sit
-    // deliberately OUTSIDE the range -- a timed stage aims past its target so
-    // it lands on it -- and a swing measured from the centre reads as
-    // overhanging there even when the excursion is ZERO, which made the sag
-    // fire and drag the aim back inside, silently cancelling the whole
-    // aim-past-the-target mechanism. What has to fit is where the VALUE goes.
-    if (excursion_q30 > kValueMax_q30 - value_q30) {
-      slew_input_center_q30 -= excursion_q30 - (kValueMax_q30 - value_q30);
-    }
-    if (excursion_q30 > value_q30) {
-      slew_input_center_q30 += excursion_q30 - value_q30;
-    }
-    // No rail guard: the centre is used as computed. The guard used to hold it
-    // a guarded run's excursion off the acoustic-peak rail, costing
-    // sag everywhere to protect against a tail event the output clamp already
-    // handles. Removing it was checked against the sim by ear (no banding, no
-    // excursions) and by measurement: rail contact cannot exceed the clamp,
-    // and floor dwell at low sustain is no worse than with the guard present.
+    // THE CORRECTION DOES NOT GO THROUGH AN INTEGRATOR, and that is why bias
+    // can be part of it. Every version that steered the slew input instead had
+    // to wait for the value to slew there, and the lag is the integrator's own
+    // time constant: MEASURED, a bias LFO at 364 ms left 6641 LSB of output
+    // error because the mean was chasing a rail that had already moved. Applied
+    // as an offset at the point of use, it is exact whatever the bias does.
     //
-    // TWO SATURATES, ONE OF THEM FEEDING BACK, and the difference is the point:
-    //  - the VALUE clamp is anti-windup. The slew is a leaky integrator and the
-    //    value is its state; when the centre rides a rail the perturbation
-    //    pushes past it and the state accumulates distance it must unwind
-    //    before the output moves again. Ablated, rail dwell goes 9 -> 81
-    //    samples. It bounds the ENVELOPE against the ENVELOPE's range, so it
-    //    carries no bias term and cannot move the trajectory.
-    //  - the OUTPUT saturate has no state to wind up: bias is added fresh every
-    //    sample, never integrated, so bounding the sum needs no feedback.
-    // Both bounds are the same constant, which is why neither needs a register.
+    // ONLY THE OFFSET IS RAMPED, never nominal. The offset is the overhang,
+    // which moves slowly; nominal is an EXPONENTIAL and a linear chord across a
+    // 64-sample run is percent-level wrong on a 409-sample stage, which would
+    // be envelope distortion rather than rounding.
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    // Carries the clamp offset too, so the output add undoes it for free:
-    // (value - base) + (bias + base) == value + bias.
-    int32_t running_bias_q30 = bias_q30 + clamp_base_q30;
+    const int32_t lo_q30 = excursion_q30;
+    const int32_t hi_q30 = kValueMax_q30 - excursion_q30;
+    // Where nominal reaches by the run's end, for the offset's far endpoint.
+    // Approximate (linear in rate * run_samples) -- it only sizes an offset
+    // that is itself an approximation, and it never touches nominal's own path.
+    int32_t nominal_end_q30 = nominal_q30;
+    {
+      const int32_t gap_q30 = stage_aim_q30 - nominal_q30;
+      int64_t step = ((static_cast<int64_t>(gap_q30) * stage_rate_q31) >> 31)
+        * static_cast<int32_t>(run_samples);
+      if ((gap_q30 >= 0 && step > gap_q30) || (gap_q30 < 0 && step < gap_q30)) {
+        step = gap_q30;
+      }
+      nominal_end_q30 += static_cast<int32_t>(step);
+    }
+    const int32_t bias_end_q30 =
+      bias_q30 + bias_slope_q30 * static_cast<int32_t>(run_samples);
+    int32_t combined_q30, combined_end_q30;
+    if (lo_q30 < hi_q30) {
+      combined_q30 = ClampOffset(nominal_q30 + bias_q30, lo_q30, hi_q30)
+        + bias_q30;
+      combined_end_q30 =
+        ClampOffset(nominal_end_q30 + bias_end_q30, lo_q30, hi_q30)
+        + bias_end_q30;
+    } else {
+      // Chiff wider than the rails: centre it and let the output saturate.
+      combined_q30 = (kValueMax_q30 >> 1) - nominal_q30;
+      combined_end_q30 = (kValueMax_q30 >> 1) - nominal_end_q30;
+    }
+    const int32_t combined_slope_q30 = run_samples
+      ? (combined_end_q30 - combined_q30) / static_cast<int32_t>(run_samples)
+      : 0;
+    // TRACK THE GAP TO THE AIM, NOT THE VALUE. A one-pole on the value is
+    // sub/smull/add; the same motion on the gap is a pure geometric decay,
+    // smull/sub -- the shape the rate decay above already uses. The aim folds
+    // into the offset register, so the output is one subtract either way.
+    int32_t nominal_gap_q30 = stage_aim_q30 - nominal_q30;
+    combined_q30 += stage_aim_q30;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
@@ -893,48 +849,44 @@ void Envelope::RenderStage(
     // and the off-hardware QEMU harness use the same arm-none-eabi Cortex-M3
     // build, which defines __arm__ && __ARM_ARCH == 7, and take this asm.
 #if defined(__arm__) && __ARM_ARCH >= 7
-    // HAND-ALLOCATED loop. The values live across it fit in r0-r11 with ip/lr
-    // as scratch, but GCC 4.8 spills several from poor allocation, paying a
-    // reload per sample. Presenting them all as asm operands forces GCC to pin
-    // them; the loop then runs with 0 spills. The behaviour is the C loop in
-    // #else (kept as the host reference, golden-verified) -- this block must be
-    // flash-verified bit-identical, which the QEMU differential does.
+    // HAND-ALLOCATED loop. GCC 4.8 allocates this badly and spills; presenting
+    // every live value as an operand pins them. The behaviour is the C loop in
+    // #else (the host reference), and the QEMU differential proves the two
+    // bit-identical.
     //
-    // Per sample: the rate decays geometrically (rate -= (rate*decay)>>32), the
-    // perturbation takes a sign from one PRNG bit, the one-pole moves the value
-    // toward the input, USAT #30 bounds the value, and the biased copy goes out
-    // through a USAT #15 that shifts as it saturates -- the saturate and the
-    // >> 15 in one instruction, which is what keeps the split free. `end == buf`
-    // (run_samples 0) is handled by the leading guard.
+    // Per sample: two independent one-poles. The chiff's chases +/- the
+    // perturbation at its own decaying rate; nominal chases the stage's aim at
+    // the STAGE's rate. The offset carrying bias and the mean correction ramps.
+    // One USAT saturates and shifts in one instruction.
     __asm__ volatile(
       "  cmp   %[buf], %[end]\n"
       "  beq   2f\n"
       "1:\n"
-      "  smull ip, lr, %[rate], %[decay]\n"      // (rate*decay), lr = hi word
-      "  sub   %[rate], %[rate], lr\n"           // rate -= (rate*decay)>>32
-      "  ldr   ip, [%[prng]], #4\n"              // draw = *prng++
-      "  sbfx  ip, ip, #16, #1\n"                // sign mask from bit 16
-      "  eor   lr, %[perturb], ip\n"             // perturb ^ mask
-      "  sub   lr, lr, ip\n"                     //   - mask  => +/- perturb
-      "  add   lr, lr, %[center]\n"              // slew input, no bias in it
-      "  sub   lr, lr, %[value]\n"               // delta = input - value
-      "  smull ip, lr, lr, %[rate]\n"            // delta*rate (ip=lo, lr=hi)
-      "  add   %[value], %[value], lr, lsl #1\n" // value += (product>>31): hi<<1
-      "  add   %[value], %[value], ip, lsr #31\n"//                 + lo>>31
-      "  usat  %[value], #30, %[value]\n"        // anti-windup, feeds back
-      "  add   %[bias], %[bias], %[slope]\n"     // the bias ramp, on its own
-      "  add   ip, %[value], %[bias]\n"          // the terminal add
-      "  usat  ip, #15, ip, asr #15\n"           // output saturate, no feedback
-      "  strh  ip, [%[buf]], #2\n"               // *sample_buffer++
+      "  smull ip, lr, %[rate], %[decay]\n"       // (rate*decay), lr = hi
+      "  sub   %[rate], %[rate], lr\n"            // rate -= (rate*decay)>>32
+      "  ldr   ip, [%[prng]], #4\n"               // draw = *prng++
+      "  sbfx  ip, ip, #16, #1\n"                 // sign mask from bit 16
+      "  eor   lr, %[perturb], ip\n"
+      "  sub   lr, lr, ip\n"                      // +/- perturbation
+      "  sub   lr, lr, %[chiff]\n"                // delta = input - chiff
+      "  smull ip, lr, lr, %[rate]\n"
+      "  add   %[chiff], %[chiff], lr, lsl #1\n"  // chiff += (product>>32)*2
+      "  smull ip, lr, %[gap], %[srate]\n"        // the gap to the aim decays
+      "  sub   %[gap], %[gap], lr, lsl #1\n"      //   at the STAGE's rate
+      "  add   %[comb], %[comb], %[cslope]\n"     // bias + mean + the aim
+      "  sub   ip, %[comb], %[gap]\n"             // the mean
+      "  add   ip, ip, %[chiff]\n"                // + the chiff
+      "  usat  ip, #15, ip, asr #15\n"            // saturate and shift, one op
+      "  strh  ip, [%[buf]], #2\n"
       "  cmp   %[buf], %[end]\n"
       "  bne   1b\n"
       "2:\n"
-      : [value] "+r"(value_q30), [rate] "+r"(slew_rate_q31),
-        [bias] "+r"(running_bias_q30),
+      : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
+        [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
         [prng] "+r"(prng), [buf] "+r"(sample_buffer)
       : [decay] "r"(decay_q32), [perturb] "r"(scaled_perturb_q30),
-        [center] "r"(slew_input_center_q30),
-        [slope] "r"(bias_slope_q30), [end] "r"(segment_end)
+        [srate] "r"(stage_rate_q31),
+        [cslope] "r"(combined_slope_q30), [end] "r"(segment_end)
       : "ip", "lr", "cc", "memory");
 #else
     while (sample_buffer != segment_end) {
@@ -947,17 +899,19 @@ void Envelope::RenderStage(
       // +/- the perturbation, branchless: (p ^ mask) - mask.
       int32_t perturb_signed_q30 =
         (scaled_perturb_q30 ^ sign_mask) - sign_mask;
-      int32_t delta_q30 =
-        (slew_input_center_q30 + perturb_signed_q30) - value_q30;
-      value_q30 += static_cast<int32_t>(
-        (static_cast<int64_t>(delta_q30) * slew_rate_q31) >> 31);
-      // Anti-windup: bounds the integrator, and carries no bias.
-      if (value_q30 < 0) value_q30 = 0;
-      if (value_q30 > kValueMax_q30) value_q30 = kValueMax_q30;
-      running_bias_q30 += bias_slope_q30;
-      // The terminal add, saturated to the s16 range. Matches USAT #15 with
-      // ASR #15: the shift is arithmetic, so it floors before the saturate.
-      int32_t sample = (value_q30 + running_bias_q30) >> kSampleBits;
+      // (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word
+      // term. Two instructions saved per one-pole. The dropped bit is a half
+      // LSB per sample and cannot accumulate: at a one-pole's fixed point the
+      // step is zero, so the error is bounded by the last step, not summed.
+      chiff_state_q30 += 2 * static_cast<int32_t>(
+        (static_cast<int64_t>(perturb_signed_q30 - chiff_state_q30)
+         * slew_rate_q31) >> 32);
+      nominal_gap_q30 -= 2 * static_cast<int32_t>(
+        (static_cast<int64_t>(nominal_gap_q30) * stage_rate_q31) >> 32);
+      combined_q30 += combined_slope_q30;
+      // Matches USAT #15 with ASR #15: arithmetic shift, then saturate.
+      int32_t sample = (combined_q30 - nominal_gap_q30 + chiff_state_q30)
+        >> kSampleBits;
       if (sample < 0) sample = 0;
       if (sample > INT16_MAX) sample = INT16_MAX;
       *sample_buffer++ = static_cast<int16_t>(sample);
@@ -987,11 +941,22 @@ void Envelope::RenderStage(
       slew_time_log2_q5_27_ = slew_time_log2_end;
     }
 
-    // Back out of the clamp offset. No bias to unpick: value_q30 IS the
-    // envelope, so the nominal value, the centre, the sag and tremolo all read
-    // it directly. The bias's Q31 form is authoritative -- the loop's Q30 copy
-    // is a rounded scratch that ends here.
-    value_q30 += clamp_base_q30;
+    // value_q30_ is the realized envelope -- nominal plus the chiff -- and it
+    // carries NO bias, so the consumers that read it (value(), tremolo(), the
+    // next stage's start) see the same trajectory whatever the bias does.
+    nominal_q30 = stage_aim_q30 - nominal_gap_q30;
+    nominal_q30_ = nominal_q30;
+    chiff_state_q30_ = chiff_state_q30;
+    // Bounded to the note's own DAC range before anyone reads it. Nothing in
+    // the render needs this -- neither one-pole integrates it, so there is no
+    // windup to prevent -- but value() returns int16_t and tremolo() forms
+    // (value - release target) * strength_u16 in int32, and both wrap on an
+    // out-of-range value. MEASURED unbounded: -10014..33092, and 33092 * 65535
+    // is 2.17e9 against INT32_MAX 2.147e9. Bias-free, so the invariant holds.
+    value_q30 = nominal_q30 + chiff_state_q30;
+    if (value_q30 < clamp_base_q30_) value_q30 = clamp_base_q30_;
+    const int32_t value_top_q30 = clamp_base_q30_ + kValueMax_q30;
+    if (value_q30 > value_top_q30) value_q30 = value_top_q30;
     bias_q31 += bias_slope_q31 * static_cast<int32_t>(run_samples);
   }
 

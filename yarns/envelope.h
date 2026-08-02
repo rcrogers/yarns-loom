@@ -279,6 +279,13 @@ class Envelope {
   // RenderStage because a local stays live across the whole per-run path and
   // GCC spills it -- MEASURED 383 -> 413 instructions, 58 -> 72 spills.
   int32_t clamp_base_q30_;
+  // THE THREE TERMS the output is built from. nominal is the chiff-free
+  // envelope -- its own one-pole, running at the STAGE's rate, chasing the
+  // stage's aim. chiff_state is the zero-mean filtered perturbation -- its own
+  // one-pole, running at the CHIFF's rate. bias is the terminal add.
+  // value_q30_ is kept as nominal + chiff for the consumers that read it.
+  int32_t nominal_q30_;
+  int32_t chiff_state_q30_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
