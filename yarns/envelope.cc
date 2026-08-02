@@ -783,31 +783,26 @@ void Envelope::RenderStage(
       SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27_);
     const int32_t input_q30 = ChiffInput_q30();
     const int32_t chiff_input_q30 = input_q30;
-    // How far the chiff actually swings: the chiff input times the slew's own
-    // response. Dividing by 2^15.5 would cost a 64-bit division, so multiply by
-    // the same constant and shift 31 (46341^2 is 2^31 to 3 parts per million).
-    const int32_t excursion_q30 = static_cast<int32_t>(
+    // The chiff's output RMS: its input times the filter's response. Dividing
+    // by 2^15.5 would be a 64-bit division, so multiply by the same constant
+    // and shift 31 (46341^2 is 2^31 to 3 parts per million).
+    const int32_t chiff_rms_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(input_q30)
        * (chiff_response_q15_5 * kResponseOne_q15_5)) >> 31);
-    // THE CHIFF GETS ITS HEADROOM BY THE MEAN MOVING, NOT BY BEING CLIPPED --
-    // the same rule as before, stated where it can be met exactly: hold
-    // nominal + bias far enough inside the DAC rails for the excursion to fit,
-    // then ADD the chiff, which is therefore never clipped.
-    //
-    // THE CORRECTION DOES NOT GO THROUGH AN INTEGRATOR, and that is why bias
-    // can be part of it. Every version that steered the slew input instead had
-    // to wait for the value to slew there, and the lag is the integrator's own
-    // time constant: MEASURED, a bias LFO at 364 ms left 6641 LSB of output
-    // error because the mean was chasing a rail that had already moved. Applied
-    // as an offset at the point of use, it is exact whatever the bias does.
-    //
-    // ONLY THE OFFSET IS RAMPED, never nominal. The offset is the overhang,
-    // which moves slowly; nominal is an EXPONENTIAL and a linear chord across a
-    // 64-sample run is percent-level wrong on a 409-sample stage, which would
-    // be envelope distortion rather than rounding.
+    // THE MEAN IS HELD ONE CHIFF RMS INSIDE EACH RAIL; the chiff is then added,
+    // so it has room by construction instead of being clipped.
+    //  - the clamp does NOT feed back, which is why bias may be part of it.
+    //    Steering the slew input instead waits on the integrator: MEASURED, a
+    //    bias LFO at 364 ms left 6641 LSB of output error.
+    //  - only the OFFSET is ramped across the run. nominal is an exponential and
+    //    a linear chord over 64 samples is percent-level wrong on a 409-sample
+    //    stage -- envelope distortion, not rounding.
+    //  - ONE rms is inherited, not chosen: it is what the response returns.
+    //    Peaks reach ~4.3x rms, so MEASURED ~1.6% of the loud phase still clips
+    //    at the rail. Widening it costs level (2x rms is ~1.6 dB of attack).
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    const int32_t lo_q30 = excursion_q30;
-    const int32_t hi_q30 = kValueMax_q30 - excursion_q30;
+    const int32_t lo_q30 = chiff_rms_q30;
+    const int32_t hi_q30 = kValueMax_q30 - chiff_rms_q30;
     // Where nominal reaches by the run's end, for the offset's far endpoint.
     // Approximate (linear in rate * run_samples) -- it only sizes an offset
     // that is itself an approximation, and it never touches nominal's own path.
