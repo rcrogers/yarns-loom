@@ -169,3 +169,46 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
   check('clip path: no windup behind the rail', worst <= 640,
         'longest ceiling dwell '+worst+' samples (bias holds 512)');
 }
+
+// THE INVARIANT, and it is the strongest check in this file: the output is
+// saturate(envelope + bias), where the envelope is bit-for-bit what it would
+// have been with bias 0. Equivalently, the envelope's OWN trajectory does not
+// depend on the bias. Read value_q30_ per block and diff against a bias-0 run
+// at the same settings.
+//
+// EVERY OTHER CHECK HERE READS THE OUTPUT SAMPLES, which stay in range and look
+// correct even while the clamp is writing bias back into the envelope. That is
+// why this class went unseen: with the render state carrying envelope + bias,
+// the state clamp bounded the SUM, so at a rail it clipped the bias into the
+// envelope's own integrator. MEASURED then, against a bias-0 run: the value
+// diverged by EXACTLY the bias amplitude (10, 8000, 20000 s16) every time the
+// sum touched a rail, and the battery was all green.
+{ const base='basic 96 90 value_trace=1 gate=2000 tail=1000 range=32767 ';
+  const ref=run(base+'bias_lfo=0');
+  for (const bias of [10, 8000, 20000, 32767]) {
+    const s=run(base+'bias_lfo='+bias);
+    let worst=0;
+    for (let i=0;i<ref.length;i++){ const d=Math.abs(s[i]-ref[i]); if(d>worst)worst=d; }
+    // EXACT, not within a tolerance: bias reaches the buffer on a scratch copy
+    // and is never fed back, so there is no path -- not even a rounding one --
+    // from bias into the envelope. A tolerance here would hide the defect this
+    // check exists for, which was worth thousands of Q30 LSBs.
+    check('invariant: envelope is bias-independent (bias '+bias+')', worst===0,
+          'max |diff| '+(worst/32768).toFixed(4)+' s16 over '+ref.length+' blocks');
+  }
+}
+
+// The recovered value must stay inside the DAC range, because tremolo() forms
+// (value - release target) * strength_u16 in int32. Every release target is
+// non-negative, so a bounded value keeps |relative| <= 32767 and the product at
+// 32767 * 65535 = 2147385345, which fits with 98302 to spare. Unbounded it does
+// not: MEASURED 36063 before the split, i.e. 2.36e9, an overflow -- and
+// value() returns int16_t, so 36063 wrapped there too.
+{ const range=(args)=>execSync('./test '+args,{maxBuffer:1e9})
+    .toString().trim().split(/\s+/).map(Number);
+  for (const args of ['bias_lfo=32767', 'bias_lfo=32767 tremolo=48000']) {
+    const r=range('basic 96 90 value_range=1 range=32767 '+args);
+    check('value stays in the DAC range, so tremolo cannot overflow ('+args+')',
+          r[0]>=0 && r[1]<=FS_OUT, r[0]+'..'+r[1]);
+  }
+}

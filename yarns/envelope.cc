@@ -49,11 +49,13 @@ namespace {
   uint32_t shared_prng_state = 0xCAFEBABE;
 }  // namespace
 
-// The render state is envelope + bias in Q30, and the DAC range maps to
-// [0, 2^30): the s16 output 32767 is 32767 << 15, and (2^30 - 1) >> 15 is
-// 32767 exactly. A single USAT #30 therefore both bounds the integrator and
-// leaves a value whose top bits ARE the sample.
-const int32_t kStateMax_q30 = (1 << 30) - 1;
+// The DAC range in Q30: the s16 output 32767 is 32767 << 15, and
+// (2^30 - 1) >> 15 is 32767 exactly. It bounds the envelope's own integrator
+// (anti-windup) and, separately, the biased output.
+const int32_t kValueMax_q30 = (1 << 30) - 1;
+
+// The output sample is the s16 range, which USAT #15 states directly.
+const int kSampleBits = 15;
 
 // 1.0 for the slew's response to a perturbation, Q15.5.
 const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
@@ -690,12 +692,16 @@ void Envelope::RenderStage(
   const int32_t stage_target_q30 = target_q30_;
 
   {
-    // THE RENDER STATE IS THE OUTPUT-DOMAIN VALUE: envelope plus bias, Q30, so
-    // the DAC range is a constant [0, kStateMax_q30) and one usat in the loop
-    // both bounds the integrator and yields the sample. Computed here rather
-    // than at the loop because the sag below asks its question in this domain.
+    // BIAS IS A TERMINAL ADD. The loop's state is the envelope alone; bias is
+    // added to a scratch copy on the way to the buffer, so the output is
+    // saturate(envelope + bias) and the envelope's own trajectory is the same
+    // whatever the bias does. Folding bias into the integrator instead (the
+    // state clamp then bounding the sum) let the clamp write the bias back into
+    // the envelope: at rest under a negative bias the state pinned at 0 and the
+    // envelope came back at +bias. MEASURED before the split, against a bias-0
+    // run at the same settings: the value diverged by exactly the bias
+    // amplitude (10, 8000, 20000 s16) every time the sum touched a rail.
     const int32_t bias_q30 = bias_q31 >> 1;
-    int32_t state_q30 = value_q30 + bias_q30;
     // Slew-rate floor (timed stages): never slower than the stage's own
     // rate, else the value hangs on a moving stage near the window's slow
     // end. Monotone (the rate only falls), so flooring holds it there.
@@ -810,25 +816,24 @@ void Envelope::RenderStage(
     const int32_t excursion_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(perturb_q30)
        * (chiff_response_q15_5 * kResponseOne_q15_5)) >> 31);
-    // ASKED IN THE STATE'S OWN DOMAIN. What clips is the render state --
-    // envelope plus bias -- against the constants 0 and kStateMax_q30, so the
-    // question is simply whether the swing carries the state out of that range.
-    // Asking it here needs no bounds of its own: the state is already computed
-    // for the loop, and the two limits are literals rather than a floor and a
-    // top derived from the bias (which also removed the only place a bias near
-    // full scale could push a derived bound past what an int32 holds).
+    // ASKED IN THE VALUE'S OWN DOMAIN, against the constants 0 and
+    // kValueMax_q30: the question is whether the swing carries the ENVELOPE out
+    // of the range its integrator is clamped to. The bias is not part of it.
+    // Asking it against the biased sum would move the centre by an amount that
+    // depends on the bias, which is the sag becoming a second path from bias
+    // into the envelope's trajectory.
     //
-    // MEASURED FROM THE STATE, never from the centre. The centre may sit
+    // MEASURED FROM THE VALUE, never from the centre. The centre may sit
     // deliberately OUTSIDE the range -- a timed stage aims past its target so
     // it lands on it -- and a swing measured from the centre reads as
     // overhanging there even when the excursion is ZERO, which made the sag
     // fire and drag the aim back inside, silently cancelling the whole
     // aim-past-the-target mechanism. What has to fit is where the VALUE goes.
-    if (excursion_q30 > kStateMax_q30 - state_q30) {
-      slew_input_center_q30 -= excursion_q30 - (kStateMax_q30 - state_q30);
+    if (excursion_q30 > kValueMax_q30 - value_q30) {
+      slew_input_center_q30 -= excursion_q30 - (kValueMax_q30 - value_q30);
     }
-    if (excursion_q30 > state_q30) {
-      slew_input_center_q30 += excursion_q30 - state_q30;
+    if (excursion_q30 > value_q30) {
+      slew_input_center_q30 += excursion_q30 - value_q30;
     }
     // No rail guard: the centre is used as computed. The guard used to hold it
     // a guarded run's excursion off the acoustic-peak rail, costing
@@ -836,20 +841,19 @@ void Envelope::RenderStage(
     // handles. Removing it was checked against the sim by ear (no banding, no
     // excursions) and by measurement: rail contact cannot exceed the clamp,
     // and floor dwell at low sustain is no worse than with the guard present.
-    // THE STATE IS THE OUTPUT-DOMAIN VALUE -- envelope PLUS bias -- so the DAC
-    // range is a constant [0, 2^30) and ONE clamp does both jobs: it bounds the
-    // integrator (anti-windup, feeds back) and it produces the sample. Bias was
-    // the only thing keeping the two apart: it was added AFTER the state clamp,
-    // so the output saturate could not feed back and the state could wind up
-    // behind a saturated output. Folding it in closes that hole and costs no
-    // registers -- the constant bound needs none, where floor/top needed two.
     //
-    // The slew still moves the ENVELOPE, not the sum: with state = value + bias
-    // and the input offset by the same bias, the delta is identical, and the
-    // bias ramp is added to both the state and the centre so it cancels out of
-    // that delta exactly.
+    // TWO SATURATES, ONE OF THEM FEEDING BACK, and the difference is the point:
+    //  - the VALUE clamp is anti-windup. The slew is a leaky integrator and the
+    //    value is its state; when the centre rides a rail the perturbation
+    //    pushes past it and the state accumulates distance it must unwind
+    //    before the output moves again. Ablated, rail dwell goes 9 -> 81
+    //    samples. It bounds the ENVELOPE against the ENVELOPE's range, so it
+    //    carries no bias term and cannot move the trajectory.
+    //  - the OUTPUT saturate has no state to wind up: bias is added fresh every
+    //    sample, never integrated, so bounding the sum needs no feedback.
+    // Both bounds are the same constant, which is why neither needs a register.
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    int32_t slew_input_center_biased_q30 = slew_input_center_q30 + bias_q30;
+    int32_t running_bias_q30 = bias_q30;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
@@ -870,10 +874,11 @@ void Envelope::RenderStage(
     // flash-verified bit-identical, which the QEMU differential does.
     //
     // Per sample: the rate decays geometrically (rate -= (rate*decay)>>32), the
-    // perturbation takes a sign from one PRNG bit, the one-pole moves the state
-    // toward the biased input, and ONE usat both bounds the state and leaves a
-    // value whose top bits are the sample. `end == buf` (run_samples 0) is
-    // handled by the leading guard.
+    // perturbation takes a sign from one PRNG bit, the one-pole moves the value
+    // toward the input, USAT #30 bounds the value, and the biased copy goes out
+    // through a USAT #15 that shifts as it saturates -- the saturate and the
+    // >> 15 in one instruction, which is what keeps the split free. `end == buf`
+    // (run_samples 0) is handled by the leading guard.
     __asm__ volatile(
       "  cmp   %[buf], %[end]\n"
       "  beq   2f\n"
@@ -884,23 +889,24 @@ void Envelope::RenderStage(
       "  sbfx  ip, ip, #16, #1\n"                // sign mask from bit 16
       "  eor   lr, %[perturb], ip\n"             // perturb ^ mask
       "  sub   lr, lr, ip\n"                     //   - mask  => +/- perturb
-      "  add   %[center], %[center], %[slope]\n" // centre carries the bias ramp
-      "  add   lr, lr, %[center]\n"              // slew input, bias included
-      "  sub   lr, lr, %[state]\n"               // delta = input - state
+      "  add   lr, lr, %[center]\n"              // slew input, no bias in it
+      "  sub   lr, lr, %[value]\n"               // delta = input - value
       "  smull ip, lr, lr, %[rate]\n"            // delta*rate (ip=lo, lr=hi)
-      "  add   %[state], %[state], lr, lsl #1\n" // state += (product>>31): hi<<1
-      "  add   %[state], %[state], ip, lsr #31\n"//                + lo>>31
-      "  add   %[state], %[state], %[slope]\n"   // bias ramp into the state
-      "  usat  %[state], #30, %[state]\n"        // the one clamp: DAC range
-      "  lsr   ip, %[state], #15\n"              // top bits ARE the sample
+      "  add   %[value], %[value], lr, lsl #1\n" // value += (product>>31): hi<<1
+      "  add   %[value], %[value], ip, lsr #31\n"//                 + lo>>31
+      "  usat  %[value], #30, %[value]\n"        // anti-windup, feeds back
+      "  add   %[bias], %[bias], %[slope]\n"     // the bias ramp, on its own
+      "  add   ip, %[value], %[bias]\n"          // the terminal add
+      "  usat  ip, #15, ip, asr #15\n"           // output saturate, no feedback
       "  strh  ip, [%[buf]], #2\n"               // *sample_buffer++
       "  cmp   %[buf], %[end]\n"
       "  bne   1b\n"
       "2:\n"
-      : [state] "+r"(state_q30), [rate] "+r"(slew_rate_q31),
-        [center] "+r"(slew_input_center_biased_q30),
+      : [value] "+r"(value_q30), [rate] "+r"(slew_rate_q31),
+        [bias] "+r"(running_bias_q30),
         [prng] "+r"(prng), [buf] "+r"(sample_buffer)
       : [decay] "r"(decay_q32), [perturb] "r"(scaled_perturb_q30),
+        [center] "r"(slew_input_center_q30),
         [slope] "r"(bias_slope_q30), [end] "r"(segment_end)
       : "ip", "lr", "cc", "memory");
 #else
@@ -914,15 +920,20 @@ void Envelope::RenderStage(
       // +/- the perturbation, branchless: (p ^ mask) - mask.
       int32_t perturb_signed_q30 =
         (scaled_perturb_q30 ^ sign_mask) - sign_mask;
-      slew_input_center_biased_q30 += bias_slope_q30;
       int32_t delta_q30 =
-        (slew_input_center_biased_q30 + perturb_signed_q30) - state_q30;
-      state_q30 += static_cast<int32_t>(
-        (static_cast<int64_t>(delta_q30) * slew_rate_q31) >> 31)
-        + bias_slope_q30;
-      if (state_q30 < 0) state_q30 = 0;
-      if (state_q30 > kStateMax_q30) state_q30 = kStateMax_q30;
-      *sample_buffer++ = static_cast<int16_t>(state_q30 >> 15);
+        (slew_input_center_q30 + perturb_signed_q30) - value_q30;
+      value_q30 += static_cast<int32_t>(
+        (static_cast<int64_t>(delta_q30) * slew_rate_q31) >> 31);
+      // Anti-windup: bounds the integrator, and carries no bias.
+      if (value_q30 < 0) value_q30 = 0;
+      if (value_q30 > kValueMax_q30) value_q30 = kValueMax_q30;
+      running_bias_q30 += bias_slope_q30;
+      // The terminal add, saturated to the s16 range. Matches USAT #15 with
+      // ASR #15: the shift is arithmetic, so it floors before the saturate.
+      int32_t sample = (value_q30 + running_bias_q30) >> kSampleBits;
+      if (sample < 0) sample = 0;
+      if (sample > INT16_MAX) sample = INT16_MAX;
+      *sample_buffer++ = static_cast<int16_t>(sample);
     }
 #endif
     {
@@ -949,15 +960,11 @@ void Envelope::RenderStage(
       slew_time_log2_q5_27_ = slew_time_log2_end;
     }
 
-    // Unpick the state: the loop carried envelope PLUS bias, and everything
-    // outside it -- the nominal value, the centre, the sag, tremolo -- reasons
-    // about the pure envelope. The bias it accumulated is exactly the
-    // per-sample slope times the run, so both come back with one multiply
-    // instead of an add per sample.
-    const int32_t run_bias_q30 =
-      bias_q30 + bias_slope_q30 * static_cast<int32_t>(run_samples);
+    // Nothing to unpick: value_q30 IS the envelope, so the nominal value, the
+    // centre, the sag and tremolo all read it directly. Only the bias needs
+    // carrying forward, and its Q31 form is authoritative -- the loop's Q30
+    // copy is a rounded scratch that ends here.
     bias_q31 += bias_slope_q31 * static_cast<int32_t>(run_samples);
-    value_q30 = state_q30 - run_bias_q30;
   }
 
   block_samples_left -= run_samples;
