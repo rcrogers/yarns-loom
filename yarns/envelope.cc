@@ -82,6 +82,39 @@ const uint32_t kMaxSlewTimeLog2_q5_27 = 27u << 27;
 const uint32_t kChiffAmountBits = 7;
 const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 
+// THE CHARACTER AXIS. Above kChiffCleanAmount the chiff is DRIVEN into its
+// clip: same filter, same clip point, more signal pushed at it. The clip is a
+// saturating one-pole (the clipped value feeds back), so the output squares off
+// and grows louder at once -- gaussian at the hinge, a full-scale square wave
+// at the top. Below the hinge the drive is 1 and the clip sits at the signal's
+// own natural peak, so nothing is shaped.
+const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
+// Octaves of drive from the hinge to full, Q5.27. MEASURED ON THE ENGINE: the
+// state clip reaches a square wave and then STOPS MOVING, so too wide a span
+// leaves a DEAD ZONE at the top of the control -- at 4 octaves settings
+// 112..127 rendered bit-identically, at 3 octaves 112..127 still did. The
+// terminal sits near 4.9x, sooner than the standalone model implied, because
+// the clip point EQUALS the chiff input at fast rates: clipping starts at 1x
+// instead of waiting for the input to be driven past a tail bound above it.
+// 2.5 octaves is 5.66x, a deliberate small overshoot -- the terminal moves with
+// the rate, so undershooting would leave some patches unable to reach the
+// square at all, which matters more than a couple of settings of overlap.
+const uint32_t kChiffDriveSpan_q5_27 = 5u << 26;  // 2.5 octaves
+// The state is held scaled DOWN by this many bits so the driven input cannot
+// leave Q30: undriven it reaches 2^29, and 16x that is 2^33. Shifting the
+// state instead costs nothing, because the output add takes a shifted operand.
+// Must be >= kChiffDriveSpan: the drive is stored pre-divided by it.
+const uint32_t kChiffStateShift = 4;  // asm below hard-codes this as #4
+// The clip point, and the mean's reserve, is this many of the chiff's own
+// sigma: 2 x the stored scaled rms, i.e. 2 * 3/sqrt(2). MEASURED peak reach is
+// 4.23 sigma over a 180k-sample window and lower everywhere faster, so the
+// clean end clips essentially nothing while reserving no more than it must.
+const uint32_t kChiffClipRmsShift = 1;  // scaled rms << 1 == 3*sqrt(2) sigma
+// The clipped chiff cannot exceed the clip point, so however hard it is driven
+// its level rises by at most log2(3*sqrt(2)) octaves. The shrink schedule is
+// corrected by this so DURATION stays independent of AMOUNT.
+const uint32_t kChiffDriveOctavesCap_q5_27 = 279838930;  // log2(3*sqrt(2)) << 27
+
 // Chiff window as a multiple of the ATTACK duration: at kChiffDurationCenter the
 // window equals the attack; each side spans +-kChiffOctaves octaves (setting 127
 // ~= 8x, setting 0 = 1/8x). Center is the 0..127 setting midpoint, and the
@@ -130,6 +163,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_input_fraction_q30_ = 0;
   chiff_input_fraction_step_q5_27_ = 0;
   chiff_input_full_q30_ = 0;
+  chiff_drive_over_16_q30_ = 1 << (30 - kChiffStateShift);
   // Bias is a CONTINUOUS control, not note state -- nothing else resets it,
   // because it must survive NoteOn/NoteOff to stay smooth. But Init means
   // "from a known state", and it was the one thing Init left alone: in the
@@ -460,9 +494,36 @@ void Envelope::NoteOn(
       //
       // Sized to reach the max slew time at the nominal duration, so the slew
       // time at that moment IS that end.
+      // THE DRIVE, from the resolved (velocity-modulated) amount: 1x at or
+      // below the hinge, rising to 2^kChiffDriveOctaves at full. Stored
+      // PRE-DIVIDED by 2^kChiffStateShift -- the same power of two -- so the
+      // filter's input register never grows past the undriven input, which is
+      // what keeps it inside Q30 at full drive.
+      uint32_t drive_octaves_q5_27 = 0;
+      if (chiff_amount > kChiffCleanAmount) {
+        drive_octaves_q5_27 = static_cast<uint32_t>(
+          (static_cast<uint64_t>(kChiffDriveSpan_q5_27) *
+           (chiff_amount - kChiffCleanAmount)) /
+          (kChiffAmountMax - kChiffCleanAmount));
+      }
+      // The exponent is measured from kChiffStateShift, NOT from the drive
+      // span: the stored value is the drive divided by 2^kChiffStateShift, so
+      // the undriven case must land on 2^-kChiffStateShift whatever the span
+      // is. Tying it to the span instead made the two agree only while both
+      // were 4, and narrowing the span then doubled the undriven chiff.
+      chiff_drive_over_16_q30_ = static_cast<int32_t>(
+        static_cast<uint32_t>(SlewRateFromTimeLog2_q31(
+          (kChiffStateShift << 27) - drive_octaves_q5_27)) >> 1);
+      // DURATION STAYS DURATION. The drive makes the chiff louder, so it would
+      // reach inaudibility LATER and sing past its nominal duration; the shrink
+      // is given exactly the extra octaves the drive adds. Capped, because the
+      // clip means the level cannot rise by the full drive -- correcting by the
+      // raw drive instead would kill the chiff EARLY at high amounts.
+      const uint32_t drive_level_octaves_q5_27 =
+        std::min(drive_octaves_q5_27, kChiffDriveOctavesCap_q5_27);
       chiff_input_fraction_step_q5_27_ =
-        ChiffInputFractionOctaves_q5_27(chiff_input_full_q30_,
-          chiff_slew_time_log2_end_q5_27_)
+        (ChiffInputFractionOctaves_q5_27(chiff_input_full_q30_,
+          chiff_slew_time_log2_end_q5_27_) + drive_level_octaves_q5_27)
         / window_samples;
       // Set ONCE, here, so the slow-down finishes at the nominal duration
       // however many stages the note passes through.
@@ -788,7 +849,11 @@ void Envelope::RenderStage(
     const int32_t stage_rate_q31 =
       SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27_);
     const int32_t input_q30 = ChiffInput_q30();
-    const int32_t chiff_input_q30 = input_q30;
+    // What the filter chases: the input driven by the character axis, in the
+    // state's scaled-down domain. The drive already carries the 1/2^shift, so
+    // this is <= input_q30 and cannot overflow however hard it is driven.
+    const int32_t chiff_input_q30 = static_cast<int32_t>(
+      (static_cast<int64_t>(input_q30) * chiff_drive_over_16_q30_) >> 30);
     // The chiff's rms times 2.121, as a level: the per-input figure
     // times the input. Dividing by 2^15.5 would be a 64-bit division, so
     // multiply by the same constant and shift 31 instead (46341^2 is 2^31 to
@@ -819,12 +884,23 @@ void Envelope::RenderStage(
     //    ~1.4% of the loud phase clips at the rail. Doubling the margin costs
     //    ~1.8 dB of attack level -- measured before the response correction
     //    widened this quantity by ~0.5 dB.
-    // COST PROBE ONLY: a stand-in clip point of the right magnitude, so the
-    // loop pays what a real one would. Not the design's min(input, k*sigma).
-    const int32_t chiff_clip_q30 = chiff_scaled_rms_q30;
+    // THE CLIP POINT, WHICH IS ALSO THE MEAN'S RESERVE -- one number doing
+    // both jobs, so a bounded chiff always fits the headroom reserved for it
+    // and rail clipping cannot happen at any peak or bias.
+    // min() because the peak the chiff can reach is the SMALLER of two bounds:
+    // its input (the state is a convex combination of +/- input, so it can
+    // never exceed it) and its tail (3*sqrt(2) sigma). The input bound binds at
+    // fast rates and the tail bound when slow. MEASURED: at rate 0.5 the peak
+    // is 1.73 sigma and sqrt((2-r)/r) is 1.73, i.e. the hard bound, to the
+    // digit. Reserving the tail bound at fast rates would over-reserve 2.5x
+    // exactly where the chiff is loudest.
+    const int32_t chiff_clip_q30 = std::min<int32_t>(
+      input_q30, chiff_scaled_rms_q30 << kChiffClipRmsShift);
+    // The loop runs the state scaled down, so its clip point is too.
+    const int32_t chiff_clip_scaled_q30 = chiff_clip_q30 >> kChiffStateShift;
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    const int32_t lo_q30 = chiff_scaled_rms_q30;
-    const int32_t hi_q30 = kValueMax_q30 - chiff_scaled_rms_q30;
+    const int32_t lo_q30 = chiff_clip_q30;
+    const int32_t hi_q30 = kValueMax_q30 - chiff_clip_q30;
     // Where nominal reaches by the run's end, for the offset's far endpoint.
     // Approximate (linear in rate * run_samples) -- it only sizes an offset
     // that is itself an approximation, and it never touches nominal's own path.
@@ -895,17 +971,20 @@ void Envelope::RenderStage(
       "  sub   lr, lr, %[chiff]\n"                // delta = input - chiff
       "  smull ip, lr, lr, %[rate]\n"
       "  add   %[chiff], %[chiff], lr, lsl #1\n"  // chiff += (product>>32)*2
-      "  cmp   %[chiff], %[clip]\n"                // COST PROBE: symmetric clip
-      "  it    gt\n"
-      "  movgt %[chiff], %[clip]\n"
-      "  cmn   %[chiff], %[clip]\n"
-      "  it    lt\n"
+      "  cmp   %[chiff], %[clip]\n"               // saturating one-pole: the
+      "  it    gt\n"                               //   clipped value FEEDS
+      "  movgt %[chiff], %[clip]\n"                //   BACK, so the state can
+      "  cmn   %[chiff], %[clip]\n"                //   never carry more than
+      "  it    lt\n"                               //   it is allowed to show
       "  rsblt %[chiff], %[clip], #0\n"
       "  smull ip, lr, %[gap], %[srate]\n"        // the gap to the aim decays
       "  sub   %[gap], %[gap], lr, lsl #1\n"      //   at the STAGE's rate
       "  add   %[comb], %[comb], %[cslope]\n"     // bias + mean + the aim
       "  sub   ip, %[comb], %[gap]\n"             // the mean
-      "  add   ip, ip, %[chiff]\n"                // + the chiff
+      "  add   ip, ip, %[chiff], lsl #4\n"        // + the chiff, unscaled
+                                                  //   (#4 == kChiffStateShift;
+                                                  //   the QEMU differential
+                                                  //   catches any drift)
       "  usat  ip, #15, ip, asr #15\n"            // saturate and shift, one op
       "  strh  ip, [%[buf]], #2\n"
       "  cmp   %[buf], %[end]\n"
@@ -915,7 +994,7 @@ void Envelope::RenderStage(
         [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
         [prng] "+r"(prng), [buf] "+r"(sample_buffer)
       : [decay] "r"(decay_q32), [input] "r"(chiff_input_q30),
-        [clip] "r"(chiff_clip_q30),
+        [clip] "r"(chiff_clip_scaled_q30),
         [srate] "r"(stage_rate_q31),
         [cslope] "r"(combined_slope_q30), [end] "r"(segment_end)
       : "ip", "lr", "cc", "memory");
@@ -934,20 +1013,23 @@ void Envelope::RenderStage(
       // term. Two instructions saved per one-pole. The dropped bit is a half
       // LSB per sample and cannot accumulate: at a one-pole's fixed point the
       // step is zero, so the error is bounded by the last step, not summed.
-      // COST PROBE: symmetric clip, mirroring the asm above.
       chiff_state_q30 += 2 * static_cast<int32_t>(
         (static_cast<int64_t>(chiff_input_signed_q30 - chiff_state_q30)
          * slew_rate_q31) >> 32);
-      if (chiff_state_q30 > chiff_clip_q30) chiff_state_q30 = chiff_clip_q30;
-      else if (chiff_state_q30 < -chiff_clip_q30) {
-        chiff_state_q30 = -chiff_clip_q30;
+      // The clipped value feeds back: a saturating one-pole, not a
+      // waveshaped output. MEASURED to reach an exact square wave at 16x
+      // drive where clipping the output only approaches one.
+      if (chiff_state_q30 > chiff_clip_scaled_q30) {
+        chiff_state_q30 = chiff_clip_scaled_q30;
+      } else if (chiff_state_q30 < -chiff_clip_scaled_q30) {
+        chiff_state_q30 = -chiff_clip_scaled_q30;
       }
       nominal_gap_q30 -= 2 * static_cast<int32_t>(
         (static_cast<int64_t>(nominal_gap_q30) * stage_rate_q31) >> 32);
       combined_q30 += combined_slope_q30;
       // Matches USAT #15 with ASR #15: arithmetic shift, then saturate.
-      int32_t sample = (combined_q30 - nominal_gap_q30 + chiff_state_q30)
-        >> kSampleBits;
+      int32_t sample = (combined_q30 - nominal_gap_q30
+        + (chiff_state_q30 << kChiffStateShift)) >> kSampleBits;
       if (sample < 0) sample = 0;
       if (sample > INT16_MAX) sample = INT16_MAX;
       *sample_buffer++ = static_cast<int16_t>(sample);
@@ -989,7 +1071,7 @@ void Envelope::RenderStage(
     // (value - release target) * strength_u16 in int32, and both wrap on an
     // out-of-range value. MEASURED unbounded: -10014..33092, and 33092 * 65535
     // is 2.17e9 against INT32_MAX 2.147e9. Bias-free, so the invariant holds.
-    value_q30 = nominal_q30 + chiff_state_q30;
+    value_q30 = nominal_q30 + (chiff_state_q30 << kChiffStateShift);
     if (value_q30 < clamp_base_q30_) value_q30 = clamp_base_q30_;
     const int32_t value_top_q30 = clamp_base_q30_ + kValueMax_q30;
     if (value_q30 > value_top_q30) value_q30 = value_top_q30;

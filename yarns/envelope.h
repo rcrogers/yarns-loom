@@ -147,6 +147,12 @@ class Envelope {
   // accumulator, interpolating slew times between powers of two.
   uint32_t stage_slew_time_log2_q5_27_;
 
+  // The character axis, as a multiplier on the chiff's filter input, ALREADY
+  // DIVIDED by 2^kChiffStateShift: 2^-kChiffDriveOctaves at or below the hinge,
+  // 1.0 at full amount. Pre-dividing is what keeps the driven input inside Q30,
+  // and it costs nothing because the state is carried scaled down to match.
+  int32_t chiff_drive_over_16_q30_;
+
   // How the rate falls while the chiff runs: decay = 1 - 2^-step (Q32), so
   // rate -= (rate*decay)>>32 each sample == rate *= 2^-step, reproducing the
   // slew time rising linearly, with no per-sample LUT. Zero = hold.
