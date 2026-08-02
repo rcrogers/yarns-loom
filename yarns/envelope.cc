@@ -439,6 +439,10 @@ void Envelope::NoteOn(
         ChiffInputFractionOctaves_q5_27(chiff_input_full_q30_,
           chiff_slew_time_log2_end_q5_27_)
         / window_samples;
+      // Set ONCE, here, so the slow-down finishes at the nominal duration
+      // however many stages the note passes through.
+      chiff_slew_time_log2_step_q5_27_ =
+        (ChiffMaxSlewTime_q5_27() - slew_time_log2_q5_27_) / window_samples;
       RederiveSlewState();
       break;
     }
@@ -520,16 +524,16 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
 
 void Envelope::RederiveSlewState() {
   if (chiff_target_samples_) {
-    // The chiff's slew slows from where it is now toward its max slew time,
-    // over the NOMINAL duration. That duration is a sizing reference, never a
-    // countdown -- nothing happens when it elapses. NoteOn guarantees the slew
-    // starts no slower than it ends; guard anyway.
+    // THE STEP IS NOT RECOMPUTED HERE. It is set once, in NoteOn, from the
+    // nominal duration. Respreading the remaining octaves over the FULL duration
+    // at every stage handoff made the chiff's schedule depend on how many stage
+    // transitions it lived through and when they fell -- stage timing driving
+    // chiff timing after the duration was decided. Only the release compression
+    // may shorten it, and it does that by taking a FASTER step, below.
     const uint32_t max_slew_time_q5_27 = ChiffMaxSlewTime_q5_27();
     if (slew_time_log2_q5_27_ > max_slew_time_q5_27) {
       slew_time_log2_q5_27_ = max_slew_time_q5_27;
     }
-    chiff_slew_time_log2_step_q5_27_ =
-      (max_slew_time_q5_27 - slew_time_log2_q5_27_) / chiff_target_samples_;
     chiff_slew_rate_decay_q32_ = DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
   } else {
     slew_time_log2_q5_27_ = stage_slew_time_log2_q5_27_;
