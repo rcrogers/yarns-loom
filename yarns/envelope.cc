@@ -179,13 +179,20 @@ void Envelope::NoteOff() {
 // the slew running fast for the rest of the note, because the slew time its
 // duration implies is short and a short slew time is a fast slew.
 //
-// This is the rate FLOOR's mirror image, and it only became available when the
-// window went away: while a window existed its close reset the slew time, and
-// stopping at the stage's slew time would have tied the chiff's TIMING to the
-// stage too. Now the shrink owns the timing, so the rate is free to land
-// wherever the envelope needs it.
+// THE CAP IS THE CHIFF'S OWN, from its duration, and nothing about the stages
+// enters it. Duration being attack-relative is a control convenience in how the
+// duration is DECIDED; once decided, nothing further about stage timing may
+// touch the chiff (user, 2026-08-02), and the release compression below is the
+// single stated exception.
+//
+// A CAP IS REQUIRED, and not for the reason this once carried ("so the rate
+// lands back on the envelope's own rate" -- a tracking argument the dedicated
+// chiff filter deleted). With no cap the rate falls to zero, and a one-pole at
+// rate zero HOLDS its state rather than decaying: chiff_state stops moving and
+// the shrinking input can no longer pull it down. MEASURED uncapped: a +716 LSB
+// DC offset left on the envelope, permanently.
 uint32_t Envelope::ChiffMaxSlewTime_q5_27() const {
-  return std::max(chiff_slew_time_log2_end_q5_27_, stage_slew_time_log2_q5_27_);
+  return chiff_slew_time_log2_end_q5_27_;
 }
 
 uint32_t Envelope::ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const {
