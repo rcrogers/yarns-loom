@@ -1,4 +1,4 @@
 loop_instructions 18
-loop_cycles 28
+loop_cycles 31
 loop_spills 0
-function_instructions 386
+function_instructions 371
