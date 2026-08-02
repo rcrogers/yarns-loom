@@ -294,19 +294,15 @@ const uint32_t kChiffInaudibleShift = 13;
 // Q5.27. Adapts to the target (via that rate) and to the note's range (via the
 // chiff input), which is what a constant octave count cannot do.
 //
-// PASS THE CHIFF'S OWN SLEW TIME AT THE DEADLINE, never the stage's. The
-// output is ALWAYS chiff input x the slew's response at the chiff's own rate:
-// where the rate floor binds, the chiff input is rescaled by exactly the
-// response ratio (see ChiffPerturbScaleForClampedRate), so the floor cancels
-// out of the amplitude entirely. An earlier version passed
-// min(chiff end, stage) on the theory that the floor governs the output. It
-// does not, and on the COMPRESSION path that mistake was worth 5 octaves: a
-// release compresses the deadline without re-sloping how fast the slew slows,
-// so the chiff is still running FAST when the deadline arrives, while the
-// release stage's own slew time is slow. Sizing against the stage assumed an
-// output 32x smaller than the one actually produced, so the shrink stopped
-// ~34 dB short and the remaining excursion was cut off dead at the deadline
-// -- an audible chop at the end of the release.
+// PASS THE CHIFF'S OWN SLEW TIME AT THE DEADLINE, never the stage's: the output
+// is chiff input x the response at the chiff's own rate, and nothing about the
+// stage enters it.
+// Passing min(chiff end, stage) instead cost 5 octaves on the COMPRESSION path.
+// A release compresses the deadline without re-sloping how fast the filter
+// slows, so the chiff is still fast when the deadline arrives while the release
+// stage's own slew time is slow; sizing against the stage assumed an output 32x
+// smaller than the one produced, the shrink stopped ~34 dB short, and the
+// remainder was chopped off at the deadline.
 static uint32_t ChiffInputFractionOctaves_q5_27(
     int32_t input_q30, uint32_t end_slew_time_log2_q5_27) {
   const uint32_t response_q15_5 =
@@ -786,6 +782,11 @@ void Envelope::RenderStage(
     // The chiff's output RMS: its input times the filter's response. Dividing
     // by 2^15.5 would be a 64-bit division, so multiply by the same constant
     // and shift 31 (46341^2 is 2^31 to 3 parts per million).
+    // APPROXIMATE, and low by up to 0.87 dB in a band of slew times the chiff
+    // transits early (see ChiffFilterResponseFromTime). The margin below
+    // inherits that error where the chiff is loudest.
+    // Computed once per RUN from the run-start slew time, while the rate decays
+    // within the run -- so it runs GENEROUS as the run proceeds, which is safe.
     const int32_t chiff_rms_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(input_q30)
        * (chiff_response_q15_5 * kResponseOne_q15_5)) >> 31);
@@ -797,9 +798,13 @@ void Envelope::RenderStage(
     //  - only the OFFSET is ramped across the run. nominal is an exponential and
     //    a linear chord over 64 samples is percent-level wrong on a 409-sample
     //    stage -- envelope distortion, not rounding.
+    //  - EXCEPT when the chiff is wider than the rails allow (lo >= hi): the
+    //    clamp is abandoned and the mean is centred instead, so the chiff clips
+    //    both sides. A larger factor reaches that regime sooner.
     //  - ONE rms is inherited, not chosen: it is what the response returns.
-    //    Peaks reach ~4.3x rms, so MEASURED ~1.6% of the loud phase still clips
-    //    at the rail. Widening it costs level (2x rms is ~1.6 dB of attack).
+    //    MEASURED AT ONE SETTING ONLY (peak at full scale, steady bias 8000),
+    //    so treat as indicative, not established: peaks ~4.3x rms, ~1.6% of the
+    //    loud phase clips at the rail, and 2x rms would cost ~1.6 dB of attack.
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
     const int32_t lo_q30 = chiff_rms_q30;
     const int32_t hi_q30 = kValueMax_q30 - chiff_rms_q30;
