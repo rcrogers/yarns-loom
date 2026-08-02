@@ -142,6 +142,16 @@ int chiff_render(
       static_cast<int8_t>(chiff_amount_mod_velocity),
       static_cast<uint8_t>(velocity)) >> 6;
 
+  // THE SPAN MUST FIT int16. NoteOn forms `int16_t scale_s16 = max - min`, so a
+  // span outside [-32768, 32767] wraps and then min_target_q31 + scale * peak
+  // overflows int32 on top of it. No firmware caller can ask for that -- timbre
+  // is 0..warped with warped in int16, and the DC and gain pairs are both
+  // non-negative and under 32767 -- but the sim exposes the two rails as free
+  // controls, so it can. Clamped here rather than only in the UI so no caller,
+  // including the check scripts, can drive the engine into that.
+  if (max_target - min_target > INT16_MAX) max_target = min_target + INT16_MAX;
+  if (max_target - min_target < INT16_MIN) max_target = min_target + INT16_MIN;
+
   // Rest level = the note's own min, so an inverted or negative range starts
   // where it ends rather than at a zero that is outside it.
   envelope.Init(static_cast<int16_t>(min_target));

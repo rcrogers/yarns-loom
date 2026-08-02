@@ -170,6 +170,28 @@ new Promise((resolve, reject) => {
         : `${diffs} differ, first at ${first}`);
   }
 
+  // THE NOTE'S SPAN MUST STAY INSIDE int16. NoteOn forms
+  // `int16_t scale_s16 = max - min`, so a wider span wraps and then
+  // min_target_q31 + scale * peak overflows int32 on top. No firmware caller
+  // can ask for that, but the sim exposes both rails as free controls, so it
+  // can -- MEASURED before the clamp: min -16384 / max 16384 reported a ceiling
+  // of 31232 instead of 16384, and min -16384 / max 32767 a floor of -25345
+  // instead of -16384. Both are garbage, and nothing else here would see it.
+  for (const [mn, mx, wantCeil, wantFloor] of [
+        [0, 32767, 32766, 0],
+        [-16384, 16384, 16382, -16384],   // span 32768, one past int16
+        [-16384, 32767, 16382, -16384],   // span 49151, clamped to 32767
+        [16384, -16384, 16384, -16384],   // span -32768, the negative limit
+      ]) {
+    const r = page.render(Object.assign({}, {
+      attack: 40, decay: 64, sustain: 70, release: 64,
+      amplitudeModVelocity: 0, velocity: 127, amount: 96, chiffDuration: 90,
+      gateMs: 600, seed: 0xCAFEBABE }, { minTarget: mn, maxTarget: mx }));
+    check(`span stays inside int16: min ${mn} max ${mx}`,
+      r.ceiling === wantCeil && r.floorLevel === wantFloor,
+      `rails ${r.floorLevel}..${r.ceiling}, want ${wantFloor}..${wantCeil}`);
+  }
+
   // CHIFF DURATION is attack-relative now (no table): setting 64 == the attack,
   // 0 == 1/8x, 127 == ~7.7x, via the firmware ChiffWindowSamples. Resolve
   // through the engine (firmware code), not a JS reimplementation.
