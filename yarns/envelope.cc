@@ -123,11 +123,20 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_perturb_shrink_q30_ = 0;
   chiff_perturb_shrink_step_q5_27_ = 0;
   chiff_perturb_full_q30_ = 0;
+  // Bias is a CONTINUOUS control, not note state -- nothing else resets it,
+  // because it must survive NoteOn/NoteOff to stay smooth. But Init means
+  // "from a known state", and it was the one thing Init left alone: in the
+  // firmware it is whatever the object was constructed with, and anywhere the
+  // envelope is reused (the sim renders every note through one static) the
+  // previous note's bias leaked into the next one's FIRST BLOCK, which then
+  // ramped from the wrong place. Found as a 63-sample sim-vs-native mismatch.
+  bias_q31_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
   stage_start_q30_ = zero_value_q30;
   chiff_floor_q30_ = zero_value_q30;
   chiff_top_q30_ = zero_value_q30;
+  clamp_base_q30_ = std::min<int32_t>(zero_value_q30, 0);
   std::fill(
     &stage_target_q30_[0],
     &stage_target_q30_[ENV_NUM_STAGES],
@@ -363,6 +372,7 @@ void Envelope::NoteOn(
     stage_target_q30_[ENV_STAGE_ATTACK], stage_target_q30_[ENV_STAGE_SUSTAIN]));
   chiff_floor_q30_ = std::min(release_q30, std::min(
     stage_target_q30_[ENV_STAGE_ATTACK], stage_target_q30_[ENV_STAGE_SUSTAIN]));
+  clamp_base_q30_ = std::min<int32_t>(chiff_floor_q30_, 0);
   // EXPERIMENT: half the note's ALLOWED range, in the stage targets' Q30
   // domain (a target is s16 << 15, so half the range is |scale| << 14). The
   // range may be numerically inverted, hence the magnitude.
@@ -702,6 +712,19 @@ void Envelope::RenderStage(
     // run at the same settings: the value diverged by exactly the bias
     // amplitude (10, 8000, 20000 s16) every time the sum touched a rail.
     const int32_t bias_q30 = bias_q31 >> 1;
+    // THE CLAMP RIDES THE NOTE'S FLOOR. USAT bounds [0, 2^30) and nothing else,
+    // so to bound a value whose range goes BELOW zero the loop runs on the
+    // value measured FROM that floor. Subtracted here, added back after the
+    // loop, and absorbed into the bias register for the output -- all per run,
+    // so the loop is untouched and this costs NOTHING per sample.
+    //
+    // min(floor, 0), not floor: where the note's floor is already >= 0 the
+    // offset is zero and the bound is exactly what it was, so the common case
+    // cannot move (every bias-0 scenario hash is unchanged). Only a range that
+    // reaches below zero shifts it, and then floor..floor+2^30 covers the
+    // note's whole range because a range is at most full scale wide.
+    const int32_t clamp_base_q30 = clamp_base_q30_;
+    value_q30 -= clamp_base_q30;
     // Slew-rate floor (timed stages): never slower than the stage's own
     // rate, else the value hangs on a moving stage near the window's slow
     // end. Monotone (the rate only falls), so flooring holds it there.
@@ -787,6 +810,8 @@ void Envelope::RenderStage(
         (static_cast<int64_t>(stage_aim_q30 - nominal_value_q30) * ratio_q31)
         >> 31);
     }
+    // Into the same domain as the value, so the sag and the loop agree.
+    slew_input_center_q30 -= clamp_base_q30;
     const int32_t perturb_q30 = ChiffPerturb_q30();
     int32_t scaled_perturb_q30 = perturb_q30;
     if (chiff_perturb_scale_q15_5 != (1u << 15)) {
@@ -853,7 +878,9 @@ void Envelope::RenderStage(
     //    sample, never integrated, so bounding the sum needs no feedback.
     // Both bounds are the same constant, which is why neither needs a register.
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    int32_t running_bias_q30 = bias_q30;
+    // Carries the clamp offset too, so the output add undoes it for free:
+    // (value - base) + (bias + base) == value + bias.
+    int32_t running_bias_q30 = bias_q30 + clamp_base_q30;
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
@@ -960,10 +987,11 @@ void Envelope::RenderStage(
       slew_time_log2_q5_27_ = slew_time_log2_end;
     }
 
-    // Nothing to unpick: value_q30 IS the envelope, so the nominal value, the
-    // centre, the sag and tremolo all read it directly. Only the bias needs
-    // carrying forward, and its Q31 form is authoritative -- the loop's Q30
-    // copy is a rounded scratch that ends here.
+    // Back out of the clamp offset. No bias to unpick: value_q30 IS the
+    // envelope, so the nominal value, the centre, the sag and tremolo all read
+    // it directly. The bias's Q31 form is authoritative -- the loop's Q30 copy
+    // is a rounded scratch that ends here.
+    value_q30 += clamp_base_q30;
     bias_q31 += bias_slope_q31 * static_cast<int32_t>(run_samples);
   }
 
@@ -1059,6 +1087,7 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   chiff_perturb_full_q30_ = ScaleRatio(chiff_perturb_full_q30_, num, den);
   chiff_floor_q30_ = ScaleRatio(chiff_floor_q30_, num, den);
   chiff_top_q30_ = ScaleRatio(chiff_top_q30_, num, den);
+  clamp_base_q30_ = std::min<int32_t>(chiff_floor_q30_, 0);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
     stage_target_q30_[i] = ScaleRatio(stage_target_q30_[i], num, den);
   }

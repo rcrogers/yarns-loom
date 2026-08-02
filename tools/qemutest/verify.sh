@@ -26,6 +26,15 @@ TREMOLO=24000
 # The asm saturates with USAT and the C reference with two compares, and this
 # is the only scenario where those two have to agree under saturation.
 BIAS_LFO=20000
+# A note whose range sits BELOW zero (a negative TIMBRE MOD ENV target). Every
+# scenario above has a non-negative floor, so the clamp offset that lets the
+# value go negative was unverified against the C reference -- and this is the
+# case where the asm and the C reference are least obviously equal: the asm
+# saturates with USAT #15, ASR #15 (one instruction, arithmetic shift then
+# saturate) where the C does >> 15 then two compares, and only a negative
+# operand exercises the sign path through both.
+NEG_SCENARIOS="basic held"
+NEG_RANGE=-16383
 
 echo "== building host C reference (clang) =="
 ( cd ../hosttest && python3 ../portable_envelope.py ../.. envelope_host.cc &&
@@ -51,6 +60,12 @@ echo "== building ARM asm ELF + running every scenario under QEMU =="
       -semihosting-config arg=test,arg=$s,arg='"$AMOUNT"',arg='"$DURATION"',arg=hash=1,arg=tremolo='"$TREMOLO"',arg=bias_lfo='"$BIAS_LFO"' \
       -kernel test.elf
     mv qemu_out.txt "qemu_${s}_bias.txt"
+  done
+  for s in '"$NEG_SCENARIOS"'; do
+    qemu-system-arm -M lm3s6965evb -nographic -semihosting \
+      -semihosting-config arg=test,arg=$s,arg='"$AMOUNT"',arg='"$DURATION"',arg=hash=1,arg=range='"$NEG_RANGE"',arg=bias_lfo='"$BIAS_LFO"' \
+      -kernel test.elf
+    mv qemu_out.txt "qemu_${s}_neg.txt"
   done' ) >/dev/null
 
 echo "== diffing asm vs C, per scenario =="
@@ -71,6 +86,16 @@ for s in $BIAS_SCENARIOS; do
     printf 'PASS %-9s bias hash %s  (asm == C)\n' "$s" "$(cat qemu_${s}_bias.txt)"
   else
     printf 'FAIL %-9s bias host=%s qemu=%s\n' "$s" "$(cat host_${s}_bias.txt)" "$(cat qemu_${s}_bias.txt)"
+    fail=1
+  fi
+done
+for s in $NEG_SCENARIOS; do
+  ../hosttest/test "$s" "$AMOUNT" "$DURATION" hash=1 "range=$NEG_RANGE" \
+    "bias_lfo=$BIAS_LFO" > "host_${s}_neg.txt"
+  if cmp -s "host_${s}_neg.txt" "qemu_${s}_neg.txt"; then
+    printf 'PASS %-10s neg hash %s  (asm == C)\n' "$s" "$(cat qemu_${s}_neg.txt)"
+  else
+    printf 'FAIL %-10s neg host=%s qemu=%s\n' "$s" "$(cat host_${s}_neg.txt)" "$(cat qemu_${s}_neg.txt)"
     fail=1
   fi
 done

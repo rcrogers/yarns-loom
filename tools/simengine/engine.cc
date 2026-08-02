@@ -109,6 +109,24 @@ int chiff_render(
     int env_mod_sustain, int env_mod_release,
     int chiff_amount, int chiff_duration, int chiff_amount_mod_velocity,
     int gate_samples, int tail_samples, int max_target,
+    // The note's OTHER bound. Together with max_target these are NoteOn's two
+    // rails, so the sim can render the ranges the firmware actually asks for:
+    // inverted (min > max, a CV DAC where codes fall as volts rise) and
+    // NEGATIVE (min 0, max < 0 -- a negative TIMBRE MOD ENV, whose warped
+    // target is below zero). Default 0 is the ordinary 0..max note.
+    int min_target,
+    // BIAS, driven exactly as tools/hosttest/driver.cc drives it, so the sim
+    // and the host battery agree. Both default to 0, which is bias-free and
+    // reproduces every earlier render bit-for-bit.
+    //   tremolo   -- target sampled per block from the envelope's own value,
+    //                the way Oscillator::Render does it. Negative feedback
+    //                scaled to the envelope, so the sum stays near range and
+    //                the clip path is never exercised.
+    //   bias_lfo  -- an INDEPENDENT bias, the way a timbre LFO drives it, in
+    //                s16. This is the one that can push envelope + bias out of
+    //                the DAC range and make the saturate bite. Sign flips
+    //                every bias_lfo_blocks blocks so the ramp is always live.
+    int tremolo, int bias_lfo, int bias_lfo_blocks,
     unsigned int seed,
     int16_t* out, int max_samples, int32_t* meta) {
   BuildAdsr(&adsr, attack_setting, decay_setting, sustain_setting,
@@ -124,9 +142,11 @@ int chiff_render(
       static_cast<int8_t>(chiff_amount_mod_velocity),
       static_cast<uint8_t>(velocity)) >> 6;
 
-  envelope.Init(0);
+  // Rest level = the note's own min, so an inverted or negative range starts
+  // where it ends rather than at a zero that is outside it.
+  envelope.Init(static_cast<int16_t>(min_target));
   envelope.prng_offset_u32_ = 0;   // reproducible across calls
-  envelope.NoteOn(adsr, 0, max_target,
+  envelope.NoteOn(adsr, min_target, max_target,
                   modulated_chiff_amount,
                   static_cast<uint8_t>(chiff_duration));
   // The NOMINAL duration, for the sim's marker. It is attack-relative
@@ -141,6 +161,8 @@ int chiff_render(
 
   int written = 0;
   bool released = false;
+  int block_counter = 0;
+  if (bias_lfo_blocks <= 0) bias_lfo_blocks = 8;
   int16_t block[kAudioBlockSize];
   while (written < total) {
     if (!released && written >= gate_samples) {
@@ -148,7 +170,18 @@ int chiff_render(
       released = true;
     }
     Envelope::FillSharedPrngBuffer();
-    envelope.RenderSamples(block, 0);
+    // Same construction as the host driver, so a scenario dialled here and a
+    // scenario run there produce the same bias.
+    int32_t bias_target_q31 = tremolo
+        ? static_cast<int32_t>(envelope.tremolo(
+            static_cast<uint16_t>(tremolo))) << 16
+        : 0;
+    if (bias_lfo) {
+      const bool high = ((block_counter / bias_lfo_blocks) & 1) == 0;
+      bias_target_q31 += (high ? bias_lfo : -bias_lfo) << 16;
+    }
+    ++block_counter;
+    envelope.RenderSamples(block, bias_target_q31);
     int n = total - written;
     if (n > static_cast<int>(kAudioBlockSize)) n = kAudioBlockSize;
     memcpy(out + written, block, n * sizeof(int16_t));
@@ -167,12 +200,12 @@ int chiff_render(
   meta[META_PEAK_U16] = adsr.peak_u16;
   meta[META_SUSTAIN_U16] = adsr.sustain_u16;
   meta[META_CHIFF_AMOUNT] = modulated_chiff_amount;
-  // Convert the Q30 rails into the same units the rendered samples use, by
-  // the same path EnvelopeSample takes (>>14 then the saturating >>1).
-  meta[META_CEILING] = static_cast<int32_t>(
-      ClipUShifted(envelope.chiff_top_q30_ >> (30 - 16), 15, 1));
-  meta[META_FLOOR] = static_cast<int32_t>(
-      ClipUShifted(envelope.chiff_floor_q30_ >> (30 - 16), 15, 1));
+  // The Q30 rails in the rendered samples' units. SIGNED, not clipped to the
+  // DAC range: a negative range's rails are genuinely below zero, and clipping
+  // them reported 0 and drew the wrong line. Identical for any rail that is
+  // already inside the range.
+  meta[META_CEILING] = envelope.chiff_top_q30_ >> 15;
+  meta[META_FLOOR] = envelope.chiff_floor_q30_ >> 15;
   return written;
 }
 

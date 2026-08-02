@@ -198,6 +198,58 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
   }
 }
 
+// NEGATIVE ENVELOPES. A negative TIMBRE MOD ENV makes part.cc's timbre_14
+// negative (it is CONSTRAINed to [-8192, 8191]), so WarpTimbre's target is
+// negative and timbre_envelope_.NoteOn gets min 0 / max NEGATIVE -- the note's
+// whole range sits BELOW zero. The base timbre arrives as the envelope's BIAS,
+// and the envelope is supposed to SUBTRACT from it.
+//
+// 6a8a00b8 moved the value clamp from the note's range to [0, 2^30) and killed
+// this outright: MEASURED at that bound, value range 0..0 and the output flat
+// at the bias -- the envelope did not move at all, silently. Nothing in this
+// file could see it, because every scenario had a non-negative floor.
+{ const args='basic 0 90 range=-16383 bias_lfo=20000 bias_lfo_blocks=1000000 '+
+             'gate=2000 tail=500 attack_setting=40';
+  const rng=execSync('./test '+args+' value_range=1',{maxBuffer:1e9})
+    .toString().trim().split(/\s+/).map(Number);
+  // The envelope must actually travel to its negative target, not sit pinned.
+  check('negative range: the envelope reaches its target',
+        rng[0] < -15000, 'value range '+rng[0]+'..'+rng[1]);
+  const s=run(args);
+  // MEASURE AFTER THE BIAS HAS RAMPED IN. Sample 0 is ~300 whatever the
+  // envelope does, because the bias slews up from 0 across the first block --
+  // a min over the whole render reads that startup transient and passes even
+  // when the envelope is dead. Caught by mutation-testing this check against
+  // the broken build, which it passed at "output dips to 312".
+  // Loop, not Math.min.apply: the render is ~112k samples and apply() spreads
+  // as arguments, which overflows the stack and silently kills the rest of the
+  // file (RangeError inside execSync's caller).
+  const dip=meanWin(s,120,150);
+  let mn=99999, mx=-99999; for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v; }
+  // With a standing bias of 20000 the envelope must pull the output DOWN. The
+  // threshold is HALF the bias: working it reaches ~4000, dead it sits at
+  // 20000, so neither verdict is near the line. 120-150 ms is the trough --
+  // the attack has travelled but the release has not started.
+  check('negative range: the envelope subtracts from the bias', dip < 10000,
+        'output at 120-150ms is '+dip.toFixed(0)+' of a 20000 bias'+
+        ' (20000 means the envelope is dead)');
+  check('negative range: output still inside the DAC range',
+        mn>=0 && mx<=FS_OUT, mn+'..'+mx);
+}
+
+// The invariant again, on a range that sits BELOW zero: the clamp offset must
+// not become a second path from bias into the envelope.
+{ const base='basic 96 90 range=-16383 gate=2000 tail=500 value_trace=1 ';
+  const ref=run(base+'bias_lfo=0');
+  for (const bias of [10, 20000]) {
+    const s=run(base+'bias_lfo='+bias);
+    let worst=0;
+    for (let i=0;i<ref.length;i++){ const d=Math.abs(s[i]-ref[i]); if(d>worst)worst=d; }
+    check('negative range: envelope is bias-independent (bias '+bias+')',
+          worst===0, 'max |diff| '+(worst/32768).toFixed(4)+' s16');
+  }
+}
+
 // The recovered value must stay inside the DAC range, because tremolo() forms
 // (value - release target) * strength_u16 in int32. Every release target is
 // non-negative, so a bounded value keeps |relative| <= 32767 and the product at

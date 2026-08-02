@@ -89,6 +89,18 @@ const CASES = [
     atk: 40, dec: 64, sus: 70, rel: 64, amt: 127, chiffDur: 120 },
   { name: 'chiff off (amt 0)',
     atk: 40, dec: 64, sus: 70, rel: 64, amt: 0, chiffDur: 90 },
+  // BIAS AND A NEGATIVE RANGE. Every case above renders bias 0 on an ordinary
+  // 0..32767 note, so the sim's bias arithmetic and its negative-range path
+  // were never compared against the firmware at all -- the sim could have
+  // drifted from the module in exactly the two places hardest to reason about.
+  { name: 'bias: independent LFO + tremolo',
+    atk: 16, dec: 64, sus: 70, rel: 64, amt: 96, chiffDur: 33,
+    biasLfo: 20000, tremolo: 24000 },
+  // A range BELOW zero (a negative TIMBRE MOD ENV). Needs a bias to be visible
+  // at all: with none, the output saturate takes the whole thing to zero.
+  { name: 'negative range (max < 0) under bias',
+    atk: 40, dec: 64, sus: 70, rel: 64, amt: 96, chiffDur: 90,
+    maxTarget: -16383, biasLfo: 20000 },
 ];
 
 const GATE_MS = 400, TAIL_MS = 400;
@@ -131,6 +143,9 @@ new Promise((resolve, reject) => {
       amplitudeModVelocity: 0, velocity: 127,
       amount: c.amt, chiffDuration: c.chiffDur,
       gateMs: GATE_MS, tailMs: TAIL_MS, seed: 0xCAFEBABE,
+      biasLfo: c.biasLfo || 0, tremolo: c.tremolo || 0,
+      maxTarget: c.maxTarget === undefined ? 32767 : c.maxTarget,
+      minTarget: c.minTarget || 0,
     };
     const res = page.render(p);
 
@@ -138,7 +153,9 @@ new Promise((resolve, reject) => {
       'basic', c.amt, c.chiffDur,
       `attack_setting=${c.atk}`, `decay_setting=${c.dec}`,
       `release_setting=${c.rel}`, `sustain_setting=${c.sus}`,
-      'peak=100', `gate=${GATE_MS}`, `tail=${TAIL_MS}`, 'range=32767',
+      'peak=100', `gate=${GATE_MS}`, `tail=${TAIL_MS}`,
+      `range=${c.maxTarget === undefined ? 32767 : c.maxTarget}`,
+      `bias_lfo=${c.biasLfo || 0}`, `tremolo=${c.tremolo || 0}`,
     ].join(' ');
     const native = execSync(`./test ${args}`, { cwd: HOSTTEST, maxBuffer: 1e9 })
       .toString().trim().split('\n').map(Number);

@@ -273,6 +273,12 @@ class Envelope {
   // timbre target may be negative), so these are min/max, not release/peak.
   int32_t chiff_floor_q30_;
   int32_t chiff_top_q30_;
+  // Where the render loop measures the value FROM. min(chiff_floor, 0): USAT
+  // bounds [0, 2^30) and nothing else, so a note whose range reaches below
+  // zero is rendered offset by its floor. Held as state rather than derived in
+  // RenderStage because a local stays live across the whole per-run path and
+  // GCC spills it -- MEASURED 383 -> 413 instructions, 58 -> 72 spills.
+  int32_t clamp_base_q30_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
