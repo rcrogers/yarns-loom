@@ -87,6 +87,10 @@ static int g_value_range = 0;
 // identical whatever the bias is; two traces that diverge are the clamp
 // feeding back into the envelope, i.e. accumulated damage to its state.
 static int g_value_trace = 0;
+// The chiff's slew time per block, Q5.27. ChiffFilterResponseFromTime is an
+// approximation whose error depends only on the slew time, so this is what
+// says how much of a real chiff's life is spent where the error is material.
+static int g_slew_trace = 0;
 static int32_t g_value_min = INT32_MAX;
 static int32_t g_value_max = INT32_MIN;
 
@@ -103,6 +107,10 @@ static void RenderMs(double ms) {
     }
     ++g_block_counter;
     env.RenderSamples(buffer, bias_target_q31);
+    if (g_slew_trace) {
+      printf("%u %d\n", env.slew_time_log2_q5_27_, env.chiff_input_fraction_q30_);
+      continue;
+    }
     if (g_value_trace) { printf("%d\n", env.value_q30_); continue; }
     if (g_value_range) {
       if (env.value_q30_ < g_value_min) g_value_min = env.value_q30_;
@@ -137,6 +145,7 @@ int main(int argc, char** argv) {
   g_bias_lfo = OptInt(argc, argv, "bias_lfo", 0);
   g_value_range = OptInt(argc, argv, "value_range", 0);
   g_value_trace = OptInt(argc, argv, "value_trace", 0);
+  g_slew_trace = OptInt(argc, argv, "slew_trace", 0);
   g_bias_lfo_blocks = OptInt(argc, argv, "bias_lfo_blocks", 8);
 
   int peak_pct = OptInt(argc, argv, "peak", 100);
