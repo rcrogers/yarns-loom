@@ -67,7 +67,7 @@ class Envelope {
   // Single render path: this is a realtime system, so the worst case (chiff
   // live) is the only case that matters; a lean chiff-off variant would only
   // optimize the best case. With the window closed the same loop degenerates
-  // correctly by itself: perturbation 0 -> slew input is the target -> output
+  // correctly by itself: chiff input 0 -> slew input is the target -> output
   // = the nominal value, clamp transparent.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
@@ -91,7 +91,7 @@ class Envelope {
 
   // the +/- the chiff puts on the slew input -- half the note's
   // ALLOWED range times the shrink, so it does not follow the realized level.
-  int32_t ChiffPerturb_q30() const;
+  int32_t ChiffInput_q30() const;
 
   // how slow the chiff's slew will have got after `samples` more
   // samples, never past its max. The shrink is sized against this.
@@ -164,7 +164,7 @@ class Envelope {
   //   nominal   the envelope with no chiff. Its own one-pole, running at the
   //             STAGE's rate, chasing the stage's aim.
   //   chiff     this. Its own one-pole, running at the CHIFF's rate, chasing
-  //             +/- the perturbation with the sign drawn per sample from the
+  //             +/- the chiff input with the sign drawn per sample from the
   //             shared PRNG. Zero-mean.
   //   bias      added at the point of use and never integrated.
   // out = saturate(mean + chiff), where mean = nominal + bias held far enough
@@ -172,26 +172,26 @@ class Envelope {
   // to a mean that already has room, so it is never clipped, and the clamp
   // does not feed back: value_q30_ is nominal + chiff and carries no bias.
   //
-  // THE PERTURBATION is half the note's ALLOWED range times
-  // chiff_perturb_shrink_q30_, so it does not follow the level the note
+  // THE CHIFF INPUT is half the note's ALLOWED range times
+  // chiff_input_fraction_q30_, so it does not follow the level the note
   // reaches and a quiet note gets the same exciter.
   //
   // TWO THINGS DECAY, and they divide the work by TIME rather than by
   // proportion, so neither covers for the other:
   //   the SLEW SLOWING contributes a curve straight in dB, about -4 dB per 10%
   //   of the chiff's duration. Amount-independent.
-  //   the PERTURBATION SHRINKING contributes 20log10(1 - t/duration): gentle
+  //   the CHIFF INPUT SHRINKING contributes 20log10(1 - t/duration): gentle
   //   early, steep at the end. The steepening is that mechanism finishing, not
   //   an artifact.
-  // How the perturbation shrinks is not free to change without re-measuring
+  // How the chiff input shrinks is not free to change without re-measuring
   // what the slew is doing at the same time.
   //
   // AMOUNT SETS THE STARTING SLEW TIME AND NOTHING ELSE. It does not scale the
-  // perturbation. Low amounts are quiet because a slow filter realizes less of
-  // the same perturbation. At AMOUNT 0 the perturbation is zero, the chiff
+  // chiff input. Low amounts are quiet because a slow filter realizes less of
+  // the same chiff input. At AMOUNT 0 the chiff input is zero, the chiff
   // one-pole holds zero, and the output is nominal + bias.
   //
-  // NOTHING NAMES THE OUTPUT. What you hear is the perturbation times the
+  // NOTHING NAMES THE OUTPUT. What you hear is the chiff input times the
   // filter's response, which falls as sqrt(rate) -- about 3 dB per octave.
   // KEEP THE CAUSAL CHAIN VISIBLE: an effect may cause a further effect, but an
   // effect must not be promoted into a thing that acts on its own with the
@@ -204,7 +204,7 @@ class Envelope {
   // magnitude, 0..kMaxSlewTimeLog2, whose max exceeds 2^31 as Q5.27.
   //
   // Things that did not work: per-block alpha (cb68505b), the two-point
-  // mixture, an absolute slew-rate floor with a perturbation rescale, and the
+  // mixture, an absolute slew-rate floor with a chiff input rescale, and the
   // sag -- a level move to make room for the chiff, which could not be made to
   // track a moving bias because the correction went through the integrator
   // (f5eee4b6 replaced it with the mean clamp above).
@@ -214,7 +214,7 @@ class Envelope {
   uint32_t chiff_slew_time_log2_end_q5_27_;   // Max slew time the chiff's own
                                              // goes, from its duration
   // The NOMINAL chiff duration, in samples: a sizing reference for how fast
-  // the slew slows and the perturbation shrinks. NOT a countdown -- nothing
+  // the slew slows and the chiff input shrinks. NOT a countdown -- nothing
   // observes it elapsing, and there is no window to be inside of.
   // 0 = no chiff on this note (AMOUNT 0).
   uint32_t chiff_target_samples_;
@@ -223,14 +223,17 @@ class Envelope {
   // lut_env_expo[phase] -- with no iterated level state, the same
   // construction the duty-binary core used for its duty curve.
   int32_t stage_start_q30_;
-  // how much of the available slack the perturbation uses, Q30
-  // (1<<30 == all of it), shrinking by chiff_perturb_shrink_step octaves per
-  // sample. Dimensionless, so unlike the levels it does not rescale.
-  int32_t chiff_perturb_shrink_q30_;
-  uint32_t chiff_perturb_shrink_step_q5_27_;
-  // half the note's ALLOWED range -- the perturbation at full
-  // shrink. A LEVEL, so it rescales with the others.
-  int32_t chiff_perturb_full_q30_;
+  // How much of chiff_input_full_q30_ is in use, Q30 (1<<30 == all of it),
+  // decaying by chiff_input_fraction_step octaves per sample. Dimensionless, so
+  // unlike the levels it does not rescale.
+  // NOT a fraction of the SLACK between the level and the rails: that sizing
+  // was tried and rejected, because the slack vanishes at the peak and the
+  // excursion notched there. See ChiffInput_q30.
+  int32_t chiff_input_fraction_q30_;
+  uint32_t chiff_input_fraction_step_q5_27_;
+  // Half the note's ALLOWED range: the chiff input at fraction 1.0, i.e.
+  // before any decay. A LEVEL, so it rescales with the others.
+  int32_t chiff_input_full_q30_;
   // Ordered clamp bounds over the note's stage targets. The envelope's range
   // may be numerically inverted (CV DAC codes fall as volts rise; a warped
   // timbre target may be negative), so these are min/max, not release/peak.
@@ -244,7 +247,7 @@ class Envelope {
   int32_t clamp_base_q30_;
   // THE THREE TERMS the output is built from. nominal is the chiff-free
   // envelope -- its own one-pole, running at the STAGE's rate, chasing the
-  // stage's aim. chiff_state is the zero-mean filtered perturbation -- its own
+  // stage's aim. chiff_state is the zero-mean filtered chiff input -- its own
   // one-pole, running at the CHIFF's rate. bias is the terminal add.
   // value_q30_ is kept as nominal + chiff for the consumers that read it.
   int32_t nominal_q30_;

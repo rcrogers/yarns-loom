@@ -64,7 +64,7 @@ inline int32_t ClampOffset(int32_t mean, int32_t lo, int32_t hi) {
   return 0;
 }
 
-// 1.0 for the slew's response to a perturbation, Q15.5.
+// 1.0 for the slew's response to a chiff input, Q15.5.
 const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
 
 // Number of slew time constants a timed stage spans, as log2 in Q5.27.
@@ -127,9 +127,9 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_slew_time_log2_step_q5_27_ = 0;
   chiff_slew_time_log2_end_q5_27_ = 0;
   chiff_target_samples_ = 0;
-  chiff_perturb_shrink_q30_ = 0;
-  chiff_perturb_shrink_step_q5_27_ = 0;
-  chiff_perturb_full_q30_ = 0;
+  chiff_input_fraction_q30_ = 0;
+  chiff_input_fraction_step_q5_27_ = 0;
+  chiff_input_full_q30_ = 0;
   // Bias is a CONTINUOUS control, not note state -- nothing else resets it,
   // because it must survive NoteOn/NoteOff to stay smooth. But Init means
   // "from a known state", and it was the one thing Init left alone: in the
@@ -170,7 +170,7 @@ void Envelope::NoteOff() {
 // samples, never past its max. The slew slows on a schedule set by
 // the NOMINAL duration, so at a release deadline it is part-way down: its rate
 // there is neither the one it started at nor the one it ends at. That rate is
-// what decides how much of the perturbation is audible, so the shrink has to
+// what decides how much of the chiff input is audible, so the shrink has to
 // be sized against it.
 // the MAX slew time the chiff reaches -- the larger of the slew
 // time its own duration implies and the STAGE's slew time (larger = slower).
@@ -203,12 +203,12 @@ uint32_t Envelope::ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const {
 // the exciter hits the same way however hard the note is played.
 //
 // Making room is the MEAN's job (RenderStage holds it clear of the rails), not
-// the perturbation's. Sizing the perturbation from the room between the level
+// the chiff input's. Sizing the chiff input from the room between the level
 // and the rails was tried and rejected: the room vanishes as the level reaches
 // the peak, so the excursion notched there.
-int32_t Envelope::ChiffPerturb_q30() const {
+int32_t Envelope::ChiffInput_q30() const {
   return static_cast<int32_t>(
-    (static_cast<int64_t>(chiff_perturb_full_q30_) * chiff_perturb_shrink_q30_)
+    (static_cast<int64_t>(chiff_input_full_q30_) * chiff_input_fraction_q30_)
     >> 30);
 }
 
@@ -231,7 +231,7 @@ static uint32_t SlewTimeLog2FromDuration_q5_27(uint32_t samples) {
 // Slew rate 2^-slew_time, Q31; defined below.
 static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 
-// How much of a +/- perturbation on the slew input survives to the slew's
+// How much of a +/- chiff input on the slew input survives to the slew's
 // output, ~Q15.5 (46341 == 1.0). Three sigma of the wandering the slew settles
 // to, clamped at 1.0 -- it cannot realize more than it is given.
 //
@@ -251,7 +251,7 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 // time 1.0 and the slew only ever slows, so that band is transited in a
 // chiff's first moments and never returned to; by the time the chiff is doing
 // its quiet work the two forms are the same number.
-static uint32_t SlewPerturbResponseFromTime_q15_5(
+static uint32_t ChiffFilterResponseFromTime_q15_5(
     uint32_t slew_time_log2_q5_27) {
   // 2^(-t/2) in Q31, then x1.5 and into Q15.5: 69512 == 1.5 * 2^15.5.
   const uint32_t root_q31 = static_cast<uint32_t>(
@@ -282,14 +282,14 @@ static uint32_t Log2_q5_27(uint64_t x) {
 // below 2^-13 of full scale the chiff is inaudible (-78 dBFS).
 const uint32_t kChiffInaudibleShift = 13;
 
-// octaves the perturbation must shrink for the OUTPUT to reach
+// octaves the chiff input must shrink for the OUTPUT to reach
 // inaudibility, given the slew time the chiff will have at the deadline.
 // Q5.27. Adapts to the target (via that rate) and to the note's range (via the
-// perturbation), which is what a constant octave count cannot do.
+// chiff input), which is what a constant octave count cannot do.
 //
 // PASS THE CHIFF'S OWN SLEW TIME AT THE DEADLINE, never the stage's. The
-// output is ALWAYS perturbation x the slew's response at the chiff's own rate:
-// where the rate floor binds, the perturbation is rescaled by exactly the
+// output is ALWAYS chiff input x the slew's response at the chiff's own rate:
+// where the rate floor binds, the chiff input is rescaled by exactly the
 // response ratio (see ChiffPerturbScaleForClampedRate), so the floor cancels
 // out of the amplitude entirely. An earlier version passed
 // min(chiff end, stage) on the theory that the floor governs the output. It
@@ -300,11 +300,11 @@ const uint32_t kChiffInaudibleShift = 13;
 // output 32x smaller than the one actually produced, so the shrink stopped
 // ~34 dB short and the remaining excursion was cut off dead at the deadline
 // -- an audible chop at the end of the release.
-static uint32_t ChiffShrinkOctaves_q5_27(
-    int32_t perturb_q30, uint32_t end_slew_time_log2_q5_27) {
+static uint32_t ChiffInputFractionOctaves_q5_27(
+    int32_t input_q30, uint32_t end_slew_time_log2_q5_27) {
   const uint32_t response_q15_5 =
-    SlewPerturbResponseFromTime_q15_5(end_slew_time_log2_q5_27);
-  const uint64_t reached = static_cast<uint64_t>(perturb_q30)
+    ChiffFilterResponseFromTime_q15_5(end_slew_time_log2_q5_27);
+  const uint64_t reached = static_cast<uint64_t>(input_q30)
     * (response_q15_5 ? response_q15_5 : 1u);
   const uint64_t inaudible =
     (1ull << (30 - kChiffInaudibleShift)) * kResponseOne_q15_5;
@@ -317,8 +317,8 @@ static uint32_t ChiffWindowSamples(
 
 // AMOUNT places the chiff's START slew time, interpolating between the END
 // slew time (no motion at all) and the fastest the slew can run (most motion).
-// It does NOT scale the perturbation: low amounts are quiet because a slow
-// slew realizes less of the same perturbation.
+// It does NOT scale the chiff input: low amounts are quiet because a slow
+// slew realizes less of the same chiff input.
 //
 // Anchoring the slow side on the END is what keeps the start a fixed
 // PROPORTION of the window. An absolute anchor put the start at a quarter of
@@ -373,7 +373,7 @@ void Envelope::NoteOn(
   // half the note's ALLOWED range, in the stage targets' Q30
   // domain (a target is s16 << 15, so half the range is |scale| << 14). The
   // range may be numerically inverted, hence the magnitude.
-  chiff_perturb_full_q30_ =
+  chiff_input_full_q30_ =
     (scale_s16 < 0 ? -static_cast<int32_t>(scale_s16) : scale_s16) << 14;
 
   switch (stage_) {
@@ -397,12 +397,12 @@ void Envelope::NoteOn(
       uint32_t window_samples =
         ChiffWindowSamples(adsr.attack_u32, chiff_duration);
       // The nominal duration is a SIZING REFERENCE, not a countdown: it sets
-      // how fast the perturbation shrinks and how fast the slew slows, and
+      // how fast the chiff input shrinks and how fast the slew slows, and
       // nothing observes it elapsing. AMOUNT 0 arms nothing, which is the one
       // case that still degenerates to the classic slew by construction.
       chiff_target_samples_ = chiff_amount ? window_samples : 0;
       if (!chiff_target_samples_) {
-        chiff_perturb_shrink_q30_ = 0;
+        chiff_input_fraction_q30_ = 0;
         RederiveSlewState();
         break;
       }
@@ -412,24 +412,24 @@ void Envelope::NoteOn(
       chiff_slew_time_log2_end_q5_27_ = SlewTimeLog2FromDuration_q5_27(window_samples);
       slew_time_log2_q5_27_ = ChiffStartSlewTimeLog2_q5_27(
         chiff_amount, chiff_slew_time_log2_end_q5_27_);
-      // the perturbation is HALF THE NOTE'S ALLOWED RANGE, times
+      // the chiff input is HALF THE NOTE'S ALLOWED RANGE, times
       // the shrink. Half the range is the largest symmetric +/- that can ever
       // fit inside the range -- a bound, not a tuned fraction, which is what
       // the old 0.9 x range was. Sized from the ALLOWED range rather than the
       // realized one so a quiet note gets the same exciter as a loud one.
-      chiff_perturb_shrink_q30_ = 1 << 30;
+      chiff_input_fraction_q30_ = 1 << 30;
       // size the shrink so the OUTPUT reaches the inaudibility
       // threshold exactly at the target, whatever the target and whatever the
       // note's range. Output at the target, with no shrink, would be
-      // perturbation * the slew's response at the END rate; the octaves needed
+      // chiff input * the slew's response at the END rate; the octaves needed
       // are log2 of that over the threshold. Adapts where a constant cannot: a
       // long target needs fewer octaves (its slew has already done more of the
       // work), a short target more, a quiet note fewer.
       //
       // Sized to reach the max slew time at the nominal duration, so the slew
       // time at that moment IS that end.
-      chiff_perturb_shrink_step_q5_27_ =
-        ChiffShrinkOctaves_q5_27(chiff_perturb_full_q30_,
+      chiff_input_fraction_step_q5_27_ =
+        ChiffInputFractionOctaves_q5_27(chiff_input_full_q30_,
           chiff_slew_time_log2_end_q5_27_)
         / window_samples;
       RederiveSlewState();
@@ -465,7 +465,7 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
 // off the bottom of this.
 //
 // NOT applied inside SlewRateFromTimeLog2_q31 itself: that is a general 2^-x,
-// and its other callers (the centre blend's ratio, the perturbation shrink,
+// and its other callers (the centre blend's ratio, the chiff input shrink,
 // and 2^(-t/2) in the response) all need to reach 1.0.
 const int32_t kMaxSlewRate_q31 = 1357468564;  // round((1 - e^-1) * 2^31)
 
@@ -537,14 +537,14 @@ void Envelope::RederiveSlewState() {
 // closer to the target just means arriving (proportionally) closer to it
 // when the stage's sample countdown expires. The nominal value
 // carries across the transition untouched -- the chiff needs no anchor
-// bookkeeping; the perturbation is applied about wherever the nominal value goes.
+// bookkeeping; the chiff input is applied about wherever the nominal value goes.
 void Envelope::Trigger(EnvelopeStage stage) {
   // Anchor the new stage's start on where the leaving stage's NOMINAL VALUE
   // reached: with the chiff
   // off the value is the exact classic slew, so use it directly; a timed
   // stage's nominal value is closed-form from its phase (the same lut_env_expo
   // curve the slew traces); a hold's has converged to its target.
-  if (!chiff_perturb_shrink_q30_) {
+  if (!chiff_input_fraction_q30_) {
     stage_start_q30_ = nominal_q30_;
   } else if (phase_increment_u32_) {
     // Phase runs 0 -> ~UINT32_MAX across the stage, but a stage that ran to
@@ -632,19 +632,19 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // adjusts what RederiveSlewState just computed.
   RederiveSlewState();
   if (stage == ENV_STAGE_RELEASE && stage_samples_left_ && chiff_target_samples_) {
-    // BOTH mechanisms get the same deadline. Speeding up only the perturbation
+    // BOTH mechanisms get the same deadline. Speeding up only the chiff input
     // leaves the note ending with the slew still running at chiff speed, and
     // the ~2% of the stage's span that a slew has left at handoff is then
     // consumed in a fraction of a millisecond instead of gliding away over the
     // stage's own time constant -- a click at the end of every note. MEASURED
     // before this was added: a burst to -53 dBFS at the release/DEAD boundary
     // on a long chiff.
-    const uint32_t shrink_step_q5_27 =
-      ChiffShrinkOctaves_q5_27(ChiffPerturb_q30(),
+    const uint32_t fraction_step_q5_27 =
+      ChiffInputFractionOctaves_q5_27(ChiffInput_q30(),
         ChiffSlewTimeAtDeadline_q5_27(stage_samples_left_))
       / stage_samples_left_;
-    if (shrink_step_q5_27 > chiff_perturb_shrink_step_q5_27_) {
-      chiff_perturb_shrink_step_q5_27_ = shrink_step_q5_27;
+    if (fraction_step_q5_27 > chiff_input_fraction_step_q5_27_) {
+      chiff_input_fraction_step_q5_27_ = fraction_step_q5_27;
     }
     const uint32_t max_slew_time_q5_27 = ChiffMaxSlewTime_q5_27();
     if (max_slew_time_q5_27 > slew_time_log2_q5_27_) {
@@ -690,7 +690,7 @@ void Envelope::RenderStage(
   // not re-checked per sample.
   const bool timed = phase_increment_u32_ != 0;
   // NO CHIFF ON/OFF ANYWHERE IN HERE. There is no window to be inside of and no
-  // mode to be in: with AMOUNT 0 the shrink is zero, so the perturbation is
+  // mode to be in: with AMOUNT 0 the shrink is zero, so the chiff input is
   // zero, the slew stops slowing and the rate is the stage's -- and every line
   // below degenerates to the classic slew on its own. Branching on it would
   // only make the BEST case cheaper, which is worth nothing here; the worst
@@ -727,16 +727,16 @@ void Envelope::RenderStage(
     // end. Monotone (the rate only falls), so flooring holds it there.
     int32_t decay_q32 = chiff_slew_rate_decay_q32_;
     // The floor exists to TRACK the nominal value, not to energize the chiff:
-    // floored, a full perturbation would ride the stage rate and AMOUNT 1
+    // floored, a full chiff input would ride the stage rate and AMOUNT 1
     // would sound like attack-speed noise (a 0 -> 1 discontinuity). Shrinking
-    // the perturbation by the response ratio keeps the output continuous
+    // the chiff input by the response ratio keeps the output continuous
     // across the floor boundary, and sends AMOUNT -> 0 to silence smoothly.
     //
     // Both the floor and the scale are PER-RUN scratch: neither may be
     // written back into the persistent state. The chiff's own rate keeps
     // ramping on its own schedule (recovered from the slew time below), and
-    // the perturbation keeps shrinking linearly -- persisting either compounds
-    // it every block and drives the perturbation to zero in a few blocks.
+    // the chiff input keeps shrinking linearly -- persisting either compounds
+    // it every block and drives the chiff input to zero in a few blocks.
     //
     // The chiff's response is the expensive term in this function (a sqrt and
     // a divide), computed once here: the mean clamp needs it to know how much
@@ -750,8 +750,8 @@ void Envelope::RenderStage(
     uint32_t slew_time_q5_27 = slew_time_log2_q5_27_;
     int32_t slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_q5_27);
     const uint32_t chiff_response_q15_5 =
-      SlewPerturbResponseFromTime_q15_5(slew_time_q5_27);
-    // NO SLEW-RATE FLOOR, and no perturbation rescale at it. Both existed
+      ChiffFilterResponseFromTime_q15_5(slew_time_q5_27);
+    // NO SLEW-RATE FLOOR, and no chiff input rescale at it. Both existed
     // because ONE slew had to track the nominal level AND carry the chiff: if
     // the chiff's rate went below the stage's, the level stopped tracking. The
     // nominal has its own one-pole now, so the chiff's rate is free to fall as
@@ -770,13 +770,13 @@ void Envelope::RenderStage(
     // rejects it for -mcpu=cortex-m3, which is what this builds for.
     const int32_t stage_rate_q31 =
       SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27_);
-    const int32_t perturb_q30 = ChiffPerturb_q30();
-    const int32_t scaled_perturb_q30 = perturb_q30;
-    // How far the chiff actually swings: the perturbation times the slew's own
+    const int32_t input_q30 = ChiffInput_q30();
+    const int32_t chiff_input_q30 = input_q30;
+    // How far the chiff actually swings: the chiff input times the slew's own
     // response. Dividing by 2^15.5 would cost a 64-bit division, so multiply by
     // the same constant and shift 31 (46341^2 is 2^31 to 3 parts per million).
     const int32_t excursion_q30 = static_cast<int32_t>(
-      (static_cast<int64_t>(perturb_q30)
+      (static_cast<int64_t>(input_q30)
        * (chiff_response_q15_5 * kResponseOne_q15_5)) >> 31);
     // THE CHIFF GETS ITS HEADROOM BY THE MEAN MOVING, NOT BY BEING CLIPPED --
     // the same rule as before, stated where it can be met exactly: hold
@@ -851,7 +851,7 @@ void Envelope::RenderStage(
     // bit-identical.
     //
     // Per sample: two independent one-poles. The chiff's chases +/- the
-    // perturbation at its own decaying rate; nominal chases the stage's aim at
+    // chiff input at its own decaying rate; nominal chases the stage's aim at
     // the STAGE's rate. The offset carrying bias and the mean correction ramps.
     // One USAT saturates and shifts in one instruction.
     __asm__ volatile(
@@ -862,8 +862,8 @@ void Envelope::RenderStage(
       "  sub   %[rate], %[rate], lr\n"            // rate -= (rate*decay)>>32
       "  ldr   ip, [%[prng]], #4\n"               // draw = *prng++
       "  sbfx  ip, ip, #16, #1\n"                 // sign mask from bit 16
-      "  eor   lr, %[perturb], ip\n"
-      "  sub   lr, lr, ip\n"                      // +/- perturbation
+      "  eor   lr, %[input], ip\n"
+      "  sub   lr, lr, ip\n"                      // +/- chiff input
       "  sub   lr, lr, %[chiff]\n"                // delta = input - chiff
       "  smull ip, lr, lr, %[rate]\n"
       "  add   %[chiff], %[chiff], lr, lsl #1\n"  // chiff += (product>>32)*2
@@ -880,27 +880,27 @@ void Envelope::RenderStage(
       : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
         [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
         [prng] "+r"(prng), [buf] "+r"(sample_buffer)
-      : [decay] "r"(decay_q32), [perturb] "r"(scaled_perturb_q30),
+      : [decay] "r"(decay_q32), [input] "r"(chiff_input_q30),
         [srate] "r"(stage_rate_q31),
         [cslope] "r"(combined_slope_q30), [end] "r"(segment_end)
       : "ip", "lr", "cc", "memory");
 #else
     while (sample_buffer != segment_end) {
-      // PRNG budget: bit 16 = perturbation sign.
+      // PRNG budget: bit 16 = chiff input sign.
       uint32_t chiff_draw_u32 = *prng++;
       int32_t slew_rate_step = static_cast<int32_t>(
         (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);
       slew_rate_q31 -= slew_rate_step;
       int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
-      // +/- the perturbation, branchless: (p ^ mask) - mask.
-      int32_t perturb_signed_q30 =
-        (scaled_perturb_q30 ^ sign_mask) - sign_mask;
+      // +/- the chiff input, branchless: (p ^ mask) - mask.
+      int32_t chiff_input_signed_q30 =
+        (chiff_input_q30 ^ sign_mask) - sign_mask;
       // (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word
       // term. Two instructions saved per one-pole. The dropped bit is a half
       // LSB per sample and cannot accumulate: at a one-pole's fixed point the
       // step is zero, so the error is bounded by the last step, not summed.
       chiff_state_q30 += 2 * static_cast<int32_t>(
-        (static_cast<int64_t>(perturb_signed_q30 - chiff_state_q30)
+        (static_cast<int64_t>(chiff_input_signed_q30 - chiff_state_q30)
          * slew_rate_q31) >> 32);
       nominal_gap_q30 -= 2 * static_cast<int32_t>(
         (static_cast<int64_t>(nominal_gap_q30) * stage_rate_q31) >> 32);
@@ -914,15 +914,15 @@ void Envelope::RenderStage(
     }
 #endif
     {
-      // THE PERTURBATION SHRINKS FOREVER AND NEVER REACHES ZERO -- until Q30
+      // THE CHIFF INPUT SHRINKS FOREVER AND NEVER REACHES ZERO -- until Q30
       // runs out of bits, which is the only ending there is. Nothing mutes it,
       // nothing resets the slew: the term simply becomes too small to
       // represent, and the loop it feeds is already the classic slew with a
       // zero offset. That is the low-pass gate, and it is why no window exists
       // here -- nothing has to close.
-      chiff_perturb_shrink_q30_ = static_cast<int32_t>(
-        (static_cast<int64_t>(chiff_perturb_shrink_q30_) * SlewRateFromTimeLog2_q31(
-           chiff_perturb_shrink_step_q5_27_ * run_samples))
+      chiff_input_fraction_q30_ = static_cast<int32_t>(
+        (static_cast<int64_t>(chiff_input_fraction_q30_) * SlewRateFromTimeLog2_q31(
+           chiff_input_fraction_step_q5_27_ * run_samples))
         >> 31);
       uint32_t slew_time_log2_end =
         slew_time_log2_q5_27_ + chiff_slew_time_log2_step_q5_27_ * run_samples;
@@ -1044,8 +1044,8 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   stage_start_q30_ = ScaleRatio(stage_start_q30_, num, den);
   // The shrink and its step are DIMENSIONLESS -- a fraction of the slack, and
   // octaves per sample -- so they do not scale with the levels. The rails do,
-  // and the perturbation follows them because it is derived from the slack.
-  chiff_perturb_full_q30_ = ScaleRatio(chiff_perturb_full_q30_, num, den);
+  // and the chiff input follows them because it is derived from the slack.
+  chiff_input_full_q30_ = ScaleRatio(chiff_input_full_q30_, num, den);
   chiff_floor_q30_ = ScaleRatio(chiff_floor_q30_, num, den);
   chiff_top_q30_ = ScaleRatio(chiff_top_q30_, num, den);
   clamp_base_q30_ = std::min<int32_t>(chiff_floor_q30_, 0);
