@@ -64,8 +64,8 @@ inline int32_t ClampOffset(int32_t mean, int32_t lo, int32_t hi) {
   return 0;
 }
 
-// 1.0 for the slew's response to a chiff input, Q15.5.
-const uint32_t kResponseOne_q15_5 = 46341;  // 2^15.5 == 1.0
+// 1.0 in Q15.5, the unit the chiff's scaled rms is carried in.
+const uint32_t kOne_q15_5 = 46341;  // 2^15.5 == 1.0
 
 // Number of slew time constants a timed stage spans, as log2 in Q5.27.
 // log2(4) = 2: the stage hands off with e^-4 ~= 1.8% of its initial delta
@@ -238,14 +238,23 @@ static uint32_t SlewTimeLog2FromDuration_q5_27(uint32_t samples) {
 // Slew rate 2^-slew_time, Q31; defined below.
 static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 
-// How much of a +/- chiff input on the slew input survives to the slew's
-// output, ~Q15.5 (46341 == 1.0). Three sigma of the wandering the slew settles
-// to, clamped at 1.0 -- it cannot realize more than it is given.
+// The chiff's output rms times 2.121, per unit of chiff input, Q15.5.
+// Clamped at 1.0: the filter's state is a convex combination of +/- its input,
+// so |chiff| <= input always and reserving past the input reserves for an
+// output that cannot occur.
+//
+// IT IS NOT AN RMS. The chiff's own rms is
+//   sigma = input * sqrt(r / (2 - r)),
+// and what this returns is 3/sqrt(2) = 2.121 of it, per unit of input. A
+// caller wanting c sigma of margin wants c/2.121 of this.
+// The scale is folded into kChiffScaledRmsPerRoot_q15_5, so no call site pays
+// for it. NOT 3: the exact form below carries a 1/sqrt(2) the 3 does not
+// cancel, and reading the constant as 3 sigma overstates every margin by 41%.
 //
 // TAKEN FROM THE SLEW TIME, which is the only encoding stored, so 2^(-t/2) is
 // sqrt(rate) for free through the same exp2 table the rate itself comes from:
-//   response = min(1, 1.5 * 2^(-t/2))
-// The exact form is min(1, 3*sqrt(r/(2*(2-r)))), which needed an integer sqrt
+//   scaled rms per input = min(1, 1.5 * 2^(-t/2))
+// The exact form is min(1, 3*sqrt(r/(2*(2-r)))), which needs an integer sqrt
 // AND a 64-bit division -- 39 instructions plus a loop, ESTIMATED 250-400
 // cycles, once or twice EVERY RUN. This is about ten.
 //
@@ -264,9 +273,14 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 // exceeds 0.3 dB, energy-weighted -0.32 to -0.69 dB at AMOUNT 64..127.
 // Judged by TIME it looked negligible; judged by ENERGY it is most of the
 // chiff.
-static uint32_t ChiffFilterResponseFromTime_q15_5(
+// What one unit of 2^(-t/2) is worth, Q15.5: 1.5 is 3/2, the 3 of the exact
+// form halved by its sqrt(1/4) at small r. Carries the 2.121, so no call site
+// multiplies by it.
+const uint32_t kChiffScaledRmsPerRoot_q15_5 = (3u * kOne_q15_5 + 1u) / 2u;
+
+static uint32_t ChiffScaledRmsPerInput_q15_5(
     uint32_t slew_time_log2_q5_27) {
-  // 2^(-t/2) in Q31, then x1.5 and into Q15.5: 69512 == 1.5 * 2^15.5.
+  // 2^(-t/2) in Q31, then into Q15.5 at kChiffScaledRmsPerRoot.
   const uint32_t root_q31 = static_cast<uint32_t>(
     SlewRateFromTimeLog2_q31(slew_time_log2_q5_27 >> 1));
   // r = 2^-t = root^2, then 1 + r/4 + 3r^2/32 in Q31.
@@ -276,11 +290,10 @@ static uint32_t ChiffFilterResponseFromTime_q15_5(
   const uint64_t correction_q31 =
     (1ull << 31) + (rate_q31 >> 2) + ((3ull * rate_sq_q31) >> 5);
   const uint64_t uncorrected_q15_5 =
-    (static_cast<uint64_t>(root_q31) * 69512u) >> 31;
-  const uint32_t response_q15_5 = static_cast<uint32_t>(
+    (static_cast<uint64_t>(root_q31) * kChiffScaledRmsPerRoot_q15_5) >> 31;
+  const uint32_t scaled_rms_q15_5 = static_cast<uint32_t>(
     (uncorrected_q15_5 * correction_q31) >> 31);
-  return response_q15_5 > kResponseOne_q15_5
-    ? kResponseOne_q15_5 : response_q15_5;
+  return scaled_rms_q15_5 > kOne_q15_5 ? kOne_q15_5 : scaled_rms_q15_5;
 }
 
 
@@ -300,7 +313,9 @@ static uint32_t Log2_q5_27(uint64_t x) {
   return (integer_bits << 27) + mantissa_frac_q5_27;
 }
 
-// below 2^-13 of full scale the chiff is inaudible (-78 dBFS).
+// below 2^-13 of full scale the chiff is inaudible (-78 dBFS). The quantity
+// held to it is the SCALED rms, so the chiff's own sigma at that point is
+// 2.121x lower again.
 const uint32_t kChiffInaudibleShift = 13;
 
 // octaves the chiff input must shrink for the OUTPUT to reach
@@ -309,8 +324,8 @@ const uint32_t kChiffInaudibleShift = 13;
 // chiff input), which is what a constant octave count cannot do.
 //
 // PASS THE CHIFF'S OWN SLEW TIME AT THE DEADLINE, never the stage's: the output
-// is chiff input x the response at the chiff's own rate, and nothing about the
-// stage enters it.
+// is chiff input x the scaled rms at the chiff's own rate, and nothing about
+// the stage enters it.
 // Passing min(chiff end, stage) instead cost 5 octaves on the COMPRESSION path.
 // A release compresses the deadline without re-sloping how fast the filter
 // slows, so the chiff is still fast when the deadline arrives while the release
@@ -319,12 +334,12 @@ const uint32_t kChiffInaudibleShift = 13;
 // remainder was chopped off at the deadline.
 static uint32_t ChiffInputFractionOctaves_q5_27(
     int32_t input_q30, uint32_t end_slew_time_log2_q5_27) {
-  const uint32_t response_q15_5 =
-    ChiffFilterResponseFromTime_q15_5(end_slew_time_log2_q5_27);
+  const uint32_t scaled_rms_per_input_q15_5 =
+    ChiffScaledRmsPerInput_q15_5(end_slew_time_log2_q5_27);
   const uint64_t reached = static_cast<uint64_t>(input_q30)
-    * (response_q15_5 ? response_q15_5 : 1u);
+    * (scaled_rms_per_input_q15_5 ? scaled_rms_per_input_q15_5 : 1u);
   const uint64_t inaudible =
-    (1ull << (30 - kChiffInaudibleShift)) * kResponseOne_q15_5;
+    (1ull << (30 - kChiffInaudibleShift)) * kOne_q15_5;
   return reached > inaudible
     ? Log2_q5_27(reached) - Log2_q5_27(inaudible) : 0u;
 }
@@ -438,7 +453,7 @@ void Envelope::NoteOn(
       // size the shrink so the OUTPUT reaches the inaudibility
       // threshold exactly at the target, whatever the target and whatever the
       // note's range. Output at the target, with no shrink, would be
-      // chiff input * the slew's response at the END rate; the octaves needed
+      // chiff input * the scaled rms at the END rate; the octaves needed
       // are log2 of that over the threshold. Adapts where a constant cannot: a
       // long target needs fewer octaves (its slew has already done more of the
       // work), a short target more, a quiet note fewer.
@@ -487,7 +502,7 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
 //
 // NOT applied inside SlewRateFromTimeLog2_q31 itself: that is a general 2^-x,
 // and its other callers (the centre blend's ratio, the chiff input shrink,
-// and 2^(-t/2) in the response) all need to reach 1.0.
+// and 2^(-t/2) in the scaled rms) all need to reach 1.0.
 const int32_t kMaxSlewRate_q31 = 1357468564;  // round((1 - e^-1) * 2^31)
 
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27) {
@@ -722,56 +737,37 @@ void Envelope::RenderStage(
   const int32_t stage_target_q30 = target_q30_;
 
   {
-    // BIAS IS A TERMINAL ADD. The loop's state is the envelope alone; bias is
-    // added to a scratch copy on the way to the buffer, so the output is
-    // saturate(envelope + bias) and the envelope's own trajectory is the same
-    // whatever the bias does. Folding bias into the integrator instead (the
-    // state clamp then bounding the sum) let the clamp write the bias back into
-    // the envelope: at rest under a negative bias the state pinned at 0 and the
-    // envelope came back at +bias. MEASURED before the split, against a bias-0
-    // run at the same settings: the value diverged by exactly the bias
-    // amplitude (10, 8000, 20000 s16) every time the sum touched a rail.
+    // BIAS IS A TERMINAL ADD. Neither one-pole's state carries it: bias enters
+    // only through the offset register the loop ramps, so the envelope's own
+    // trajectory is the same whatever the bias does.
+    // THAT IS THE WHOLE OF THE CLAIM. The output is NOT saturate(envelope +
+    // bias), because the mean clamp below holds nominal + bias clear of the
+    // rails to leave the chiff room.
+    // Folding bias into the integrator instead, with one clamp bounding the
+    // sum, let the clamp write bias back into the envelope: at rest under a
+    // negative bias the state pinned at 0 and the envelope came back at +bias.
+    // MEASURED against a bias-0 run at the same settings, the value diverged by
+    // exactly the bias amplitude (10, 8000, 20000 s16) every time the sum
+    // touched a rail.
     const int32_t bias_q30 = bias_q31 >> 1;
-    // THE CLAMP RIDES THE NOTE'S FLOOR. USAT bounds [0, 2^30) and nothing else,
-    // so to bound a value whose range goes BELOW zero the loop runs on the
-    // value measured FROM that floor. Subtracted here, added back after the
-    // loop, and absorbed into the bias register for the output -- all per run,
-    // so the loop is untouched and this costs NOTHING per sample.
-    //
-    // min(floor, 0), not floor: where the note's floor is already >= 0 the
-    // offset is zero and the bound is exactly what it was, so the common case
-    // cannot move (every bias-0 scenario hash is unchanged). Only a range that
-    // reaches below zero shifts it, and then floor..floor+2^30 covers the
-    // note's whole range because a range is at most full scale wide.
-    // Slew-rate floor (timed stages): never slower than the stage's own
-    // rate, else the value hangs on a moving stage near the window's slow
-    // end. Monotone (the rate only falls), so flooring holds it there.
+    // A PER-RUN COPY. The loop decays the rate every sample; writing that back
+    // would compound the schedule once per block and collapse the chiff in a
+    // few of them. The persistent encoding is the slew TIME, set once below.
     int32_t decay_q32 = chiff_slew_rate_decay_q32_;
-    // The floor exists to TRACK the nominal value, not to energize the chiff:
-    // floored, a full chiff input would ride the stage rate and AMOUNT 1
-    // would sound like attack-speed noise (a 0 -> 1 discontinuity). Shrinking
-    // the chiff input by the response ratio keeps the output continuous
-    // across the floor boundary, and sends AMOUNT -> 0 to silence smoothly.
-    //
-    // Both the floor and the scale are PER-RUN scratch: neither may be
-    // written back into the persistent state. The chiff's own rate keeps
-    // ramping on its own schedule (recovered from the slew time below), and
-    // the chiff input keeps shrinking linearly -- persisting either compounds
-    // it every block and drives the chiff input to zero in a few blocks.
-    //
-    // The chiff's response is the expensive term in this function (a sqrt and
-    // a divide), computed once here: the mean clamp needs it to know how much
-    // room to leave.
+    // The chiff's scaled rms, computed once here because the mean clamp needs
+    // it to know how much room to leave. About ten instructions: the sqrt and
+    // the 64-bit divide belong to the exact form, which
+    // ChiffScaledRmsPerInput approximates away.
     // ONE ENCODING OF THE SLEW IS STORED -- the slew TIME -- and the rate is
     // derived here, once, for the loop to run on. They are the same quantity
     // (rate = 2^-time), and keeping both as state meant keeping two
     // accumulators for it: the loop decayed the rate per sample while the
-    // writeback raised the time per run, and they were reconciled only when
-    // the floor bound. Derived, the rate cannot drift from the schedule.
+    // writeback raised the time per run, with nothing holding the two to the
+    // same schedule. Derived, the rate cannot drift from it.
     uint32_t slew_time_q5_27 = slew_time_log2_q5_27_;
     int32_t slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_q5_27);
-    const uint32_t chiff_response_q15_5 =
-      ChiffFilterResponseFromTime_q15_5(slew_time_q5_27);
+    const uint32_t chiff_scaled_rms_per_input_q15_5 =
+      ChiffScaledRmsPerInput_q15_5(slew_time_q5_27);
     // NO SLEW-RATE FLOOR, and no chiff input rescale at it. Both existed
     // because ONE slew had to track the nominal level AND carry the chiff: if
     // the chiff's rate went below the stage's, the level stopped tracking. The
@@ -793,19 +789,19 @@ void Envelope::RenderStage(
       SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27_);
     const int32_t input_q30 = ChiffInput_q30();
     const int32_t chiff_input_q30 = input_q30;
-    // The chiff's output RMS: its input times the filter's response. Dividing
-    // by 2^15.5 would be a 64-bit division, so multiply by the same constant
-    // and shift 31 (46341^2 is 2^31 to 3 parts per million).
-    // APPROXIMATE, and low by up to 0.87 dB in a band of slew times the chiff
-    // transits early (see ChiffFilterResponseFromTime). The margin below
-    // inherits that error where the chiff is loudest.
+    // The chiff's rms times 2.121, as a level: the per-input figure
+    // times the input. Dividing by 2^15.5 would be a 64-bit division, so
+    // multiply by the same constant and shift 31 instead (46341^2 is 2^31 to
+    // 3 parts per million).
+    // APPROXIMATE, within 0.031 dB of the exact form (see
+    // ChiffScaledRmsPerInput). The margin below inherits that error.
     // Computed once per RUN from the run-start slew time, while the rate decays
     // within the run -- so it runs GENEROUS as the run proceeds, which is safe.
-    const int32_t chiff_rms_q30 = static_cast<int32_t>(
+    const int32_t chiff_scaled_rms_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(input_q30)
-       * (chiff_response_q15_5 * kResponseOne_q15_5)) >> 31);
-    // THE MEAN IS HELD ONE CHIFF RMS INSIDE EACH RAIL; the chiff is then added,
-    // so it has room by construction instead of being clipped.
+       * (chiff_scaled_rms_per_input_q15_5 * kOne_q15_5)) >> 31);
+    // THE MEAN IS HELD ONE SCALED RMS INSIDE EACH RAIL; the chiff is then
+    // added, so it has room by construction instead of being clipped.
     //  - the clamp does NOT feed back, which is why bias may be part of it.
     //    Steering the slew input instead waits on the integrator: MEASURED, a
     //    bias LFO at 364 ms left 6641 LSB of output error.
@@ -814,14 +810,18 @@ void Envelope::RenderStage(
     //    stage -- envelope distortion, not rounding.
     //  - EXCEPT when the chiff is wider than the rails allow (lo >= hi): the
     //    clamp is abandoned and the mean is centred instead, so the chiff clips
-    //    both sides. A larger factor reaches that regime sooner.
-    //  - ONE rms is inherited, not chosen: it is what the response returns.
+    //    both sides. A larger margin reaches that regime sooner.
+    //  - THE MARGIN IS 2.121 SIGMA, INHERITED RATHER THAN
+    //    CHOSEN: the factor applied here is one, and the 2.121 arrives folded
+    //    into what ChiffScaledRmsPerInput returns. What it should be is open.
     //    MEASURED AT ONE SETTING ONLY (peak at full scale, steady bias 8000),
-    //    so treat as indicative, not established: peaks ~4.3x rms, ~1.6% of the
-    //    loud phase clips at the rail, and 2x rms would cost ~1.6 dB of attack.
+    //    so treat as indicative, not established: peaks reach ~4.3 sigma and
+    //    ~1.4% of the loud phase clips at the rail. Doubling the margin costs
+    //    ~1.8 dB of attack level -- measured before the response correction
+    //    widened this quantity by ~0.5 dB.
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    const int32_t lo_q30 = chiff_rms_q30;
-    const int32_t hi_q30 = kValueMax_q30 - chiff_rms_q30;
+    const int32_t lo_q30 = chiff_scaled_rms_q30;
+    const int32_t hi_q30 = kValueMax_q30 - chiff_scaled_rms_q30;
     // Where nominal reaches by the run's end, for the offset's far endpoint.
     // Approximate (linear in rate * run_samples) -- it only sizes an offset
     // that is itself an approximation, and it never touches nominal's own path.

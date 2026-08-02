@@ -66,9 +66,9 @@ class Envelope {
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
   // Single render path: this is a realtime system, so the worst case (chiff
   // live) is the only case that matters; a lean chiff-off variant would only
-  // optimize the best case. With the window closed the same loop degenerates
-  // correctly by itself: chiff input 0 -> slew input is the target -> output
-  // = the nominal value, clamp transparent.
+  // optimize the best case. At AMOUNT 0 the same loop degenerates by itself:
+  // chiff input 0 -> the chiff one-pole holds 0 -> the scaled rms is 0, so the
+  // mean clamp is a no-op and the output is nominal + bias.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
@@ -97,9 +97,9 @@ class Envelope {
   // samples, never past its max. The shrink is sized against this.
   uint32_t ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const;
 
-  // the MAX slew time the chiff reaches -- the larger of the
-  // slew time its own duration implies and the stage's, so the slew lands back
-  // on the envelope's own nominal rate.
+  // the MAX slew time the chiff reaches: the one its own duration
+  // implies, and nothing else. No stage term -- the chiff's filter is its own,
+  // so how fast the stage runs has no claim on how slow the chiff may get.
   uint32_t ChiffMaxSlewTime_q5_27() const;
 
  public:
@@ -167,9 +167,9 @@ class Envelope {
   //             +/- the chiff input with the sign drawn per sample from the
   //             shared PRNG. Zero-mean.
   //   bias      added at the point of use and never integrated.
-  // out = saturate(mean + chiff), where mean = nominal + bias held far enough
-  // inside the DAC rails for the chiff's excursion to fit. The chiff is ADDED
-  // to a mean that already has room, so it is never clipped, and the clamp
+  // out = saturate(mean + chiff), where mean = nominal + bias held one scaled
+  // rms (2.121 sigma) inside each DAC rail so the chiff has room. The chiff is
+  // ADDED to a mean that already has it, so it is never clipped, and the clamp
   // does not feed back: value_q30_ is nominal + chiff and carries no bias.
   //
   // THE CHIFF INPUT is half the note's ALLOWED range times

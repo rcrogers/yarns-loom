@@ -87,7 +87,7 @@ static int g_value_range = 0;
 // identical whatever the bias is; two traces that diverge are the clamp
 // feeding back into the envelope, i.e. accumulated damage to its state.
 static int g_value_trace = 0;
-// The chiff's slew time per block, Q5.27. ChiffFilterResponseFromTime is an
+// The chiff's slew time per block, Q5.27. ChiffScaledRmsPerInput is an
 // approximation whose error depends only on the slew time, so this is what
 // says how much of a real chiff's life is spent where the error is material.
 static int g_slew_trace = 0;
