@@ -42,8 +42,8 @@ using namespace stmlib;
 // PRNG state out of RAM. Double-length: each envelope reads a block-sized
 // window starting at its own offset (assigned round-robin in Init), so no
 // two envelopes consume the same word on the same sample -- decorrelation
-// without the per-sample XOR that used to cost a register (and a spill)
-// in the render loop.
+// with no per-sample XOR, which would cost a register and a spill in the
+// render loop.
 namespace {
   uint32_t shared_prng_buffer[2 * kAudioBlockSize];
   uint32_t shared_prng_state = 0xCAFEBABE;
@@ -98,13 +98,13 @@ const int32_t kChiffOctaves = 3;
 // The aim overshoots the target by 1.9% of the stage's span, which is a level
 // the note may not have -- that is fine, because the value never reaches the
 // aim: it arrives at the target precisely when the stage ends. It does mean the
-// slew INPUT can sit outside the note's range, which the old note-range state
-// clamp would have fought; the clamp now bounds the DAC range instead.
+// slew INPUT can sit outside the note's range. Nothing clamps it: the mean is
+// held clear of the rails at the point of use, and no integrator carries it.
 //
 // It also makes lut_env_expo read straight. The table is normalized to land at
 // 1.0, so it already describes (1 - e^-4t/T)/(1 - e^-4) -- exactly the true
-// slew once the aim carries the 1/(1 - e^-4). The landing-fraction scaling the
-// closed-form nominal value used to need therefore cancels out and is gone.
+// slew once the aim carries the 1/(1 - e^-4). No landing-fraction scaling is
+// needed on the closed-form nominal value; it cancels.
 const uint32_t kStageAimOvershoot_u16 = 66759;  // round(2^16 / (1 - e^-4))
 
 void Envelope::FillSharedPrngBuffer() {
@@ -166,13 +166,13 @@ void Envelope::NoteOff() {
   Trigger(ENV_STAGE_RELEASE);
 }
 
-// EXPERIMENT: how slow the chiff's slew will have got after `samples` more
-// samples, never past the slowest it goes. The slew slows on a schedule set by
+// how slow the chiff's slew will have got after `samples` more
+// samples, never past its max. The slew slows on a schedule set by
 // the NOMINAL duration, so at a release deadline it is part-way down: its rate
 // there is neither the one it started at nor the one it ends at. That rate is
 // what decides how much of the perturbation is audible, so the shrink has to
 // be sized against it.
-// EXPERIMENT: the SLOWEST the chiff's slew ever gets -- the larger of the slew
+// the MAX slew time the chiff reaches -- the larger of the slew
 // time its own duration implies and the STAGE's slew time (larger = slower).
 // Stopping at the stage's is what returns the envelope to exactly its nominal
 // level curve once the chiff has gone quiet; without it a short chiff leaves
@@ -184,7 +184,7 @@ void Envelope::NoteOff() {
 // stopping at the stage's slew time would have tied the chiff's TIMING to the
 // stage too. Now the shrink owns the timing, so the rate is free to land
 // wherever the envelope needs it.
-uint32_t Envelope::ChiffSlowestSlewTime_q5_27() const {
+uint32_t Envelope::ChiffMaxSlewTime_q5_27() const {
   return std::max(chiff_slew_time_log2_end_q5_27_, stage_slew_time_log2_q5_27_);
 }
 
@@ -193,20 +193,19 @@ uint32_t Envelope::ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const {
     * samples;
   const uint64_t at_deadline =
     static_cast<uint64_t>(slew_time_log2_q5_27_) + swept;
-  const uint32_t end = ChiffSlowestSlewTime_q5_27();
+  const uint32_t end = ChiffMaxSlewTime_q5_27();
   return at_deadline > end ? end : static_cast<uint32_t>(at_deadline);
 }
 
-// EXPERIMENT: the +/- the chiff puts on the slew input. Sized from the note's
+// the +/- the chiff puts on the slew input. Sized from the note's
 // ALLOWED range (set in NoteOn) and NOT from the level the note actually
 // reaches, so the noise does not thin out at a low sustain or a low peak --
 // the exciter hits the same way however hard the note is played.
 //
-// Sizing it from the room BETWEEN the level and the rails (the slack) was
-// tried and rejected: the room vanishes as the level reaches the peak, so the
-// excursion notched there and came back as the decay pulled the level away.
-// Making room is now the CENTRE's job (see the sag in RenderStage), not the
-// perturbation's.
+// Making room is the MEAN's job (RenderStage holds it clear of the rails), not
+// the perturbation's. Sizing the perturbation from the room between the level
+// and the rails was tried and rejected: the room vanishes as the level reaches
+// the peak, so the excursion notched there.
 int32_t Envelope::ChiffPerturb_q30() const {
   return static_cast<int32_t>(
     (static_cast<int64_t>(chiff_perturb_full_q30_) * chiff_perturb_shrink_q30_)
@@ -280,10 +279,10 @@ static uint32_t Log2_q5_27(uint64_t x) {
   return (integer_bits << 27) + mantissa_frac_q5_27;
 }
 
-// EXPERIMENT: below 2^-13 of full scale the chiff is inaudible (-78 dBFS).
+// below 2^-13 of full scale the chiff is inaudible (-78 dBFS).
 const uint32_t kChiffInaudibleShift = 13;
 
-// EXPERIMENT: octaves the perturbation must shrink for the OUTPUT to reach
+// octaves the perturbation must shrink for the OUTPUT to reach
 // inaudibility, given the slew time the chiff will have at the deadline.
 // Q5.27. Adapts to the target (via that rate) and to the note's range (via the
 // perturbation), which is what a constant octave count cannot do.
@@ -371,7 +370,7 @@ void Envelope::NoteOn(
   chiff_floor_q30_ = std::min(release_q30, std::min(
     stage_target_q30_[ENV_STAGE_ATTACK], stage_target_q30_[ENV_STAGE_SUSTAIN]));
   clamp_base_q30_ = std::min<int32_t>(chiff_floor_q30_, 0);
-  // EXPERIMENT: half the note's ALLOWED range, in the stage targets' Q30
+  // half the note's ALLOWED range, in the stage targets' Q30
   // domain (a target is s16 << 15, so half the range is |scale| << 14). The
   // range may be numerically inverted, hence the magnitude.
   chiff_perturb_full_q30_ =
@@ -413,13 +412,13 @@ void Envelope::NoteOn(
       chiff_slew_time_log2_end_q5_27_ = SlewTimeLog2FromDuration_q5_27(window_samples);
       slew_time_log2_q5_27_ = ChiffStartSlewTimeLog2_q5_27(
         chiff_amount, chiff_slew_time_log2_end_q5_27_);
-      // EXPERIMENT: the perturbation is HALF THE NOTE'S ALLOWED RANGE, times
+      // the perturbation is HALF THE NOTE'S ALLOWED RANGE, times
       // the shrink. Half the range is the largest symmetric +/- that can ever
       // fit inside the range -- a bound, not a tuned fraction, which is what
       // the old 0.9 x range was. Sized from the ALLOWED range rather than the
       // realized one so a quiet note gets the same exciter as a loud one.
       chiff_perturb_shrink_q30_ = 1 << 30;
-      // EXPERIMENT: size the shrink so the OUTPUT reaches the inaudibility
+      // size the shrink so the OUTPUT reaches the inaudibility
       // threshold exactly at the target, whatever the target and whatever the
       // note's range. Output at the target, with no shrink, would be
       // perturbation * the slew's response at the END rate; the octaves needed
@@ -427,7 +426,7 @@ void Envelope::NoteOn(
       // long target needs fewer octaves (its slew has already done more of the
       // work), a short target more, a quiet note fewer.
       //
-      // Sized to reach the slowest slew time at the nominal duration, so the slew
+      // Sized to reach the max slew time at the nominal duration, so the slew
       // time at that moment IS that end.
       chiff_perturb_shrink_step_q5_27_ =
         ChiffShrinkOctaves_q5_27(chiff_perturb_full_q30_,
@@ -454,8 +453,8 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
 // 1 - e^(-1/tau). It is exact enough everywhere the module runs -- MEASURED
 // error 0.0% at slew time 13, +0.5% at 6.7, +2.5% at 4.25 -- and it hits its
 // ceiling at t = 0, where it says 1.0 while the truth is 0.632. A rate of 1.0
-// is not a slew at all: the value arrives in ONE sample. That is what used to
-// need a "stage too short to slew" special case.
+// is not a slew at all: the value arrives in ONE sample. Capping the rate is
+// what removes the need for a "stage too short to slew" special case.
 //
 // Capping here removes the special case instead, and lands the short stage
 // exactly where every other stage lands: 1 - 0.632 IS e^-1, so a 4-sample
@@ -514,16 +513,16 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
 
 void Envelope::RederiveSlewState() {
   if (chiff_target_samples_) {
-    // The chiff's slew slows from where it is now toward the slowest it goes,
+    // The chiff's slew slows from where it is now toward its max slew time,
     // over the NOMINAL duration. That duration is a sizing reference, never a
     // countdown -- nothing happens when it elapses. NoteOn guarantees the slew
     // starts no slower than it ends; guard anyway.
-    const uint32_t slowest_slew_time_q5_27 = ChiffSlowestSlewTime_q5_27();
-    if (slew_time_log2_q5_27_ > slowest_slew_time_q5_27) {
-      slew_time_log2_q5_27_ = slowest_slew_time_q5_27;
+    const uint32_t max_slew_time_q5_27 = ChiffMaxSlewTime_q5_27();
+    if (slew_time_log2_q5_27_ > max_slew_time_q5_27) {
+      slew_time_log2_q5_27_ = max_slew_time_q5_27;
     }
     chiff_slew_time_log2_step_q5_27_ =
-      (slowest_slew_time_q5_27 - slew_time_log2_q5_27_) / chiff_target_samples_;
+      (max_slew_time_q5_27 - slew_time_log2_q5_27_) / chiff_target_samples_;
     chiff_slew_rate_decay_q32_ = DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
   } else {
     slew_time_log2_q5_27_ = stage_slew_time_log2_q5_27_;
@@ -557,8 +556,8 @@ void Envelope::Trigger(EnvelopeStage stage) {
     uint32_t phase_u32 = stage_samples_left_
       ? 0u - stage_samples_left_ * phase_increment_u32_
       : UINT32_MAX;
-    // No landing fraction any more: the slew aims past its target, so
-    // lut_env_expo's own normalization already describes where the value is.
+    // No landing fraction: the slew aims past its target, so lut_env_expo's own
+    // normalization already describes where the value is.
     uint32_t expo_u16 = Interpolate824(lut_env_expo, phase_u32);
     stage_start_q30_ += static_cast<int32_t>(
       (static_cast<int64_t>(target_q30_ - stage_start_q30_) * expo_u16) >> 16);
@@ -647,10 +646,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
     if (shrink_step_q5_27 > chiff_perturb_shrink_step_q5_27_) {
       chiff_perturb_shrink_step_q5_27_ = shrink_step_q5_27;
     }
-    const uint32_t slowest_slew_time_q5_27 = ChiffSlowestSlewTime_q5_27();
-    if (slowest_slew_time_q5_27 > slew_time_log2_q5_27_) {
+    const uint32_t max_slew_time_q5_27 = ChiffMaxSlewTime_q5_27();
+    if (max_slew_time_q5_27 > slew_time_log2_q5_27_) {
       const uint32_t slew_time_step_q5_27 =
-        (slowest_slew_time_q5_27 - slew_time_log2_q5_27_) / stage_samples_left_;
+        (max_slew_time_q5_27 - slew_time_log2_q5_27_) / stage_samples_left_;
       if (slew_time_step_q5_27 > chiff_slew_time_log2_step_q5_27_) {
         chiff_slew_time_log2_step_q5_27_ = slew_time_step_q5_27;
         chiff_slew_rate_decay_q32_ =
@@ -738,13 +737,10 @@ void Envelope::RenderStage(
     // ramping on its own schedule (recovered from the slew time below), and
     // the perturbation keeps shrinking linearly -- persisting either compounds
     // it every block and drives the perturbation to zero in a few blocks.
-    // Sentinel 1<<15 means "scale is exactly 1.0, skip the multiply" -- also
-    // what the ratio computes to when both responses cap at 1.0.
     //
-    // The chiff's OWN response is computed once here and reused: the sag below
-    // needs it too, and it is the expensive term in this function (a sqrt and
-    // a divide). Computing it before the floor overwrites the rate is what
-    // makes the sharing possible.
+    // The chiff's response is the expensive term in this function (a sqrt and
+    // a divide), computed once here: the mean clamp needs it to know how much
+    // room to leave.
     // ONE ENCODING OF THE SLEW IS STORED -- the slew TIME -- and the rate is
     // derived here, once, for the loop to run on. They are the same quantity
     // (rate = 2^-time), and keeping both as state meant keeping two
@@ -892,9 +888,9 @@ void Envelope::RenderStage(
     while (sample_buffer != segment_end) {
       // PRNG budget: bit 16 = perturbation sign.
       uint32_t chiff_draw_u32 = *prng++;
-      int32_t ramp_hi = static_cast<int32_t>(
+      int32_t slew_rate_step = static_cast<int32_t>(
         (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);
-      slew_rate_q31 -= ramp_hi;
+      slew_rate_q31 -= slew_rate_step;
       int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
       // +/- the perturbation, branchless: (p ^ mask) - mask.
       int32_t perturb_signed_q30 =
@@ -922,17 +918,17 @@ void Envelope::RenderStage(
       // runs out of bits, which is the only ending there is. Nothing mutes it,
       // nothing resets the slew: the term simply becomes too small to
       // represent, and the loop it feeds is already the classic slew with a
-      // zero offset. That is the low-pass gate the design was after, and it is
-      // why there is no window here any more.
+      // zero offset. That is the low-pass gate, and it is why no window exists
+      // here -- nothing has to close.
       chiff_perturb_shrink_q30_ = static_cast<int32_t>(
         (static_cast<int64_t>(chiff_perturb_shrink_q30_) * SlewRateFromTimeLog2_q31(
            chiff_perturb_shrink_step_q5_27_ * run_samples))
         >> 31);
       uint32_t slew_time_log2_end =
         slew_time_log2_q5_27_ + chiff_slew_time_log2_step_q5_27_ * run_samples;
-      const uint32_t slowest_slew_time_q5_27 = ChiffSlowestSlewTime_q5_27();
-      if (slew_time_log2_end > slowest_slew_time_q5_27) {
-        slew_time_log2_end = slowest_slew_time_q5_27;
+      const uint32_t max_slew_time_q5_27 = ChiffMaxSlewTime_q5_27();
+      if (slew_time_log2_end > max_slew_time_q5_27) {
+        slew_time_log2_end = max_slew_time_q5_27;
         // As slow as it goes: stop decaying the rate, or the loop keeps taking it
         // below the end it was told to stop at.
         chiff_slew_rate_decay_q32_ = 0;

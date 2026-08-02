@@ -85,22 +85,22 @@ class Envelope {
  private:
   // Re-derive the slew coefficients after a stage change: the classic
   // rate from the new stage's slew time and, if the chiff is live, the
-  // chiff's own slew slowing (toward the slowest it goes, compressed into
+  // chiff's own slew slowing (toward its max slew time, compressed into
   // the remaining stage when the stage is shorter than the chiff).
   void RederiveSlewState();
 
-  // EXPERIMENT: the +/- the chiff puts on the slew input -- half the note's
+  // the +/- the chiff puts on the slew input -- half the note's
   // ALLOWED range times the shrink, so it does not follow the realized level.
   int32_t ChiffPerturb_q30() const;
 
-  // EXPERIMENT: how slow the chiff's slew will have got after `samples` more
-  // samples, never past the slowest it goes. The shrink is sized against this.
+  // how slow the chiff's slew will have got after `samples` more
+  // samples, never past its max. The shrink is sized against this.
   uint32_t ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const;
 
-  // EXPERIMENT: the slowest the chiff's slew ever gets -- the larger of the
+  // the MAX slew time the chiff reaches -- the larger of the
   // slew time its own duration implies and the stage's, so the slew lands back
   // on the envelope's own nominal rate.
-  uint32_t ChiffSlowestSlewTime_q5_27() const;
+  uint32_t ChiffMaxSlewTime_q5_27() const;
 
  public:
 
@@ -158,97 +158,60 @@ class Envelope {
   // without per-sample work. Assigned round-robin in Init().
   uint32_t prng_offset_u32_;
 
-  // CHIFF. The envelope's own slew, sped up and fed a perturbed input.
+  // CHIFF. A filtered noise added to the envelope, with its own filter state.
   //
-  //   slew input    what the slew chases: base +/- the perturbation, sign
-  //                 drawn per sample from the shared PRNG
-  //   perturbation  half the note's ALLOWED range times
-  //                 chiff_perturb_shrink_q30_ -- independent of the level the
-  //                 note reaches, so a quiet note gets the same exciter. The
-  //                 shrink is what decays with time.
-  //   sag           near a rail the perturbation does not fit, so the CENTRE
-  //                 moves off the rail by the shortfall. Sized from the
-  //                 REALIZED excursion, so it vanishes with the noise
-  //   slew time     ramped linearly (so the RATE decays exponentially) from a
-  //                 start set by AMOUNT to an end set by the window
+  // THREE TERMS MAKE THE OUTPUT, and they are independent:
+  //   nominal   the envelope with no chiff. Its own one-pole, running at the
+  //             STAGE's rate, chasing the stage's aim.
+  //   chiff     this. Its own one-pole, running at the CHIFF's rate, chasing
+  //             +/- the perturbation with the sign drawn per sample from the
+  //             shared PRNG. Zero-mean.
+  //   bias      added at the point of use and never integrated.
+  // out = saturate(mean + chiff), where mean = nominal + bias held far enough
+  // inside the DAC rails for the chiff's excursion to fit. The chiff is ADDED
+  // to a mean that already has room, so it is never clipped, and the clamp
+  // does not feed back: value_q30_ is nominal + chiff and carries no bias.
   //
-  // NOTHING NAMES THE OUTPUT. What you hear is the perturbation times the
-  // slew's response to it, which falls as sqrt(rate) -- about 3 dB per octave.
-  //
-  // KEEP THE CAUSAL CHAIN VISIBLE. There are exactly two mechanisms here --
-  // the slew slowing and the perturbation shrinking. Everything else described
-  // below is downstream of them and is written with its cause attached. An
-  // effect may perfectly well cause a further effect; what must not happen is
-  // an effect being promoted into a thing that acts on its own, with the chain
-  // back to a mechanism lost. That is where the recurring confusions came
-  // from: input mistaken for output, and one effect assumed to have one cause
-  // when two mechanisms were producing it jointly.
+  // THE PERTURBATION is half the note's ALLOWED range times
+  // chiff_perturb_shrink_q30_, so it does not follow the level the note
+  // reaches and a quiet note gets the same exciter.
   //
   // TWO THINGS DECAY, and they divide the work by TIME rather than by
-  // proportion: the slew slowing, and the perturbation shrinking. MEASURED in
-  // the sim by rendering the full curve with the perturbation shrinking and
-  // held constant, then subtracting:
+  // proportion, so neither covers for the other:
+  //   the SLEW SLOWING contributes a curve straight in dB, about -4 dB per 10%
+  //   of the chiff's duration. Amount-independent.
+  //   the PERTURBATION SHRINKING contributes 20log10(1 - t/duration): gentle
+  //   early, steep at the end. The steepening is that mechanism finishing, not
+  //   an artifact.
+  // How the perturbation shrinks is not free to change without re-measuring
+  // what the slew is doing at the same time.
   //
-  //   THE SLEW SLOWING, on its own, CONTRIBUTES a curve that is straight in
-  //   dB -- about -4 dB per 10% of the window -- for the first 80%, and then
-  //   goes flat at -30 dB. (That flattening is a consequence, not a thing the
-  //   code does.) Amount-independent: -30.7 at AMOUNT 96, -31.0 at 127.
+  // AMOUNT SETS THE STARTING SLEW TIME AND NOTHING ELSE. It does not scale the
+  // perturbation. Low amounts are quiet because a slow filter realizes less of
+  // the same perturbation. At AMOUNT 0 the perturbation is zero, the chiff
+  // one-pole holds zero, and the output is nominal + bias.
   //
-  //   It flattens because two rates compete. Hold the slew rate and the
-  //   perturbation fixed and the value's wandering settles to an RMS of
-  //   perturbation * sqrt(rate/2). The rate is NOT fixed -- it collapses
-  //   exponentially by design -- so where the wandering would settle keeps
-  //   dropping, a constant dB per second. Meanwhile the value can only shed
-  //   its excess AT the slew rate, which is collapsing too. Early on it keeps
-  //   up; past ~80% of the window it cannot, and the curve flattens carrying
-  //   excursion it can no longer shed. Nothing here is a "target" -- the
-  //   value is not chasing a point, it just arrives at an amplitude.
+  // NOTHING NAMES THE OUTPUT. What you hear is the perturbation times the
+  // filter's response, which falls as sqrt(rate) -- about 3 dB per octave.
+  // KEEP THE CAUSAL CHAIN VISIBLE: an effect may cause a further effect, but an
+  // effect must not be promoted into a thing that acts on its own with the
+  // chain back to a mechanism lost. Every recurring confusion here was that --
+  // input mistaken for output, or one effect assumed to have one cause.
   //
-  //   THE PERTURBATION SHRINKING carries the output from that -30 dB floor to
-  //   silence, contributing 20log10(1 - t/window): gentle early, steep at the
-  //   edge. The steepening you see at the end is a CONSEQUENCE of that, not an
-  //   artifact to smooth away -- it is what the second mechanism finishing the
-  //   job looks like. Soften it and the flattening above is left exposed,
-  //   which is exactly what shrinking the perturbation exponentially was
-  //   measured to do (fast decay, then a plateau near -40 dB).
+  // ONLY THE SLEW TIME IS STORED. The rate is 2^-slew_time, one quantity in two
+  // encodings; keeping both meant two accumulators that could drift apart.
+  // RenderStage derives the rate once per run. Slew time is unsigned: a
+  // magnitude, 0..kMaxSlewTimeLog2, whose max exceeds 2^31 as Q5.27.
   //
-  // So neither covers for the other, and how the perturbation shrinks is not
-  // free to change without re-measuring where the slew gives up.
-  //
-  // AMOUNT sets the STARTING slew time and nothing else -- it does NOT scale
-  // the perturbation. Low amounts are quiet because a slow slew realizes less
-  // of the same perturbation. At AMOUNT 0 (or window closed) the input
-  // collapses to the stage target: the classic per-sample slew, exactly.
-  //
-  // The slew input centre is derived so the value's EXPECTED step equals the
-  // value's step in every regime: centre = nominal + (target - nominal) *
-  // stage_rate/effective_rate (timed stages; holds use the target). Anything
-  // else makes the value chase the moving nominal value through its slew -- two
-  // cascaded one-poles -- so it trails the envelope (a kink wherever the
-  // window ends). The rate is also floored at the stage rate on timed stages
-  // (else an early release near the window's slow end hangs); hold stages are
-  // exempt so the chiff still closes on its own schedule.
-  //
-  // The window spans stages (sustain included). Only a stage shorter than the
-  // remaining window (in practice the release) compresses it: both the
-  // perturbation and the slew time re-sloped to land by stage end.
-  //
-  // ONLY THE SLEW TIME IS STORED. The rate is 2^-slew_time, so the two are one
-  // quantity in two encodings, and keeping both as state meant keeping two
-  // accumulators for it -- the loop decaying the rate per sample, the writeback
-  // raising the time per run -- which could drift apart between the moments
-  // they were reconciled. RenderStage derives the rate it needs, once per run.
-  // The rate is required only INSIDE the sample loop (the one-pole multiply and
-  // its per-sample decay); every other consumer is either a comparison, which
-  // is monotone in either encoding, or the centre blend's ratio, which is a
-  // difference of slew times and so is CHEAPER here than it was as a division.
-  //
-  // Slew time is unsigned: a magnitude, 0..kMaxSlewTimeLog2. The max exceeds
-  // 2^31 as Q5.27 (integer part up to 27), so int32 would sign-flip.
+  // Things that did not work: per-block alpha (cb68505b), the two-point
+  // mixture, an absolute slew-rate floor with a perturbation rescale, and the
+  // sag -- a level move to make room for the chiff, which could not be made to
+  // track a moving bias because the correction went through the integrator
+  // (f5eee4b6 replaced it with the mean clamp above).
   uint32_t slew_time_log2_q5_27_;             // Current slew time, log2 samples
   uint32_t chiff_slew_time_log2_step_q5_27_;  // Per-sample rise, i.e. how fast
                                              // the slew slows (>= 0)
-  uint32_t chiff_slew_time_log2_end_q5_27_;   // Slowest the chiff's own slew
+  uint32_t chiff_slew_time_log2_end_q5_27_;   // Max slew time the chiff's own
                                              // goes, from its duration
   // The NOMINAL chiff duration, in samples: a sizing reference for how fast
   // the slew slows and the perturbation shrinks. NOT a countdown -- nothing
@@ -260,12 +223,12 @@ class Envelope {
   // lut_env_expo[phase] -- with no iterated level state, the same
   // construction the duty-binary core used for its duty curve.
   int32_t stage_start_q30_;
-  // EXPERIMENT: how much of the available slack the perturbation uses, Q30
+  // how much of the available slack the perturbation uses, Q30
   // (1<<30 == all of it), shrinking by chiff_perturb_shrink_step octaves per
   // sample. Dimensionless, so unlike the levels it does not rescale.
   int32_t chiff_perturb_shrink_q30_;
   uint32_t chiff_perturb_shrink_step_q5_27_;
-  // EXPERIMENT: half the note's ALLOWED range -- the perturbation at full
+  // half the note's ALLOWED range -- the perturbation at full
   // shrink. A LEVEL, so it rescales with the others.
   int32_t chiff_perturb_full_q30_;
   // Ordered clamp bounds over the note's stage targets. The envelope's range
