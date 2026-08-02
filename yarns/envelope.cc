@@ -819,6 +819,9 @@ void Envelope::RenderStage(
     //    ~1.4% of the loud phase clips at the rail. Doubling the margin costs
     //    ~1.8 dB of attack level -- measured before the response correction
     //    widened this quantity by ~0.5 dB.
+    // COST PROBE ONLY: a stand-in clip point of the right magnitude, so the
+    // loop pays what a real one would. Not the design's min(input, k*sigma).
+    const int32_t chiff_clip_q30 = chiff_scaled_rms_q30;
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
     const int32_t lo_q30 = chiff_scaled_rms_q30;
     const int32_t hi_q30 = kValueMax_q30 - chiff_scaled_rms_q30;
@@ -892,6 +895,12 @@ void Envelope::RenderStage(
       "  sub   lr, lr, %[chiff]\n"                // delta = input - chiff
       "  smull ip, lr, lr, %[rate]\n"
       "  add   %[chiff], %[chiff], lr, lsl #1\n"  // chiff += (product>>32)*2
+      "  cmp   %[chiff], %[clip]\n"                // COST PROBE: symmetric clip
+      "  it    gt\n"
+      "  movgt %[chiff], %[clip]\n"
+      "  cmn   %[chiff], %[clip]\n"
+      "  it    lt\n"
+      "  rsblt %[chiff], %[clip], #0\n"
       "  smull ip, lr, %[gap], %[srate]\n"        // the gap to the aim decays
       "  sub   %[gap], %[gap], lr, lsl #1\n"      //   at the STAGE's rate
       "  add   %[comb], %[comb], %[cslope]\n"     // bias + mean + the aim
@@ -906,6 +915,7 @@ void Envelope::RenderStage(
         [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
         [prng] "+r"(prng), [buf] "+r"(sample_buffer)
       : [decay] "r"(decay_q32), [input] "r"(chiff_input_q30),
+        [clip] "r"(chiff_clip_q30),
         [srate] "r"(stage_rate_q31),
         [cslope] "r"(combined_slope_q30), [end] "r"(segment_end)
       : "ip", "lr", "cc", "memory");
@@ -924,9 +934,14 @@ void Envelope::RenderStage(
       // term. Two instructions saved per one-pole. The dropped bit is a half
       // LSB per sample and cannot accumulate: at a one-pole's fixed point the
       // step is zero, so the error is bounded by the last step, not summed.
+      // COST PROBE: symmetric clip, mirroring the asm above.
       chiff_state_q30 += 2 * static_cast<int32_t>(
         (static_cast<int64_t>(chiff_input_signed_q30 - chiff_state_q30)
          * slew_rate_q31) >> 32);
+      if (chiff_state_q30 > chiff_clip_q30) chiff_state_q30 = chiff_clip_q30;
+      else if (chiff_state_q30 < -chiff_clip_q30) {
+        chiff_state_q30 = -chiff_clip_q30;
+      }
       nominal_gap_q30 -= 2 * static_cast<int32_t>(
         (static_cast<int64_t>(nominal_gap_q30) * stage_rate_q31) >> 32);
       combined_q30 += combined_slope_q30;
