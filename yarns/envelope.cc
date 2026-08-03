@@ -834,10 +834,10 @@ void Envelope::RenderStage(
     // exactly the bias amplitude (10, 8000, 20000 s16) every time the sum
     // touched a rail.
     const int32_t bias_q30 = bias_q31 >> 1;
-    // A PER-RUN COPY. The loop decays the rate every sample; writing that back
-    // would compound the schedule once per block and collapse the chiff in a
-    // few of them. The persistent encoding is the slew TIME, set once below.
-    int32_t decay_q32 = chiff_slew_rate_decay_q32_;
+    // EXPERIMENT: the rate is held for the whole run. The writeback below
+    // already advances the slew TIME by the run's worth, so the next run
+    // derives the advanced rate -- the schedule is unchanged, only its
+    // resolution is (per run instead of per sample).
     // The chiff's scaled rms, computed once here because the mean clamp needs
     // it to know how much room to leave. About ten instructions: the sqrt and
     // the 64-bit divide belong to the exact form, which
@@ -999,8 +999,6 @@ void Envelope::RenderStage(
       "  cmp   %[buf], %[end]\n"
       "  beq   2f\n"
       "1:\n"
-      "  smull ip, lr, %[rate], %[decay]\n"       // (rate*decay), lr = hi
-      "  sub   %[rate], %[rate], lr\n"            // rate -= (rate*decay)>>32
       "  lsrs  %[bits], %[bits], #1\n"            // sign bit -> carry
       "  rsb   lr, %[chiff], %[input2], asr #1\n" // delta = input - chiff
       "  it    cs\n"
@@ -1029,7 +1027,7 @@ void Envelope::RenderStage(
       : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
         [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
         [bits] "+r"(sign_bits), [buf] "+r"(sample_buffer)
-      : [decay] "r"(decay_q32), [input2] "r"(chiff_input2_q30),
+      : [input2] "r"(chiff_input2_q30),
         [clip] "r"(chiff_clip_scaled_q30),
         [srate] "r"(stage_rate_q31),
         [cslope] "r"(combined_slope_q30), [end] "r"(chunk_end)
@@ -1039,9 +1037,6 @@ void Envelope::RenderStage(
       // One bit, consumed low end first, matching the asm's LSRS.
       const uint32_t sign = sign_bits & 1u;
       sign_bits >>= 1;
-      int32_t slew_rate_step = static_cast<int32_t>(
-        (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);
-      slew_rate_q31 -= slew_rate_step;
 
       // (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word
       // term. Two instructions saved per one-pole. The dropped bit is a half
