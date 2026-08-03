@@ -994,6 +994,31 @@ void Envelope::RenderStage(
         static_cast<uint32_t>(segment_end - sample_buffer);
       if (chunk > sign_bits_left) chunk = sign_bits_left;
       int16_t* const chunk_end = sample_buffer + chunk;
+      int16_t* const chunk_end4 = sample_buffer + (chunk & ~3u);
+// EXPERIMENT: one sample of the render loop, so it can be emitted four times.
+#define ENVELOPE_SAMPLE_BODY \
+  "  smull ip, lr, %[rate], %[decay]\n" \
+  "  sub   %[rate], %[rate], lr\n" \
+  "  lsrs  %[bits], %[bits], #1\n" \
+  "  rsb   lr, %[chiff], %[input2], asr #1\n" \
+  "  it    cs\n" \
+  "  subcs lr, lr, %[input2]\n" \
+  "  smull ip, lr, lr, %[rate]\n" \
+  "  add   %[chiff], %[chiff], lr, lsl #1\n" \
+  "  cmp   %[chiff], %[clip]\n" \
+  "  it    gt\n" \
+  "  movgt %[chiff], %[clip]\n" \
+  "  cmn   %[chiff], %[clip]\n" \
+  "  it    lt\n" \
+  "  rsblt %[chiff], %[clip], #0\n" \
+  "  smull ip, lr, %[gap], %[srate]\n" \
+  "  sub   %[gap], %[gap], lr, lsl #1\n" \
+  "  add   %[comb], %[comb], %[cslope]\n" \
+  "  sub   ip, %[comb], %[gap]\n" \
+  "  add   ip, ip, %[chiff], lsl #4\n" \
+  "  usat  ip, #15, ip, asr #15\n" \
+  "  strh  ip, [%[buf]], #2\n"
+
     // 32-bit ARMv7+ only (Thumb-2: smull / sbfx / usat / IT). Gate on __arm__,
     // NOT bare __ARM_ARCH: the build host is arm64 (Apple Silicon), which
     // defines __ARM_ARCH == 8 but not __arm__ -- so the host harness and the
@@ -1010,34 +1035,36 @@ void Envelope::RenderStage(
     // chiff input at its own decaying rate; nominal chases the stage's aim at
     // the STAGE's rate. The offset carrying bias and the mean correction ramps.
     // One USAT saturates and shifts in one instruction.
+    // FOUR SAMPLES PER ITERATION. Loop control is a compare and a TAKEN branch
+    // whatever the body does, so the only lever on it is taking it less often.
+    // Two asm blocks, not one: a thirteenth operand does not fit (GCC: "can't
+    // find a register in class GENERAL_REGS"), and each block gets its own
+    // allocation.
     __asm__ volatile(
       "  cmp   %[buf], %[end]\n"
       "  beq   2f\n"
       "1:\n"
-      "  smull ip, lr, %[rate], %[decay]\n"       // (rate*decay), lr = hi
-      "  sub   %[rate], %[rate], lr\n"            // rate -= (rate*decay)>>32
-      "  lsrs  %[bits], %[bits], #1\n"            // sign bit -> carry
-      "  rsb   lr, %[chiff], %[input2], asr #1\n" // delta = input - chiff
-      "  it    cs\n"
-      "  subcs lr, lr, %[input2]\n"               // sign set: delta -= 2*input
-      "  smull ip, lr, lr, %[rate]\n"
-      "  add   %[chiff], %[chiff], lr, lsl #1\n"  // chiff += (product>>32)*2
-      "  cmp   %[chiff], %[clip]\n"               // saturating one-pole: the
-      "  it    gt\n"                               //   clipped value FEEDS
-      "  movgt %[chiff], %[clip]\n"                //   BACK, so the state can
-      "  cmn   %[chiff], %[clip]\n"                //   never carry more than
-      "  it    lt\n"                               //   it is allowed to show
-      "  rsblt %[chiff], %[clip], #0\n"
-      "  smull ip, lr, %[gap], %[srate]\n"        // the gap to the aim decays
-      "  sub   %[gap], %[gap], lr, lsl #1\n"      //   at the STAGE's rate
-      "  add   %[comb], %[comb], %[cslope]\n"     // bias + mean + the aim
-      "  sub   ip, %[comb], %[gap]\n"             // the mean
-      "  add   ip, ip, %[chiff], lsl #4\n"        // + the chiff, unscaled
-                                                  //   (#4 == kChiffStateShift;
-                                                  //   the QEMU differential
-                                                  //   catches any drift)
-      "  usat  ip, #15, ip, asr #15\n"            // saturate and shift, one op
-      "  strh  ip, [%[buf]], #2\n"
+      ENVELOPE_SAMPLE_BODY
+      ENVELOPE_SAMPLE_BODY
+      ENVELOPE_SAMPLE_BODY
+      ENVELOPE_SAMPLE_BODY
+      "  cmp   %[buf], %[end]\n"
+      "  bne   1b\n"
+      "2:\n"
+      : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
+        [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
+        [bits] "+r"(sign_bits), [buf] "+r"(sample_buffer)
+      : [decay] "r"(decay_q32), [input2] "r"(chiff_input2_q30),
+        [clip] "r"(chiff_clip_scaled_q30),
+        [srate] "r"(stage_rate_q31),
+        [cslope] "r"(combined_slope_q30), [end] "r"(chunk_end4)
+      : "ip", "lr", "cc", "memory");
+    // Tail: the 0-3 samples the unrolled loop could not take.
+    __asm__ volatile(
+      "  cmp   %[buf], %[end]\n"
+      "  beq   2f\n"
+      "1:\n"
+      ENVELOPE_SAMPLE_BODY
       "  cmp   %[buf], %[end]\n"
       "  bne   1b\n"
       "2:\n"
