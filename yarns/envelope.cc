@@ -849,7 +849,15 @@ void Envelope::RenderStage(
     // writeback raised the time per run, with nothing holding the two to the
     // same schedule. Derived, the rate cannot drift from it.
     uint32_t slew_time_q5_27 = slew_time_log2_q5_27_;
-    int32_t slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_q5_27);
+    // THE RUN HOLDS ITS MIDPOINT RATE, NOT ITS STARTING ONE. The start is the
+    // FASTEST rate in the run, so holding it makes every run too bright --
+    // MEASURED +39% brightness on a chiff that lives a single block. Advancing
+    // half a run before deriving the rate centres the error instead of biasing
+    // it. The writeback still advances by the whole run, so the schedule is
+    // untouched.
+    const uint32_t slew_time_mid_q5_27 = slew_time_q5_27
+      + chiff_slew_time_log2_step_q5_27_ * (run_samples >> 1);
+    int32_t slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_mid_q5_27);
     const uint32_t chiff_scaled_rms_per_input_q15_5 =
       ChiffScaledRmsPerInput_q15_5(slew_time_q5_27);
     // NO SLEW-RATE FLOOR, and no chiff input rescale at it. Both existed
