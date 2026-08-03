@@ -105,10 +105,14 @@ const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
 // terminal sits near 4.9x, sooner than the standalone model implied, because
 // the clip point EQUALS the chiff input at fast rates: clipping starts at 1x
 // instead of waiting for the input to be driven past a tail bound above it.
-// 2.5 octaves is 5.66x, a deliberate small overshoot -- the terminal moves with
-// the rate, so undershooting would leave some patches unable to reach the
-// square at all, which matters more than a couple of settings of overlap.
-const uint32_t kChiffDriveSpan_q5_27 = 5u << 26;  // 2.5 octaves
+// RECALIBRATED after the rate sweep moved to the lower half: a brighter signal
+// clips at a LOWER drive (one step moves rate * D * input, so with C = input at
+// fast rates it clips once rate*D >= 1), and MEASURED the terminal fell to
+// amount 112 under a 2.5-octave span. 2.5 * 48/63 = 1.90 lands it exactly at
+// 127; 1.9375 keeps the deliberate small overshoot, since the terminal moves
+// with the rate and undershooting would leave some patches unable to reach the
+// square at all.
+const uint32_t kChiffDriveSpan_q5_27 = 31u << 23;  // 1.9375 octaves
 // The state is held scaled DOWN by this many bits so the driven input cannot
 // leave Q30: undriven it reaches 2^29, and 16x that is 2^33. Shifting the
 // state instead costs nothing, because the output add takes a shifted operand.
