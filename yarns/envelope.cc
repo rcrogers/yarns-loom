@@ -419,6 +419,17 @@ static uint32_t ChiffWindowSamples(
 // on the fastest slew time (the raw table tops out just short).
 static uint32_t ChiffStartSlewTimeLog2_q5_27(
     uint8_t chiff_amount, uint32_t end_slew_time_log2_q5_27) {
+  // THE RATE SWEEP OWNS THE LOWER HALF OF THE KNOB; the drive owns the upper.
+  // Reaching the FASTEST rate at the hinge makes kChiffCleanAmount the
+  // maximally-unfiltered-but-not-overdriven point, and hands the whole upper
+  // half to overdrive on an already-bright signal. Sweeping the rate across the
+  // full range instead meant the drive above the hinge was clipping a signal
+  // the rate had not finished brightening -- duller squares for no reason.
+  const uint32_t rate_amount = static_cast<uint32_t>(chiff_amount)
+      * ((kChiffAmountMax + 1) / kChiffCleanAmount);
+  chiff_amount = rate_amount > kChiffAmountMax
+      ? static_cast<uint8_t>(kChiffAmountMax)
+      : static_cast<uint8_t>(rate_amount);
   const uint32_t kFastestSlewTimeLog2_q5_27 = 1u << 27;
   // Window too short for the slew to move at all: start where it ends.
   if (end_slew_time_log2_q5_27 <= kFastestSlewTimeLog2_q5_27) {
