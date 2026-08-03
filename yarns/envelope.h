@@ -142,9 +142,9 @@ class Envelope {
   // next stage's slew continues seamlessly from the current value.
   uint32_t stage_samples_left_;
 
-  // The stage's own slew time, log2 samples, Q5.27. Integer part is the base
-  // downshift; the fraction dithers to the next integer via the sigma-delta
-  // accumulator, interpolating slew times between powers of two.
+  // The stage's own slew time, log2 samples, Q5.27. RenderStage derives the
+  // rate from it once per run (2^-slew_time, via the exp2 table) and the loop
+  // applies it with a multiply.
   uint32_t stage_slew_time_log2_q5_27_;
 
   // The character axis, as a multiplier on the chiff's filter input, ALREADY

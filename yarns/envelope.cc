@@ -45,7 +45,7 @@ using namespace stmlib;
 // with no per-sample XOR, which would cost a register and a spill in the
 // render loop.
 namespace {
-  uint32_t shared_prng_buffer[2 * kAudioBlockSize];
+  int32_t shared_prng_buffer[2 * kAudioBlockSize];
   uint32_t shared_prng_state = 0xCAFEBABE;
 }  // namespace
 
@@ -74,8 +74,8 @@ const uint32_t kOne_q15_5 = 46341;  // 2^15.5 == 1.0
 // the curve but leaves a bigger residual at handoff.
 const uint32_t kSlewTimesPerStageLog2_q5_27 = 2u << 27;
 
-// Base shift is capped so that shift + dither <= 28: keeps `delta >> shift`
-// well-defined, and 2^28 samples is already an absurdly long time constant.
+// Caps how slow a slew may get, so the exp2 helper's `>> integer_part` stays
+// well-defined. 2^27 samples is ~50 minutes at 45 kHz, already absurd.
 const uint32_t kMaxSlewTimeLog2_q5_27 = 27u << 27;
 
 // chiff_amount lives in [0, kChiffAmountMax].
@@ -146,7 +146,12 @@ void Envelope::FillSharedPrngBuffer() {
     state ^= state << 13;
     state ^= state >> 17;
     state ^= state << 5;
-    shared_prng_buffer[i] = state;
+    // STORE THE SIGN MASK, NOT THE DRAW. Every consumer sign-extends the same
+    // bit, so doing it here costs one shift pair per BUFFER WORD instead of one
+    // per envelope-sample: 128 against 768 per block, and it takes an
+    // instruction out of the render loop. Bit-identical -- the loop's `sbfx
+    // ip, ip, #16, #1` and this are the same operation on the same bit.
+    shared_prng_buffer[i] = static_cast<int32_t>(state << 15) >> 31;
   }
   shared_prng_state = state;
 }
@@ -940,7 +945,7 @@ void Envelope::RenderStage(
 
     // Buffer position (plus this instance's decorrelation offset) doubles as
     // the index into the shared PRNG block.
-    const uint32_t* prng = &shared_prng_buffer[
+    const int32_t* prng = &shared_prng_buffer[
       prng_offset_u32_ + (kAudioBlockSize - block_samples_left)];
     // 32-bit ARMv7+ only (Thumb-2: smull / sbfx / usat / IT). Gate on __arm__,
     // NOT bare __ARM_ARCH: the build host is arm64 (Apple Silicon), which
@@ -964,8 +969,7 @@ void Envelope::RenderStage(
       "1:\n"
       "  smull ip, lr, %[rate], %[decay]\n"       // (rate*decay), lr = hi
       "  sub   %[rate], %[rate], lr\n"            // rate -= (rate*decay)>>32
-      "  ldr   ip, [%[prng]], #4\n"               // draw = *prng++
-      "  sbfx  ip, ip, #16, #1\n"                 // sign mask from bit 16
+      "  ldr   ip, [%[prng]], #4\n"               // sign mask, pre-extracted
       "  eor   lr, %[input], ip\n"
       "  sub   lr, lr, ip\n"                      // +/- chiff input
       "  sub   lr, lr, %[chiff]\n"                // delta = input - chiff
@@ -1000,12 +1004,11 @@ void Envelope::RenderStage(
       : "ip", "lr", "cc", "memory");
 #else
     while (sample_buffer != segment_end) {
-      // PRNG budget: bit 16 = chiff input sign.
-      uint32_t chiff_draw_u32 = *prng++;
+      // Pre-extracted by FillSharedPrngBuffer: 0 or -1.
+      int32_t sign_mask = *prng++;
       int32_t slew_rate_step = static_cast<int32_t>(
         (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);
       slew_rate_q31 -= slew_rate_step;
-      int32_t sign_mask = static_cast<int32_t>(chiff_draw_u32 << 15) >> 31;
       // +/- the chiff input, branchless: (p ^ mask) - mask.
       int32_t chiff_input_signed_q30 =
         (chiff_input_q30 ^ sign_mask) - sign_mask;
