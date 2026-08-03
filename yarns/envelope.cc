@@ -1041,6 +1041,20 @@ void Envelope::RenderStage(
       "  cmp   %[buf], %[end]\n"
       "  bne   1b\n"
       "2:\n"
+      // UNROLLING x4 IS WORTH 3 CYCLES PER SAMPLE, 24.0% -> 21.8% OF THE CPU,
+      // and it is BIT-IDENTICAL -- MEASURED, not estimated: prototype 1a5a154a
+      // on env-chiff-unroll runs 116 cycles per 4 samples against 32 per 1,
+      // with 0 spills, all 10 QEMU hashes unchanged, +308 bytes of flash.
+      // These two instructions are the whole of it: a compare and a TAKEN
+      // branch, ~4 cycles, doing no work. They cannot be made cheaper --
+      // Cortex-M3 has no decrement-and-branch, and a countdown only swaps `cmp`
+      // for `subs`, both one cycle -- so the only lever is taking the branch
+      // less often.
+      // IT NEEDS TWO ASM BLOCKS: a thirteenth operand does not fit, so the
+      // unrolled loop and the 0-3 sample tail each take their own allocation.
+      // `make cycles` will NOT show the saving -- it finds the smallest loop
+      // containing the output saturate, which is the tail. Read the 4-sample
+      // loop out of the disassembly instead.
       : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
         [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
         [bits] "+r"(sign_bits), [buf] "+r"(sample_buffer)
