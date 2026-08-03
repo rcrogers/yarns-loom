@@ -37,15 +37,24 @@ namespace yarns {
 
 using namespace stmlib;
 
-// System-wide PRNG buffer shared by all envelopes' chiff draws. Filled once
-// per audio block by FillSharedPrngBuffer(). Shared state keeps per-envelope
-// PRNG state out of RAM. Double-length: each envelope reads a block-sized
-// window starting at its own offset (assigned round-robin in Init), so no
-// two envelopes consume the same word on the same sample -- decorrelation
-// with no per-sample XOR, which would cost a register and a spill in the
-// render loop.
+// Chiff sign bits, filled once per audio block by FillSharedPrngBuffer().
+// ONE BIT PER SAMPLE IS ALL THE CHIFF NEEDS -- the sign of its filter's input --
+// so a word carries 32 samples and an envelope's whole block is two words.
+// Each envelope owns ITS OWN words, so the sequences are independent rather
+// than shifted views of one stream.
 namespace {
-  int32_t shared_prng_buffer[2 * kAudioBlockSize];
+  // 32 sign bits per word.
+  const size_t kChiffSignWordsPerBlock = kAudioBlockSize / 32;
+  // Envelope instances that can each be given their own words. TWELVE EXIST:
+  // four Voice::envelope_ plus four Oscillators x (gain, timbre). Wrapping past
+  // this hands two envelopes the SAME sequence, which is the one property the
+  // decorrelation exists to provide -- raise it if instances are added.
+  const size_t kMaxChiffEnvelopes = 32;
+  const size_t kChiffSignWords = kMaxChiffEnvelopes * kChiffSignWordsPerBlock;
+  uint32_t shared_chiff_signs[kChiffSignWords];
+  // How much of it any envelope actually reads. Generating the whole buffer
+  // regardless was ~1% of the CPU spent on randomness nobody consumed.
+  size_t shared_chiff_words_used = 0;
   uint32_t shared_prng_state = 0xCAFEBABE;
 }  // namespace
 
@@ -142,16 +151,13 @@ const uint32_t kStageAimOvershoot_u16 = 66759;  // round(2^16 / (1 - e^-4))
 
 void Envelope::FillSharedPrngBuffer() {
   uint32_t state = shared_prng_state;
-  for (size_t i = 0; i < 2 * kAudioBlockSize; ++i) {
+  for (size_t i = 0; i < shared_chiff_words_used; ++i) {
     state ^= state << 13;
     state ^= state >> 17;
     state ^= state << 5;
-    // STORE THE SIGN MASK, NOT THE DRAW. Every consumer sign-extends the same
-    // bit, so doing it here costs one shift pair per BUFFER WORD instead of one
-    // per envelope-sample: 128 against 768 per block, and it takes an
-    // instruction out of the render loop. Bit-identical -- the loop's `sbfx
-    // ip, ip, #16, #1` and this are the same operation on the same bit.
-    shared_prng_buffer[i] = static_cast<int32_t>(state << 15) >> 31;
+    // EVERY BIT IS USED. The old buffer spent a whole 32-bit draw to deliver
+    // one sign, generating and loading 32 bits per sample to carry 1.
+    shared_chiff_signs[i] = state;
   }
   shared_prng_state = state;
 }
@@ -197,7 +203,19 @@ void Envelope::Init(int16_t zero_value_s16) {
   // samples to the envelopes (buffer is 2x block size purely for these
   // offsets, and each envelope consumes a full word per sample).
   static uint32_t next_prng_offset = 0;
-  prng_offset_u32_ = next_prng_offset++ & (kAudioBlockSize - 1);
+  // CLAIMED ONCE PER OBJECT, NOT ONCE PER Init. Init runs again whenever the
+  // layout is reassigned, and taking a fresh slot each time walks the counter
+  // until it wraps onto a slot a LIVE envelope still holds -- two envelopes
+  // then draw the same signs, which is the one thing this offset exists to
+  // prevent. Envelopes live in static storage, so the flag starts false.
+  if (!prng_offset_assigned_) {
+    prng_offset_assigned_ = true;
+    prng_offset_u32_ = (next_prng_offset++ * kChiffSignWordsPerBlock)
+      & (kChiffSignWords - 1);
+    if (prng_offset_u32_ + kChiffSignWordsPerBlock > shared_chiff_words_used) {
+      shared_chiff_words_used = prng_offset_u32_ + kChiffSignWordsPerBlock;
+    }
+  }
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -859,6 +877,10 @@ void Envelope::RenderStage(
     // this is <= input_q30 and cannot overflow however hard it is driven.
     const int32_t chiff_input_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(input_q30) * chiff_drive_over_16_q30_) >> 30);
+    // TWICE the input is what the loop holds, not the input. `rsb lr, chiff,
+    // input2, asr #1` then forms the delta in ONE instruction, and a negative
+    // sign is `subcs lr, lr, input2` -- no mask, no separate subtract.
+    const int32_t chiff_input2_q30 = chiff_input_q30 << 1;
     // The chiff's rms times 2.121, as a level: the per-input figure
     // times the input. Dividing by 2^15.5 would be a 64-bit division, so
     // multiply by the same constant and shift 31 instead (46341^2 is 2^31 to
@@ -943,10 +965,20 @@ void Envelope::RenderStage(
     int32_t nominal_gap_q30 = stage_aim_q30 - nominal_q30;
     combined_q30 += stage_aim_q30;
 
-    // Buffer position (plus this instance's decorrelation offset) doubles as
-    // the index into the shared PRNG block.
-    const int32_t* prng = &shared_prng_buffer[
-      prng_offset_u32_ + (kAudioBlockSize - block_samples_left)];
+    // ONE WORD IS 32 SAMPLES of sign bits, so a run can straddle a word
+    // boundary. Chunk the loop there -- at most twice, since a block is 64
+    // samples -- rather than reloading per sample.
+    const uint32_t sample_index =
+      static_cast<uint32_t>(kAudioBlockSize - block_samples_left);
+    const uint32_t* sign_word =
+      &shared_chiff_signs[prng_offset_u32_ + (sample_index >> 5)];
+    uint32_t sign_bits_left = 32 - (sample_index & 31);
+    uint32_t sign_bits = *sign_word >> (sample_index & 31);
+    while (sample_buffer != segment_end) {
+      uint32_t chunk =
+        static_cast<uint32_t>(segment_end - sample_buffer);
+      if (chunk > sign_bits_left) chunk = sign_bits_left;
+      int16_t* const chunk_end = sample_buffer + chunk;
     // 32-bit ARMv7+ only (Thumb-2: smull / sbfx / usat / IT). Gate on __arm__,
     // NOT bare __ARM_ARCH: the build host is arm64 (Apple Silicon), which
     // defines __ARM_ARCH == 8 but not __arm__ -- so the host harness and the
@@ -969,10 +1001,10 @@ void Envelope::RenderStage(
       "1:\n"
       "  smull ip, lr, %[rate], %[decay]\n"       // (rate*decay), lr = hi
       "  sub   %[rate], %[rate], lr\n"            // rate -= (rate*decay)>>32
-      "  ldr   ip, [%[prng]], #4\n"               // sign mask, pre-extracted
-      "  eor   lr, %[input], ip\n"
-      "  sub   lr, lr, ip\n"                      // +/- chiff input
-      "  sub   lr, lr, %[chiff]\n"                // delta = input - chiff
+      "  lsrs  %[bits], %[bits], #1\n"            // sign bit -> carry
+      "  rsb   lr, %[chiff], %[input2], asr #1\n" // delta = input - chiff
+      "  it    cs\n"
+      "  subcs lr, lr, %[input2]\n"               // sign set: delta -= 2*input
       "  smull ip, lr, lr, %[rate]\n"
       "  add   %[chiff], %[chiff], lr, lsl #1\n"  // chiff += (product>>32)*2
       "  cmp   %[chiff], %[clip]\n"               // saturating one-pole: the
@@ -996,29 +1028,29 @@ void Envelope::RenderStage(
       "2:\n"
       : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
         [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
-        [prng] "+r"(prng), [buf] "+r"(sample_buffer)
-      : [decay] "r"(decay_q32), [input] "r"(chiff_input_q30),
+        [bits] "+r"(sign_bits), [buf] "+r"(sample_buffer)
+      : [decay] "r"(decay_q32), [input2] "r"(chiff_input2_q30),
         [clip] "r"(chiff_clip_scaled_q30),
         [srate] "r"(stage_rate_q31),
-        [cslope] "r"(combined_slope_q30), [end] "r"(segment_end)
+        [cslope] "r"(combined_slope_q30), [end] "r"(chunk_end)
       : "ip", "lr", "cc", "memory");
 #else
-    while (sample_buffer != segment_end) {
-      // Pre-extracted by FillSharedPrngBuffer: 0 or -1.
-      int32_t sign_mask = *prng++;
+    while (sample_buffer != chunk_end) {
+      // One bit, consumed low end first, matching the asm's LSRS.
+      const uint32_t sign = sign_bits & 1u;
+      sign_bits >>= 1;
       int32_t slew_rate_step = static_cast<int32_t>(
         (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);
       slew_rate_q31 -= slew_rate_step;
-      // +/- the chiff input, branchless: (p ^ mask) - mask.
-      int32_t chiff_input_signed_q30 =
-        (chiff_input_q30 ^ sign_mask) - sign_mask;
+
       // (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word
       // term. Two instructions saved per one-pole. The dropped bit is a half
       // LSB per sample and cannot accumulate: at a one-pole's fixed point the
       // step is zero, so the error is bounded by the last step, not summed.
+      int32_t delta_q30 = (chiff_input2_q30 >> 1) - chiff_state_q30;
+      if (sign) delta_q30 -= chiff_input2_q30;
       chiff_state_q30 += 2 * static_cast<int32_t>(
-        (static_cast<int64_t>(chiff_input_signed_q30 - chiff_state_q30)
-         * slew_rate_q31) >> 32);
+        (static_cast<int64_t>(delta_q30) * slew_rate_q31) >> 32);
       // The clipped value feeds back: a saturating one-pole, not a
       // waveshaped output. MEASURED to reach an exact square wave at 16x
       // drive where clipping the output only approaches one.
@@ -1038,6 +1070,13 @@ void Envelope::RenderStage(
       *sample_buffer++ = static_cast<int16_t>(sample);
     }
 #endif
+      sign_bits_left -= chunk;
+      if (!sign_bits_left) {
+        ++sign_word;
+        sign_bits = *sign_word;
+        sign_bits_left = 32;
+      }
+    }
     {
       // THE CHIFF INPUT SHRINKS FOREVER AND NEVER REACHES ZERO -- until Q30
       // runs out of bits, which is the only ending there is. Nothing mutes it,

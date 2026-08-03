@@ -158,11 +158,12 @@ class Envelope {
   // slew time rising linearly, with no per-sample LUT. Zero = hold.
   int32_t chiff_slew_rate_decay_q32_;
 
-  // Per-instance start offset into the double-length shared PRNG buffer.
-  // Distinct offsets mean co-triggered envelopes never consume the same
-  // random word on the same sample, so their chiff draws are decorrelated
-  // without per-sample work. Assigned round-robin in Init().
+  // Which words of the shared sign buffer THIS envelope owns -- two of them,
+  // 32 sign bits each, covering one audio block. Ownership is exclusive, so
+  // the sequences are independent rather than shifted views of one stream.
+  // Claimed once per object (see Init), never reassigned.
   uint32_t prng_offset_u32_;
+  bool prng_offset_assigned_;
 
   // CHIFF. A filtered noise added to the envelope, with its own filter state.
   //
