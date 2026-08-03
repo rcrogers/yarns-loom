@@ -837,6 +837,21 @@ void Envelope::RenderStage(
     // A PER-RUN COPY. The loop decays the rate every sample; writing that back
     // would compound the schedule once per block and collapse the chiff in a
     // few of them. The persistent encoding is the slew TIME, set once below.
+    //
+    // THESE TWO IN-LOOP INSTRUCTIONS ARE WORTH 5 CYCLES PER SAMPLE, 24.0% ->
+    // 20.2% OF THE CPU. Deleting them costs nothing to build: the writeback
+    // already advances the slew time by the whole run, so the next run derives
+    // an advanced rate and the decay SCHEDULE is unchanged -- only its
+    // resolution, per run instead of per sample.
+    // WHAT IT BUYS AND WHAT IT COSTS, MEASURED (env-chiff-perblock-rate):
+    // long chiffs are untouched (<=1% brightness at a 200 ms attack, 3-9% at
+    // 20 ms), but a chiff that lives a single block loses its darkening
+    // ENTIRELY and reads 39% brighter -- holding the run's midpoint rate rather
+    // than its starting one turns that into 15% darker, i.e. the worst-case
+    // rate error goes +94% -> -29%, but no constant restores the chirp.
+    // SHORT CHIFFS ARE NOT A CORNER CASE: the window inherits the attack's
+    // velocity modulation and reaches 0.2 ms at velocity 127 on the shipped
+    // default. cb68505b rejected this same trade by ear.
     int32_t decay_q32 = chiff_slew_rate_decay_q32_;
     // The chiff's scaled rms, computed once here because the mean clamp needs
     // it to know how much room to leave. About ten instructions: the sqrt and
