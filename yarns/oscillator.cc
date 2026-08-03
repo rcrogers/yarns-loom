@@ -551,35 +551,52 @@ inline uint32_t amplify_for_transfer(
 }
 
 void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix) {
-  uint8_t carrier_index = transfer_carrier_;
-  uint8_t transfer_index = transfer_function_;
+  const uint8_t carrier_index = transfer_carrier_;
+  const uint8_t transfer_index = transfer_function_;
   uint32_t bias = transfer_bias_;
   uint8_t gain_shift = transfer_gain_shift_;
-  // int16_t prev_raw = prev_transfer_raw_;
-  // int16_t prev_avg = prev_transfer_avg_;
-  // Cascaded boxcar (triangular window {1/4, 1/2, 1/4}) anti-aliasing:
-  // double null at Nyquist, -6dB at Nyquist/2.
-  RENDER_PERIODIC(
-    switch (carrier_index) {
-      case 0: this_sample = sine(phase); break;
-      case 1: this_sample = triangle(phase); break;
-      case 2: this_sample = expo(phase); break;
-    }
-    uint32_t transfer_phase =
-        amplify_for_transfer(this_sample, timbre >> gain_shift, bias);
-    switch (transfer_index) {
-      case 0: this_sample = sine(transfer_phase); break;
-      case 1: this_sample = triangle(transfer_phase); break;
-      case 2: this_sample = expo(transfer_phase); break;
-    }
-    // int16_t raw = this_sample;
-    // int16_t avg = (raw + prev_raw) >> 1;
-    // this_sample = (avg + prev_avg) >> 1;
-    // prev_raw = raw;
-    // prev_avg = avg;
+  // THE SHAPE IS FIXED FOR THE WHOLE BLOCK, so the choice is made HERE and the
+  // loop carries no dispatch. It used to switch twice per sample on indices set
+  // before the loop, which fragmented the body into basic blocks joined by
+  // taken branches.
+  //
+  // SINE AND EXPO ARE THE SAME CODE with a different quadrant table, so the
+  // choice between those two is a POINTER and costs nothing. Only triangle is
+  // separate code, which is why this specialises 2x2 and not 3x3 -- one loop
+  // per (carrier is triangle?, transfer is triangle?), four in all. A triangle
+  // LUT would collapse it to one loop, but 514 bytes of table to replace a
+  // shift and an xor is the wrong trade.
+  // Both indices come from `% 3` and `/ 6`, so neither can leave [0, 2].
+  const uint16_t* carrier_table =
+      carrier_index == 0 ? lut_sine_quadrant : lut_expo_quadrant;
+  const uint16_t* transfer_table =
+      transfer_index == 0 ? lut_sine_quadrant : lut_expo_quadrant;
+
+#define TRANSFER_LOOP(CARRIER, TRANSFER) \
+  RENDER_PERIODIC( \
+    this_sample = CARRIER; \
+    uint32_t transfer_phase = \
+        amplify_for_transfer(this_sample, timbre >> gain_shift, bias); \
+    this_sample = TRANSFER; \
   )
-  // prev_transfer_raw_ = prev_raw;
-  // prev_transfer_avg_ = prev_avg;
+
+  if (carrier_index == 1) {
+    if (transfer_index == 1) {
+      TRANSFER_LOOP(triangle(phase), triangle(transfer_phase))
+    } else {
+      TRANSFER_LOOP(triangle(phase),
+                    quadrant_lookup(transfer_table, transfer_phase))
+    }
+  } else {
+    if (transfer_index == 1) {
+      TRANSFER_LOOP(quadrant_lookup(carrier_table, phase),
+                    triangle(transfer_phase))
+    } else {
+      TRANSFER_LOOP(quadrant_lookup(carrier_table, phase),
+                    quadrant_lookup(transfer_table, transfer_phase))
+    }
+  }
+#undef TRANSFER_LOOP
 }
 
 void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* gain_samples, int16_t* audio_mix) {
