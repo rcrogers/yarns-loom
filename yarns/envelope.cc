@@ -87,6 +87,18 @@ const uint32_t kSlewTimesPerStageLog2_q5_27 = 2u << 27;
 // well-defined. 2^27 samples is ~50 minutes at 45 kHz, already absurd.
 const uint32_t kMaxSlewTimeLog2_q5_27 = 27u << 27;
 
+// THE CHIFF'S FASTEST SLEW TIME, and it is nearly ZERO on purpose: at rate 1.0
+// the one-pole's output IS its input, i.e. WHITE noise, and the whole point of
+// the hinge is that it be genuinely unfiltered. 2^-t must stay inside int32, so
+// this is the smallest step off zero the Q5.27 exponent affords: 1/128 octave,
+// rate 0.9946 -- white to within half a percent.
+// IT IS NOT kMaxSlewRate. That cap is 1 - e^-1, the true one-pole coefficient
+// at a ONE-SAMPLE time constant, and it is load-bearing for the STAGE rate
+// (open item 5: it is what lets a 4-sample stage cover 1 - e^-4 like any
+// other). The chiff is not tracking a target and has no such constraint, so it
+// derives its rate UNCAPPED.
+const uint32_t kChiffFastestSlewTimeLog2_q5_27 = 1u << 20;
+
 // chiff_amount lives in [0, kChiffAmountMax].
 const uint32_t kChiffAmountBits = 7;
 const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
@@ -434,7 +446,7 @@ static uint32_t ChiffStartSlewTimeLog2_q5_27(
   chiff_amount = rate_amount > kChiffAmountMax
       ? static_cast<uint8_t>(kChiffAmountMax)
       : static_cast<uint8_t>(rate_amount);
-  const uint32_t kFastestSlewTimeLog2_q5_27 = 1u << 27;
+  const uint32_t kFastestSlewTimeLog2_q5_27 = kChiffFastestSlewTimeLog2_q5_27;
   // Window too short for the slew to move at all: start where it ends.
   if (end_slew_time_log2_q5_27 <= kFastestSlewTimeLog2_q5_27) {
     return end_slew_time_log2_q5_27;
@@ -879,7 +891,8 @@ void Envelope::RenderStage(
     // writeback raised the time per run, with nothing holding the two to the
     // same schedule. Derived, the rate cannot drift from it.
     uint32_t slew_time_q5_27 = slew_time_log2_q5_27_;
-    int32_t slew_rate_q31 = SlewRateFromSlewTime_q31(slew_time_q5_27);
+    // UNCAPPED, unlike the stage rate below: see kChiffFastestSlewTimeLog2.
+    int32_t slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
     const uint32_t chiff_scaled_rms_per_input_q15_5 =
       ChiffScaledRmsPerInput_q15_5(slew_time_q5_27);
     // NO SLEW-RATE FLOOR, and no chiff input rescale at it. Both existed
