@@ -93,11 +93,6 @@ class Envelope {
   // ALLOWED range times the shrink, so it does not follow the realized level.
   int32_t ChiffInput_q30() const;
 
-  // the MAX slew time the chiff reaches: the one its own duration
-  // implies, and nothing else. No stage term -- the chiff's filter is its own,
-  // so how fast the stage runs has no claim on how slow the chiff may get.
-  uint32_t ChiffMaxSlewTime_q5_27() const;
-
  public:
 
   // Step the running bias state directly, bypassing the per-block slew that
@@ -142,6 +137,10 @@ class Envelope {
   // rate from it once per run (2^-slew_time, via the exp2 table) and the loop
   // applies it with a multiply.
   uint32_t stage_slew_time_log2_q5_27_;
+  // 2^-stage_slew_time, capped, Q31. Derived in Trigger rather than per run:
+  // it moves only when the stage does, and deriving it costs an exp2 table
+  // interpolation.
+  int32_t stage_rate_q31_;
 
   // The character axis, as a multiplier on the chiff's filter input, ALREADY
   // DIVIDED by 2^kChiffStateShift: 2^-kChiffDriveOctaves at or below the hinge,
