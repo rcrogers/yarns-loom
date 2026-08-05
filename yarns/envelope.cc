@@ -128,10 +128,6 @@ const uint32_t kMaxSlewTimeLog2_q5_27 = 27u << 27;
 // two-level input: +0.7 dB across the whole upper half).
 const uint32_t kChiffFastestSlewTimeLog2_q5_27 = 1u << 20;
 
-// PROTOTYPE TOGGLE, so the walk and the schedule it replaces can be rendered
-// from one binary. Not a shipping switch.
-const bool kChiffWalk = true;
-
 // chiff_amount lives in [0, kChiffAmountMax].
 const uint32_t kChiffAmountBits = 7;
 const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
@@ -178,10 +174,6 @@ const uint32_t kChiffDriveSpan_q5_27 = 5u << 26;  // 2.5 octaves
 // 4.23 sigma over a 180k-sample window and lower everywhere faster, so the
 // clean end clips essentially nothing while reserving no more than it must.
 const uint32_t kChiffClipRmsShift = 1;  // scaled rms << 1 == 3*sqrt(2) sigma
-// The clipped chiff cannot exceed the clip point, so however hard it is driven
-// its level rises by at most log2(3*sqrt(2)) octaves. The shrink schedule is
-// corrected by this so DURATION stays independent of AMOUNT.
-const uint32_t kChiffDriveOctavesCap_q5_27 = 279838930;  // log2(3*sqrt(2)) << 27
 
 // Chiff window as a multiple of the ATTACK duration: at kChiffDurationCenter the
 // window equals the attack; each side spans +-kChiffOctaves octaves (setting 127
@@ -231,7 +223,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_slew_time_log2_end_q5_27_ = 0;
   chiff_target_samples_ = 0;
   chiff_input_fraction_q30_ = 0;
-  chiff_input_fraction_step_q5_27_ = 0;
   chiff_input_full_q30_ = 0;
   chiff_drive_over_16_q30_ = 1 << (30 - kChiffStateShift);
   chiff_walk_start_q7_25_ = 0;
@@ -282,44 +273,6 @@ void Envelope::NoteOff() {
   Trigger(ENV_STAGE_RELEASE);
 }
 
-// how slow the chiff's slew will have got after `samples` more
-// samples, never past its max. The slew slows on a schedule set by
-// the NOMINAL duration, so at a release deadline it is part-way down: its rate
-// there is neither the one it started at nor the one it ends at. That rate is
-// what decides how much of the chiff input is audible, so the shrink has to
-// be sized against it.
-// the MAX slew time the chiff reaches -- the larger of the slew
-// time its own duration implies and the STAGE's slew time (larger = slower).
-// Stopping at the stage's is what returns the envelope to exactly its nominal
-// level curve once the chiff has gone quiet; without it a short chiff leaves
-// the slew running fast for the rest of the note, because the slew time its
-// duration implies is short and a short slew time is a fast slew.
-//
-// THE CAP IS THE CHIFF'S OWN, from its duration, and nothing about the stages
-// enters it. Duration being attack-relative is a control convenience in how the
-// duration is DECIDED; once decided, nothing further about stage timing may
-// touch the chiff (user, 2026-08-02), and the release compression below is the
-// single stated exception.
-//
-// A CAP IS REQUIRED, and not for the reason this once carried ("so the rate
-// lands back on the envelope's own rate" -- a tracking argument the dedicated
-// chiff filter deleted). With no cap the rate falls to zero, and a one-pole at
-// rate zero HOLDS its state rather than decaying: chiff_state stops moving and
-// the shrinking input can no longer pull it down. MEASURED uncapped: a +716 LSB
-// DC offset left on the envelope, permanently.
-uint32_t Envelope::ChiffMaxSlewTime_q5_27() const {
-  return chiff_slew_time_log2_end_q5_27_;
-}
-
-uint32_t Envelope::ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const {
-  const uint64_t swept = static_cast<uint64_t>(chiff_slew_time_log2_step_q5_27_)
-    * samples;
-  const uint64_t at_deadline =
-    static_cast<uint64_t>(slew_time_log2_q5_27_) + swept;
-  const uint32_t end = ChiffMaxSlewTime_q5_27();
-  return at_deadline > end ? end : static_cast<uint32_t>(at_deadline);
-}
-
 // the +/- the chiff puts on the slew input. Sized from the note's
 // ALLOWED range (set in NoteOn) and NOT from the level the note actually
 // reaches, so the noise does not thin out at a low sustain or a low peak --
@@ -329,6 +282,16 @@ uint32_t Envelope::ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const {
 // the chiff input's. Sizing the chiff input from the room between the level
 // and the rails was tried and rejected: the room vanishes as the level reaches
 // the peak, so the excursion notched there.
+// The MAX slew time the chiff reaches: the one its own duration implies.
+// A CAP IS REQUIRED. With no cap the rate falls to zero, and a one-pole at rate
+// zero HOLDS its state rather than decaying -- MEASURED uncapped, a +716 LSB DC
+// offset left on the envelope permanently. Under the walk the input reaches
+// zero too, so the state drains rather than parking, but the cap still bounds
+// the exp2 helper's shift.
+uint32_t Envelope::ChiffMaxSlewTime_q5_27() const {
+  return chiff_slew_time_log2_end_q5_27_;
+}
+
 int32_t Envelope::ChiffInput_q30() const {
   return static_cast<int32_t>(
     (static_cast<int64_t>(chiff_input_full_q30_) * chiff_input_fraction_q30_)
@@ -426,47 +389,10 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
 // Defined below; chiff window in samples, scaled off the attack duration.
 
-// log2(x) in Q5.27 for x >= 1: integer bits plus a linear mantissa fraction,
-// the same approximation SlewTimeLog2FromDuration uses. Cold path.
-static uint32_t Log2_q5_27(uint64_t x) {
-  const uint32_t leading = __builtin_clzll(x);
-  const uint32_t integer_bits = 63 - leading;
-  const uint64_t shifted = x << leading;
-  const uint32_t mantissa_frac_q5_27 =
-      static_cast<uint32_t>((shifted & 0x7FFFFFFFFFFFFFFFull) >> 36);
-  return (integer_bits << 27) + mantissa_frac_q5_27;
-}
-
 // below 2^-13 of full scale the chiff is inaudible (-78 dBFS). The quantity
 // held to it is the SCALED rms, so the chiff's own sigma at that point is
 // 2.121x lower again.
 const uint32_t kChiffInaudibleShift = 13;
-
-// octaves the chiff input must shrink for the OUTPUT to reach
-// inaudibility, given the slew time the chiff will have at the deadline.
-// Q5.27. Adapts to the target (via that rate) and to the note's range (via the
-// chiff input), which is what a constant octave count cannot do.
-//
-// PASS THE CHIFF'S OWN SLEW TIME AT THE DEADLINE, never the stage's: the output
-// is chiff input x the scaled rms at the chiff's own rate, and nothing about
-// the stage enters it.
-// Passing min(chiff end, stage) instead cost 5 octaves on the COMPRESSION path.
-// A release compresses the deadline without re-sloping how fast the filter
-// slows, so the chiff is still fast when the deadline arrives while the release
-// stage's own slew time is slow; sizing against the stage assumed an output 32x
-// smaller than the one produced, the shrink stopped ~34 dB short, and the
-// remainder was chopped off at the deadline.
-static uint32_t ChiffInputFractionOctaves_q5_27(
-    int32_t input_q30, uint32_t end_slew_time_log2_q5_27) {
-  const uint32_t scaled_rms_per_input_q15_5 =
-    ChiffScaledRmsPerInput_q15_5(end_slew_time_log2_q5_27);
-  const uint64_t reached = static_cast<uint64_t>(input_q30)
-    * (scaled_rms_per_input_q15_5 ? scaled_rms_per_input_q15_5 : 1u);
-  const uint64_t inaudible =
-    (1ull << (30 - kChiffInaudibleShift)) * kOne_q15_5;
-  return reached > inaudible
-    ? Log2_q5_27(reached) - Log2_q5_27(inaudible) : 0u;
-}
 
 // THE KNOB'S OWN MAPS, AT WALK RESOLUTION. The walk passes BETWEEN knob
 // positions, so these take a Q7.25 amount and interpolate where the integer
@@ -792,12 +718,6 @@ void Envelope::NoteOn(
       // MEASURED before building this: onset level runs -72.2 dBFS at amount 1
       // (8 LSB) against -16.7 at 64, so the walk has already gone quiet by the
       // time it lands. Reaching zero at the duration is a landing, not a cut.
-      const uint32_t drive_level_octaves_q5_27 =
-        std::min(drive_octaves_q5_27, kChiffDriveOctavesCap_q5_27);
-      chiff_input_fraction_step_q5_27_ = kChiffWalk ? 0 :
-        (ChiffInputFractionOctaves_q5_27(chiff_input_full_q30_,
-          chiff_slew_time_log2_end_q5_27_) + drive_level_octaves_q5_27)
-        / window_samples;
       // THE WALK IS THE WHOLE SCHEDULE. DURATION is a time-based modulation of
       // AMOUNT: the amount descends its own axis and the drive, the slew time
       // and the input are all read off it by the maps the knob itself uses, so
@@ -1025,28 +945,18 @@ void Envelope::Trigger(EnvelopeStage stage) {
     // UNDER THE WALK there is one deadline and one mechanism: finish the walk
     // by the release's end. Both of the schedules below then follow, because
     // both are read off the amount.
-    const uint32_t fraction_step_q5_27 =
-      ChiffInputFractionOctaves_q5_27(ChiffInput_q30(),
-        ChiffSlewTimeAtDeadline_q5_27(stage_samples_left_))
-      / stage_samples_left_;
-    if (!kChiffWalk && fraction_step_q5_27 > chiff_input_fraction_step_q5_27_) {
-      chiff_input_fraction_step_q5_27_ = fraction_step_q5_27;
-    }
     const uint32_t max_slew_time_q5_27 = ChiffMaxSlewTime_q5_27();
     // THE DEADLINE COMPRESSES BOTH LEGS, in the same dB proportion the duration
     // was split by. Compressing only one leaves the other still running when
     // the release ends -- which is the chiff singing into the silence.
-    if (kChiffWalk) {
-      const uint32_t walk_step_q7_25 =
-        (0xFFFFFFFFu - chiff_walk_phase_q32_) / stage_samples_left_;
-      if (walk_step_q7_25 > chiff_walk_phase_step_q32_) {
-        chiff_walk_phase_step_q32_ = walk_step_q7_25;
-      }
+    const uint32_t walk_step_q32 =
+      (0xFFFFFFFFu - chiff_walk_phase_q32_) / stage_samples_left_;
+    if (walk_step_q32 > chiff_walk_phase_step_q32_) {
+      chiff_walk_phase_step_q32_ = walk_step_q32;
     }
-    uint32_t rate_samples_left = stage_samples_left_;
     if (max_slew_time_q5_27 > slew_time_log2_q5_27_) {
       const uint32_t slew_time_step_q5_27 =
-        (max_slew_time_q5_27 - slew_time_log2_q5_27_) / rate_samples_left;
+        (max_slew_time_q5_27 - slew_time_log2_q5_27_) / stage_samples_left_;
       if (slew_time_step_q5_27 > chiff_slew_time_log2_step_q5_27_) {
         chiff_slew_time_log2_step_q5_27_ = slew_time_step_q5_27;
         chiff_slew_rate_decay_q32_ =
@@ -1129,15 +1039,14 @@ void Envelope::RenderStage(
     // SHORT CHIFFS ARE NOT A CORNER CASE: the window inherits the attack's
     // velocity modulation and reaches 0.2 ms at velocity 127 on the shipped
     // default. cb68505b rejected this same trade by ear.
-    // THE WALK, ADVANCED ONCE PER RUN, IN TWO PHASES THAT SHARE ONE CLOCK.
-    // The chiff decays by descending its own amount axis, and the clock is dB,
-    // not knob units: the drive relaxes to 1 first (the stretch of the axis
-    // above the hinge), then the slew time ramps (the stretch below it), each
-    // given the share of the duration matching the dB it carries.
-    // WHILE THE DRIVE IS STILL RELAXING THE RATE IS HELD, because above the
-    // hinge the knob does not move the rate either -- that is what makes the
-    // decay wear the timbre of the amount it is passing through.
-    if (kChiffWalk && chiff_target_samples_) {
+    // THE WALK, ADVANCED ONCE PER RUN. All three of the chiff's axes -- the
+    // slew time, the drive and the input -- are read off the amount this run
+    // sits at, by the maps the knob itself uses. The loop's per-sample rate
+    // decay then carries the chirp between this run's start and end amounts.
+    // ALL THREE, NOT TWO: leaving the input pinned while the other two walk
+    // costs the pass-through invariant (up to 18 dB of input error) and stops
+    // the chiff converging at all -- it parks instead of landing.
+    if (chiff_target_samples_) {
       const uint64_t advanced =
         static_cast<uint64_t>(chiff_walk_phase_step_q32_) * run_samples;
       const uint32_t phase_end_q32 =
@@ -1155,10 +1064,8 @@ void Envelope::RenderStage(
         ? (slew_time_end_q5_27 - slew_time_log2_q5_27_) / run_samples : 0;
       chiff_slew_rate_decay_q32_ =
         DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
-      chiff_drive_over_16_q30_ =
-        ChiffWalkDriveOver16_q30(amount_q7_25);
-      chiff_input_fraction_q30_ =
-        ChiffWalkInputFraction_q30(chiff_walk_start_q7_25_);
+      chiff_drive_over_16_q30_ = ChiffWalkDriveOver16_q30(amount_q7_25);
+      chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(amount_q7_25);
       chiff_walk_phase_q32_ = phase_end_q32;
     }
     int32_t decay_q32 = chiff_slew_rate_decay_q32_;
@@ -1434,21 +1341,8 @@ void Envelope::RenderStage(
       // represent, and the loop it feeds is already the classic slew with a
       // zero offset. That is the low-pass gate, and it is why no window exists
       // here -- nothing has to close.
-      // A zero step means the WALK carries the decay, and 2^-0 does not fit
-      // Q31 anyway -- skip rather than wrap.
-      if (chiff_input_fraction_step_q5_27_) {
-        chiff_input_fraction_q30_ = static_cast<int32_t>(
-          (static_cast<int64_t>(chiff_input_fraction_q30_) * SlewRateFromTimeLog2_q31(
-             chiff_input_fraction_step_q5_27_ * run_samples))
-          >> 31);
-      }
-      // Held while the drive leg runs: that leg of the knob does not move the
-      // rate, so neither does the decay.
+      // The WALK set this run's slew time; only its ceiling is enforced here.
       uint32_t slew_time_log2_end = slew_time_log2_q5_27_;
-      if (!kChiffWalk) {
-        slew_time_log2_end +=
-          chiff_slew_time_log2_step_q5_27_ * run_samples;
-      }
       const uint32_t max_slew_time_q5_27 = ChiffMaxSlewTime_q5_27();
       if (slew_time_log2_end > max_slew_time_q5_27) {
         slew_time_log2_end = max_slew_time_q5_27;

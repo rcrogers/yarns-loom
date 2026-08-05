@@ -93,10 +93,6 @@ class Envelope {
   // ALLOWED range times the shrink, so it does not follow the realized level.
   int32_t ChiffInput_q30() const;
 
-  // how slow the chiff's slew will have got after `samples` more
-  // samples, never past its max. The shrink is sized against this.
-  uint32_t ChiffSlewTimeAtDeadline_q5_27(uint32_t samples) const;
-
   // the MAX slew time the chiff reaches: the one its own duration
   // implies, and nothing else. No stage term -- the chiff's filter is its own,
   // so how fast the stage runs has no claim on how slow the chiff may get.
@@ -259,7 +255,6 @@ class Envelope {
   // was tried and rejected, because the slack vanishes at the peak and the
   // excursion notched there. See ChiffInput_q30.
   int32_t chiff_input_fraction_q30_;
-  uint32_t chiff_input_fraction_step_q5_27_;
   // Half the note's ALLOWED range: the chiff input at fraction 1.0, i.e.
   // before any decay. A LEVEL, so it rescales with the others.
   int32_t chiff_input_full_q30_;
