@@ -686,6 +686,23 @@ void Envelope::NoteOn(
              chiff_input_full_q30_, chiff_slew_time_log2_end_q5_27_)) >> 16);
       chiff_input_fraction_q30_ =
         ChiffWalkInputFraction_q30(chiff_walk_start_q7_25_);
+      // THE WALK'S FIRST STATE IS THE NOTE'S FIRST STATE. All three of the
+      // chiff's numbers are read off the starting amount here; the slew time
+      // was the one left out, so it entered the note carrying whatever the
+      // PREVIOUS note had ramped it to (or, on a first note, the STAGE's slew
+      // time, which is not the chiff's at all). The first run then derived its
+      // step from that stale value, and only the run's END landed on the walk.
+      // MEASURED, AMOUNT 96, chiff alone over the note's first 64 samples:
+      // rms 151 and lag-1 0.97 -- a filtered whisper where the hinge is meant
+      // to be unfiltered -- against 5441 and 0.11 with this line. On a
+      // RETRIGGER, where the stale value is the previous note's slowest, the
+      // first block was rms 1.5: the chiff's onset was simply absent.
+      // The onset is the loudest, most character-defining part of the chiff,
+      // and a window can be shorter than one block (0.2 ms at velocity 127 on
+      // the shipped default), so a whole chiff can live inside the block that
+      // was getting this wrong.
+      slew_time_log2_q5_27_ = ChiffWalkSlewTimeLog2_q5_27(
+        chiff_walk_start_q7_25_, chiff_slew_time_log2_end_q5_27_);
       chiff_slew_time_log2_step_q5_27_ = 0;
       RederiveSlewState();
       break;
