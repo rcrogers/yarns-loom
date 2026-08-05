@@ -12,7 +12,7 @@
 #   make qemu       differential: render-loop asm == C reference, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
-#   make cycles     per-sample cycle count of the render loop vs the baseline
+#   make cycles     what the envelope costs per block, against the baseline
 
 .PHONY: all sim host qemu check firmware cycles
 
@@ -42,6 +42,7 @@ check: host qemu
 	node tools/chiff_checks/peakfloor.js
 	node tools/chiff_checks/xvmod.js
 	node tools/chiff_checks/strictmode.js
+	node tools/chiff_checks/decay.js
 
 firmware:
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh make -f yarns/makefile syx

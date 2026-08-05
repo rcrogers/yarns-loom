@@ -47,8 +47,11 @@ cannot disagree — there is one implementation.
   not move. Settings too short to judge (a 1.7 ms chiff is two blocks long)
   report SKIP, never PASS. Takes an optional page path, so a prototype branch's
   `chiff_sim.html` can be measured against the current one.
-  NOT in `make check`: it fails today (see the plan's OPEN ITEM 3), and a
-  suite that is expected to be red stops being read. Wire it in once it passes.
+  IN `make check` since 2026-08-05, when it first went green (worst notch
+  5.9 dB against the 6 dB limit). It is the slowest check by a wide margin --
+  25 configurations x 5 seeds, each a full render through the page -- and it is
+  the only automated reading of L6, "smooth transitions over the chiff
+  duration", which is a hard design law.
 - `residual.js` — splits the chiff's effect into OFFSET (per-block mean of
   chiff minus nominal: the value sitting off where it should be) and WANDER
   (per-block standard deviation: what is audible), in absolute dBFS. RMS of the
@@ -72,7 +75,6 @@ Also useful, outside this directory:
   "unfiltered white noise at 64, extremely harsh at 127".
 - `tools/hosttest/dursweep.js` — all 128 CHIFF DURATION settings.
 - `tools/hosttest/plot.js` — trace to PNG.
-- `tools/hosttest/probe.cc` — per-block internal chiff state.
 - `tools/simengine/parity.js` — engine vs native build.
 
 ## Removed
