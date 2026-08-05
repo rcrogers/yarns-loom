@@ -76,7 +76,13 @@ namespace {
   // A POWER OF TWO: Init masks the round-robin offset with kChiffDrawWords - 1.
   const size_t kMaxChiffEnvelopes = 16;
   const size_t kChiffDrawWords = kMaxChiffEnvelopes * kChiffDrawWordsPerBlock;
-  uint32_t shared_chiff_draws[kChiffDrawWords];
+  // ONE GUARD WORD. Both render loops fetch the NEXT word as they finish the
+  // current one and only then test whether the run is over, so an envelope
+  // whose words run to the end of the buffer reads one word past it. Today no
+  // envelope does -- twelve exist of the sixteen slots -- so this is latent,
+  // and the alternative is a compare per run to guard something the buffer can
+  // just contain. Never read for its value; the loop has already ended.
+  uint32_t shared_chiff_draws[kChiffDrawWords + 1];
   // How much of it any envelope actually reads. Generating the whole buffer
   // regardless was ~1% of the CPU spent on randomness nobody consumed.
   size_t shared_chiff_words_used = 0;
