@@ -1,4 +1,9 @@
-loop_instructions 18
-loop_cycles 31
+loop_instructions 25
+loop_cycles 35
 loop_spills 0
-function_instructions 371
+function_instructions 531
+chunk_cycles 78
+run_cycles 924
+handoff_cycles 323
+note_on_cycles 3383
+block_cycles 3788
