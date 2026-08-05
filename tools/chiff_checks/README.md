@@ -58,6 +58,18 @@ cannot disagree — there is one implementation.
 
 Also useful, outside this directory:
 - `tools/hosttest/build.sh` — 22-check battery on the native build.
+- `tools/hosttest/passthrough.js` — **the model, as a check.** A note started
+  at amount A must pass through the state every smaller amount holds at its
+  onset. The chiff's state is three numbers — drive, slew time, input — read
+  straight out of the engine via `chiff_trace=1`, so this compares what the
+  chiff IS, not what its output looks like. That distinction is load-bearing:
+  an earlier check compared level and centroid, which match equally for a
+  clipped quiet signal and an unclipped loud one, and it scored a build as
+  compliant that was off by two octaves of drive.
+- `tools/hosttest/zones.js` — the knob's zones as one table: level, lag-1
+  autocorrelation (which reads the filter directly), decay-normalised kurtosis
+  and flip fraction, per AMOUNT, on the chiff alone. The acceptance test for
+  "unfiltered white noise at 64, extremely harsh at 127".
 - `tools/hosttest/dursweep.js` — all 128 CHIFF DURATION settings.
 - `tools/hosttest/plot.js` — trace to PNG.
 - `tools/hosttest/probe.cc` — per-block internal chiff state.

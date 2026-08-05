@@ -158,12 +158,34 @@ class Envelope {
   // slew time rising linearly, with no per-sample LUT. Zero = hold.
   int32_t chiff_slew_rate_decay_q32_;
 
-  // Which words of the shared sign buffer THIS envelope owns -- two of them,
-  // 32 sign bits each, covering one audio block. Ownership is exclusive, so
-  // the sequences are independent rather than shifted views of one stream.
+  // Which words of the shared draw buffer THIS envelope owns -- enough of them
+  // to cover one audio block at one field per sample. Ownership is exclusive,
+  // so the sequences are independent rather than shifted views of one stream.
   // Claimed once per object (see Init), never reassigned.
   uint32_t prng_offset_u32_;
   bool prng_offset_assigned_;
+
+  // THE AMOUNT WALK (prototype). DURATION is a time-based modulation of AMOUNT:
+  // the chiff's entire decay is this one quantity falling linearly to zero over
+  // the duration, with the rate and the drive read off it by the SAME maps the
+  // knob uses. So a chiff started at any amount decays THROUGH the states every
+  // smaller amount has as its onset.
+  // THE CLOCK IS dB, NOT KNOB UNITS. Walking the amount axis evenly plateaus
+  // then collapses, because the axis' top half spans 4 dB while its bottom
+  // eight units span 50 (MEASURED: 3.7 dB in the first 45% of the duration,
+  // 50 dB in the last 20%). Smoothness over the duration outranks knob
+  // linearity. Level goes as 2^(-t/2) in the slew time, so the LINEAR SLEW-TIME
+  // RAMP already is the exponential decay; what the walk adds is the drive
+  // relaxing to 1 first, over the share of the duration its own dB earns.
+  // Q5.27, carried finely: at knob resolution this would step 128 times across
+  // the duration, coarser than a run for a long chiff -- the granularity
+  // already measured to kill the chirp.
+  // The CURRENT amount is not here: it is derived from start and phase inside
+  // the run that uses it, so it is a local. Only what cannot be recomputed is
+  // state -- where the walk has got to, where it began, and how fast it goes.
+  uint32_t chiff_walk_start_q7_25_;
+  uint32_t chiff_walk_phase_q32_;
+  uint32_t chiff_walk_phase_step_q32_;
 
   // CHIFF. A filtered noise added to the envelope, with its own filter state.
   //
@@ -171,8 +193,8 @@ class Envelope {
   //   nominal   the envelope with no chiff. Its own one-pole, running at the
   //             STAGE's rate, chasing the stage's aim.
   //   chiff     this. Its own one-pole, running at the CHIFF's rate, chasing
-  //             +/- the chiff input with the sign drawn per sample from the
-  //             shared PRNG. Zero-mean.
+  //             one of sixteen levels spanning +/- the chiff input, drawn per
+  //             sample from the shared PRNG. Symmetric, so zero-mean.
   //   bias      added at the point of use and never integrated.
   // out = saturate(mean + chiff), where mean = nominal + bias held one scaled
   // rms (2.121 sigma) inside each DAC rail so the chiff has room. The chiff is

@@ -91,6 +91,14 @@ static int g_value_trace = 0;
 // approximation whose error depends only on the slew time, so this is what
 // says how much of a real chiff's life is spent where the error is material.
 static int g_slew_trace = 0;
+// THE CHIFF'S STATE, as the model defines it: the drive it is being pushed
+// with, the slew time its filter is running at, and the input it is chasing.
+// Those three ARE the chiff -- everything audible follows from them. The model
+// says a note started at amount A must PASS THROUGH the triple that amount B
+// holds at its onset, so this is what has to be compared, not two summary
+// statistics of the output. Level and centroid cannot tell a clipped quiet
+// signal from an unclipped loud one; this can.
+static int g_chiff_trace = 0;
 static int32_t g_value_min = INT32_MAX;
 static int32_t g_value_max = INT32_MIN;
 
@@ -107,6 +115,11 @@ static void RenderMs(double ms) {
     }
     ++g_block_counter;
     env.RenderSamples(buffer, bias_target_q31);
+    if (g_chiff_trace) {
+      printf("%d %u %d\n", env.chiff_drive_over_16_q30_,
+             env.slew_time_log2_q5_27_, env.ChiffInput_q30());
+      continue;
+    }
     if (g_slew_trace) {
       printf("%u %d\n", env.slew_time_log2_q5_27_, env.chiff_input_fraction_q30_);
       continue;
@@ -146,6 +159,7 @@ int main(int argc, char** argv) {
   g_value_range = OptInt(argc, argv, "value_range", 0);
   g_value_trace = OptInt(argc, argv, "value_trace", 0);
   g_slew_trace = OptInt(argc, argv, "slew_trace", 0);
+  g_chiff_trace = OptInt(argc, argv, "chiff_trace", 0);
   g_bias_lfo_blocks = OptInt(argc, argv, "bias_lfo_blocks", 8);
 
   int peak_pct = OptInt(argc, argv, "peak", 100);
