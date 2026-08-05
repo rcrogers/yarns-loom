@@ -943,6 +943,77 @@ void Envelope::HandOffToNextStage(
   RenderStage(sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
 }
 
+// ONE RENDERED SAMPLE, written once and used by every loop below so they
+// cannot drift: the whole-word loop and the head/tail loop, in both the ARM
+// asm and the C reference. `draw` is the raw 0..kChiffDrawMax field.
+//
+// Two independent one-poles. The chiff's chases +/- the chiff input at its own
+// decaying rate; nominal chases the stage's aim at the STAGE's rate. The
+// offset carrying bias and the mean correction ramps.
+//
+// The asm form is HAND-ALLOCATED: GCC 4.8 allocates this badly and spills, and
+// presenting every live value as an operand pins them. Its behaviour is the C
+// form, and the QEMU differential proves the two bit-identical. `bit_offset`
+// is a string because `ubfx` needs an immediate -- one instruction where the C
+// reference's shift-and-mask would be two.
+#define YARNS_CHIFF_ASM_SAMPLE(bit_offset) \
+  "  smull ip, lr, %[rate], %[decay]\n"       /* (rate*decay), lr = hi     */ \
+  "  sub   %[rate], %[rate], lr\n"            /* rate -= (rate*decay)>>32  */ \
+  "  ubfx  ip, %[draws], #" bit_offset ", #4\n" /* one draw, low end first */ \
+  "  add   ip, ip, ip\n"                      /* level = 2*draw - 15, i.e. */ \
+  "  sub   ip, ip, #15\n"                     /*   an odd multiple, signed */ \
+  "  mul   lr, ip, %[qinput]\n"               /* what the filter chases    */ \
+  "  sub   lr, lr, %[chiff]\n"                /* delta                     */ \
+  "  smull ip, lr, lr, %[rate]\n"                                             \
+  "  add   %[chiff], %[chiff], lr, lsl #1\n"  /* chiff += (product>>32)*2  */ \
+  "  cmp   %[chiff], %[clip]\n"               /* saturating one-pole: the  */ \
+  "  it    gt\n"                              /*   clipped value FEEDS     */ \
+  "  movgt %[chiff], %[clip]\n"               /*   BACK, so the state can  */ \
+  "  cmn   %[chiff], %[clip]\n"               /*   never carry more than   */ \
+  "  it    lt\n"                              /*   it is allowed to show   */ \
+  "  rsblt %[chiff], %[clip], #0\n"                                           \
+  "  smull ip, lr, %[gap], %[srate]\n"        /* the gap to the aim decays */ \
+  "  sub   %[gap], %[gap], lr, lsl #1\n"      /*   at the STAGE's rate     */ \
+  "  add   %[comb], %[comb], %[cslope]\n"     /* bias + mean + the aim     */ \
+  "  sub   ip, %[comb], %[gap]\n"             /* the mean                  */ \
+  "  add   ip, ip, %[chiff], lsl #4\n"        /* + the chiff, unscaled     */ \
+  "  usat  ip, #15, ip, asr #15\n"            /* saturate and shift, 1 op  */ \
+  "  strh  ip, [%[buf]], #2\n"
+// The #15 and #4 above are kChiffDrawMax and kChiffStateShift written out, and
+// the #4 in ubfx is kChiffDrawBits; the QEMU differential catches any drift
+// between them and the C reference.
+
+#define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
+  do {                                                                        \
+    slew_rate_q31 -= static_cast<int32_t>(                                    \
+      (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);               \
+    /* (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word  \
+     * term. Two instructions saved per one-pole. The dropped bit is a half   \
+     * LSB per sample and cannot accumulate: at a one-pole's fixed point the  \
+     * step is zero, so the error is bounded by the last step, not summed. */ \
+    int32_t delta_q30 = (2 * (draw) - kChiffDrawMax)                          \
+      * chiff_input_per_level_q30 - chiff_state_q30;                          \
+    chiff_state_q30 += 2 * static_cast<int32_t>(                              \
+      (static_cast<int64_t>(delta_q30) * slew_rate_q31) >> 32);               \
+    /* The clipped value feeds back: a saturating one-pole, not a waveshaped  \
+     * output. MEASURED to reach an exact square wave at 16x drive where      \
+     * clipping the output only approaches one. */                            \
+    if (chiff_state_q30 > chiff_clip_scaled_q30) {                            \
+      chiff_state_q30 = chiff_clip_scaled_q30;                                \
+    } else if (chiff_state_q30 < -chiff_clip_scaled_q30) {                    \
+      chiff_state_q30 = -chiff_clip_scaled_q30;                               \
+    }                                                                         \
+    nominal_gap_q30 -= 2 * static_cast<int32_t>(                              \
+      (static_cast<int64_t>(nominal_gap_q30) * stage_rate_q31) >> 32);        \
+    combined_q30 += combined_slope_q30;                                       \
+    /* Matches USAT #15 with ASR #15: arithmetic shift, then saturate. */     \
+    int32_t sample = (combined_q30 - nominal_gap_q30                          \
+      + (chiff_state_q30 << kChiffStateShift)) >> kSampleBits;                \
+    if (sample < 0) sample = 0;                                               \
+    if (sample > INT16_MAX) sample = INT16_MAX;                               \
+    *sample_buffer++ = static_cast<int16_t>(sample);                          \
+  } while (0)
+
 void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
@@ -1180,8 +1251,61 @@ void Envelope::RenderStage(
     uint32_t draws_left = kChiffDrawsPerWord - draw_in_word;
     uint32_t draws = *draw_word >> (draw_in_word * kChiffDrawBits);
     while (sample_buffer != segment_end) {
-      uint32_t chunk =
+      const uint32_t samples_left =
         static_cast<uint32_t>(segment_end - sample_buffer);
+      // WHOLE WORDS DO NOT LEAVE THE LOOP. Fetching the draws inside it is
+      // what removes the chunk loop, and the chunk loop was not bookkeeping:
+      // the render body pins twelve registers, so every one of them was
+      // SPILLED AND RELOADED at each word boundary -- MEASURED 78 cycles per
+      // eight samples, 624 per block, against 2240 for the render itself.
+      // THE REGISTER BUDGET IS EXACTLY FOURTEEN and this is at it: eleven
+      // values, the draws word, and ip/lr as scratch. The loop's end test is
+      // the one operand that does not get a register -- it is read from memory
+      // once per word, which costs two cycles per eight samples instead of a
+      // register the body cannot spare.
+      if (draws_left == kChiffDrawsPerWord &&
+          samples_left >= kChiffDrawsPerWord) {
+        const uint32_t* const word_end =
+          draw_word + samples_left / kChiffDrawsPerWord;
+#if defined(__arm__) && __ARM_ARCH >= 7
+        __asm__ volatile(
+          "1:\n"
+          "  ldr   %[draws], [%[word]], #4\n"       // one word: eight draws
+          YARNS_CHIFF_ASM_SAMPLE("0")
+          YARNS_CHIFF_ASM_SAMPLE("4")
+          YARNS_CHIFF_ASM_SAMPLE("8")
+          YARNS_CHIFF_ASM_SAMPLE("12")
+          YARNS_CHIFF_ASM_SAMPLE("16")
+          YARNS_CHIFF_ASM_SAMPLE("20")
+          YARNS_CHIFF_ASM_SAMPLE("24")
+          YARNS_CHIFF_ASM_SAMPLE("28")
+          "  ldr   ip, %[wend]\n"                   // the operand with no
+          "  cmp   %[word], ip\n"                   //   register of its own
+          "  bne   1b\n"
+          : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
+            [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
+            [buf] "+r"(sample_buffer), [word] "+r"(draw_word),
+            [draws] "=&r"(draws)
+          : [decay] "r"(decay_q32), [qinput] "r"(chiff_input_per_level_q30),
+            [clip] "r"(chiff_clip_scaled_q30),
+            [srate] "r"(stage_rate_q31),
+            [cslope] "r"(combined_slope_q30), [wend] "m"(word_end)
+          : "ip", "lr", "cc", "memory");
+#else
+        while (draw_word != word_end) {
+          draws = *draw_word++;
+          for (uint32_t i = 0; i < kChiffDrawsPerWord; ++i) {
+            YARNS_CHIFF_RENDER_SAMPLE(
+              static_cast<int32_t>((draws >> (i * kChiffDrawBits))
+                                   & kChiffDrawMax));
+          }
+        }
+#endif
+        // draws_left is already a whole word; the next word feeds the tail.
+        draws = *draw_word;
+        continue;
+      }
+      uint32_t chunk = samples_left;
       if (chunk > draws_left) chunk = draws_left;
       int16_t* const chunk_end = sample_buffer + chunk;
     // 32-bit ARMv7+ only (Thumb-2: smull / sbfx / usat / IT). Gate on __arm__,
@@ -1196,62 +1320,18 @@ void Envelope::RenderStage(
     // #else (the host reference), and the QEMU differential proves the two
     // bit-identical.
     //
-    // Per sample: two independent one-poles. The chiff's chases +/- the
-    // chiff input at its own decaying rate; nominal chases the stage's aim at
-    // the STAGE's rate. The offset carrying bias and the mean correction ramps.
-    // One USAT saturates and shifts in one instruction.
+    // HEAD AND TAIL ONLY: the samples that do not fill a whole word, i.e. a
+    // run that starts mid-word and the last few samples of any run. Whole
+    // words go through the unrolled block above, which is where the work is.
     __asm__ volatile(
       "  cmp   %[buf], %[end]\n"
       "  beq   2f\n"
       "1:\n"
-      "  smull ip, lr, %[rate], %[decay]\n"       // (rate*decay), lr = hi
-      "  sub   %[rate], %[rate], lr\n"            // rate -= (rate*decay)>>32
-      "  and   ip, %[draws], #15\n"               // one draw (kChiffDrawBits)
-      "  lsr   %[draws], %[draws], #4\n"          //   consumed low end first
-      "  add   ip, ip, ip\n"                      // level = 2*draw - 15, i.e.
-      "  sub   ip, ip, #15\n"                     //   an odd multiple, signed
-      "  mul   lr, ip, %[qinput]\n"               // what the filter chases
-      "  sub   lr, lr, %[chiff]\n"                // delta
-      "  smull ip, lr, lr, %[rate]\n"
-      "  add   %[chiff], %[chiff], lr, lsl #1\n"  // chiff += (product>>32)*2
-      "  cmp   %[chiff], %[clip]\n"               // saturating one-pole: the
-      "  it    gt\n"                               //   clipped value FEEDS
-      "  movgt %[chiff], %[clip]\n"                //   BACK, so the state can
-      "  cmn   %[chiff], %[clip]\n"                //   never carry more than
-      "  it    lt\n"                               //   it is allowed to show
-      "  rsblt %[chiff], %[clip], #0\n"
-      "  smull ip, lr, %[gap], %[srate]\n"        // the gap to the aim decays
-      "  sub   %[gap], %[gap], lr, lsl #1\n"      //   at the STAGE's rate
-      "  add   %[comb], %[comb], %[cslope]\n"     // bias + mean + the aim
-      "  sub   ip, %[comb], %[gap]\n"             // the mean
-      "  add   ip, ip, %[chiff], lsl #4\n"        // + the chiff, unscaled
-                                                  //   (#4 == kChiffStateShift;
-                                                  //   the QEMU differential
-                                                  //   catches any drift)
-      "  usat  ip, #15, ip, asr #15\n"            // saturate and shift, one op
-      "  strh  ip, [%[buf]], #2\n"
+      YARNS_CHIFF_ASM_SAMPLE("0")
+      "  lsr   %[draws], %[draws], #4\n"          // consumed low end first
       "  cmp   %[buf], %[end]\n"
       "  bne   1b\n"
       "2:\n"
-      // UNROLLING x4 IS WORTH 3 CYCLES PER SAMPLE, 24.0% -> 21.8% OF THE CPU,
-      // and it is BIT-IDENTICAL -- MEASURED, not estimated: prototype 1a5a154a
-      // on env-chiff-unroll runs 116 cycles per 4 samples against 32 per 1,
-      // with 0 spills, all 10 QEMU hashes unchanged, +308 bytes of flash.
-      // These two instructions are the whole of it: a compare and a TAKEN
-      // branch, ~4 cycles, doing no work. They cannot be made cheaper --
-      // Cortex-M3 has no decrement-and-branch, and a countdown only swaps `cmp`
-      // for `subs`, both one cycle -- so the only lever is taking the branch
-      // less often.
-      // IT NEEDS TWO ASM BLOCKS: a thirteenth operand does not fit, so the
-      // unrolled loop and the 0-3 sample tail each take their own allocation.
-      // `make cycles` will NOT show the saving -- it finds the smallest loop
-      // containing the output saturate, which is the tail. Read the 4-sample
-      // loop out of the disassembly instead.
-      // TWELVE OPERANDS IS THE LIMIT, and this is at it -- the draw needs only
-      // the one input register because the division by kChiffDrawMax happens
-      // per run. The #15 and #4 above are kChiffDrawMax and kChiffDrawBits
-      // written out, as #4 below is kChiffStateShift; the QEMU differential
-      // catches any drift between them and the C reference.
       : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
         [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
         [draws] "+r"(draws), [buf] "+r"(sample_buffer)
@@ -1262,38 +1342,9 @@ void Envelope::RenderStage(
       : "ip", "lr", "cc", "memory");
 #else
     while (sample_buffer != chunk_end) {
-      // One draw, consumed low end first, matching the asm's AND then LSR.
-      const int32_t draw = static_cast<int32_t>(draws & kChiffDrawMax);
+      // One draw, consumed low end first, matching the asm's UBFX then LSR.
+      YARNS_CHIFF_RENDER_SAMPLE(static_cast<int32_t>(draws & kChiffDrawMax));
       draws >>= kChiffDrawBits;
-      int32_t slew_rate_step = static_cast<int32_t>(
-        (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);
-      slew_rate_q31 -= slew_rate_step;
-
-      // (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word
-      // term. Two instructions saved per one-pole. The dropped bit is a half
-      // LSB per sample and cannot accumulate: at a one-pole's fixed point the
-      // step is zero, so the error is bounded by the last step, not summed.
-      int32_t delta_q30 = (2 * draw - kChiffDrawMax)
-        * chiff_input_per_level_q30 - chiff_state_q30;
-      chiff_state_q30 += 2 * static_cast<int32_t>(
-        (static_cast<int64_t>(delta_q30) * slew_rate_q31) >> 32);
-      // The clipped value feeds back: a saturating one-pole, not a
-      // waveshaped output. MEASURED to reach an exact square wave at 16x
-      // drive where clipping the output only approaches one.
-      if (chiff_state_q30 > chiff_clip_scaled_q30) {
-        chiff_state_q30 = chiff_clip_scaled_q30;
-      } else if (chiff_state_q30 < -chiff_clip_scaled_q30) {
-        chiff_state_q30 = -chiff_clip_scaled_q30;
-      }
-      nominal_gap_q30 -= 2 * static_cast<int32_t>(
-        (static_cast<int64_t>(nominal_gap_q30) * stage_rate_q31) >> 32);
-      combined_q30 += combined_slope_q30;
-      // Matches USAT #15 with ASR #15: arithmetic shift, then saturate.
-      int32_t sample = (combined_q30 - nominal_gap_q30
-        + (chiff_state_q30 << kChiffStateShift)) >> kSampleBits;
-      if (sample < 0) sample = 0;
-      if (sample > INT16_MAX) sample = INT16_MAX;
-      *sample_buffer++ = static_cast<int16_t>(sample);
     }
 #endif
       draws_left -= chunk;
@@ -1360,6 +1411,9 @@ void Envelope::RenderStage(
       sample_buffer, block_samples_left, bias_q31, bias_slope_q31);
   }
 }
+
+#undef YARNS_CHIFF_ASM_SAMPLE
+#undef YARNS_CHIFF_RENDER_SAMPLE
 
 // Exact unsigned division of a 64-bit dividend (hi:lo) by a 32-bit divisor,
 // valid when the quotient fits 32 bits (hi < divisor; the caller saturates

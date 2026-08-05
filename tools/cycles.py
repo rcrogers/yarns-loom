@@ -71,24 +71,31 @@ lines = functions[RENDER_STAGE]
 # picked the wrong loop twice -- the widest branch is outer control flow (298
 # instructions, 315% of the CPU), and the tightest is some other inlined loop
 # (14 instructions, 1 spill). Anchoring on usat+strh is unambiguous.
-loop_start = loop_end = None
-for addr, text in lines:
-  match = re.search(
-      r'\bb(?:ne|eq|cs|cc|mi|pl|hi|ls|ge|lt|gt|le)?(?:\.[nw])?\s+([0-9a-f]{4,})\b',
-      text)
-  if not match:
-    continue
-  target = int(match.group(1), 16)
-  if target >= addr:
-    continue
-  body = [t for a, t in lines if target <= a <= addr]
-  if any('usat' in t for t in body) and any(re.search(r'\bstrh', t)
-                                            for t in body):
-    if loop_start is None or addr - target < loop_end - loop_start:
-      loop_start, loop_end = target, addr
-if loop_start is None:
+#
+# THERE IS MORE THAN ONE SUCH LOOP once the render is unrolled to a whole PRNG
+# word: the unrolled one, and the head/tail loop for the samples that do not
+# fill a word. The HOT one is the one that emits the most samples per
+# iteration, and its usat count IS its samples per iteration -- so the same
+# anchor that finds the loop also says how many samples it renders.
+graph_for_loops = pathcost.Graph(lines)
+candidates = []
+for source, target in graph_for_loops.back_edges():
+  low = min(source, target)
+  high = max(address for address, _ in graph_for_loops.blocks[source])
+  body = [t for a, t in lines if low <= a <= high]
+  saturates = sum(1 for t in body if 'usat' in t)
+  if saturates and any(re.search(r'\bstrh', t) for t in body):
+    candidates.append((saturates, -(high - low), low, high))
+if not candidates:
   print('  could not identify the sample loop (no usat+strh backward branch)')
   sys.exit(1)
+_, _, loop_start, loop_end = max(candidates)
+LOOP_SAMPLES = max(saturates for saturates, _, _, _ in candidates)
+# Anything else that emits samples is the head/tail path: it renders nothing in
+# the common case (a full block, starting on a word boundary), so it is priced
+# but not charged per block.
+tail_regions = [(low, high) for _, _, low, high in candidates
+                if (low, high) != (loop_start, loop_end)]
 
 
 def loop_cost(text, is_branch):
@@ -111,21 +118,35 @@ spills = sum(1 for _, t in body if re.search(r'(ldr|str)\w*\s+\S+,\s*\[sp', t))
 graph = pathcost.Graph(lines)
 call_cost, _ = pathcost.call_cost_function(
     functions,
-    # Priced separately below: a handoff is not part of an ordinary run.
-    boundary=(HAND_OFF, TRIGGER))
+    # Priced separately below: a handoff is not part of an ordinary run, and
+    # neither is a re-entry. RenderStage tail-calls ITSELF for the rest of a
+    # block after a stage boundary, and GCC compiles that either as a loop or
+    # as a `b.w` to the function's own entry depending on how big the body is.
+    # As a loop the back edge gets cut; as a branch it looks like a call, and
+    # left priced it charged one run for the next one as well -- 1126 cycles
+    # of double counting that appeared the moment the render loop was unrolled.
+    boundary=(HAND_OFF, TRIGGER, RENDER_STAGE))
 sample_region = (loop_start, loop_end)
-chunk_region = graph.loop_region(containing=sample_region) or sample_region
-
-# Per chunk: the chunk loop's body with the sample loop charged nowhere.
-chunk_cycles = pathcost.longest_path(
-    pathcost.Graph([(a, t) for a, t in lines
-                    if chunk_region[0] <= a <= chunk_region[1]]),
-    call_cost,
-    weights=[(sample_region[0], sample_region[1], 0)])
-# Per run: the whole function with both loops charged nowhere.
-run_cycles = pathcost.longest_path(
-    graph, call_cost,
-    weights=[(chunk_region[0], chunk_region[1], 0)])
+# A loop that renders FEWER samples than a PRNG word holds is chunked at word
+# boundaries by a loop around it, and that wrapper then runs once per word --
+# where its whole cost is the render body's registers being spilled and
+# reloaded. A loop that consumes a whole word has no such wrapper to pay for.
+chunk_region = None
+if LOOP_SAMPLES < DRAWS_PER_WORD:
+  chunk_region = graph.loop_region(containing=sample_region)
+chunk_cycles = 0
+if chunk_region:
+  chunk_cycles = pathcost.longest_path(
+      pathcost.Graph([(a, t) for a, t in lines
+                      if chunk_region[0] <= a <= chunk_region[1]]),
+      call_cost,
+      weights=[(sample_region[0], sample_region[1], 0)])
+# Per run: the whole function with everything that renders samples charged
+# nowhere, since those are counted per sample above.
+rendering = [(low, high, 0) for low, high in
+             [sample_region] + tail_regions + ([chunk_region] if chunk_region
+                                               else [])]
+run_cycles = pathcost.longest_path(graph, call_cost, weights=rendering)
 # A stage transition, which re-enters RenderStage for the rest of the block.
 handoff_call_cost, _ = pathcost.call_cost_function(
     functions, boundary=(RENDER_STAGE,))
@@ -160,13 +181,15 @@ for callee, pattern in SEARCH_TRIPS:
 note_on_cycles = pathcost.longest_path(
     note_on_graph, handoff_call_cost, weights=search_weights)
 
-block_cycles = (BLOCK_SAMPLES * cycles
+loop_iterations = BLOCK_SAMPLES // LOOP_SAMPLES
+block_cycles = (loop_iterations * cycles
                 + CHUNKS_PER_BLOCK * chunk_cycles
                 + run_cycles)
 budget = CPU_HZ * BLOCK_SAMPLES / FRAME_HZ
 
 report = {
     'loop_instructions': len(body),
+    'loop_samples': LOOP_SAMPLES,
     'loop_cycles': cycles,
     'loop_spills': spills,
     'function_instructions': len(lines),
@@ -179,14 +202,16 @@ report = {
 for key, value in report.items():
   print(f'  {key:<22} {value}')
 print('  ---')
-print(f'  {"per sample":<22} {BLOCK_SAMPLES:>5} x {cycles}')
-print(f'  {"per chunk":<22} {CHUNKS_PER_BLOCK:>5} x {chunk_cycles}')
+print(f'  {"per sample":<22} {loop_iterations:>5} x {cycles}'
+      f'   ({cycles / LOOP_SAMPLES:.1f} per sample)')
+print(f'  {"per chunk":<22} {CHUNKS_PER_BLOCK if chunk_cycles else 0:>5}'
+      f' x {chunk_cycles}')
 print(f'  {"per run":<22} {1:>5} x {run_cycles}')
 print(f'  {"percent_of_cpu":<22} {block_cycles * ENVELOPES / budget * 100:.1f}%'
       f'  ({ENVELOPES} envelopes x {FRAME_HZ} Hz on {CPU_HZ / 1e6:.0f} MHz)')
-print(f'  {"loop_only_percent":<22} '
-      f'{BLOCK_SAMPLES * cycles * ENVELOPES / budget * 100:.1f}%'
-      '  (what this tool reported before the per-run path was priced)')
+print(f'  {"render_percent":<22} '
+      f'{loop_iterations * cycles * ENVELOPES / budget * 100:.1f}%'
+      '  (the loop alone -- all this tool used to report)')
 print(f'  {"note_on_burst":<22} '
       f'{note_on_cycles * ENVELOPES / budget * 100:.1f}%'
       f'  ({ENVELOPES} NoteOns landing in one block, on top of the above)')
