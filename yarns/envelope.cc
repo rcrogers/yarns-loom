@@ -226,6 +226,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_input_full_q30_ = 0;
   chiff_drive_over_16_q30_ = 1 << (30 - kChiffStateShift);
   chiff_walk_start_q7_25_ = 0;
+  chiff_walk_amount_q7_25_ = 0;
   chiff_walk_phase_q32_ = 0;
   chiff_walk_phase_step_q32_ = 0;
   // Bias is a CONTINUOUS control, not note state -- nothing else resets it,
@@ -675,6 +676,7 @@ void Envelope::NoteOn(
       // amount has as its onset. Nothing else decays; there is nothing to keep
       // in step with anything.
       chiff_walk_start_q7_25_ = static_cast<uint32_t>(chiff_amount) << 25;
+      chiff_walk_amount_q7_25_ = chiff_walk_start_q7_25_;
       chiff_walk_phase_q32_ = 0;
       // The walk crosses the AUDIBLE part of the axis in exactly the duration;
       // the inaudible remainder is where it finishes converging to nominal.
@@ -1002,15 +1004,16 @@ void Envelope::RenderStage(
       const uint32_t phase_end_q32 =
         advanced + chiff_walk_phase_q32_ < 0xFFFFFFFFull
           ? chiff_walk_phase_q32_ + static_cast<uint32_t>(advanced) : 0xFFFFFFFFu;
-      const uint32_t amount_q7_25 =
-        ChiffWalkAmount_q7_25(chiff_walk_start_q7_25_, chiff_walk_phase_q32_);
-      // THIS RUN'S START SLEW TIME IS LAST RUN'S END, so it is carried rather
-      // than recomputed -- the amount is a pure function of the phase and the
-      // phase is continuous, so the two are the same number. Halves the
-      // interpolated table reads in the per-run path.
+      // THIS RUN'S START IS LAST RUN'S END, for both the amount and the slew
+      // time: the amount is a pure function of the phase and the phase is
+      // continuous, so they are the same numbers. Only the END is derived, and
+      // it is carried forward. One curve evaluation and one map evaluation per
+      // run instead of two and two.
+      const uint32_t amount_q7_25 = chiff_walk_amount_q7_25_;
+      chiff_walk_amount_q7_25_ =
+        ChiffWalkAmount_q7_25(chiff_walk_start_q7_25_, phase_end_q32);
       const uint32_t slew_time_end_q5_27 = ChiffWalkSlewTimeLog2_q5_27(
-        ChiffWalkAmount_q7_25(chiff_walk_start_q7_25_, phase_end_q32),
-        chiff_slew_time_log2_end_q5_27_);
+        chiff_walk_amount_q7_25_, chiff_slew_time_log2_end_q5_27_);
       chiff_slew_time_log2_step_q5_27_ = run_samples
         ? (slew_time_end_q5_27 - slew_time_log2_q5_27_) / run_samples : 0;
       chiff_slew_rate_decay_q32_ =

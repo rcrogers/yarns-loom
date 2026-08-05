@@ -176,10 +176,11 @@ class Envelope {
   // Q5.27, carried finely: at knob resolution this would step 128 times across
   // the duration, coarser than a run for a long chiff -- the granularity
   // already measured to kill the chirp.
-  // The CURRENT amount is not here: it is derived from start and phase inside
-  // the run that uses it, so it is a local. Only what cannot be recomputed is
-  // state -- where the walk has got to, where it began, and how fast it goes.
+  // Where the walk is, where it began, how fast it crosses, and the amount it
+  // has reached. The amount is CARRIED rather than re-derived because this
+  // run's end is next run's start -- one curve evaluation per run, not two.
   uint32_t chiff_walk_start_q7_25_;
+  uint32_t chiff_walk_amount_q7_25_;
   uint32_t chiff_walk_phase_q32_;
   uint32_t chiff_walk_phase_step_q32_;
 
