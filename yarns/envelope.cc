@@ -494,8 +494,17 @@ static uint32_t ChiffWalkRemaining_u16(uint32_t phase_q32) {
     ? kEnvExpoFull_u16 - done_u16 + (done_u16 ? 0 : 1) : 0;
 }
 
+// RECIPROCAL, NOT A DIVIDE. GCC 4.8 does not strength-reduce a 64-bit divide by
+// a constant, so the plain form calls __aeabi_uldivmod -- once per run, per
+// envelope, twelve envelopes deep. 43ac801c had got that helper to zero call
+// sites in the firmware; this put it back. round(2^32 * 32 / 127).
+// A Q7.25 amount times this, high word kept, is the level the law asks for in
+// Q30 -- which is why the audibility search below reads it directly.
+const uint32_t kChiffAmountMaxRecip_q32 = 1082196485u;
+
 static uint32_t ChiffWalkAmount_q7_25(uint32_t start_q7_25, uint32_t phase_q32);
-static int32_t ChiffWalkInputFraction_q30(uint32_t amount_q7_25);
+static int32_t ChiffWalkInputFraction_q30(
+    uint32_t amount_q7_25, uint32_t slew_time_log2_q5_27, int32_t rate_q31_in);
 static uint32_t ChiffWalkSlewTimeLog2_q5_27(
     uint32_t amount_q7_25, uint32_t end_slew_time_log2_q5_27);
 static uint32_t ChiffScaledRmsPerInput_q15_5(uint32_t slew_time_log2_q5_27);
@@ -512,15 +521,28 @@ static uint32_t ChiffWalkAudibleAmount_q7_25(
   // against 1.21/1.33), so that bias does not explain the residual.
   const uint64_t inaudible =
     (1ull << (30 - kChiffInaudibleShift)) * kOne_q15_5;
+  // THE PRODUCT COLLAPSES, so neither factor is computed. The input is
+  // min(1, level / response), so input * response is min(level, response) --
+  // the law where the input has room, the bare response where it is capped at
+  // full scale. That is the whole quantity this searches on, and it costs ONE
+  // ChiffScaledRmsPerInput where the two-factor form paid for that AND the
+  // reciprocal beside it, twelve times per NoteOn.
   uint32_t lo = 0, hi = start_q7_25;
   for (uint32_t i = 0; i < 12; ++i) {
     const uint32_t mid = lo + ((hi - lo) >> 1);
-    const int32_t input_q30 = static_cast<int32_t>(
-      (static_cast<int64_t>(input_full_q30)
-       * ChiffWalkInputFraction_q30(mid)) >> 30);
-    const uint64_t reached = static_cast<uint64_t>(input_q30)
-      * ChiffScaledRmsPerInput_q15_5(
-          ChiffWalkSlewTimeLog2_q5_27(mid, end_slew_q5_27));
+    const uint32_t response_q15_5 = ChiffScaledRmsPerInput_q15_5(
+      ChiffWalkSlewTimeLog2_q5_27(mid, end_slew_q5_27));
+    // uint32, so the product below is a umull and not a full 64x64.
+    const uint32_t level_q30 = static_cast<uint32_t>(
+      (static_cast<uint64_t>(mid) * kChiffAmountMaxRecip_q32) >> 32);
+    // Both in the two-factor form's own units: an input times a Q15.5
+    // response. The input is folded down BEFORE the kOne, or the triple
+    // product leaves 64 bits.
+    const uint64_t law =
+      ((static_cast<uint64_t>(input_full_q30) * level_q30) >> 30) * kOne_q15_5;
+    const uint64_t capped =
+      static_cast<uint64_t>(input_full_q30) * response_q15_5;
+    const uint64_t reached = law < capped ? law : capped;
     if (reached < inaudible) lo = mid; else hi = mid;
   }
   return hi;
@@ -549,11 +571,6 @@ static uint32_t ChiffWalkAmount_q7_25(uint32_t start_q7_25, uint32_t phase_q32) 
     (static_cast<uint64_t>(start_q7_25) * ChiffWalkRemaining_u16(phase_q32)) >> 16);
 }
 
-// RECIPROCAL, NOT A DIVIDE. GCC 4.8 does not strength-reduce a 64-bit divide by
-// a constant, so the plain form calls __aeabi_uldivmod -- once per run, per
-// envelope, twelve envelopes deep. 43ac801c had got that helper to zero call
-// sites in the firmware; this put it back. round(2^32 * 32 / 127).
-const uint32_t kChiffAmountMaxRecip_q32 = 1082196485u;
 // OCTAVES OF DRIVE PER UNIT OF AMOUNT ABOVE THE HINGE, Q32 -- one constant
 // where there were two, because the two multiplies it replaces were a Q30
 // round trip through the fraction of the span. Q7.25 amount times this,
@@ -563,9 +580,99 @@ const uint32_t kChiffDriveOctavesPerAmount_q32 = static_cast<uint32_t>(
   ((static_cast<uint64_t>(kChiffDriveSpan_q5_27) << 32)
    + (((kChiffAmountMax - kChiffCleanAmount) << 25) >> 1))
   / ((kChiffAmountMax - kChiffCleanAmount) << 25));
-static int32_t ChiffWalkInputFraction_q30(uint32_t amount_q7_25) {
-  return static_cast<int32_t>(
+// THE INPUT IS SOLVED FOR, NOT DIALLED. What the knob is meant to promise is a
+// LEVEL, and the level is the input times the filter's own response:
+//
+//   level(amount) = input(amount) * ChiffScaledRmsPerInput(slew_time(amount))
+//
+// The response falls as the slew slows, so an input read straight off the
+// amount makes the level fall TWICE below the hinge -- once because the input
+// shrank and once because a slow filter realizes less of it. Stating the level
+// and inverting is the whole change:
+//
+//   level(amount) = amount / kChiffAmountMax        <- one law, whole knob
+//   input(amount) = min(1, level(amount) / response(slew_time(amount)))
+//
+// AT AND ABOVE THE HINGE THIS IS A NO-OP, EXACTLY: the slew time is
+// kChiffFastestSlewTimeLog2 there, the response clamps at 1.0, and the
+// expression collapses to amount / kChiffAmountMax -- the form this replaces.
+// So L5's zones, the drive calibration that rests on them, and every golden
+// vector at or above 64 are untouched by construction, not by measurement.
+//
+// WHY LINEAR IN AMOUNT AND NOT SOME OTHER LAW: it is the law the walk ALREADY
+// ASSUMES. ChiffWalkRemaining decays the amount along lut_env_expo because
+// "level goes as 20log10(amount), so constant dB per second wants the amount
+// to decay exponentially" -- true only where level is proportional to amount,
+// which until now held above the hinge and nowhere else. Making it hold
+// everywhere is what makes the decay exponential in dB across the whole knob,
+// which is L7.
+//
+// THE MIN IS A REAL BOUND, NOT DEFENSIVE: |chiff| <= input always, so an input
+// past full scale would be asking for an output that cannot occur. Where it
+// binds, the level falls short of the law and the knob's bottom goes quiet
+// again -- which is exactly the trade the slow end of the axis is choosing.
+// NOT A DIVIDE BY THE RESPONSE. The plain form divides a Q30 by a runtime
+// Q15.5, which GCC 4.8 turns into __aeabi_uldivmod -- the call site 9605ad6a
+// got back out of the per-run path. The reciprocal is BUILT the same way
+// ChiffScaledRmsPerInput builds the response, out of the same exp2 table:
+//
+//   response      = min(1, 1.5 * 2^(-t/2) * (1 + r/4 + 3r^2/32))
+//   1 / response  = max(1, (2/3) * 2^(+t/2) * (1 - r/4 - r^2/32))
+//
+// the bracket being that correction inverted to two terms.
+//
+// THE 1.5 IS NOT THE WHOLE CONSTANT, and reading it as such costs 4.23 dB
+// flat: kChiffScaledRmsPerRoot also carries kChiffDrawRmsPerPeak, the sixteen
+// levels' own rms over their peak, because sigma = input * sqrt(r/(2-r)) reads
+// `input` as an rms. So the constant to invert is that whole stored quantity
+// over kOne_q15_5, not 1.5. It is named here rather than folded in as a
+// literal for exactly the reason the 4.23 dB happened.
+//
+// 2^(+t/2) EXCEEDS Q30 AND MUST NOT BE MATERIALIZED. Split the exponent: with
+// n = floor(g) and f its fraction, 2^g is 2^(n+1) * 2^(f-1), and 2^(f-1) is in
+// [0.5, 1) -- one read of the same table at (1 - f), which is what
+// SlewRateFromTimeLog2 already returns. The level is multiplied by that FIRST
+// and shifted after, so no wide intermediate exists.
+//
+// THE max() IS THE RESPONSE'S OWN CLAMP, READ BACKWARDS. The response
+// saturates at 1.0 near the hinge -- with the correction included the boundary
+// is t ~= 0.35, not a clean power of two -- so rather than deriving that
+// crossing and testing for it, let the reciprocal come out below 1.0 and take
+// the larger. Where it does, the input IS the level, which is the no-op at and
+// above the hinge.
+// round(-log2(kChiffScaledRmsPerRoot_q15_5 / kOne_q15_5) * 2^27), i.e. what
+// the reciprocal is worth at a slew time of zero.
+const uint32_t kChiffLog2PerScaledRms_q5_27 = 15736016u;
+
+// THE RATE IS PASSED IN, not derived: every caller already has it (the run
+// derives it for the loop, NoteOn for RederiveSlewState), and deriving it here
+// as well would be a second read of the same table at the same argument.
+static int32_t ChiffWalkInputFraction_q30(
+    uint32_t amount_q7_25, uint32_t slew_time_log2_q5_27, int32_t rate_q31_in) {
+  const uint32_t level_q30 = static_cast<uint32_t>(
     (static_cast<uint64_t>(amount_q7_25) * kChiffAmountMaxRecip_q32) >> 32);
+  // (1 - r/4 - r^2/32): ChiffScaledRmsPerInput's own correction, inverted to
+  // the same two terms so the two agree where it matters most.
+  const uint32_t rate_q31 = static_cast<uint32_t>(rate_q31_in);
+  const uint32_t rate_sq_q31 = static_cast<uint32_t>(
+    (static_cast<uint64_t>(rate_q31) * rate_q31) >> 31);
+  const uint32_t correction_q31 =
+    (1u << 31) - (rate_q31 >> 2) - (rate_sq_q31 >> 5);
+  const uint32_t corrected_q30 = static_cast<uint32_t>(
+    (static_cast<uint64_t>(level_q30) * correction_q31) >> 31);
+  const uint32_t g_q5_27 =
+    (slew_time_log2_q5_27 >> 1) + kChiffLog2PerScaledRms_q5_27;
+  const uint32_t shift = (g_q5_27 >> 27) + 1;
+  const uint32_t two_pow_f_q31 = static_cast<uint32_t>(SlewRateFromTimeLog2_q31(
+    (1u << 27) - (g_q5_27 & 0x07FFFFFFu)));
+  const uint32_t scaled_q30 = static_cast<uint32_t>(
+    (static_cast<uint64_t>(corrected_q30) * two_pow_f_q31) >> 31);
+  // |chiff| <= input always, so an input past full scale asks for an output
+  // that cannot occur. Saturate in the shift's own terms, before it wraps.
+  const uint32_t ceiling_q30 = shift >= 31 ? 0u : ((1u << 30) >> shift);
+  if (scaled_q30 >= ceiling_q30) return 1 << 30;
+  const uint32_t input_q30 = scaled_q30 << shift;
+  return static_cast<int32_t>(input_q30 > level_q30 ? input_q30 : level_q30);
 }
 
 static int32_t ChiffWalkDriveOver16_q30(uint32_t amount_q7_25) {
@@ -687,8 +794,6 @@ void Envelope::NoteOn(
         (static_cast<uint64_t>(0xFFFFFFFFu / window_samples)
          * ChiffWalkAudiblePhase_u16(chiff_walk_start_q7_25_,
              chiff_input_full_q30_, chiff_slew_time_log2_end_q5_27_)) >> 16);
-      chiff_input_fraction_q30_ =
-        ChiffWalkInputFraction_q30(chiff_walk_start_q7_25_);
       // THE WALK'S FIRST STATE IS THE NOTE'S FIRST STATE. All three of the
       // chiff's numbers are read off the starting amount here; the slew time
       // was the one left out, so it entered the note carrying whatever the
@@ -706,6 +811,10 @@ void Envelope::NoteOn(
       // was getting this wrong.
       slew_time_log2_q5_27_ = ChiffWalkSlewTimeLog2_q5_27(
         chiff_walk_start_q7_25_, chiff_slew_time_log2_end_q5_27_);
+      // AFTER the slew time, which the input is now solved against.
+      chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
+        chiff_walk_start_q7_25_, slew_time_log2_q5_27_,
+        SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_));
       chiff_slew_time_log2_step_q5_27_ = 0;
       RederiveSlewState();
       break;
@@ -1112,7 +1221,12 @@ void Envelope::RenderStage(
       chiff_slew_rate_decay_q32_ =
         DecayFromIncrement_q32(chiff_slew_time_log2_step_q5_27_);
       chiff_drive_over_16_q30_ = ChiffWalkDriveOver16_q30(amount_q7_25);
-      chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(amount_q7_25);
+      // Against THIS run's start slew time: slew_time_log2_q5_27_ still holds
+      // the run's start (the writeback to the end is at the loop's tail), and
+      // amount_q7_25 is the start amount, so the pair is consistent.
+      chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
+        amount_q7_25, slew_time_log2_q5_27_,
+        SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_));
       chiff_walk_phase_q32_ = phase_end_q32;
     }
     int32_t decay_q32 = chiff_slew_rate_decay_q32_;
