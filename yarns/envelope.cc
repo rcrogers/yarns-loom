@@ -1300,6 +1300,13 @@ void Envelope::RenderStage(
     // ChiffScaledRmsPerInput). The margin below inherits that error.
     // Computed once per RUN from the run-start slew time, while the rate decays
     // within the run -- so it runs GENEROUS as the run proceeds, which is safe.
+    // THIS IS THE LEVEL THE KNOB ASKED FOR, wherever the input is not capped.
+    // The input is min(1, level / response), so input * response is
+    // min(level, response * full) -- the LAW where the input has room, the bare
+    // response where it is pinned at full scale. Kept as the product rather
+    // than written as that min: the two differ only in rounding, and the
+    // product is what the CAPPED branch -- the worst case, and the one the
+    // reserve has to be right for -- needs anyway.
     const int32_t chiff_scaled_rms_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(input_q30)
        * (chiff_scaled_rms_per_input_q15_5 * kOne_q15_5)) >> 31);
