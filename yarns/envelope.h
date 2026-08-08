@@ -198,70 +198,51 @@ class Envelope {
   //             STAGE's rate, chasing the stage's aim.
   //   chiff     this. Its own one-pole, running at the CHIFF's rate, chasing
   //             one of sixteen levels spanning +/- the chiff input, drawn per
-  //             sample from the shared PRNG. Symmetric, so zero-mean.
+  //             sample from this envelope's own PRNG. Symmetric, so zero-mean.
   //   bias      added at the point of use and never integrated.
   // out = saturate(mean + chiff), where mean = nominal + bias held one scaled
   // rms (2.121 sigma) inside each DAC rail so the chiff has room. The chiff is
   // ADDED to a mean that already has it, so it is never clipped, and the clamp
   // does not feed back: value_q30_ is nominal + chiff and carries no bias.
   //
-  // THE CHIFF INPUT is half the note's ALLOWED range times
-  // chiff_input_fraction_q30_, so it does not follow the level the note
-  // reaches and a quiet note gets the same exciter.
+  // ONE THING DECAYS: THE AMOUNT. DURATION is a time-based modulation of it,
+  // and the drive, the slew time and the input are all read off it by the maps
+  // the knob itself uses -- so a chiff started at any amount decays THROUGH the
+  // states every smaller amount has as its onset, and nothing has to be kept in
+  // step with anything.
   //
-  // TWO THINGS DECAY, and they divide the work by TIME rather than by
-  // proportion, so neither covers for the other:
-  //   the SLEW SLOWING contributes a curve straight in dB, about -4 dB per 10%
-  //   of the chiff's duration. Amount-independent.
-  //   the CHIFF INPUT SHRINKING contributes 20log10(1 - t/duration): gentle
-  //   early, steep at the end. The steepening is that mechanism finishing, not
-  //   an artifact.
-  // How the chiff input shrinks is not free to change without re-measuring
-  // what the slew is doing at the same time.
+  // AMOUNT IS A LEVEL LAW. level = amount / kChiffAmountMax across the whole
+  // knob; the input is that divided by the filter's response, capped at full
+  // scale. At AMOUNT 0 the input is zero, the chiff one-pole holds zero, and
+  // the output is nominal + bias.
   //
-  // AMOUNT SETS THE STARTING SLEW TIME AND NOTHING ELSE. It does not scale the
-  // chiff input. Low amounts are quiet because a slow filter realizes less of
-  // the same chiff input. At AMOUNT 0 the chiff input is zero, the chiff
-  // one-pole holds zero, and the output is nominal + bias.
-  //
-  // NOTHING NAMES THE OUTPUT. What you hear is the chiff input times the
-  // filter's response, which falls as sqrt(rate) -- about 3 dB per octave.
-  // KEEP THE CAUSAL CHAIN VISIBLE: an effect may cause a further effect, but an
-  // effect must not be promoted into a thing that acts on its own with the
-  // chain back to a mechanism lost. Every recurring confusion here was that --
-  // input mistaken for output, or one effect assumed to have one cause.
+  // NOTHING NAMES THE OUTPUT. What you hear is the input times the filter's
+  // response. KEEP THE CAUSAL CHAIN VISIBLE: an effect may cause a further
+  // effect, but an effect must not be promoted into a thing that acts on its
+  // own with the chain back to a mechanism lost. Every recurring confusion here
+  // was that -- input mistaken for output, or one effect assumed to have one
+  // cause.
   //
   // ONLY THE SLEW TIME IS STORED. The rate is 2^-slew_time, one quantity in two
   // encodings; keeping both meant two accumulators that could drift apart.
   // RenderStage derives the rate once per run. Slew time is unsigned: a
   // magnitude, 0..kMaxSlewTimeLog2, whose max exceeds 2^31 as Q5.27.
-  //
-  // Things that did not work: per-block alpha (cb68505b), the two-point
-  // mixture, an absolute slew-rate floor with a chiff input rescale, and the
-  // sag -- a level move to make room for the chiff, which could not be made to
-  // track a moving bias because the correction went through the integrator
-  // (f5eee4b6 replaced it with the mean clamp above).
   uint32_t slew_time_log2_q5_27_;             // Current slew time, log2 samples
   uint32_t chiff_slew_time_log2_step_q5_27_;  // Per-sample rise, i.e. how fast
                                              // the slew slows (>= 0)
   uint32_t chiff_slew_time_log2_end_q5_27_;   // Max slew time the chiff's own
                                              // goes, from its duration
-  // The NOMINAL chiff duration, in samples: a sizing reference for how fast
-  // the slew slows and the chiff input shrinks. NOT a countdown -- nothing
-  // observes it elapsing, and there is no window to be inside of.
-  // 0 = no chiff on this note (AMOUNT 0).
+  // The nominal chiff duration in samples, which sizes the walk's speed. NOT a
+  // countdown: nothing observes it elapsing, and only its nonzero-ness is read
+  // after NoteOn. 0 = no chiff on this note (AMOUNT 0).
   uint32_t chiff_target_samples_;
-  // Where the current stage began: with the stage phase (closed-form from
-  // the countdown), this anchors the nominal value -- start + (target - start) *
-  // lut_env_expo[phase] -- with no iterated level state, the same
-  // construction the duty-binary core used for its duty curve.
+  // Where the current stage began. With the stage phase (closed-form from the
+  // countdown) this anchors the nominal value -- start + (target - start) *
+  // lut_env_expo[phase] -- with no iterated level state.
   int32_t stage_start_q30_;
-  // How much of chiff_input_full_q30_ is in use, Q30 (1<<30 == all of it),
-  // decaying by chiff_input_fraction_step octaves per sample. Dimensionless, so
-  // unlike the levels it does not rescale.
-  // NOT a fraction of the SLACK between the level and the rails: that sizing
-  // was tried and rejected, because the slack vanishes at the peak and the
-  // excursion notched there. See ChiffInput_q30.
+  // How much of chiff_input_full_q30_ is in use, Q30 (1<<30 == all of it). Set
+  // per run from the amount the walk has reached. Dimensionless, so unlike the
+  // levels it does not rescale.
   int32_t chiff_input_fraction_q30_;
   // Half the note's ALLOWED range: the chiff input at fraction 1.0, i.e.
   // before any decay. A LEVEL, so it rescales with the others.

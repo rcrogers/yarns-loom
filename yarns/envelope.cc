@@ -185,7 +185,7 @@ const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
 // leave Q30: undriven it reaches 2^29, and 16x that is 2^33. Shifting the
 // state instead costs nothing, because the output add takes a shifted operand.
 // Must be >= kChiffDriveSpan: the drive is stored pre-divided by it.
-const uint32_t kChiffStateShift = 4;  // asm below hard-codes this as #4
+const uint32_t kChiffStateShift = 4;
 // Octaves of drive from the hinge to full, Q5.27 -- and DERIVED, not fitted.
 // THE TERMINAL IS DRIVE == kChiffDrawMax, exactly: the clip point equals the
 // chiff input at fast rates, so from a state sitting on the clip a draw of
@@ -1517,12 +1517,6 @@ void Envelope::RenderStage(
     chiff_draws_ = draw_state;
     chiff_draws_left_ = static_cast<uint8_t>(draws_left);
     {
-      // THE CHIFF INPUT SHRINKS FOREVER AND NEVER REACHES ZERO -- until Q30
-      // runs out of bits, which is the only ending there is. Nothing mutes it,
-      // nothing resets the slew: the term simply becomes too small to
-      // represent, and the loop it feeds is already the classic slew with a
-      // zero offset. That is the low-pass gate, and it is why no window exists
-      // here -- nothing has to close.
       // The walk's end-of-run slew time becomes the next run's start.
       uint32_t slew_time_log2_end = slew_time_log2_q5_27_
         + chiff_slew_time_log2_step_q5_27_ * run_samples;
@@ -1644,9 +1638,9 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   value_q30_ = ScaleRatio(value_q30_, num, den);
   target_q30_ = ScaleRatio(target_q30_, num, den);
   stage_start_q30_ = ScaleRatio(stage_start_q30_, num, den);
-  // The shrink and its step are DIMENSIONLESS -- a fraction of the slack, and
-  // octaves per sample -- so they do not scale with the levels. The rails do,
-  // and the chiff input follows them because it is derived from the slack.
+  // chiff_input_fraction_q30_ is DIMENSIONLESS -- a fraction of the full input
+  // -- so it does not scale with the levels. The full input does, being half
+  // the note's allowed range.
   chiff_input_full_q30_ = ScaleRatio(chiff_input_full_q30_, num, den);
   chiff_floor_q30_ = ScaleRatio(chiff_floor_q30_, num, den);
   chiff_top_q30_ = ScaleRatio(chiff_top_q30_, num, den);
