@@ -327,51 +327,16 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 // The same, capped at kMaxSlewRate for a slew that has to track a target.
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 
-// The chiff's output rms times 2.121, per unit of chiff input, Q15.5.
-// Clamped at 1.0: the filter's state is a convex combination of +/- its input,
-// so |chiff| <= input always and reserving past the input reserves for an
-// output that cannot occur.
-//
-// IT IS NOT AN RMS. The chiff's own rms is
-//   sigma = input * sqrt(r / (2 - r)),
-// and what this returns is 3/sqrt(2) = 2.121 of it, per unit of input. A
-// caller wanting c sigma of margin wants c/2.121 of this.
-// The scale is folded into kChiffScaledRmsPerRoot_q15_5, so no call site pays
-// for it. NOT 3: the exact form below carries a 1/sqrt(2) the 3 does not
-// cancel, and reading the constant as 3 sigma overstates every margin by 41%.
-//
-// TAKEN FROM THE SLEW TIME, which is the only encoding stored, so 2^(-t/2) is
-// sqrt(rate) for free through the same exp2 table the rate itself comes from:
-//   scaled rms per input = min(1, 1.5 * 2^(-t/2))
-// The exact form is min(1, 3*sqrt(r/(2*(2-r)))), which needs an integer sqrt
-// AND a 64-bit division -- 39 instructions plus a loop, ESTIMATED 250-400
-// cycles, once or twice EVERY RUN. This is about ten.
-//
-// approx/exact is exactly sqrt((2-r)/2), so the shortfall is CORRECTED by
-// multiplying by sqrt(2/(2-r)) = (1 - r/2)^(-1/2), taken to two terms:
-//   1 + r/4 + 3r^2/32
-// r is root^2, already in hand, so this is two multiplies and no sqrt.
-// Residual against the exact form, MEASURED: 0.031 dB at slew time 1.2 and
-// better everywhere slower -- against 0.87 dB uncorrected.
-//
-// THE UNCORRECTED ERROR WAS NOT A CORNER CASE, which is why this is worth two
-// multiplies. Its old note argued the band "is transited in a chiff's first
-// moments and never returned to". True, and beside the point: the first
-// moments are where the ENERGY is. MEASURED, weighting the error by the chiff
-// energy emitted at each slew time -- 62% to 97% of it lands where the error
-// exceeds 0.3 dB, energy-weighted -0.32 to -0.69 dB at AMOUNT 64..127.
-// Judged by TIME it looked negligible; judged by ENERGY it is most of the
-// chiff.
-// What one unit of 2^(-t/2) is worth, Q15.5: 1.5 is 3/2, the 3 of the exact
-// form halved by its sqrt(1/4) at small r. Carries the 2.121, so no call site
-// multiplies by it.
-// AND THE INPUT'S OWN rms/peak, because sigma = input * sqrt(r / (2 - r)) reads
-// `input` as the rms of what the filter chases, which is the PEAK only for a
-// two-level input. The draws are sixteen levels, so the true rms is
-// kChiffDrawRmsPerPeak of the peak. THIS FACTOR HAS TWO CONSUMERS -- the mean's
-// reserve and the walk's inaudibility threshold -- and applying
-// it to one alone moves the deadline by 0.7 octaves. Folding it in here reaches
-// both, which is why it is here rather than at either call site.
+// What one unit of 2^(-t/2) is worth, Q15.5. The 1.5 is 3/2 -- the 3 of the
+// exact form halved by its sqrt(1/4) at small rate -- and it CARRIES TWO
+// FACTORS so no call site has to.
+//   the 2.121 (3/sqrt(2)), so callers get scaled rms rather than sigma;
+//   kChiffDrawRmsPerPeak, because sigma = input * sqrt(r/(2-r)) reads `input`
+//   as the rms of what the filter chases, which is the PEAK only for a
+//   two-level input.
+// The second has TWO consumers -- the mean's reserve and the walk's threshold
+// -- and applying it at one alone moves the deadline by 0.7 octaves, which is
+// why it is folded in here rather than at either call site.
 const uint32_t kChiffScaledRmsPerRoot_q15_5 =
   (((3u * kOne_q15_5 + 1u) / 2u) * kChiffDrawRmsPerPeak_q16) >> 16;
 
@@ -457,44 +422,19 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
     >> 16);
 }
 
-// AMOUNT SCALES THE INPUT, which is what lets the chiff CONVERGE rather than
-// merely go quiet: a one-pole reaches zero only if what it chases reaches zero.
-// A slower filter alone just freezes the state wherever it happens to sit --
-// MEASURED, 15 LSB of wander still on the output at 1.9 s.
-// WHERE THE AMOUNT IS AFTER `phase` OF THE DURATION, Q7.25. The amount decays
-// along lut_env_expo -- THE ENVELOPE'S OWN STAGE CURVE -- rather than linearly.
-// A LINEAR WALK CANNOT BE SMOOTH: MEASURED on the amount axis' own level curve,
-// dB per knob unit runs 0.09 at the top and 0.9 by amount 24, a 10x spread, so
-// equal time per unit is wildly unequal time per dB and the decay plateaus then
-// dives -- exactly what the user rejected. Level goes as 20log10(amount) at the
-// bottom, so constant dB per second wants the amount itself to decay
-// exponentially, which is what this curve is.
-// AND IT LANDS ON ZERO: env_expo is 1 - e^-4x normalised, so the remaining
-// fraction (1 - env_expo) reaches exactly 0 at the end of the duration. That is
-// the same construction the ADSR stages use to land ON their target.
 // HOW MUCH OF THE WALK IS LEFT at this point in the duration, u16.
-// THE CURVE IS lut_env_expo -- the envelope's own stage curve -- and it has to
-// be: MEASURED, dB per knob unit runs 0.09 at the top of the amount axis and
-// 0.9 by amount 24, so an even walk is wildly uneven in dB and plateaus then
-// dives. Level goes as 20log10(amount) at the bottom, so a constant dB per
-// second wants the amount to decay exponentially, which is what this is.
-// TRIED AND REJECTED: gentler exponents (k = 3, 2, 1) to make the duration
-// marker read true. They work on the marker and wreck the shape -- 2.58 dB from
-// the envelope's curve at k = 4, 5.79 dB at k = 1 -- and the marker was the
-// thing that was wrong. The speed, not the curve, is what calibrates duration.
-// TRIED AND REVERTED TWICE, the second time with the correct detector: pinning
-// the amount axis' slow end to a constant leaves the die-out ratio unchanged
-// (1.58/1.74/1.73 against 1.52/1.75/1.68) and costs level at the knob's bottom.
-// HOW FAST THE WALK CROSSES THE AXIS. DERIVED, not fitted: the walk lands
-// amount 0 at the duration, but the chiff stops being audible at some SMALL
-// NONZERO amount, so die-out always precedes the landing and the duration reads
-// long -- MEASURED 1.52x at a 900 ms window. The exponent cannot fix this (it
-// only reshapes the descent, so the error stays one-sided); the SPEED can, and
-// it is orthogonal to the shape.
-// SO: find the amount whose output sits at the inaudibility threshold, find the
-// phase at which the curve reaches it, and make THAT phase arrive at the
-// duration. Everything after it is the inaudible remainder of the walk, which
-// is where the chiff converges the rest of the way to nominal.
+//
+// THE CURVE IS lut_env_expo, the envelope's own stage curve, and it has to be.
+// Level goes as 20log10(amount) at the bottom of the axis, so a constant dB per
+// second wants the amount itself to decay exponentially; walking the axis
+// EVENLY instead plateaus and then dives, because the axis' top half spans a
+// few dB while its bottom few units span tens.
+//
+// AND IT LANDS ON ZERO: env_expo is 1 - e^-4x normalised, so the remaining
+// fraction reaches exactly 0 at the end of the duration. That is what makes the
+// chiff converge rather than merely go quiet -- a one-pole reaches zero only if
+// what it chases reaches zero -- and it is the same construction the ADSR
+// stages use to land ON their target.
 static uint32_t ChiffWalkRemaining_u16(uint32_t phase_q32) {
   const uint32_t index = phase_q32 >> 24;
   const uint32_t frac_u8 = (phase_q32 >> 16) & 0xFF;
@@ -502,8 +442,6 @@ static uint32_t ChiffWalkRemaining_u16(uint32_t phase_q32) {
   const uint32_t hi = index < LUT_ENV_EXPO_SIZE - 1
     ? lut_env_expo[index + 1] : lut_env_expo[LUT_ENV_EXPO_SIZE - 1];
   const uint32_t done_u16 = lo + (((hi - lo) * frac_u8) >> 8);
-  // The table lands on 1.0, so the remaining fraction lands on 0 at the end of
-  // the duration -- the same construction the ADSR stages use to land ON target.
   // THE NORMALISATION IS A SUBTRACT, NOT A DIVIDE. The table's last entry is
   // kEnvExpoFull, and x * 2^16 / kEnvExpoFull is EXACTLY x for every x below
   // that entry -- the quotient's fractional part only reaches 1 at the entry
@@ -513,12 +451,9 @@ static uint32_t ChiffWalkRemaining_u16(uint32_t phase_q32) {
     ? kEnvExpoFull_u16 - done_u16 + (done_u16 ? 0 : 1) : 0;
 }
 
-// RECIPROCAL, NOT A DIVIDE. GCC 4.8 does not strength-reduce a 64-bit divide by
-// a constant, so the plain form calls __aeabi_uldivmod -- once per run, per
-// envelope, twelve envelopes deep. 43ac801c had got that helper to zero call
-// sites in the firmware; this put it back. round(2^32 * 32 / 127).
-// A Q7.25 amount times this, high word kept, is the level the law asks for in
-// Q30 -- which is why the audibility search below reads it directly.
+// A RECIPROCAL, NOT A DIVIDE: GCC 4.8 does not strength-reduce a 64-bit divide
+// by a constant, so the plain form calls __aeabi_uldivmod, which costs ~1.4 kB
+// of library code that nothing in the check suite can see.
 // A Q7.25 amount times this, high word kept, is the Q30 level the law asks
 // for: 2^32 * 2^30 / 2^25 / kChiffAmountMax, i.e. 2^37 / kChiffAmountMax.
 // CEIL, not round: the multiply that uses it TRUNCATES, so rounding the
@@ -620,72 +555,52 @@ const uint32_t kChiffDriveOctavesPerAmount_q32 = static_cast<uint32_t>(
   ((static_cast<uint64_t>(kChiffDriveSpan_q5_27) << 32)
    + (((kChiffAmountMax - kChiffCleanAmount) << 25) >> 1))
   / ((kChiffAmountMax - kChiffCleanAmount) << 25));
-// THE INPUT IS SOLVED FOR, NOT DIALLED. What the knob is meant to promise is a
-// LEVEL, and the level is the input times the filter's own response:
-//
-//   level(amount) = input(amount) * ChiffScaledRmsPerInput(slew_time(amount))
-//
-// The response falls as the slew slows, so an input read straight off the
-// amount makes the level fall TWICE below the hinge -- once because the input
-// shrank and once because a slow filter realizes less of it. Stating the level
-// and inverting is the whole change:
+// What the reciprocal is worth at a slew time of zero, Q5.27. It is the WHOLE
+// stored quantity that gets inverted, not the 1.5: kChiffScaledRmsPerRoot also
+// carries kChiffDrawRmsPerPeak, and reading it as 1.5 alone costs 4.23 dB flat.
+const uint32_t kChiffLog2PerScaledRms_q5_27 = static_cast<uint32_t>(
+  -__builtin_log2(static_cast<double>(kChiffScaledRmsPerRoot_q15_5)
+                  / kOne_q15_5) * 134217728.0 + 0.5);
+
+// THE INPUT IS SOLVED FOR, NOT DIALLED. The knob promises a LEVEL, and the
+// level is the input times the filter's own response:
 //
 //   level(amount) = amount / kChiffAmountMax        <- one law, whole knob
 //   input(amount) = min(1, level(amount) / response(slew_time(amount)))
 //
-// AT AND ABOVE THE HINGE THIS IS A NO-OP, EXACTLY: the slew time is
-// kChiffFastestSlewTimeLog2 there, the response clamps at 1.0, and the
-// expression collapses to amount / kChiffAmountMax -- the form this replaces.
-// So L5's zones, the drive calibration that rests on them, and every golden
-// vector at or above 64 are untouched by construction, not by measurement.
+// An input read straight off the amount makes the level fall TWICE below the
+// hinge -- once because the input shrank and once because a slow filter
+// realizes less of it. AT AND ABOVE THE HINGE THIS IS A NO-OP, EXACTLY: the
+// slew time is kChiffFastestSlewTimeLog2 there, the response clamps at 1.0,
+// and the expression collapses to amount / kChiffAmountMax.
 //
-// WHY LINEAR IN AMOUNT AND NOT SOME OTHER LAW: it is the law the walk ALREADY
-// ASSUMES. ChiffWalkRemaining decays the amount along lut_env_expo because
-// "level goes as 20log10(amount), so constant dB per second wants the amount
-// to decay exponentially" -- true only where level is proportional to amount,
-// which until now held above the hinge and nowhere else. Making it hold
-// everywhere is what makes the decay exponential in dB across the whole knob,
-// which is L7.
+// WHY LINEAR IN AMOUNT: it is the law the walk ALREADY ASSUMES, since
+// ChiffWalkRemaining decays the amount exponentially on the strength of level
+// being proportional to amount. Making that hold everywhere is what makes the
+// decay exponential in dB across the whole knob, which is L7.
 //
 // THE MIN IS A REAL BOUND, NOT DEFENSIVE: |chiff| <= input always, so an input
-// past full scale would be asking for an output that cannot occur. Where it
-// binds, the level falls short of the law and the knob's bottom goes quiet
-// again -- which is exactly the trade the slow end of the axis is choosing.
-// NOT A DIVIDE BY THE RESPONSE. The plain form divides a Q30 by a runtime
-// Q15.5, which GCC 4.8 turns into __aeabi_uldivmod -- the call site 9605ad6a
-// got back out of the per-run path. The reciprocal is BUILT the same way
-// ChiffScaledRmsPerInput builds the response, out of the same exp2 table:
+// past full scale asks for an output that cannot occur. Where it binds, the
+// level falls short of the law and the knob's bottom goes quiet again.
+//
+// NOT A DIVIDE BY THE RESPONSE, which GCC 4.8 would turn into
+// __aeabi_uldivmod. The reciprocal is BUILT the way ChiffScaledRmsPerInput
+// builds the response, out of the same exp2 table:
 //
 //   response      = min(1, 1.5 * 2^(-t/2) * (1 + r/4 + 3r^2/32))
 //   1 / response  = max(1, (2/3) * 2^(+t/2) * (1 - r/4 - r^2/32))
 //
 // the bracket being that correction inverted to two terms.
 //
-// THE 1.5 IS NOT THE WHOLE CONSTANT, and reading it as such costs 4.23 dB
-// flat: kChiffScaledRmsPerRoot also carries kChiffDrawRmsPerPeak, the sixteen
-// levels' own rms over their peak, because sigma = input * sqrt(r/(2-r)) reads
-// `input` as an rms. So the constant to invert is that whole stored quantity
-// over kOne_q15_5, not 1.5. It is named here rather than folded in as a
-// literal for exactly the reason the 4.23 dB happened.
-//
 // 2^(+t/2) EXCEEDS Q30 AND MUST NOT BE MATERIALIZED. Split the exponent: with
 // n = floor(g) and f its fraction, 2^g is 2^(n+1) * 2^(f-1), and 2^(f-1) is in
-// [0.5, 1) -- one read of the same table at (1 - f), which is what
-// SlewRateFromTimeLog2 already returns. The level is multiplied by that FIRST
-// and shifted after, so no wide intermediate exists.
+// [0.5, 1) -- one read of the same table at (1 - f). The level is multiplied
+// by that FIRST and shifted after, so no wide intermediate exists.
 //
-// THE max() IS THE RESPONSE'S OWN CLAMP, READ BACKWARDS. The response
-// saturates at 1.0 near the hinge -- with the correction included the boundary
-// is t ~= 0.35, not a clean power of two -- so rather than deriving that
-// crossing and testing for it, let the reciprocal come out below 1.0 and take
-// the larger. Where it does, the input IS the level, which is the no-op at and
-// above the hinge.
-// round(-log2(kChiffScaledRmsPerRoot_q15_5 / kOne_q15_5) * 2^27), i.e. what
-// the reciprocal is worth at a slew time of zero.
-const uint32_t kChiffLog2PerScaledRms_q5_27 = static_cast<uint32_t>(
-  -__builtin_log2(static_cast<double>(kChiffScaledRmsPerRoot_q15_5)
-                  / kOne_q15_5) * 134217728.0 + 0.5);
-
+// THE max() IS THE RESPONSE'S OWN CLAMP READ BACKWARDS. The response saturates
+// at 1.0 near the hinge, so rather than deriving that crossing and testing for
+// it, let the reciprocal come out below 1.0 and take the larger. Where it does,
+// the input IS the level -- the no-op at and above the hinge.
 // THE RATE IS PASSED IN, not derived: every caller already has it (the run
 // derives it for the loop, NoteOn for RederiveSlewState), and deriving it here
 // as well would be a second read of the same table at the same argument.
