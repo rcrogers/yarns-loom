@@ -35,7 +35,7 @@ TRIGGER = '_ZN5yarns8Envelope7TriggerENS_13EnvelopeStageE'
 
 # TWELVE ENVELOPES RENDER PER BLOCK: four CVOutput::envelope_ plus four audio
 # voices x (gain, timbre). Same figure kMaxChiffEnvelopes is sized from.
-ENVELOPES = 12
+ENVELOPES = 13
 # STM32F103 at its 72 MHz ceiling.
 CPU_HZ = 72e6
 
