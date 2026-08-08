@@ -83,7 +83,13 @@ namespace {
   // n = 2^(kChiffDrawBits - 1) levels per side, i.e. sqrt(85)/15 at four bits.
   // A square is 1.0 here; this is 4.2 dB below it, and that gap IS the drive's
   // room above the hinge. Kurtosis is 1.79 against a square's 1.00.
-  const uint32_t kChiffDrawRmsPerPeak_q16 = 40281;
+  // sqrt((4n^2 - 1)/3) / (2n - 1) for n levels per side, DERIVED from the
+  // draw width rather than fitted to it, so widening a draw moves it.
+  const uint32_t kChiffDrawLevelsPerSide = 1u << (kChiffDrawBits - 1);
+  const uint32_t kChiffDrawRmsPerPeak_q16 = static_cast<uint32_t>(
+    65536.0 * __builtin_sqrt(
+      (4.0 * kChiffDrawLevelsPerSide * kChiffDrawLevelsPerSide - 1.0) / 3.0)
+      / (2.0 * kChiffDrawLevelsPerSide - 1.0) + 0.5);
   typedef char kChiffDrawsMustFillWholeWords[
       (kAudioBlockSize % kChiffDrawsPerWord == 0) ? 1 : -1];
 
@@ -125,7 +131,9 @@ inline int32_t ClampOffset(int32_t mean, int32_t lo, int32_t hi) {
 }
 
 // 1.0 in Q15.5, the unit the chiff's scaled rms is carried in.
-const uint32_t kOne_q15_5 = 46341;  // 2^15.5 == 1.0
+// 1.0 in Q15.5: 2^15 * sqrt(2). __builtin_sqrt folds at compile time.
+const uint32_t kOne_q15_5 = static_cast<uint32_t>(
+  32768.0 * __builtin_sqrt(2.0) + 0.5);
 
 // What lut_env_expo lands on: yarns/resources/lookup_tables.py normalises the
 // table by its own maximum and scales to 65535, so its last entry IS this and
@@ -225,7 +233,8 @@ const int32_t kChiffOctaves = 3;
 // 1.0, so it already describes (1 - e^-4t/T)/(1 - e^-4) -- exactly the true
 // slew once the aim carries the 1/(1 - e^-4). No landing-fraction scaling is
 // needed on the closed-form nominal value; it cancels.
-const uint32_t kStageAimOvershoot_u16 = 66759;  // round(2^16 / (1 - e^-4))
+const uint32_t kStageAimOvershoot_u16 = static_cast<uint32_t>(
+  65536.0 / (1.0 - __builtin_exp(-4.0)) + 0.5);
 
 // Slew rate 2^-slew_time, Q31, capped at kMaxSlewRate for a slew that has to
 // track a target; defined below, declared here because Init caches it.
@@ -395,12 +404,25 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
 // Defined below; chiff window in samples, scaled off the attack duration.
 
-// The level below which the chiff is taken to be inaudible, as a fraction of
-// full scale. The quantity held to it is the SCALED rms, so the chiff's own
-// sigma there is 2.121x lower again. Derived rather than written out, because
-// the digits and the dB figure drifted apart once already: the value was
-// recalibrated and its comment still claimed the old one.
-const uint32_t kChiffInaudibleLevel_q30 = 4177340u;  // 2^30 * 10^(-48.2/20)
+// THE LEVEL THE WALK'S SPEED IS CALIBRATED AGAINST, as a fraction of full
+// scale. It is a CALIBRATED SPEC, not a threshold of audibility despite the
+// name: the walk aims to reach this level exactly at the nominal duration, so
+// it is what makes DURATION read true. Fitted to the user's own die-out
+// criterion (~-65 dBFS at AMOUNT 22 / DURATION 117 / ATTACK 72) landing at the
+// nominal duration.
+//
+// The quantity held to it is the SCALED rms, so the chiff's own sigma here is
+// 2.121x lower again.
+//
+// COMPUTED FROM THE SPEC, not transcribed: -48.2 dB is the number that was
+// calibrated, so it is the number written, and the Q30 digits are derived from
+// it. __builtin_pow folds at compile time with constant arguments, so this
+// costs no code and pulls in no libm -- verified by the image being byte
+// identical to the build that had the literal.
+const double kChiffInaudibleDbFs = -48.2;
+const uint32_t kChiffInaudibleLevel_q30 = static_cast<uint32_t>(
+  static_cast<double>(1u << 30)
+    * __builtin_pow(10.0, kChiffInaudibleDbFs / 20.0) + 0.5);
 
 // THE KNOB'S OWN MAPS, AT WALK RESOLUTION. The walk passes BETWEEN knob
 // positions, so these take a Q7.25 amount and interpolate where the integer
@@ -497,7 +519,13 @@ static uint32_t ChiffWalkRemaining_u16(uint32_t phase_q32) {
 // sites in the firmware; this put it back. round(2^32 * 32 / 127).
 // A Q7.25 amount times this, high word kept, is the level the law asks for in
 // Q30 -- which is why the audibility search below reads it directly.
-const uint32_t kChiffAmountMaxRecip_q32 = 1082196485u;
+// A Q7.25 amount times this, high word kept, is the Q30 level the law asks
+// for: 2^32 * 2^30 / 2^25 / kChiffAmountMax, i.e. 2^37 / kChiffAmountMax.
+// CEIL, not round: the multiply that uses it TRUNCATES, so rounding the
+// reciprocal down would bias every level low.
+const uint32_t kChiffAmountRecipShift = 32 + 30 - 25;
+const uint32_t kChiffAmountMaxRecip_q32 = static_cast<uint32_t>(
+  ((1ull << kChiffAmountRecipShift) + kChiffAmountMax - 1) / kChiffAmountMax);
 
 // THE AMOUNT WHOSE OUTPUT SITS AT THE INAUDIBILITY THRESHOLD, Q7.25.
 // CLOSED FORM. It was a twelve-iteration binary search, each iteration paying
@@ -654,7 +682,9 @@ const uint32_t kChiffDriveOctavesPerAmount_q32 = static_cast<uint32_t>(
 // above the hinge.
 // round(-log2(kChiffScaledRmsPerRoot_q15_5 / kOne_q15_5) * 2^27), i.e. what
 // the reciprocal is worth at a slew time of zero.
-const uint32_t kChiffLog2PerScaledRms_q5_27 = 15736016u;
+const uint32_t kChiffLog2PerScaledRms_q5_27 = static_cast<uint32_t>(
+  -__builtin_log2(static_cast<double>(kChiffScaledRmsPerRoot_q15_5)
+                  / kOne_q15_5) * 134217728.0 + 0.5);
 
 // THE RATE IS PASSED IN, not derived: every caller already has it (the run
 // derives it for the loop, NoteOn for RederiveSlewState), and deriving it here
@@ -863,7 +893,8 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
 // NOT applied inside SlewRateFromTimeLog2_q31 itself: that is a general 2^-x,
 // and its other callers (the centre blend's ratio, the chiff input shrink,
 // and 2^(-t/2) in the scaled rms) all need to reach 1.0.
-const int32_t kMaxSlewRate_q31 = 1357468564;  // round((1 - e^-1) * 2^31)
+const int32_t kMaxSlewRate_q31 = static_cast<int32_t>(
+  (1.0 - __builtin_exp(-1.0)) * 2147483648.0 + 0.5);
 
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27) {
   const int32_t rate_q31 = SlewRateFromTimeLog2_q31(slew_time_log2_q5_27);
@@ -902,7 +933,8 @@ static uint32_t ChiffWindowSamples(
 // per-sample shift step. Q32 (small positive) so the ramp step is a single
 // SMMUL: rate -= (rate * decay) >> 32.
 static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
-  const uint32_t kLn2_q28 = 186065279u;  // round(ln2 * 2^28)
+  const uint32_t kLn2_q28 = static_cast<uint32_t>(
+    __builtin_log(2.0) * 268435456.0 + 0.5);
   int64_t u_q32 = (static_cast<int64_t>(increment_q5_27) * kLn2_q28) >> 23;
   return static_cast<int32_t>(u_q32 - ((u_q32 * u_q32) >> 33));
 }
