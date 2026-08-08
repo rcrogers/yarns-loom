@@ -73,15 +73,20 @@ namespace {
   // four Voice::envelope_ plus four Oscillators x (gain, timbre). Wrapping past
   // this hands two envelopes the SAME sequence, which is the one property the
   // decorrelation exists to provide -- raise it if instances are added.
-  // A POWER OF TWO: Init masks the round-robin offset with kChiffDrawWords - 1.
-  const size_t kMaxChiffEnvelopes = 16;
+  // EXACTLY THE NUMBER THAT EXIST. It was 16 -- rounded up to a power of two so
+  // the round-robin offset could WRAP WITH A MASK -- and those four unused
+  // slots cost 128 bytes of the buffer below, against a ram_free of 404. The
+  // wrap happens ONCE PER OBJECT in Init, a cold path, so it can afford a
+  // compare; buying a mask there with a third of the remaining RAM is the wrong
+  // trade. Raise it if instances are added, and no longer to a power of two.
+  const size_t kMaxChiffEnvelopes = 12;
   const size_t kChiffDrawWords = kMaxChiffEnvelopes * kChiffDrawWordsPerBlock;
-  // ONE GUARD WORD. Both render loops fetch the NEXT word as they finish the
-  // current one and only then test whether the run is over, so an envelope
-  // whose words run to the end of the buffer reads one word past it. Today no
-  // envelope does -- twelve exist of the sixteen slots -- so this is latent,
-  // and the alternative is a compare per run to guard something the buffer can
-  // just contain. Never read for its value; the loop has already ended.
+  // ONE GUARD WORD, AND IT IS NOW LOAD-BEARING. Both render loops fetch the
+  // NEXT word as they finish the current one and only then test whether the run
+  // is over, so an envelope whose words run to the end of the buffer reads one
+  // word past it. That used to be latent -- twelve envelopes in sixteen slots,
+  // so nobody sat at the end -- and with the slots cut to twelve the LAST
+  // envelope does. Never read for its value; the loop has already ended.
   uint32_t shared_chiff_draws[kChiffDrawWords + 1];
   // How much of it any envelope actually reads. Generating the whole buffer
   // regardless was ~1% of the CPU spent on randomness nobody consumed.
@@ -283,8 +288,10 @@ void Envelope::Init(int16_t zero_value_s16) {
   // prevent. Envelopes live in static storage, so the flag starts false.
   if (!prng_offset_assigned_) {
     prng_offset_assigned_ = true;
-    prng_offset_u32_ = (next_prng_offset++ * kChiffDrawWordsPerBlock)
-      & (kChiffDrawWords - 1);
+    // A COMPARE, not a mask: kMaxChiffEnvelopes is no longer a power of two,
+    // and this runs once per object.
+    if (next_prng_offset >= kMaxChiffEnvelopes) next_prng_offset = 0;
+    prng_offset_u32_ = next_prng_offset++ * kChiffDrawWordsPerBlock;
     if (prng_offset_u32_ + kChiffDrawWordsPerBlock > shared_chiff_words_used) {
       shared_chiff_words_used = prng_offset_u32_ + kChiffDrawWordsPerBlock;
     }
