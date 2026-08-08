@@ -174,12 +174,11 @@ class Envelope {
   // knob uses. So a chiff started at any amount decays THROUGH the states every
   // smaller amount has as its onset.
   // THE CLOCK IS dB, NOT KNOB UNITS. Walking the amount axis evenly plateaus
-  // then collapses, because the axis' top half spans 4 dB while its bottom
-  // eight units span 50 (MEASURED: 3.7 dB in the first 45% of the duration,
-  // 50 dB in the last 20%). Smoothness over the duration outranks knob
-  // linearity. Level goes as 2^(-t/2) in the slew time, so the LINEAR SLEW-TIME
-  // RAMP already is the exponential decay; what the walk adds is the drive
-  // relaxing to 1 first, over the share of the duration its own dB earns.
+  // then collapses, because the axis' top half spans a few dB while its bottom
+  // few units span tens. Smoothness over the duration outranks knob linearity.
+  // Level goes as 2^(-t/2) in the slew time, so the LINEAR SLEW-TIME RAMP
+  // already is the exponential decay; what the walk adds is the drive relaxing
+  // to 1 first, over the share of the duration its own dB earns.
   // Q5.27, carried finely: at knob resolution this would step 128 times across
   // the duration, coarser than a run for a long chiff -- the granularity
   // already measured to kill the chirp.
@@ -255,8 +254,8 @@ class Envelope {
   // Where the render loop measures the value FROM. min(chiff_floor, 0): USAT
   // bounds [0, 2^30) and nothing else, so a note whose range reaches below
   // zero is rendered offset by its floor. Held as state rather than derived in
-  // RenderStage because a local stays live across the whole per-run path and
-  // GCC spills it -- MEASURED 383 -> 413 instructions, 58 -> 72 spills.
+  // RenderStage because a local stays live across the whole per-run path, and
+  // GCC spills it there.
   int32_t clamp_base_q30_;
   // THE THREE TERMS the output is built from. nominal is the chiff-free
   // envelope -- its own one-pole, running at the STAGE's rate, chasing the

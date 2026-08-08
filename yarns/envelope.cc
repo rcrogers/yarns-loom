@@ -48,8 +48,7 @@ namespace {
   // Bits per sample. FOUR LEVELS OF DETAIL ARE NOT THE POINT -- SIXTEEN LEVELS
   // ARE: a filter chasing a two-level input has a two-level output once its
   // rate reaches 1, i.e. a square, so "unfiltered" and "overdriven" collide and
-  // the drive has nothing left to shape (MEASURED at 9e5253a7: +0.7 dB across
-  // the whole upper half of the knob). A multi-level input makes the unfiltered
+  // the drive has nothing left to shape (the drive above the hinge then has nothing to shape). A multi-level input makes the unfiltered
   // midpoint NOISE, which costs 4.8 dB of level against a square of the same
   // peak -- and that 4.8 dB is exactly what the drive above the hinge reclaims.
   // FOUR divides a word evenly, so a word holds a whole number of samples and
@@ -178,15 +177,9 @@ const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 // and grows louder at once -- unfiltered white noise at the hinge, a full-scale
 // random square at the top. Below the hinge the drive is 1 and the clip sits at
 // the signal's own natural peak, so nothing is shaped.
-// MEASURED, chiff-only at the onset, kurtosis (a square is 1.00, the input's
-// own sixteen levels 1.79) and mean |step| against the hinge:
-//   AMOUNT     64     80     96    112    127
-//   kurtosis 1.91   1.42   1.21   1.13   1.07
-//   dB       0.00  +3.89  +5.34  +6.01  +6.26
 // A TWO-LEVEL INPUT HAS NO SUCH AXIS once the rate is uncapped: its unfiltered
-// output is ALREADY the square, so the whole upper half measured +0.7 dB and
-// one kurtosis (9e5253a7). The 4.2 dB the sixteen levels give away in crest
-// factor is what the drive spends.
+// output is ALREADY the square, so there is nothing left for drive to do. The
+// crest factor the sixteen levels give away is what the drive spends.
 const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
 // The state is held scaled DOWN by this many bits so the driven input cannot
 // leave Q30: undriven it reaches 2^29, and 16x that is 2^33. Shifting the
@@ -205,9 +198,8 @@ const uint32_t kChiffStateShift = 4;
 // 2^kChiffStateShift, so a wider span would leave the driven input outside Q30.
 const uint32_t kChiffDriveSpan_q5_27 = (5u << 27) / 2;  // 2.5 octaves
 // The clip point, and the mean's reserve, is this many of the chiff's own
-// sigma: 2 x the stored scaled rms, i.e. 2 * 3/sqrt(2). MEASURED peak reach is
-// 4.23 sigma over a 180k-sample window and lower everywhere faster, so the
-// clean end clips essentially nothing while reserving no more than it must.
+// sigma: 2 x the stored scaled rms, i.e. 2 * 3/sqrt(2). Sized so the clean end
+// clips essentially nothing while reserving no more than it must.
 const uint32_t kChiffClipRmsShift = 1;  // scaled rms << 1 == 3*sqrt(2) sigma
 
 // Chiff window as a multiple of the ATTACK duration: at kChiffDurationCenter the
@@ -504,10 +496,9 @@ static uint32_t ChiffWalkAudibleAmount_q7_25(
 // "ALREADY INAUDIBLE AT THE ONSET" IS AN EARLY RETURN, NOT A CLAMPED ZERO. The
 // old code ended `return phase_u16 ? phase_u16 : 1`, which turned that case --
 // target == start, so the phase to reach it is zero -- into a walk running at
-// 1/65536 speed. MEASURED on input-from-amount: AMOUNT 1..3 at DURATION 127
-// stranded for 18 s against a 1.5 s duration, and at DURATION 127 the outer
-// multiply underflowed the step to EXACTLY ZERO. The right answer is the
-// FASTEST walk, not the slowest.
+// 1/65536 speed -- the walk then never crosses the axis, so the chiff is never
+// scheduled to decay at all. The right answer is the FASTEST walk, not the
+// slowest.
 static uint32_t ChiffWalkAudiblePhase_u16(
     uint32_t start_q7_25, int32_t input_full_q30) {
   if (!start_q7_25) return 65536;
@@ -757,15 +748,9 @@ void Envelope::NoteOn(
       // PREVIOUS note had ramped it to (or, on a first note, the STAGE's slew
       // time, which is not the chiff's at all). The first run then derived its
       // step from that stale value, and only the run's END landed on the walk.
-      // MEASURED, AMOUNT 96, chiff alone over the note's first 64 samples:
-      // rms 151 and lag-1 0.97 -- a filtered whisper where the hinge is meant
-      // to be unfiltered -- against 5441 and 0.11 with this line. On a
-      // RETRIGGER, where the stale value is the previous note's slowest, the
-      // first block was rms 1.5: the chiff's onset was simply absent.
       // The onset is the loudest, most character-defining part of the chiff,
-      // and a window can be shorter than one block (0.2 ms at velocity 127 on
-      // the shipped default), so a whole chiff can live inside the block that
-      // was getting this wrong.
+      // and a window can be shorter than one block, so a whole chiff can live
+      // inside the block that would get this wrong.
       slew_time_log2_q5_27_ = ChiffWalkSlewTimeLog2_q5_27(
         chiff_walk_start_q7_25_, chiff_slew_time_log2_end_q5_27_);
       // AFTER the slew time, which the input is now solved against.
@@ -791,8 +776,7 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
 // time constant of one sample.
 //
 // rate = 2^-t is the small-rate approximation of the true coefficient
-// 1 - e^(-1/tau). It is exact enough everywhere the module runs -- MEASURED
-// error 0.0% at slew time 13, +0.5% at 6.7, +2.5% at 4.25 -- and it hits its
+// 1 - e^(-1/tau). It is exact enough everywhere the module runs, and hits its
 // ceiling at t = 0, where it says 1.0 while the truth is 0.632. A rate of 1.0
 // is not a slew at all: the value arrives in ONE sample. Capping the rate is
 // what removes the need for a "stage too short to slew" special case.
@@ -981,9 +965,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
     // leaves the note ending with the slew still running at chiff speed, and
     // the ~2% of the stage's span that a slew has left at handoff is then
     // consumed in a fraction of a millisecond instead of gliding away over the
-    // stage's own time constant -- a click at the end of every note. MEASURED
-    // before this was added: a burst to -53 dBFS at the release/DEAD boundary
-    // on a long chiff.
+    // stage's own time constant -- a click at the end of every note.
     // UNDER THE WALK THERE IS ONE DEADLINE AND ONE MECHANISM: finish the walk
     // by the release's end. The slew time and the input follow on their own,
     // because both are read off the amount the walk has reached. A second
@@ -1129,9 +1111,8 @@ void Envelope::RenderStage(
     // Folding bias into the integrator instead, with one clamp bounding the
     // sum, let the clamp write bias back into the envelope: at rest under a
     // negative bias the state pinned at 0 and the envelope came back at +bias.
-    // MEASURED against a bias-0 run at the same settings, the value diverged by
-    // exactly the bias amplitude (10, 8000, 20000 s16) every time the sum
-    // touched a rail.
+    // The value then diverged by exactly the bias amplitude every time the sum
+    // touched a rail. The battery pins this as an invariant.
     const int32_t bias_q30 = bias_q31 >> 1;
     // A PER-RUN COPY. The loop decays the rate every sample; writing that back
     // would compound the schedule once per block and collapse the chiff in a
@@ -1142,15 +1123,11 @@ void Envelope::RenderStage(
     // already advances the slew time by the whole run, so the next run derives
     // an advanced rate and the decay SCHEDULE is unchanged -- only its
     // resolution, per run instead of per sample.
-    // WHAT IT BUYS AND WHAT IT COSTS, MEASURED (env-chiff-perblock-rate):
-    // long chiffs are untouched (<=1% brightness at a 200 ms attack, 3-9% at
-    // 20 ms), but a chiff that lives a single block loses its darkening
-    // ENTIRELY and reads 39% brighter -- holding the run's midpoint rate rather
-    // than its starting one turns that into 15% darker, i.e. the worst-case
-    // rate error goes +94% -> -29%, but no constant restores the chirp.
+    // Long chiffs barely notice, but a chiff that lives a single block loses
+    // its darkening ENTIRELY, and no per-run constant restores the chirp.
     // SHORT CHIFFS ARE NOT A CORNER CASE: the window inherits the attack's
-    // velocity modulation and reaches 0.2 ms at velocity 127 on the shipped
-    // default. cb68505b rejected this same trade by ear.
+    // velocity modulation, so it reaches a fraction of a millisecond at high
+    // velocity on the shipped default. Rejected by ear twice.
     // THE WALK, ADVANCED ONCE PER RUN. All three of the chiff's axes -- the
     // slew time, the drive and the input -- are read off the amount this run
     // sits at, by the maps the knob itself uses. The loop's per-sample rate
@@ -1264,8 +1241,8 @@ void Envelope::RenderStage(
     // THE MEAN IS HELD ONE SCALED RMS INSIDE EACH RAIL; the chiff is then
     // added, so it has room by construction instead of being clipped.
     //  - the clamp does NOT feed back, which is why bias may be part of it.
-    //    Steering the slew input instead waits on the integrator: MEASURED, a
-    //    bias LFO at 364 ms left 6641 LSB of output error.
+    //    Steering the slew input instead waits on the integrator, which lags a
+    //    moving bias badly.
     //  - only the OFFSET is ramped across the run. nominal is an exponential and
     //    a linear chord over 64 samples is percent-level wrong on a 409-sample
     //    stage -- envelope distortion, not rounding.
@@ -1274,22 +1251,17 @@ void Envelope::RenderStage(
     //    both sides. A larger margin reaches that regime sooner.
     //  - THE MARGIN IS 2.121 SIGMA, INHERITED RATHER THAN
     //    CHOSEN: the factor applied here is one, and the 2.121 arrives folded
-    //    into what ChiffScaledRmsPerInput returns. What it should be is open.
-    //    MEASURED AT ONE SETTING ONLY (peak at full scale, steady bias 8000),
-    //    so treat as indicative, not established: peaks reach ~4.3 sigma and
-    //    ~1.4% of the loud phase clips at the rail. Doubling the margin costs
-    //    ~1.8 dB of attack level -- measured before the response correction
-    //    widened this quantity by ~0.5 dB.
+    //    into what ChiffScaledRmsPerInput returns. What it SHOULD be is open --
+    //    a larger margin trades attack level for rail headroom, and the trade
+    //    has never been characterised across the setting space.
     // THE CLIP POINT, WHICH IS ALSO THE MEAN'S RESERVE -- one number doing
     // both jobs, so a bounded chiff always fits the headroom reserved for it
     // and rail clipping cannot happen at any peak or bias.
     // min() because the peak the chiff can reach is the SMALLER of two bounds:
     // its input (the state is a convex combination of +/- input, so it can
     // never exceed it) and its tail (3*sqrt(2) sigma). The input bound binds at
-    // fast rates and the tail bound when slow. MEASURED: at rate 0.5 the peak
-    // is 1.73 sigma and sqrt((2-r)/r) is 1.73, i.e. the hard bound, to the
-    // digit. Reserving the tail bound at fast rates would over-reserve 2.5x
-    // exactly where the chiff is loudest.
+    // fast rates and the tail bound when slow. Reserving the tail bound at fast
+    // rates would over-reserve badly, exactly where the chiff is loudest.
     const int32_t chiff_clip_q30 = std::min<int32_t>(
       input_q30, chiff_scaled_rms_q30 << kChiffClipRmsShift);
     // The loop runs the state scaled down, so its clip point is too.
@@ -1348,8 +1320,8 @@ void Envelope::RenderStage(
       // WHOLE WORDS DO NOT LEAVE THE LOOP. Fetching the draws inside it is
       // what removes the chunk loop, and the chunk loop was not bookkeeping:
       // the render body pins twelve registers, so every one of them was
-      // SPILLED AND RELOADED at each word boundary -- MEASURED 78 cycles per
-      // eight samples, 624 per block, against 2240 for the render itself.
+      // SPILLED AND RELOADED at each word boundary, which cost more than the
+      // bookkeeping it replaced.
       // THE REGISTER BUDGET IS EXACTLY FOURTEEN and this is at it: eleven
       // values, the draws word, and ip/lr as scratch. The loop's end test is
       // the one operand that does not get a register -- it is read from memory
@@ -1483,8 +1455,8 @@ void Envelope::RenderStage(
     // the render needs this -- neither one-pole integrates it, so there is no
     // windup to prevent -- but value() returns int16_t and tremolo() forms
     // (value - release target) * strength_u16 in int32, and both wrap on an
-    // out-of-range value. MEASURED unbounded: -10014..33092, and 33092 * 65535
-    // is 2.17e9 against INT32_MAX 2.147e9. Bias-free, so the invariant holds.
+    // out-of-range value: unbounded, the product overflows int32. Bias-free,
+    // so the envelope-is-bias-independent invariant still holds.
     value_q30 = nominal_q30 + (chiff_state_q30 << kChiffStateShift);
     if (value_q30 < clamp_base_q30_) value_q30 = clamp_base_q30_;
     const int32_t value_top_q30 = clamp_base_q30_ + kValueMax_q30;
