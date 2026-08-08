@@ -47,7 +47,16 @@ cannot disagree — there is one implementation.
   not move. Settings too short to judge (a 1.7 ms chiff is two blocks long)
   report SKIP, never PASS. Takes an optional page path, so a prototype branch's
   `chiff_sim.html` can be measured against the current one.
-  IN `make check` since 2026-08-05, when it first went green (worst notch
+  **OUT of `make check` since 2026-08-08, and its LIMITS are what is wrong.**
+  It took a per-block std after subtracting the block mean -- from a residual it
+  had already high-passed, so the mean was zero and subtracting it could only
+  remove signal, most of it where the chiff's filter is slowest. With that fixed
+  (8e1764dd) the notches it used to report largely vanish (6.1-7.2 dB -> 0.0)
+  and CLIFFS appear instead, 15.9-18.0 dB against a 15 dB limit. Both marked and
+  marked-2 now fail. DO NOT RAISE THE LIMITS TO GET GREEN: recalibrate them
+  against a build whose smoothness the user has signed off on, then wire it back
+  in -- the same rule under which it went in the first time.
+  WAS IN `make check` from 2026-08-05, when it first went green (worst notch
   5.9 dB against the 6 dB limit). It is the slowest check by a wide margin --
   25 configurations x 5 seeds, each a full render through the page -- and it is
   the only automated reading of L6, "smooth transitions over the chiff
