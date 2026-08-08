@@ -50,10 +50,24 @@ namespace {
   // the whole upper half of the knob). A multi-level input makes the unfiltered
   // midpoint NOISE, which costs 4.8 dB of level against a square of the same
   // peak -- and that 4.8 dB is exactly what the drive above the hinge reclaims.
-  // FOUR divides 32 evenly, so a word holds a whole number of samples and the
-  // chunking below stays a shift and a mask.
+  // FOUR divides a word evenly, so a word holds a whole number of samples and
+  // the chunking below stays a shift and a mask. That is ASSERTED below, not
+  // just asserted here.
   const uint32_t kChiffDrawBits = 4;
-  const uint32_t kChiffDrawsPerWord = 32 / kChiffDrawBits;
+  // THE WORD THE DRAWS ARE PACKED INTO. Everything below derives from this type
+  // rather than from a literal 32, which is what the width used to be written
+  // as -- a number that is only correct as long as nobody changes the buffer's
+  // element type, with nothing to notice if they do.
+  typedef uint32_t ChiffDrawWord;
+  const uint32_t kBitsPerByte = 8;
+  const uint32_t kChiffDrawBitsPerWord = sizeof(ChiffDrawWord) * kBitsPerByte;
+  const uint32_t kChiffDrawsPerWord = kChiffDrawBitsPerWord / kChiffDrawBits;
+  // A DRAW MAY NOT STRADDLE A WORD. Both render loops extract one with a single
+  // ubfx at a compile-time offset, so a draw width that did not divide the word
+  // would silently read across the boundary. Pre-C++11 here, hence the negative
+  // array size rather than static_assert.
+  typedef char kChiffDrawBitsMustDivideTheWord[
+      (kChiffDrawBitsPerWord % kChiffDrawBits == 0) ? 1 : -1];
   // THE LEVELS ARE THE ODD MULTIPLES of 1/kChiffDrawMax of the chiff input:
   // level = 2 * draw - kChiffDrawMax for a draw in [0, kChiffDrawMax], so they
   // run +/-1, +/-3 ... +/-kChiffDrawMax and the set is SYMMETRIC about zero.
@@ -68,7 +82,14 @@ namespace {
   // A square is 1.0 here; this is 4.2 dB below it, and that gap IS the drive's
   // room above the hinge. Kurtosis is 1.79 against a square's 1.00.
   const uint32_t kChiffDrawRmsPerPeak_q16 = 40281;
-  const size_t kChiffDrawWordsPerBlock = kAudioBlockSize / kChiffDrawsPerWord;
+  // ROUNDED UP, and asserted exact. Truncating would leave the block's last
+  // partial word off the end of every envelope's slot, and both render loops
+  // read draws until the BLOCK ends rather than until the words do -- so the
+  // last samples would read another envelope's field, or past the buffer.
+  const size_t kChiffDrawWordsPerBlock =
+      (kAudioBlockSize + kChiffDrawsPerWord - 1) / kChiffDrawsPerWord;
+  typedef char kChiffDrawsMustFillWholeWords[
+      (kAudioBlockSize % kChiffDrawsPerWord == 0) ? 1 : -1];
   // Envelope instances that can each be given their own words. TWELVE EXIST:
   // four Voice::envelope_ plus four Oscillators x (gain, timbre). Wrapping past
   // this hands two envelopes the SAME sequence, which is the one property the
@@ -87,7 +108,7 @@ namespace {
   // word past it. That used to be latent -- twelve envelopes in sixteen slots,
   // so nobody sat at the end -- and with the slots cut to twelve the LAST
   // envelope does. Never read for its value; the loop has already ended.
-  uint32_t shared_chiff_draws[kChiffDrawWords + 1];
+  ChiffDrawWord shared_chiff_draws[kChiffDrawWords + 1];
   // How much of it any envelope actually reads. Generating the whole buffer
   // regardless was ~1% of the CPU spent on randomness nobody consumed.
   size_t shared_chiff_words_used = 0;
