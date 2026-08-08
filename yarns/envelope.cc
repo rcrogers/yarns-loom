@@ -37,11 +37,13 @@ namespace yarns {
 
 using namespace stmlib;
 
-// Chiff input draws, filled once per audio block by FillSharedPrngBuffer().
-// One kChiffDrawBits-wide field per sample selects the level the chiff's filter
-// chases, so a word carries kChiffDrawsPerWord samples. Each envelope owns ITS
-// OWN words, so the sequences are independent rather than shifted views of one
-// stream.
+// Chiff input draws. One kChiffDrawBits-wide field per sample selects the level
+// the chiff's filter chases, so a word carries kChiffDrawsPerWord samples.
+// EACH ENVELOPE GENERATES ITS OWN, from its own xorshift state seeded distinctly
+// in Init -- the one thing ever asked of this PRNG is that instances not share a
+// sequence. The word IS the state: the unrolled loop reads its fields with ubfx
+// and never writes it, so advancing it is three instructions with no load, no
+// store, and no buffer to index.
 namespace {
   // Bits per sample. FOUR LEVELS OF DETAIL ARE NOT THE POINT -- SIXTEEN LEVELS
   // ARE: a filter chasing a two-level input has a two-level output once its
@@ -82,26 +84,25 @@ namespace {
   // A square is 1.0 here; this is 4.2 dB below it, and that gap IS the drive's
   // room above the hinge. Kurtosis is 1.79 against a square's 1.00.
   const uint32_t kChiffDrawRmsPerPeak_q16 = 40281;
-  // ROUNDED UP, and asserted exact. Truncating would leave the block's last
-  // partial word off the end of every envelope's slot, and both render loops
-  // read draws until the BLOCK ends rather than until the words do -- so the
-  // last samples would read another envelope's field, or past the buffer.
-  const size_t kChiffDrawWordsPerBlock =
-      (kAudioBlockSize + kChiffDrawsPerWord - 1) / kChiffDrawsPerWord;
   typedef char kChiffDrawsMustFillWholeWords[
       (kAudioBlockSize % kChiffDrawsPerWord == 0) ? 1 : -1];
-  // One slot per envelope that can be live at once; kMaxChiffEnvelopes is in
-  // envelope.h, where multi.h can assert it against the layout map.
-  const size_t kChiffDrawWords = kMaxChiffEnvelopes * kChiffDrawWordsPerBlock;
-  // Both render loops fetch the NEXT word as they finish the current one and
-  // only then test whether the run is over, so the last slot reads one word
-  // past itself. Never read for its value; the loop has already ended.
-  const size_t kChiffDrawGuardWords = 1;
-  ChiffDrawWord shared_chiff_draws[kChiffDrawWords + kChiffDrawGuardWords];
-  // How much of it any envelope actually reads. Generating the whole buffer
-  // regardless was ~1% of the CPU spent on randomness nobody consumed.
-  size_t shared_chiff_words_used = 0;
-  uint32_t shared_prng_state = 0xCAFEBABE;
+
+  // xorshift32. Zero is a fixed point, so a seed may never be zero; the seeder
+  // below cannot produce one.
+  inline ChiffDrawWord NextChiffDraws(ChiffDrawWord state) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return state;
+  }
+
+  // Distinct seeds for distinct sequences. xorshift32 has ONE orbit, so seeds
+  // are phases of a single stream and near seeds start near each other -- hence
+  // an odd stride large relative to the orbit rather than a counter. Handed out
+  // per Init rather than per object: taking a fresh one on every layout change
+  // costs nothing and removes the claimed-once flag the slot allocator needed.
+  const uint32_t kChiffSeedStride = 2654435761u;  // round(2^32 / golden ratio)
+  uint32_t next_chiff_seed = 0xCAFEBABE;
 }  // namespace
 
 // The DAC range in Q30: the s16 output 32767 is 32767 << 15, and
@@ -236,19 +237,6 @@ const uint32_t kStageAimOvershoot_u16 = 66759;  // round(2^16 / (1 - e^-4))
 // track a target; defined below, declared here because Init caches it.
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 
-void Envelope::FillSharedPrngBuffer() {
-  uint32_t state = shared_prng_state;
-  for (size_t i = 0; i < shared_chiff_words_used; ++i) {
-    state ^= state << 13;
-    state ^= state >> 17;
-    state ^= state << 5;
-    // EVERY BIT IS USED. The old buffer spent a whole 32-bit draw to deliver
-    // one sign, generating and loading 32 bits per sample to carry 1.
-    shared_chiff_draws[i] = state;
-  }
-  shared_prng_state = state;
-}
-
 void Envelope::Init(int16_t zero_value_s16) {
   phase_increment_u32_ = 0;
   stage_samples_left_ = 0;
@@ -287,25 +275,12 @@ void Envelope::Init(int16_t zero_value_s16) {
     &stage_target_q30_[ENV_NUM_STAGES],
     zero_value_q30
   );
-  // Round-robin PRNG window offsets: distinct for up to kMaxChiffEnvelopes
-  // instances (we have twelve), so co-triggered envelopes never draw the same
-  // random field on the same sample.
-  static uint32_t next_prng_offset = 0;
-  // CLAIMED ONCE PER OBJECT, NOT ONCE PER Init. Init runs again whenever the
-  // layout is reassigned, and taking a fresh slot each time walks the counter
-  // until it wraps onto a slot a LIVE envelope still holds -- two envelopes
-  // then draw the same fields, which is the one thing this offset exists to
-  // prevent. Envelopes live in static storage, so the flag starts false.
-  if (!prng_offset_assigned_) {
-    prng_offset_assigned_ = true;
-    // A COMPARE, not a mask: kMaxChiffEnvelopes is no longer a power of two,
-    // and this runs once per object.
-    if (next_prng_offset >= kMaxChiffEnvelopes) next_prng_offset = 0;
-    prng_offset_u32_ = next_prng_offset++ * kChiffDrawWordsPerBlock;
-    if (prng_offset_u32_ + kChiffDrawWordsPerBlock > shared_chiff_words_used) {
-      shared_chiff_words_used = prng_offset_u32_ + kChiffDrawWordsPerBlock;
-    }
-  }
+  // A distinct sequence per instance, which is the whole requirement. The
+  // stride keeps successive seeds far apart in the single xorshift orbit; the
+  // OR guarantees nonzero, which is a fixed point.
+  next_chiff_seed += kChiffSeedStride;
+  chiff_draws_ = next_chiff_seed | 1u;
+  chiff_draws_left_ = kChiffDrawsPerWord;
   Trigger(ENV_STAGE_DEAD);
 }
 
@@ -1417,15 +1392,13 @@ void Envelope::RenderStage(
     combined_q30 += stage_aim_q30;
 
     // ONE WORD IS kChiffDrawsPerWord SAMPLES of draws, so a run can straddle a
-    // word boundary. Chunk the loop there rather than reloading per sample.
-    const uint32_t sample_index =
-      static_cast<uint32_t>(kAudioBlockSize - block_samples_left);
-    // Constant power-of-two divisors: the compiler emits a shift and a mask.
-    const uint32_t draw_in_word = sample_index % kChiffDrawsPerWord;
-    const uint32_t* draw_word = &shared_chiff_draws[
-      prng_offset_u32_ + sample_index / kChiffDrawsPerWord];
-    uint32_t draws_left = kChiffDrawsPerWord - draw_in_word;
-    uint32_t draws = *draw_word >> (draw_in_word * kChiffDrawBits);
+    // word boundary. Chunk the loop there rather than regenerating per sample.
+    // The generator state IS the current word, and how much of it is still
+    // unspent carries ACROSS runs -- a block can be rendered in several.
+    ChiffDrawWord draw_state = chiff_draws_;
+    uint32_t draws_left = chiff_draws_left_;
+    uint32_t draws =
+      draw_state >> ((kChiffDrawsPerWord - draws_left) * kChiffDrawBits);
     while (sample_buffer != segment_end) {
       const uint32_t samples_left =
         static_cast<uint32_t>(segment_end - sample_buffer);
@@ -1441,12 +1414,10 @@ void Envelope::RenderStage(
       // register the body cannot spare.
       if (draws_left == kChiffDrawsPerWord &&
           samples_left >= kChiffDrawsPerWord) {
-        const uint32_t* const word_end =
-          draw_word + samples_left / kChiffDrawsPerWord;
+        uint32_t words_left = samples_left / kChiffDrawsPerWord;
 #if defined(__arm__) && __ARM_ARCH >= 7
         __asm__ volatile(
           "1:\n"
-          "  ldr   %[draws], [%[word]], #4\n"       // one word: eight draws
           YARNS_CHIFF_ASM_SAMPLE("0")
           YARNS_CHIFF_ASM_SAMPLE("4")
           YARNS_CHIFF_ASM_SAMPLE("8")
@@ -1455,32 +1426,41 @@ void Envelope::RenderStage(
           YARNS_CHIFF_ASM_SAMPLE("20")
           YARNS_CHIFF_ASM_SAMPLE("24")
           YARNS_CHIFF_ASM_SAMPLE("28")
-          "  ldr   ip, %[wend]\n"                   // the operand with no
-          "  cmp   %[word], ip\n"                   //   register of its own
-          "  bne   1b\n"
+          // CONSUME THEN ADVANCE, so the word held at entry is the one
+          // rendered and the register leaves holding the next unspent word.
+          // xorshift32 in place: the word IS the state, and the ubfx above
+          // never writes it, so this is three instructions with no memory
+          // traffic at all -- against a load per word plus the loop-end load
+          // that had no register of its own.
+          "  eor   %[draws], %[draws], %[draws], lsl #13\n"
+          "  eor   %[draws], %[draws], %[draws], lsr #17\n"
+          "  eor   %[draws], %[draws], %[draws], lsl #5\n"
+          "  subs  %[words], %[words], #1\n"        // in the freed pointer's
+          "  bne   1b\n"                            //   register
           : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
             [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
-            [buf] "+r"(sample_buffer), [word] "+r"(draw_word),
-            [draws] "=&r"(draws)
+            [buf] "+r"(sample_buffer), [words] "+r"(words_left),
+            [draws] "+r"(draws)
           : [decay] "r"(decay_q32), [qinput] "r"(chiff_input_per_level_q30),
             [clip] "r"(chiff_clip_scaled_q30),
             [srate] "r"(stage_rate_q31),
-            [cslope] "r"(combined_slope_q30), [wend] "m"(word_end), [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),
+            [cslope] "r"(combined_slope_q30), [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),
             [stshift] "i"(kChiffStateShift), [sbits] "i"(kSampleBits),
             [satbits] "i"(kOutputSaturateBits)
           : "ip", "lr", "cc", "memory");
 #else
-        while (draw_word != word_end) {
-          draws = *draw_word++;
+        while (words_left--) {
           for (uint32_t i = 0; i < kChiffDrawsPerWord; ++i) {
             YARNS_CHIFF_RENDER_SAMPLE(
               static_cast<int32_t>((draws >> (i * kChiffDrawBits))
                                    & kChiffDrawMax));
           }
+          draws = NextChiffDraws(draws);
         }
 #endif
-        // draws_left is already a whole word; the next word feeds the tail.
-        draws = *draw_word;
+        // The loop leaves the next unspent word in hand; draws_left is
+        // already a whole word.
+        draw_state = draws;
         continue;
       }
       uint32_t chunk = samples_left;
@@ -1529,11 +1509,13 @@ void Envelope::RenderStage(
 #endif
       draws_left -= chunk;
       if (!draws_left) {
-        ++draw_word;
-        draws = *draw_word;
+        draw_state = NextChiffDraws(draw_state);
+        draws = draw_state;
         draws_left = kChiffDrawsPerWord;
       }
     }
+    chiff_draws_ = draw_state;
+    chiff_draws_left_ = static_cast<uint8_t>(draws_left);
     {
       // THE CHIFF INPUT SHRINKS FOREVER AND NEVER REACHES ZERO -- until Q30
       // runs out of bits, which is the only ending there is. Nothing mutes it,

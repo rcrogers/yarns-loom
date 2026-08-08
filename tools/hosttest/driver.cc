@@ -105,7 +105,6 @@ static int32_t g_value_max = INT32_MIN;
 static void RenderMs(double ms) {
   size_t n = (size_t)(ms * 45.0);
   for (size_t i = 0; i < n; i += kAudioBlockSize) {
-    Envelope::FillSharedPrngBuffer();
     int16_t buffer[kAudioBlockSize];
     int32_t bias_target_q31 = g_tremolo
         ? static_cast<int32_t>(env.tremolo(g_tremolo)) << 16 : 0;

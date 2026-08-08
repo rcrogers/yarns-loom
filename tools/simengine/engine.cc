@@ -8,16 +8,16 @@
 // Every control is a front-panel SETTING, not a time. Milliseconds are an
 // OUTPUT (reported in the meta block), never an input.
 #define TEST 1
-// Pin the round-robin PRNG offset below: Envelope::Init hands out a new offset
-// per construction, so without this the same parameters render differently on
-// every call and nothing is reproducible.
+// Pin the envelope's PRNG seed below: Init hands out a fresh seed per call, so
+// without this the same parameters render differently every time and nothing
+// is reproducible.
 #define private public
 
 #include "stmlib/stmlib.h"
 #include "stmlib/utils/dsp.h"
 #include "yarns/drivers/dac.h"
 
-// Same translation unit as the envelope so the file-static PRNG can be seeded
+// Same translation unit as the envelope so its PRNG can be seeded
 // for reproducible renders (the sim's re-roll button).
 #include "envelope_portable.cc"
 
@@ -133,7 +133,7 @@ int chiff_render(
             release_setting, amplitude_mod_velocity, velocity,
             env_mod_attack, env_mod_decay, env_mod_sustain, env_mod_release);
 
-  shared_prng_state = seed ? seed : 0xCAFEBABEu;
+  next_chiff_seed = seed ? seed : 0xCAFEBABEu;
 
   // EXCITER AMT VEL MOD, mirroring Part::VoiceNoteOn: modulate_7_13 works in
   // 13 bits, so shift back to the 7-bit 0..127 the amount is.
@@ -155,7 +155,9 @@ int chiff_render(
   // Rest level = the note's own min, so an inverted or negative range starts
   // where it ends rather than at a zero that is outside it.
   envelope.Init(static_cast<int16_t>(min_target));
-  envelope.prng_offset_u32_ = 0;   // reproducible across calls
+  // Re-seed AFTER Init, which consumes one stride of its own.
+  envelope.chiff_draws_ = (seed ? seed : 0xCAFEBABEu) | 1u;
+  envelope.chiff_draws_left_ = kChiffDrawsPerWord;
   envelope.NoteOn(adsr, min_target, max_target,
                   modulated_chiff_amount,
                   static_cast<uint8_t>(chiff_duration));
@@ -179,7 +181,6 @@ int chiff_render(
       envelope.NoteOff();
       released = true;
     }
-    Envelope::FillSharedPrngBuffer();
     // Same construction as the host driver, so a scenario dialled here and a
     // scenario run there produce the same bias.
     int32_t bias_target_q31 = tremolo

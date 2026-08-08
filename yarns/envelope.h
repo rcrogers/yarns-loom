@@ -63,9 +63,6 @@ class Envelope {
   ~Envelope() { }
 
   void Init(int16_t zero_value_s16);
-  // Refill the system-wide PRNG buffer consumed by the chiff draws; must
-  // be called once per audio block, before any envelope renders.
-  static void FillSharedPrngBuffer();
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
@@ -164,12 +161,12 @@ class Envelope {
   // slew time rising linearly, with no per-sample LUT. Zero = hold.
   int32_t chiff_slew_rate_decay_q32_;
 
-  // Which words of the shared draw buffer THIS envelope owns -- enough of them
-  // to cover one audio block at one field per sample. Ownership is exclusive,
-  // so the sequences are independent rather than shifted views of one stream.
-  // Claimed once per object (see Init), never reassigned.
-  uint32_t prng_offset_u32_;
-  bool prng_offset_assigned_;
+  // This envelope's chiff draws: the current word, and how many of its fields
+  // are still unspent. The word doubles as the xorshift state -- advancing it
+  // is three instructions with no memory traffic -- and both carry across runs,
+  // since a block may be rendered in several.
+  uint32_t chiff_draws_;
+  uint8_t chiff_draws_left_;
 
   // THE AMOUNT WALK (prototype). DURATION is a time-based modulation of AMOUNT:
   // the chiff's entire decay is this one quantity falling linearly to zero over
