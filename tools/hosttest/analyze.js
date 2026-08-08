@@ -237,6 +237,29 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
         mn>=0 && mx<=FS_OUT, mn+'..'+mx);
 }
 
+// A RANGE THAT SITS BELOW ZERO MUST STILL BE AUDIBLE WITH NO BIAS TO LIFT IT.
+// This is the shape a negative warped timbre target has: Oscillator::NoteOn
+// passes (0, warped_max_timbre), so an inverted timbre envelope runs from 0
+// DOWNWARD with bias 0. Every other negative-range check here carries a
+// standing bias of 20000, which lifts the signal into USAT's [0, 32767] and
+// hides the failure; the below-zero invariant check reads value_trace, the
+// INTERNAL value, which is also unaffected. So nothing asserted the thing that
+// actually reaches the DAC.
+// REGRESSED TWICE, which is why this is a check and not a patch. Compare
+// against the same range positive so the assertion cannot pass on a build that
+// renders nothing at all.
+{
+  const opts=' 0 0 gate=500 tail=300 bias_lfo=0';
+  const span=(r)=>{ const s=run('basic'+opts+' range='+r);
+    let mn=99999, mx=-99999; for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v; }
+    return mx-mn; };
+  const up=span(16383), down=span(-16383);
+  // Half the positive span: a working inversion is symmetric to within the
+  // rails, a broken one is exactly 0, so neither verdict is near the line.
+  check('below-zero range is audible with no bias (inverted timbre)',
+        down > up/2, 'span '+down+' against '+up+' for the same range positive');
+}
+
 // The invariant again, on a range that sits BELOW zero: the clamp offset must
 // not become a second path from bias into the envelope.
 { const base='basic 96 90 range=-16383 gate=2000 tail=500 value_trace=1 ';
