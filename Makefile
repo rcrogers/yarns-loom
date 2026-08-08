@@ -42,14 +42,15 @@ check: host qemu
 	node tools/chiff_checks/peakfloor.js
 	node tools/chiff_checks/xvmod.js
 	node tools/chiff_checks/strictmode.js
-# decay.js IS OUT OF THE GATE until its limits are recalibrated. It measured a
-# mean-subtracted std of an already-high-passed residual, which is blind to slow
-# content; 8e1764dd fixed the statistic, and with a statistic that SEES that
-# content its 6 dB / 15 dB limits reject marked (8 settings) and marked-2 (14).
-# The limits, not the builds, are what is unproven. Same precedent as when it
-# was first added: it goes into the gate once it is green on a build whose
-# smoothness the user has signed off on. Run it by hand meanwhile:
-#	node tools/chiff_checks/decay.js
+# decay.js is BACK IN THE GATE (2026-08-08). It left when 8e1764dd fixed its
+# statistic to see slow content and its old 6 dB / 15 dB limits then rejected
+# marked (8 settings) and this build (14) -- the limits, not the builds, were
+# what was unproven. The stated condition for readmission was a build whose
+# character the user had signed off on; e93e4006 is flash-tested and signed off
+# ("perf is adequate, basic chiff quality is good"), so the limits are
+# recalibrated to its measured spread and it is green. Read it as a REGRESSION
+# GUARD on that character, not as a smoothness oracle -- decay.js says why.
+	node tools/chiff_checks/decay.js
 
 firmware:
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh make -f yarns/makefile syx
