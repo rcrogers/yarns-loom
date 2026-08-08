@@ -32,6 +32,17 @@ namespace yarns {
 
 using namespace stmlib;
 
+// Envelope instances that can be live at once, and therefore the number of
+// per-envelope slots in the shared chiff draw buffer. Wrapping past it hands
+// two envelopes the SAME random sequence, which is the one property the
+// per-envelope offset exists to provide.
+//
+// It is stated here rather than derived because Envelope must not depend on
+// its owners (voice.h already includes this header). multi.h holds the layout
+// map, folds the true maximum out of it, and asserts that fold EQUALS this --
+// so the compiler, not a comment, is what keeps the number honest.
+const size_t kMaxChiffEnvelopes = 13;
+
 enum EnvelopeStage {
   ENV_STAGE_ATTACK,
   ENV_STAGE_DECAY,

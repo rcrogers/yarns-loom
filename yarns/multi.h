@@ -318,6 +318,48 @@ struct CVOutputMap {
 YARNS_LAYOUTS(YARNS_LAYOUT_ROW_COUNT_CHECK)
 #undef YARNS_LAYOUT_ROW_COUNT_CHECK
 
+// A CV output renders EITHER its audio voices' oscillators OR its own envelope
+// (CVOutput::RenderSamples), never both; and only an AUX role can reach the
+// envelope path at all (CVOutput::is_envelope).
+template<int kDcRole, int kNumAudioVoices>
+struct CVOutputMaxEnvelopes {
+  static const int value = kNumAudioVoices
+      ? kNumAudioVoices * kEnvelopesPerOscillator
+      : ((kDcRole == DC_AUX_1 || kDcRole == DC_AUX_2)
+          ? kEnvelopesPerCVOutput : 0);
+};
+
+#define YARNS_CV_MAP_ENVELOPES(dc_role, first_voice, num_dc_voices, num_audio_voices) \
+  + CVOutputMaxEnvelopes<dc_role, num_audio_voices>::value
+
+template<int kLayout> struct LayoutEnvelopes { static const int value = 0; };
+#define YARNS_LAYOUT_ENVELOPES(layout)                                          \
+  template<> struct LayoutEnvelopes<layout> {                          \
+    static const int value = 0 YARNS_CV_MAP_##layout(YARNS_CV_MAP_ENVELOPES);   \
+  };
+YARNS_LAYOUTS(YARNS_LAYOUT_ENVELOPES)
+#undef YARNS_LAYOUT_ENVELOPES
+
+// static const int, not enum: GCC 4.8 rejects a max over two anonymous enum
+// types under -Werror=enum-compare.
+template<int kLayout> struct MaxLayoutEnvelopes {
+  static const int max_of_preceding_layouts =
+      MaxLayoutEnvelopes<kLayout - 1>::value;
+  static const int this_layout = LayoutEnvelopes<kLayout>::value;
+  static const int value = this_layout > max_of_preceding_layouts
+      ? this_layout : max_of_preceding_layouts;
+};
+template<> struct MaxLayoutEnvelopes<0> {
+  static const int value = LayoutEnvelopes<0>::value;
+};
+
+// The shared chiff draw buffer is sized from kMaxChiffEnvelopes (envelope.h,
+// which cannot see its owners). EXACTLY equal: too few aliases two envelopes
+// onto one random sequence, too many spends RAM on slots nothing can claim.
+typedef char chiff_draw_slots_must_equal_the_hungriest_layout[
+    (MaxLayoutEnvelopes<LAYOUT_LAST - 1>::value == kMaxChiffEnvelopes)
+        ? 1 : -1];
+
 // Defined in multi.cc, where the row order is asserted against the enum.
 extern const CVOutputMap kCVOutputMap[LAYOUT_LAST][kNumCVOutputs];
 

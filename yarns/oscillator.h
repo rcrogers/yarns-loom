@@ -47,6 +47,11 @@ namespace yarns {
 
 static const uint16_t kHighestNote = 128 * 128;
 
+// Envelopes an Oscillator carries: gain_envelope_ and timbre_envelope_. The
+// layout map in multi.h counts audio voices with it to size the shared chiff
+// draw buffer, so adding an envelope here moves that buffer by itself.
+const uint8_t kEnvelopesPerOscillator = 2;
+
 class StateVariableFilter : public SVF {
  public:
   void Init();

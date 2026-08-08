@@ -90,25 +90,14 @@ namespace {
       (kAudioBlockSize + kChiffDrawsPerWord - 1) / kChiffDrawsPerWord;
   typedef char kChiffDrawsMustFillWholeWords[
       (kAudioBlockSize % kChiffDrawsPerWord == 0) ? 1 : -1];
-  // Envelope instances that can each be given their own words. TWELVE EXIST:
-  // four Voice::envelope_ plus four Oscillators x (gain, timbre). Wrapping past
-  // this hands two envelopes the SAME sequence, which is the one property the
-  // decorrelation exists to provide -- raise it if instances are added.
-  // EXACTLY THE NUMBER THAT EXIST. It was 16 -- rounded up to a power of two so
-  // the round-robin offset could WRAP WITH A MASK -- and those four unused
-  // slots cost 128 bytes of the buffer below, against a ram_free of 404. The
-  // wrap happens ONCE PER OBJECT in Init, a cold path, so it can afford a
-  // compare; buying a mask there with a third of the remaining RAM is the wrong
-  // trade. Raise it if instances are added, and no longer to a power of two.
-  const size_t kMaxChiffEnvelopes = 12;
+  // One slot per envelope that can be live at once; kMaxChiffEnvelopes is in
+  // envelope.h, where multi.h can assert it against the layout map.
   const size_t kChiffDrawWords = kMaxChiffEnvelopes * kChiffDrawWordsPerBlock;
-  // ONE GUARD WORD, AND IT IS NOW LOAD-BEARING. Both render loops fetch the
-  // NEXT word as they finish the current one and only then test whether the run
-  // is over, so an envelope whose words run to the end of the buffer reads one
-  // word past it. That used to be latent -- twelve envelopes in sixteen slots,
-  // so nobody sat at the end -- and with the slots cut to twelve the LAST
-  // envelope does. Never read for its value; the loop has already ended.
-  ChiffDrawWord shared_chiff_draws[kChiffDrawWords + 1];
+  // Both render loops fetch the NEXT word as they finish the current one and
+  // only then test whether the run is over, so the last slot reads one word
+  // past itself. Never read for its value; the loop has already ended.
+  const size_t kChiffDrawGuardWords = 1;
+  ChiffDrawWord shared_chiff_draws[kChiffDrawWords + kChiffDrawGuardWords];
   // How much of it any envelope actually reads. Generating the whole buffer
   // regardless was ~1% of the CPU spent on randomness nobody consumed.
   size_t shared_chiff_words_used = 0;

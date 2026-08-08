@@ -71,6 +71,10 @@ enum ModAux {
   MOD_AUX_LAST
 };
 
+// Envelopes a CVOutput carries: envelope_, reachable only on the is_envelope()
+// path. See kEnvelopesPerOscillator for how the two are counted together.
+const uint8_t kEnvelopesPerCVOutput = 1;
+
 // A role used by a CV output when it is not acting as an audio oscillator
 enum DCRole {
   DC_PITCH,
