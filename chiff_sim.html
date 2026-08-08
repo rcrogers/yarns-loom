@@ -369,32 +369,36 @@ function nominalValue(p, totalN, gateN) {   // chiff-free reference (amount 0)
 }
 
 // ---- measurements ----
-// Time at which the chiff's excursion has died out, by the same definition
-// tools/chiff_checks/residual.js uses: the per-block STANDARD DEVIATION of
-// (chiff - nominal value) -- the audible excursion, not the standing offset --
-// falling below kDeadDbfs of full scale. Returned in samples, null if never.
-const kDeadDbfs = -80;
-// THE BLOCK MUST OUTLAST THE CHIFF'S OWN TIME CONSTANT. A fixed 2 ms could not:
-// late in the decay the chiff's filter is slow, so a 2 ms window sees a nearly
-// constant signal, measures ~0 excursion and declares death while the slow
-// wobble is still running. MEASURED, one build, block length alone:
-//   block   2 ms   10 ms   40 ms   100 ms
-//   nominal/measured   1.21    1.13    1.13    1.00
-// That is what made the nominal duration read ~1.3x the measured one.
-// The chiff's slew time ends at log2(window/4), so its late time constant
-// scales with the window; an eighth of the window outlasts it at every setting
-// while staying fine enough to place the marker.
-function excursionDeadSample(out, nominalTrace, windowN) {
+// Time at which the chiff's excursion has died out: the RMS of
+// (chiff - nominal value) falling below kDeadDbfs of full scale.
+//
+// RMS ABOUT ZERO, NOT A PER-BLOCK STANDARD DEVIATION. The chiff term is
+// zero-mean by construction, so subtracting a block mean removes exactly the
+// low-frequency content a slow filter consists of -- and the filter is at its
+// slowest precisely where this marker is trying to read. That error made a
+// probe report a chiff 30 dB quieter than it was at the slowest setting
+// measured, and it is why the block used to have to be an eighth of the
+// window: the huge block was compensating for a statistic that should not have
+// been used. With the mean gone, the block can be small again, and the marker
+// gets back the resolution it needs -- window/8 could not resolve better than
+// +-12.5%, so it could not have detected a 2x error.
+const kDeadBlockMs = 2;
+// THE THRESHOLD IS DELIBERATELY NOT THE ENGINE'S. kChiffInaudibleLevel_q30 is
+// what the walk AIMS at; if this marker used the same number it could not
+// disagree with the engine, and for a long time it did not -- it read 1.00x at
+// every AMOUNT because it was measuring the target rather than the result.
+// A check must not share a constant with the thing it checks.
+// -50 dBFS is CALIBRATED AGAINST THE USER'S OWN READINGS at the sim (they read
+// die-out at 3000-4000 ms on a 6807 ms window, which lands here), not derived.
+const kDeadDbfs = -50;
+function excursionDeadSample(out, nominalTrace) {
   const thr = PEAK * Math.pow(10, kDeadDbfs / 20);
-  const blk = Math.max(Math.round(0.002 * FS), Math.round((windowN || 0) / 8));
+  const blk = Math.max(32, Math.round(kDeadBlockMs * FS / 1000));
   const n = Math.min(out.length, nominalTrace.length);
   for (let b = 0; (b + 1) * blk < n; b++) {
-    let sum = 0;
-    for (let i = b * blk; i < (b + 1) * blk; i++) sum += out[i] - nominalTrace[i];
-    const mean = sum / blk;
     let sq = 0;
     for (let i = b * blk; i < (b + 1) * blk; i++) {
-      const d = (out[i] - nominalTrace[i]) - mean; sq += d * d;
+      const d = out[i] - nominalTrace[i]; sq += d * d;
     }
     if (Math.sqrt(sq / blk) < thr) return b * blk;
   }
@@ -427,7 +431,7 @@ function draw() {
   const line = dia; // the chiff perturbs about the nominal value
   const dt = performance.now() - t0;
   lastRes = res; lastNominal = dia; lastLine = line; lastP = p;
-  lastDead = excursionDeadSample(res.out, dia, res.windowN);
+  lastDead = excursionDeadSample(res.out, dia);
   computeSpectrogram();
 
   const m = measure(res, dia);
