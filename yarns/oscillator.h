@@ -158,6 +158,22 @@ class Oscillator {
     return WarpTimbre(timbre, shape_);
   }
 
+  // WHAT A SIGNED MODULATION OF TIMBRE IS WORTH, warped. A warp is an
+  // ABSOLUTE-POSITION map -- a filter cutoff, a phase increment -- so warping
+  // a signed DELTA is meaningless: it asks where the position `delta` sits,
+  // not how far `delta` moves you from where you are. Warp the DESTINATION and
+  // difference it against the warped bias instead, which is the delta the map
+  // actually implies and is signed correctly by construction.
+  int16_t WarpTimbreDelta(
+      int16_t bias, int16_t delta, OscillatorShape shape, int16_t pitch) const {
+    int32_t destination = static_cast<int32_t>(bias) + delta;
+    CONSTRAIN(destination, INT16_MIN, INT16_MAX);
+    int32_t warped = WarpTimbre(static_cast<int16_t>(destination), shape, pitch)
+      - WarpTimbre(bias, shape, pitch);
+    CONSTRAIN(warped, INT16_MIN, INT16_MAX);
+    return static_cast<int16_t>(warped);
+  }
+
   void set_shape(OscillatorShape shape);
 
   // start_pitch is the new note's pitch at onset (the portamento glide's
@@ -188,7 +204,14 @@ class Oscillator {
     // (steady-state correct). It can't track the glide cheaply, so the bias
     // above is where pitch tracking is made accurate; the envelope's transient
     // pitch dependence during a glide is accepted as-is.
-    int16_t warped_max_timbre = WarpTimbre(raw_max_timbre, shape_, target_pitch);
+    // AGAINST THE BIAS, not on its own: raw_max_timbre is TIMBRE MOD ENVELOPE
+    // plus its velocity term, a SIGNED offset from where the timbre control
+    // sits. Warping it alone lost the sign on 17 of the 42 shapes -- every
+    // NOISE, CZ, LP and SYNC shape, whose warps run through a cutoff table or
+    // a phase increment and cannot be negative -- so a negative setting could
+    // not modulate downward at all, and NOISE and CZ were not even monotone.
+    int16_t warped_max_timbre = WarpTimbreDelta(
+        raw_timbre_bias_, raw_max_timbre, shape_, target_pitch);
     timbre_envelope_.NoteOn(adsr, 0, warped_max_timbre, chiff_amount, chiff_duration);
   }
   inline void NoteOff() {
