@@ -147,19 +147,18 @@ const uint32_t kMaxSlewTimeLog2_q5_27 = 27u << 27;
 
 // THE CHIFF'S FASTEST SLEW TIME, and it is nearly ZERO on purpose: at rate 1.0
 // the one-pole's output IS its input, so the hinge is genuinely unfiltered.
-// 2^-t must stay inside int32, so this is the smallest step off zero the Q5.27
-// exponent affords: 1/128 octave, rate 0.9946 -- unfiltered to within half a
-// percent.
+// A 1/128 octave step off zero, i.e. rate 0.9946 -- unfiltered to within half a
+// percent, while staying off the exact zero the exp2 helper would have to
+// special-case.
 // IT IS NOT kMaxSlewRate. That cap is 1 - e^-1, the true one-pole coefficient
 // at a ONE-SAMPLE time constant, and it is load-bearing for the STAGE rate: it
 // is what lets a 4-sample stage cover 1 - e^-4 like any other. The chiff tracks
 // no target and has no such constraint, so it derives its rate UNCAPPED.
-// WHAT MAKES THIS USABLE is the multi-level input above. Driven to rate 1 with
-// a two-level input, the output is a square rather than noise, so unfiltered
-// and overdriven become the same signal and the drive above the hinge has
-// nothing left to shape (MEASURED at 9e5253a7, which had this rate and a
-// two-level input: +0.7 dB across the whole upper half).
-const uint32_t kChiffFastestSlewTimeLog2_q5_27 = 1u << 20;
+// WHAT MAKES THIS USABLE is the multi-level input: driven to rate 1 with a
+// two-level input the output is a square rather than noise, so unfiltered and
+// overdriven collapse into one signal and the drive has nothing left to shape.
+// 1/128 octave in Q5.27.
+const uint32_t kChiffFastestSlewTimeLog2_q5_27 = (1u << 27) / 128;
 
 // chiff_amount lives in [0, kChiffAmountMax].
 const uint32_t kChiffAmountBits = 7;
@@ -186,22 +185,17 @@ const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
 // state instead costs nothing, because the output add takes a shifted operand.
 // Must be >= kChiffDriveSpan: the drive is stored pre-divided by it.
 const uint32_t kChiffStateShift = 4;
-// Octaves of drive from the hinge to full, Q5.27 -- and DERIVED, not fitted.
-// THE TERMINAL IS DRIVE == kChiffDrawMax, exactly: the clip point equals the
-// chiff input at fast rates, so from a state sitting on the clip a draw of
-// level v moves the state off it only while v * drive < kChiffDrawMax. At a
-// drive of kChiffDrawMax even the smallest level holds, half the draws hold and
-// half flip, and the state is a RANDOM SQUARE -- the loudest, harshest signal
-// this construction has. Past that, more drive changes nothing.
-// kChiffStateShift octaves is the smallest span that contains that terminal
-// (2^4 = 16 against 15), so it arrives just under 127 -- the same deliberate
-// small overshoot the earlier calibration wanted, and free, since the state
-// shift is already sized for exactly this drive.
-// NO DEAD ZONE, MEASURED: all 18 settings in 110..127 render distinctly. A
-// two-level input reached its square and STOPPED, which is what made 112..127
-// bit-identical at this span and forced 1.9375 octaves; sixteen levels approach
-// the square asymptotically instead, so the top of the knob keeps moving.
-const uint32_t kChiffDriveSpan_q5_27 = 5u << 26;  // 2.5 octaves
+// Octaves of drive from the hinge to full amount, Q5.27.
+// CALIBRATED, NOT DERIVED, and the difference matters: the terminal the drive
+// approaches is drive == kChiffDrawMax, where even the smallest level holds the
+// state on the clip and the output is a random square. Containing that terminal
+// exactly would want kChiffStateShift octaves. This span is SHORTER, chosen
+// against the whole criteria set rather than that one -- deriving it from the
+// terminal alone won on that criterion and lost on two others -- so the top of
+// the knob approaches the square asymptotically instead of arriving at it.
+// MUST NOT EXCEED kChiffStateShift: the drive is stored pre-divided by
+// 2^kChiffStateShift, so a wider span would leave the driven input outside Q30.
+const uint32_t kChiffDriveSpan_q5_27 = (5u << 27) / 2;  // 2.5 octaves
 // The clip point, and the mean's reserve, is this many of the chiff's own
 // sigma: 2 x the stored scaled rms, i.e. 2 * 3/sqrt(2). MEASURED peak reach is
 // 4.23 sigma over a 180k-sample window and lower everywhere faster, so the
@@ -401,10 +395,12 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
 // Defined below; chiff window in samples, scaled off the attack duration.
 
-// below 2^-13 of full scale the chiff is inaudible (-78 dBFS). The quantity
-// held to it is the SCALED rms, so the chiff's own sigma at that point is
-// 2.121x lower again.
-const uint32_t kChiffInaudibleLevel_q30 = 4177340u;
+// The level below which the chiff is taken to be inaudible, as a fraction of
+// full scale. The quantity held to it is the SCALED rms, so the chiff's own
+// sigma there is 2.121x lower again. Derived rather than written out, because
+// the digits and the dB figure drifted apart once already: the value was
+// recalibrated and its comment still claimed the old one.
+const uint32_t kChiffInaudibleLevel_q30 = 4177340u;  // 2^30 * 10^(-48.2/20)
 
 // THE KNOB'S OWN MAPS, AT WALK RESOLUTION. The walk passes BETWEEN knob
 // positions, so these take a Q7.25 amount and interpolate where the integer
