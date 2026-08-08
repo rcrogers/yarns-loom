@@ -96,6 +96,10 @@ const int32_t kValueMax_q30 = (1 << 30) - 1;
 
 // The output sample is the s16 range, which USAT #15 states directly.
 const int kSampleBits = 15;
+// USAT's width. INT16_MAX is 2^15 - 1, so an UNSIGNED saturate to this many
+// bits is exactly the C reference's clamp to [0, INT16_MAX]. Named so the asm
+// can take it as an immediate operand instead of writing 15 again.
+const int kOutputSaturateBits = 15;
 
 // How far a mean must move to sit inside [lo, hi]; 0 when it already does.
 inline int32_t ClampOffset(int32_t mean, int32_t lo, int32_t hi) {
@@ -1094,9 +1098,9 @@ void Envelope::HandOffToNextStage(
 #define YARNS_CHIFF_ASM_SAMPLE(bit_offset) \
   "  smull ip, lr, %[rate], %[decay]\n"       /* (rate*decay), lr = hi     */ \
   "  sub   %[rate], %[rate], lr\n"            /* rate -= (rate*decay)>>32  */ \
-  "  ubfx  ip, %[draws], #" bit_offset ", #4\n" /* one draw, low end first */ \
+  "  ubfx  ip, %[draws], #" bit_offset ", %[drawbits]\n" /* one draw, low end */ \
   "  add   ip, ip, ip\n"                      /* level = 2*draw - 15, i.e. */ \
-  "  sub   ip, ip, #15\n"                     /*   an odd multiple, signed */ \
+  "  sub   ip, ip, %[drawmax]\n"              /*   an odd multiple, signed */ \
   "  mul   lr, ip, %[qinput]\n"               /* what the filter chases    */ \
   "  sub   lr, lr, %[chiff]\n"                /* delta                     */ \
   "  smull ip, lr, lr, %[rate]\n"                                             \
@@ -1111,12 +1115,16 @@ void Envelope::HandOffToNextStage(
   "  sub   %[gap], %[gap], lr, lsl #1\n"      /*   at the STAGE's rate     */ \
   "  add   %[comb], %[comb], %[cslope]\n"     /* bias + mean + the aim     */ \
   "  sub   ip, %[comb], %[gap]\n"             /* the mean                  */ \
-  "  add   ip, ip, %[chiff], lsl #4\n"        /* + the chiff, unscaled     */ \
-  "  usat  ip, #15, ip, asr #15\n"            /* saturate and shift, 1 op  */ \
+  "  add   ip, ip, %[chiff], lsl %[stshift]\n" /* + the chiff, unscaled    */ \
+  "  usat  ip, %[satbits], ip, asr %[sbits]\n" /* saturate and shift, 1 op */ \
   "  strh  ip, [%[buf]], #2\n"
-// The #15 and #4 above are kChiffDrawMax and kChiffStateShift written out, and
-// the #4 in ubfx is kChiffDrawBits; the QEMU differential catches any drift
-// between them and the C reference.
+// EVERY CONSTANT ABOVE IS AN "i" OPERAND, not a digit in a string. They were
+// written out as #4, #15, #4, #15, #15 -- five duplicates of named constants in
+// the hottest code in the system, with only the QEMU differential (slow, double
+// emulated, not in the fast loop) standing between a renamed constant and a
+// silently wrong render. "i" is an IMMEDIATE constraint, so it substitutes the
+// literal and costs no register -- which matters, because the body is at the
+// register ceiling exactly (a 13th "r" operand does not allocate).
 
 #define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
   do {                                                                        \
@@ -1436,7 +1444,9 @@ void Envelope::RenderStage(
           : [decay] "r"(decay_q32), [qinput] "r"(chiff_input_per_level_q30),
             [clip] "r"(chiff_clip_scaled_q30),
             [srate] "r"(stage_rate_q31),
-            [cslope] "r"(combined_slope_q30), [wend] "m"(word_end)
+            [cslope] "r"(combined_slope_q30), [wend] "m"(word_end), [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),
+            [stshift] "i"(kChiffStateShift), [sbits] "i"(kSampleBits),
+            [satbits] "i"(kOutputSaturateBits)
           : "ip", "lr", "cc", "memory");
 #else
         while (draw_word != word_end) {
@@ -1485,7 +1495,9 @@ void Envelope::RenderStage(
       : [decay] "r"(decay_q32), [qinput] "r"(chiff_input_per_level_q30),
         [clip] "r"(chiff_clip_scaled_q30),
         [srate] "r"(stage_rate_q31),
-        [cslope] "r"(combined_slope_q30), [end] "r"(chunk_end)
+        [cslope] "r"(combined_slope_q30), [end] "r"(chunk_end), [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),
+            [stshift] "i"(kChiffStateShift), [sbits] "i"(kSampleBits),
+            [satbits] "i"(kOutputSaturateBits)
       : "ip", "lr", "cc", "memory");
 #else
     while (sample_buffer != chunk_end) {
