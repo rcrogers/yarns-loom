@@ -38,7 +38,9 @@
 
 namespace yarns {
 
-const char* const layout_values[LAYOUT_LAST] = {
+// Unbounded and then asserted: declaring it [LAYOUT_LAST] would zero-fill a
+// missing name into a NULL the display dereferences.
+const char* const layout_values[] = {
   "1M 1 MONO PART",
   "2M 2 MONO PARTS",
   "4M 4 MONO PARTS",
@@ -56,6 +58,9 @@ const char* const layout_values[LAYOUT_LAST] = {
   "3M 3 MONO PARTS",
   "*1 PARAPHONIC + 1 MONO PART",
 };
+typedef char layout_values_needs_one_name_per_layout[
+    (sizeof(layout_values) / sizeof(layout_values[0]) == LAYOUT_LAST)
+        ? 1 : -1];
 
 const char* const control_change_mode_values[CONTROL_CHANGE_MODE_LAST] = {
   "OFF",

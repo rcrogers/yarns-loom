@@ -199,25 +199,127 @@ enum MultiSetting {
   MULTI_CLOCK_OFFSET,
 };
 
+// THE LAYOUTS, IN ORDER. Both the Layout enum and the CV output map below
+// are generated from this one list, so a row cannot end up at another
+// layout's index. Entries are the FULL enumerator name, so no consumer has
+// to synthesize one and no entry can collide with a value macro.
+#define YARNS_LAYOUTS(LAYOUT)                                          \
+  LAYOUT(LAYOUT_MONO)                                                  \
+  LAYOUT(LAYOUT_DUAL_MONO)                                             \
+  LAYOUT(LAYOUT_QUAD_MONO)                                             \
+  LAYOUT(LAYOUT_DUAL_POLY)                                             \
+  LAYOUT(LAYOUT_QUAD_POLY)                                             \
+  LAYOUT(LAYOUT_DUAL_POLYCHAINED)                                      \
+  LAYOUT(LAYOUT_QUAD_POLYCHAINED)                                      \
+  LAYOUT(LAYOUT_OCTAL_POLYCHAINED)                                     \
+  LAYOUT(LAYOUT_QUAD_TRIGGERS)                                         \
+  LAYOUT(LAYOUT_QUAD_VOLTAGES)                                         \
+  LAYOUT(LAYOUT_THREE_ONE)                                             \
+  LAYOUT(LAYOUT_TWO_TWO)                                               \
+  LAYOUT(LAYOUT_TWO_ONE)                                               \
+  LAYOUT(LAYOUT_PARAPHONIC_PLUS_TWO)                                   \
+  LAYOUT(LAYOUT_TRI_MONO)                                              \
+  LAYOUT(LAYOUT_PARAPHONIC_PLUS_ONE)
+
 enum Layout {
-  LAYOUT_MONO,
-  LAYOUT_DUAL_MONO,
-  LAYOUT_QUAD_MONO,
-  LAYOUT_DUAL_POLY,
-  LAYOUT_QUAD_POLY,
-  LAYOUT_DUAL_POLYCHAINED,
-  LAYOUT_QUAD_POLYCHAINED,
-  LAYOUT_OCTAL_POLYCHAINED,
-  LAYOUT_QUAD_TRIGGERS,
-  LAYOUT_QUAD_VOLTAGES,
-  LAYOUT_THREE_ONE,
-  LAYOUT_TWO_TWO,
-  LAYOUT_TWO_ONE,
-  LAYOUT_PARAPHONIC_PLUS_TWO, // Now a misnomer: has a 4th part
-  LAYOUT_TRI_MONO,
-  LAYOUT_PARAPHONIC_PLUS_ONE,
+#define YARNS_LAYOUT_ENUMERATOR(layout) layout,
+  YARNS_LAYOUTS(YARNS_LAYOUT_ENUMERATOR)
+#undef YARNS_LAYOUT_ENUMERATOR
   LAYOUT_LAST
 };
+
+// HOW EACH LAYOUT WIRES ITS CV OUTPUTS -- one row per output, exactly
+// kNumCVOutputs rows per layout. AssignVoicesToCVOutputs walks these rows,
+// and the envelope count below folds the same rows, so they cannot disagree.
+struct CVOutputMap {
+  DCRole dc_role;            // what the output emits when it is not audio
+  uint8_t first_voice;       // index into Multi::voice_
+  uint8_t num_dc_voices;     // consecutive voices supplying DC from first_voice
+  uint8_t num_audio_voices;  // consecutive voices whose oscillators it sums
+};
+
+// Both voice counts are really a mode: no voices, a single voice, or the
+// whole paraphonic block. Named so the rows read as that, not as 0/1/4.
+#define VOICES_NONE 0
+#define VOICES_MONO 1
+#define VOICES_PARA kNumParaphonicVoices
+
+// Every ROW below is one CVOutputMap, in declaration order:
+//
+//    dc_role      first_voice               num_dc_voices num_audio_voices
+//
+#define YARNS_CV_MAP_LAYOUT_MONO(ROW)                                  \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_VELOCITY, 0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_1,    0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_2,    0,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_DUAL_POLYCHAINED(ROW) YARNS_CV_MAP_LAYOUT_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_DUAL_MONO(ROW)                             \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_1,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    1,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_DUAL_POLY(ROW)                             \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_1,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_2,    1,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_QUAD_POLYCHAINED(ROW) YARNS_CV_MAP_LAYOUT_DUAL_POLY(ROW)
+#define YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)                             \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    2,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    3,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_QUAD_POLY(ROW) YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_OCTAL_POLYCHAINED(ROW) YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_THREE_ONE(ROW) YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_TWO_TWO(ROW) YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_QUAD_VOLTAGES(ROW)                         \
+  ROW(DC_AUX_1,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    1,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    2,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    3,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_QUAD_TRIGGERS(ROW) YARNS_CV_MAP_LAYOUT_QUAD_VOLTAGES(ROW)
+#define YARNS_CV_MAP_LAYOUT_TWO_ONE(ROW)                               \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    2,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_2,    2,                        VOICES_MONO,  VOICES_NONE)
+#define YARNS_CV_MAP_LAYOUT_TRI_MONO(ROW)                              \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    2,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_VELOCITY, 0,                        VOICES_MONO,  VOICES_NONE)
+#define YARNS_CV_MAP_LAYOUT_PARAPHONIC_PLUS_TWO(ROW)                   \
+  /* A misnomer: this layout has a 4th part. */                        \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_PARA)\
+  ROW(DC_PITCH,    kNumParaphonicVoices,     VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    kNumParaphonicVoices,     VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_PITCH,    kNumParaphonicVoices + 1, VOICES_MONO,  VOICES_MONO)\
+  /* kNumParaphonicVoices + 2 is part 3's, gate-only, so it gets no row */
+#define YARNS_CV_MAP_LAYOUT_PARAPHONIC_PLUS_ONE(ROW)                   \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_PARA)\
+  ROW(DC_PITCH,    kNumParaphonicVoices,     VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_1,    0,                        VOICES_PARA,  VOICES_NONE)\
+  ROW(DC_AUX_1,    kNumParaphonicVoices,     VOICES_MONO,  VOICES_MONO)
+
+#define YARNS_CV_MAP_ROW(dc_role, first_voice, num_dc_voices, num_audio_voices) \
+  { dc_role, first_voice, num_dc_voices, num_audio_voices },
+
+// A new layout missing its YARNS_CV_MAP_<NAME> fails to expand, and too MANY
+// rows is an excess-initializer error -- but too FEW rows silently zero-fills
+// kCVOutputMap into DC_PITCH on voice 0. Catch that, naming the offender.
+#define YARNS_CV_MAP_COUNT_ONE(dc_role, first_voice, num_dc_voices, num_audio_voices) \
+  + 1
+#define YARNS_LAYOUT_ROW_COUNT_CHECK(layout)                                    \
+  typedef char layout##_needs_one_row_per_cv_output[                            \
+      ((0 YARNS_CV_MAP_##layout(YARNS_CV_MAP_COUNT_ONE)) == kNumCVOutputs)      \
+          ? 1 : -1];
+YARNS_LAYOUTS(YARNS_LAYOUT_ROW_COUNT_CHECK)
+#undef YARNS_LAYOUT_ROW_COUNT_CHECK
+
+// Defined in multi.cc, where the row order is asserted against the enum.
+extern const CVOutputMap kCVOutputMap[LAYOUT_LAST][kNumCVOutputs];
 
 class Multi {
  public:

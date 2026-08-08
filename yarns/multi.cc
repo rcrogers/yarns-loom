@@ -43,6 +43,14 @@ namespace yarns {
 using namespace std;
 using namespace stmlib;
 
+// Rows and the Layout enum come from the same YARNS_LAYOUTS list, so this is
+// indexed by layout by construction.
+const CVOutputMap kCVOutputMap[LAYOUT_LAST][kNumCVOutputs] = {
+#define YARNS_LAYOUT_ROWS(layout) { YARNS_CV_MAP_##layout(YARNS_CV_MAP_ROW) },
+  YARNS_LAYOUTS(YARNS_LAYOUT_ROWS)
+#undef YARNS_LAYOUT_ROWS
+};
+
 const uint8_t kCCLooperPhaseOffset = 115;
 
 const uint8_t kCCMacroRecord = 116;
@@ -404,78 +412,13 @@ void Multi::AssignVoicesToCVOutputs() {
       voice_[v].set_dc_output(static_cast<DCRole>(role), NULL);
     }
   }
-  switch (settings_.layout) {
-    case LAYOUT_MONO:
-    case LAYOUT_DUAL_POLYCHAINED:
-      MapVoices(0, DC_PITCH, 0, 1, 0);
-      MapVoices(1, DC_VELOCITY, 0, 1, 0);
-      MapVoices(2, DC_AUX_1, 0, 1, 0);
-      MapVoices(3, DC_AUX_2, 0, 1, 1);
-      break;
-
-    case LAYOUT_DUAL_MONO:
-      MapVoices(0, DC_PITCH, 0, 1, 0);
-      MapVoices(1, DC_PITCH, 1, 1, 0);
-      MapVoices(2, DC_AUX_1, 0, 1, 1);
-      MapVoices(3, DC_AUX_1, 1, 1, 1);
-      break;
-
-    case LAYOUT_DUAL_POLY:
-    case LAYOUT_QUAD_POLYCHAINED:
-      MapVoices(0, DC_PITCH, 0, 1, 0);
-      MapVoices(1, DC_PITCH, 1, 1, 0);
-      MapVoices(2, DC_AUX_1, 0, 1, 1);
-      MapVoices(3, DC_AUX_2, 1, 1, 1);
-      break;
-
-    case LAYOUT_QUAD_MONO:
-    case LAYOUT_QUAD_POLY:
-    case LAYOUT_OCTAL_POLYCHAINED:
-    case LAYOUT_THREE_ONE:
-    case LAYOUT_TWO_TWO:
-      for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        MapVoices(i, DC_PITCH, i, 1, 1);
-      }
-      break;
-    case LAYOUT_QUAD_VOLTAGES:
-      for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        MapVoices(i, DC_AUX_1, i, 1, 1);
-      }
-      break;
-    case LAYOUT_QUAD_TRIGGERS:
-      for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-        MapVoices(i, DC_AUX_1, i, 1, 1);
-      }
-      break;
-
-    case LAYOUT_TWO_ONE:
-      MapVoices(0, DC_PITCH, 0, 1, 1);
-      MapVoices(1, DC_PITCH, 1, 1, 1);
-      MapVoices(2, DC_PITCH, 2, 1, 1);
-      MapVoices(3, DC_AUX_2, 2, 1, 0);
-      break;
-
-    case LAYOUT_PARAPHONIC_PLUS_TWO:
-      MapVoices(0, DC_PITCH, 0, 1, kNumParaphonicVoices);
-      MapVoices(1, DC_PITCH, kNumParaphonicVoices, 1, 1);
-      MapVoices(2, DC_AUX_1, kNumParaphonicVoices, 1, 0);
-      MapVoices(3, DC_PITCH, kNumParaphonicVoices + 1, 1, 1);
-      // Do not assign the last voice to any CV output, since it only outputs gates
-      break;
-
-    case LAYOUT_TRI_MONO:
-      for (uint8_t i = 0; i < 3; ++i) {
-        MapVoices(i, DC_PITCH, i, 1, 1);
-      }
-      MapVoices(3, DC_VELOCITY, 0, 1, 0); // Dummy, will be overwritten in GetCvGate
-      break;
-
-    case LAYOUT_PARAPHONIC_PLUS_ONE:
-      MapVoices(0, DC_PITCH, 0, 1, kNumParaphonicVoices);
-      MapVoices(1, DC_PITCH, kNumParaphonicVoices, 1, 0);
-      MapVoices(2, DC_AUX_1, 0, kNumParaphonicVoices, 0);
-      MapVoices(3, DC_AUX_1, kNumParaphonicVoices, 1, 1);
-      break;
+  // The same rows multi.h folds the envelope count from. CV output 3 in
+  // TRI_MONO is a dummy, overwritten in GetCvGate.
+  const CVOutputMap* rows = kCVOutputMap[settings_.layout];
+  for (uint8_t cv = 0; cv < kNumCVOutputs; ++cv) {
+    MapVoices(
+      cv, rows[cv].dc_role, rows[cv].first_voice,
+      rows[cv].num_dc_voices, rows[cv].num_audio_voices);
   }
 }
 
