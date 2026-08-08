@@ -85,12 +85,15 @@ const NOTE_RANGE = 32767;
 const ATTACKS = [0, 8, 16, 24, 32, 40, 56, 72, 96, 127];
 const DURATIONS = [0, 5, 10, 20, 21, 33, 50, 68, 80, 90, 100, 110, 120, 127];
 
-const durationLut = (() => {
-  const src = fs.readFileSync(path.join(HERE, '..', '..', 'yarns', 'resources.cc'), 'utf8');
-  const start = src.indexOf('const uint32_t lut_chiff_duration_samples[] = {');
-  return src.slice(src.indexOf('{', start) + 1, src.indexOf('};', start))
-    .split(',').map(x => +x.trim()).filter(x => !isNaN(x));
-})();
+// ASK THE ENGINE, do not parse a table. lut_chiff_duration_samples was
+// abandoned by the firmware when the window became ATTACK-RELATIVE, so this
+// read the wrong length at every attack but one -- and the window here varies
+// with attack, which a flat table cannot express.
+function windowSamples(attack, duration) {
+  const out = execSync(`./test report 96 ${duration} attack_setting=${attack} report=1`,
+                       { cwd: HERE, stdio: ['ignore', 'ignore', 'pipe'] });
+  return +/chiff (\d+) smp/.exec(out.toString())[1];
+}
 
 function run(attack, duration, amount) {
   const args = [
@@ -125,7 +128,7 @@ for (const attack of ATTACKS) {
       excursions.push({ attack, duration, dwell: longest, rail: top });
     }
 
-    const from = durationLut[duration] + SETTLE_BLOCKS * BLOCK;
+    const from = windowSamples(attack, duration) + SETTLE_BLOCKS * BLOCK;
     const end = Math.min(classic.length, chiff.length);
     let worst = 0, worstAt = 0;
     for (let i = from; i + BLOCK <= end; i += BLOCK) {

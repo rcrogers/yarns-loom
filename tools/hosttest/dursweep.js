@@ -3,17 +3,16 @@
 // duration 20 -> 21 (185 -> 199 samples), so the metrics are sampled inside
 // each setting's OWN window, not a fixed time span.
 const { execSync } = require('child_process');
-const fs = require('fs');
 
-// Firmware LUT, parsed from resources.cc so the sweep and the firmware agree
-// on how many samples each setting means.
-function durationLut() {
-  const src = fs.readFileSync('../../yarns/resources.cc', 'utf8');
-  const start = src.indexOf('const uint32_t lut_chiff_duration_samples[] = {');
-  const body = src.slice(src.indexOf('{', start) + 1, src.indexOf('};', start));
-  return body.split(',').map(s => s.trim()).filter(Boolean).map(Number);
+// ASK THE ENGINE. This used to parse lut_chiff_duration_samples out of
+// resources.cc, a table the firmware stopped using when the window became
+// ATTACK-RELATIVE -- so the column was wrong by whatever the attack was, and a
+// flat table cannot express an attack-relative window at all.
+function windowSamples(dur) {
+  const out = execSync(`./test report ${amount} ${dur} ${opts} report=1`,
+                       { stdio: ['ignore', 'ignore', 'pipe'] });
+  return +/chiff (\d+) smp/.exec(out.toString())[1];
 }
-const LUT = durationLut();
 
 // argv: amount, then any KEY=VALUE driver overrides (attack/decay/release/
 // gate/peak/sustain), e.g. `node dursweep.js 96 attack=130 peak=75`.
@@ -43,7 +42,7 @@ console.log('dur  samples   onsetNoise   winNoise   totalStep   winMean   postMe
 const rows = [];
 for (let d = 0; d <= 127; d++) {
   const s = run(d);
-  const w = LUT[d];
+  const w = windowSamples(d);
   // Onset = first 64 samples (one audio block); window = the whole burst.
   const onset = noise(s, 1, Math.min(64, w));
   const win = noise(s, 1, w);

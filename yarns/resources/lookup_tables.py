@@ -921,17 +921,3 @@ def chiff_lpf_shifts():
 
 lookup_tables.append(('chiff_lpf_shifts', chiff_lpf_shifts()))
 
-"""----------------------------------------------------------------------------
-Envelope chiff: duration setting -> samples, and noise reach factor
-----------------------------------------------------------------------------"""
-
-def envelope_chiff():
-  # CHIFF DURATION setting (0..127) -> burst length in samples. Log map over
-  # 1ms..8s, matching the sim's slider (8000^(v/max) ms).
-  num_values = 128
-  max_ms = 8000.0
-  v = numpy.arange(num_values) / float(num_values - 1)
-  samples = numpy.round(numpy.power(max_ms, v) * audio_rate / 1000.0)
-  lookup_tables_32.append(('chiff_duration_samples', samples.astype(int)))
-
-envelope_chiff()
