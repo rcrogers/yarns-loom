@@ -17,6 +17,7 @@
 # is actually spent against. The old figure counted the loop alone.
 import os
 import re
+import math
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -152,30 +153,31 @@ handoff_call_cost, _ = pathcost.call_cost_function(
     functions, boundary=(RENDER_STAGE,))
 handoff_cycles = pathcost.longest_path(
     pathcost.Graph(functions[HAND_OFF]), handoff_call_cost)
-# NoteOn's two binary searches are the only loops in the envelope whose trip
-# count is a literal rather than a block size, so they are the only ones the
-# CFG cannot supply. Read the counts from the source and match each loop to a
-# search by the helper its body calls -- addresses move, the calls do not.
-SEARCH_TRIPS = [
-    ('_ZN5yarnsL28ChiffScaledRmsPerInput_q15_5Em',
-     r'ChiffWalkAudibleAmount_q7_25\(.*?for \(uint32_t i = 0; i < (\d+)'),
-    ('_ZN5yarnsL22ChiffWalkRemaining_u16Em',
-     r'ChiffWalkAudiblePhase_u16\(.*?for \(uint32_t i = 0; i < (\d+)'),
-]
+# NOTEON HAS ONE SEARCH LEFT and it calls nothing, so it cannot be identified
+# by a callee the way the old pair were. It is the inverse-interpolation of
+# lut_env_expo in ChiffWalkAudiblePhase_u16 -- a bisection over the table, so
+# its trip count is ceil(log2(size)) and comes from the TABLE SIZE rather than
+# a literal in the source.
+#   The two it replaces were ChiffWalkAudibleAmount_q7_25 (twelve iterations,
+# now a closed form -- the level law made the threshold amount solvable) and
+# the old sixteen-iteration bisection of the curve itself.
+LUT_ENV_EXPO_SIZE = source_constant(
+    'yarns/resources.h', r'LUT_ENV_EXPO_SIZE\s+(\d+)')
+TABLE_SEARCH_TRIPS = int(math.ceil(math.log(LUT_ENV_EXPO_SIZE, 2)))
 note_on_graph = pathcost.Graph(functions[NOTE_ON])
 callee_names = {body[0][0]: name for name, body in functions.items()}
 search_weights = []
-for callee, pattern in SEARCH_TRIPS:
-  trips = source_constant('yarns/envelope.cc', pattern)
-  for source, target in note_on_graph.back_edges():
-    low = min(source, target)
-    high = max(address for address, _ in note_on_graph.blocks[source])
-    calls = {callee_names.get(target_address)
-             for leader in note_on_graph.blocks
-             if low <= leader <= high
-             for target_address in note_on_graph.calls[leader]}
-    if callee in calls:
-      search_weights.append((low, high, trips))
+for source, target in note_on_graph.back_edges():
+  low = min(source, target)
+  high = max(address for address, _ in note_on_graph.blocks[source])
+  calls = {callee_names.get(target_address)
+           for leader in note_on_graph.blocks
+           if low <= leader <= high
+           for target_address in note_on_graph.calls[leader]}
+  # A call-free back edge inside NoteOn is the table bisection. Anything that
+  # calls out is not a search and the CFG already sizes it.
+  if not any(calls):
+    search_weights.append((low, high, TABLE_SEARCH_TRIPS))
 # A rotated loop peels its first iteration ahead of the header, so a trip or so
 # of each search sits outside the range weighted here. Sizing, not accounting.
 note_on_cycles = pathcost.longest_path(

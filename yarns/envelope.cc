@@ -541,18 +541,46 @@ static uint32_t ChiffWalkAudibleAmount_q7_25(
 // The phase at which the curve has fallen to that amount, u16 of the duration.
 // This IS the walk's speed: make this phase arrive at the duration and the
 // chiff goes inaudible exactly there.
+//
+// IT INVERTS lut_env_expo BY SEARCHING THE TABLE, not by bisecting the curve.
+// The old form ran sixteen iterations of ChiffWalkAmount -- a table read, an
+// interpolation and a 64-bit multiply each -- to inverse-interpolate a 257-entry
+// MONOTONE table. Eight compares against the table itself land on the bracket,
+// and one linear interpolation inside it finishes the job.
+//
+// "ALREADY INAUDIBLE AT THE ONSET" IS AN EARLY RETURN, NOT A CLAMPED ZERO. The
+// old code ended `return phase_u16 ? phase_u16 : 1`, which turned that case --
+// target == start, so the phase to reach it is zero -- into a walk running at
+// 1/65536 speed. MEASURED on input-from-amount: AMOUNT 1..3 at DURATION 127
+// stranded for 18 s against a 1.5 s duration, and at DURATION 127 the outer
+// multiply underflowed the step to EXACTLY ZERO. The right answer is the
+// FASTEST walk, not the slowest.
 static uint32_t ChiffWalkAudiblePhase_u16(
     uint32_t start_q7_25, int32_t input_full_q30) {
   if (!start_q7_25) return 65536;
   const uint32_t target_q7_25 =
     ChiffWalkAudibleAmount_q7_25(start_q7_25, input_full_q30);
-  uint32_t lo = 0, hi = 0xFFFFFFFFu;
-  for (uint32_t i = 0; i < 16; ++i) {
-    const uint32_t mid = lo + ((hi - lo) >> 1);
-    if (ChiffWalkAmount_q7_25(start_q7_25, mid) > target_q7_25) lo = mid;
+  // Inaudible before the note starts: cross the axis at full speed.
+  if (target_q7_25 >= start_q7_25) return 65536;
+  // The remaining fraction the walk has to reach, u16.
+  const uint32_t needed_u16 = static_cast<uint32_t>(
+    (static_cast<uint64_t>(target_q7_25) << 16) / start_q7_25);
+  // lut_env_expo rises, so the remaining fraction falls: find the last index
+  // whose remaining is still >= needed.
+  uint32_t lo = 0, hi = LUT_ENV_EXPO_SIZE - 1;
+  while (hi - lo > 1) {
+    const uint32_t mid = (lo + hi) >> 1;
+    if (kEnvExpoFull_u16 - lut_env_expo[mid] >= needed_u16) lo = mid;
     else hi = mid;
   }
-  const uint32_t phase_u16 = hi >> 16;
+  const uint32_t above = kEnvExpoFull_u16 - lut_env_expo[lo];
+  const uint32_t below = kEnvExpoFull_u16 - lut_env_expo[hi];
+  const uint32_t span = above - below;
+  const uint32_t frac_u8 = span
+    ? (((above - needed_u16) << 8) / span) : 0;
+  // ChiffWalkRemaining reads the index from phase >> 24 and the fraction from
+  // the next byte down, so a u16 phase is exactly index:fraction.
+  const uint32_t phase_u16 = (lo << 8) | (frac_u8 > 255 ? 255 : frac_u8);
   return phase_u16 ? phase_u16 : 1;
 }
 
