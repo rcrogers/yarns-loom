@@ -142,16 +142,16 @@ loadPage(pagePath).then(page => {
       lp += hpAlpha * (x - lp);
       resid[i] = x - lp;
     }
+    // RMS ABOUT ZERO. `resid` has just been HIGH-PASSED, so it is zero-mean by
+    // construction and subtracting a block mean can only remove signal -- and
+    // it removes most of it exactly where the chiff's filter is slowest, which
+    // is the stretch this check exists to judge. Subtracting the mean was also
+    // what forced the block to be large; with it gone the block only has to
+    // hold enough samples to average.
     const curve = [];
     for (let lo = 0; lo + BLOCK <= n; lo += BLOCK) {
-      let sum = 0;
-      for (let i = lo; i < lo + BLOCK; i++) sum += resid[i];
-      const mean = sum / BLOCK;
       let sq = 0;
-      for (let i = lo; i < lo + BLOCK; i++) {
-        const d = resid[i] - mean;
-        sq += d * d;
-      }
+      for (let i = lo; i < lo + BLOCK; i++) sq += resid[i] * resid[i];
       const sd = Math.sqrt(sq / BLOCK);
       curve.push({
         t: lo / FS * 1000,

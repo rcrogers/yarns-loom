@@ -6,6 +6,13 @@
 //           looks like.
 //   WANDER  the per-block STANDARD DEVIATION of the same. The excursion, i.e.
 //           what is actually audible as chiff.
+//   TOTAL   RMS about zero, which is sqrt(offset^2 + wander^2). Printed
+//           because NEITHER of the other two is the excursion on its own: a
+//           slow filter puts nearly all its energy in OFFSET, so reading
+//           WANDER alone reports a chiff that is plainly there as gone. That
+//           mistake, made with a std in place of an RMS, produced a 30 dB
+//           error at the slowest setting measured and sent a whole session
+//           chasing a phantom in ChiffScaledRmsPerInput.
 //
 // RMS of the residual -- what the earlier probes reported -- is the two added
 // in quadrature and cannot distinguish them: a frozen offset and an equal
@@ -53,7 +60,7 @@ loadPage().then(page => {
   console.log(`AMOUNT ${amount}  ENV ATTACK ${attack}  EXCITER DURATION ${chiffDuration}`);
   console.log(`window ${(W / FS * 1000).toFixed(0)} ms, gate ${gateMs} ms, ` +
               `full scale ${FULL}\n`);
-  console.log('    t(ms)   offset(LSB)  offset(dBFS)  wander(dBFS)   note');
+  console.log('    t(ms)   offset(LSB)  offset(dBFS)  wander(dBFS)   total(dBFS)   note');
   for (let b = 0; b * BLOCK < n; b++) {
     const lo = b * BLOCK, hi = Math.min(n, lo + BLOCK);
     let sum = 0;
@@ -62,6 +69,8 @@ loadPage().then(page => {
     let sq = 0;
     for (let i = lo; i < hi; i++) { const d = (wet[i] - dry[i]) - mean; sq += d * d; }
     const sd = Math.sqrt(sq / (hi - lo));
+    // sqrt(offset^2 + wander^2): the excursion, which is neither column alone.
+    const total = Math.sqrt(mean * mean + sd * sd);
     const t = lo / FS * 1000;
     // Only print a readable subset: every 5th block, plus around the window
     // edge and the gate release, where the interesting transitions are.
@@ -71,6 +80,7 @@ loadPage().then(page => {
     const note = nearEdge ? '<- window edge' : nearGate ? '<- gate off' : '';
     console.log(`  ${t.toFixed(0).padStart(6)}  ${mean.toFixed(1).padStart(11)}  ` +
                 `${dbfs(Math.abs(mean)).toFixed(1).padStart(12)}  ` +
-                `${dbfs(sd).toFixed(1).padStart(12)}   ${note}`);
+                `${dbfs(sd).toFixed(1).padStart(12)}  ` +
+                `${dbfs(total).toFixed(1).padStart(12)}   ${note}`);
   }
 }).catch(e => { console.error(e); process.exit(1); });
