@@ -5,6 +5,7 @@
 #include "yarns/oscillator.h"
 #include <cstdio>
 #include <algorithm>
+#include <cmath>
 using namespace yarns;
 
 static const char* kName[] = {
@@ -48,5 +49,54 @@ int main() {
            kName[s], wn2, wn1, w0, wp, inverts ? "inverts" : "SIGN LOST",
            d_neg, d_pos, (d_neg < 0 && d_pos > 0) ? "MONOTONE" : "still broken");
   }
+  // ---- set_shape's rescale ---------------------------------------------
+  // On a shape change, Oscillator::set_shape rescales the timbre envelope by
+  // WarpTimbre(midpoint, new) / WarpTimbre(midpoint, old) -- a ratio of two
+  // ABSOLUTE warped positions. The envelope's target is a signed DELTA, so the
+  // ratio that would be exact is WarpTimbreDelta(new) / WarpTimbreDelta(old).
+  // Measure how far apart those are, and compare against the ratio that would
+  // have been exact BEFORE the delta fix, when the target was WarpTimbre(mod).
+  printf("\n== set_shape rescale error, applied vs exact ==\n");
+  printf("%-18s -> %-18s %10s %10s %10s\n",
+         "from", "to", "applied", "exact(now)", "exact(old)");
+  const int16_t kMid = 1 << 14;
+  const int pairs[][2] = {
+    {OSC_SHAPE_NOISE_LP,      OSC_SHAPE_LP_SAW},
+    {OSC_SHAPE_LP_SAW,        OSC_SHAPE_SYNC_SAW},
+    {OSC_SHAPE_CZ_SAW_LP,     OSC_SHAPE_NOISE_BP},
+    {OSC_SHAPE_VARIABLE_SAW,  OSC_SHAPE_LP_PULSE},
+    {OSC_SHAPE_SYNC_SINE,     OSC_SHAPE_CZ_PULSE_LP},
+    {OSC_SHAPE_TANH_SINE,     OSC_SHAPE_DIRAC_COMB},
+  };
+  double worst_now = 0, worst_old = 0;
+  for (size_t k = 0; k < sizeof(pairs)/sizeof(pairs[0]); ++k) {
+    OscillatorShape a = static_cast<OscillatorShape>(pairs[k][0]);
+    OscillatorShape b = static_cast<OscillatorShape>(pairs[k][1]);
+    double applied = double(osc.WarpTimbre(kMid, b, pitch))
+                   / double(osc.WarpTimbre(kMid, a, pitch));
+    // averaged over a spread of bias/mod, since the exact ratio depends on both
+    double sn = 0, so = 0; int n = 0;
+    for (int bias = 4096; bias <= 28672; bias += 8192)
+      for (int mod = -12288; mod <= 12288; mod += 6144) {
+        if (!mod) continue;
+        double da = osc.WarpTimbreDelta(bias, mod, a, pitch);
+        double db = osc.WarpTimbreDelta(bias, mod, b, pitch);
+        if (da != 0) { sn += db / da; }
+        double oa = osc.WarpTimbre(mod, a, pitch);
+        double ob = osc.WarpTimbre(mod, b, pitch);
+        if (oa != 0) { so += ob / oa; }
+        ++n;
+      }
+    double now = sn / n, old = so / n;
+    printf("%-18s -> %-18s %10.3f %10.3f %10.3f\n",
+           kName[pairs[k][0]], kName[pairs[k][1]], applied, now, old);
+    double en = applied ? fabs(now - applied) / fabs(applied) : 0;
+    double eo = applied ? fabs(old - applied) / fabs(applied) : 0;
+    if (en > worst_now) worst_now = en;
+    if (eo > worst_old) worst_old = eo;
+  }
+  printf("\nworst relative error vs the applied ratio:"
+         "  delta target %.0f%%   pre-fix target %.0f%%\n",
+         100*worst_now, 100*worst_old);
   return 0;
 }

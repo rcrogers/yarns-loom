@@ -1036,6 +1036,22 @@ void Envelope::HandOffToNextStage(
 // literal and costs no register -- which matters, because the body is at the
 // register ceiling exactly (a 13th "r" operand does not allocate).
 
+// THE OPERANDS BOTH ASM BLOCKS SHARE, written once. They were copied out by
+// hand into each, eleven of them, with nothing forcing the two lists to agree
+// -- and the two blocks must agree, since the QEMU differential only proves
+// asm == C, not asm == asm.
+#define YARNS_CHIFF_ASM_STATE                                                 \
+  [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),                 \
+  [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),                      \
+  [buf] "+r"(sample_buffer), [draws] "+r"(draws)
+#define YARNS_CHIFF_ASM_INPUTS                                                \
+  [decay] "r"(decay_q32), [qinput] "r"(chiff_input_per_level_q30),            \
+  [clip] "r"(chiff_clip_scaled_q30), [srate] "r"(stage_rate_q31),             \
+  [cslope] "r"(combined_slope_q30),                                           \
+  [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),               \
+  [stshift] "i"(kChiffStateShift), [sbits] "i"(kSampleBits),                  \
+  [satbits] "i"(kOutputSaturateBits)
+
 #define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
   do {                                                                        \
     slew_rate_q31 -= static_cast<int32_t>(                                    \
@@ -1349,16 +1365,8 @@ void Envelope::RenderStage(
           "  eor   %[draws], %[draws], %[draws], lsl #5\n"
           "  subs  %[words], %[words], #1\n"        // in the freed pointer's
           "  bne   1b\n"                            //   register
-          : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
-            [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
-            [buf] "+r"(sample_buffer), [words] "+r"(words_left),
-            [draws] "+r"(draws)
-          : [decay] "r"(decay_q32), [qinput] "r"(chiff_input_per_level_q30),
-            [clip] "r"(chiff_clip_scaled_q30),
-            [srate] "r"(stage_rate_q31),
-            [cslope] "r"(combined_slope_q30), [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),
-            [stshift] "i"(kChiffStateShift), [sbits] "i"(kSampleBits),
-            [satbits] "i"(kOutputSaturateBits)
+          : YARNS_CHIFF_ASM_STATE, [words] "+r"(words_left)
+          : YARNS_CHIFF_ASM_INPUTS
           : "ip", "lr", "cc", "memory");
 #else
         while (words_left--) {
@@ -1398,19 +1406,12 @@ void Envelope::RenderStage(
       "  beq   2f\n"
       "1:\n"
       YARNS_CHIFF_ASM_SAMPLE("0")
-      "  lsr   %[draws], %[draws], #4\n"          // consumed low end first
+      "  lsr   %[draws], %[draws], %[drawbits]\n"  // consumed low end first
       "  cmp   %[buf], %[end]\n"
       "  bne   1b\n"
       "2:\n"
-      : [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),
-        [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),
-        [draws] "+r"(draws), [buf] "+r"(sample_buffer)
-      : [decay] "r"(decay_q32), [qinput] "r"(chiff_input_per_level_q30),
-        [clip] "r"(chiff_clip_scaled_q30),
-        [srate] "r"(stage_rate_q31),
-        [cslope] "r"(combined_slope_q30), [end] "r"(chunk_end), [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),
-            [stshift] "i"(kChiffStateShift), [sbits] "i"(kSampleBits),
-            [satbits] "i"(kOutputSaturateBits)
+      : YARNS_CHIFF_ASM_STATE
+      : YARNS_CHIFF_ASM_INPUTS, [end] "r"(chunk_end)
       : "ip", "lr", "cc", "memory");
 #else
     while (sample_buffer != chunk_end) {
@@ -1479,6 +1480,8 @@ void Envelope::RenderStage(
 
 #undef YARNS_CHIFF_ASM_SAMPLE
 #undef YARNS_CHIFF_RENDER_SAMPLE
+#undef YARNS_CHIFF_ASM_STATE
+#undef YARNS_CHIFF_ASM_INPUTS
 
 // Exact unsigned division of a 64-bit dividend (hi:lo) by a 32-bit divisor,
 // valid when the quotient fits 32 bits (hi < divisor; the caller saturates
