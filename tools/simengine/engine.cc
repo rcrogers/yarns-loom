@@ -166,7 +166,8 @@ int chiff_render(
   // it down and nothing happens when it elapses -- so reading it once here is
   // the whole story.
   int32_t chiff_window_samples =
-      static_cast<int32_t>(envelope.chiff_target_samples_);
+      static_cast<int32_t>(ChiffWindowSamples(adsr.attack_u32,
+          static_cast<uint8_t>(chiff_duration)));
 
   int total = gate_samples + tail_samples;
   if (total > max_samples) total = max_samples;
@@ -215,8 +216,14 @@ int chiff_render(
   // DAC range: a negative range's rails are genuinely below zero, and clipping
   // them reported 0 and drew the wrong line. Identical for any rail that is
   // already inside the range.
-  meta[META_CEILING] = envelope.chiff_top_q30_ >> 15;
-  meta[META_FLOOR] = envelope.chiff_floor_q30_ >> 15;
+  // The note's ceiling, computed here rather than stored: the firmware never
+  // read it, so it is no longer a member.
+  meta[META_CEILING] = std::max(envelope.stage_target_q30_[ENV_STAGE_RELEASE],
+      std::max(envelope.stage_target_q30_[ENV_STAGE_ATTACK],
+               envelope.stage_target_q30_[ENV_STAGE_SUSTAIN])) >> 15;
+  meta[META_FLOOR] = std::min(envelope.stage_target_q30_[ENV_STAGE_RELEASE],
+      std::min(envelope.stage_target_q30_[ENV_STAGE_ATTACK],
+               envelope.stage_target_q30_[ENV_STAGE_SUSTAIN])) >> 15;
   return written;
 }
 

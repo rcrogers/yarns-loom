@@ -57,6 +57,11 @@ struct ADSR {
   uint32_t attack_u32, decay_u32, release_u32; // Phase increments
 };
 
+// The nominal chiff window in samples, a multiple of the attack set by CHIFF
+// DURATION. Not file-local because the harnesses report it: it is the duration
+// every measurement is expressed against, and nothing else can derive it.
+uint32_t ChiffWindowSamples(uint32_t attack_increment_u32, uint8_t chiff_duration);
+
 class Envelope {
  public:
   Envelope() { }
@@ -156,11 +161,6 @@ class Envelope {
   // and it costs nothing because the state is carried scaled down to match.
   int32_t chiff_drive_over_16_q30_;
 
-  // How the rate falls while the chiff runs: decay = 1 - 2^-step (Q32), so
-  // rate -= (rate*decay)>>32 each sample == rate *= 2^-step, reproducing the
-  // slew time rising linearly, with no per-sample LUT. Zero = hold.
-  int32_t chiff_slew_rate_decay_q32_;
-
   // This envelope's chiff draws: the current word, and how many of its fields
   // are still unspent. The word doubles as the xorshift state -- advancing it
   // is three instructions with no memory traffic -- and both carry across runs,
@@ -227,14 +227,8 @@ class Envelope {
   // RenderStage derives the rate once per run. Slew time is unsigned: a
   // magnitude, 0..kMaxSlewTimeLog2, whose max exceeds 2^31 as Q5.27.
   uint32_t slew_time_log2_q5_27_;             // Current slew time, log2 samples
-  uint32_t chiff_slew_time_log2_step_q5_27_;  // Per-sample rise, i.e. how fast
-                                             // the slew slows (>= 0)
   uint32_t chiff_slew_time_log2_end_q5_27_;   // Max slew time the chiff's own
                                              // goes, from its duration
-  // The nominal chiff duration in samples, which sizes the walk's speed. NOT a
-  // countdown: nothing observes it elapsing, and only its nonzero-ness is read
-  // after NoteOn. 0 = no chiff on this note (AMOUNT 0).
-  uint32_t chiff_target_samples_;
   // Where the current stage began. With the stage phase (closed-form from the
   // countdown) this anchors the nominal value -- start + (target - start) *
   // lut_env_expo[phase] -- with no iterated level state.
@@ -246,11 +240,6 @@ class Envelope {
   // Half the note's ALLOWED range: the chiff input at fraction 1.0, i.e.
   // before any decay. A LEVEL, so it rescales with the others.
   int32_t chiff_input_full_q30_;
-  // Ordered clamp bounds over the note's stage targets. The envelope's range
-  // may be numerically inverted (CV DAC codes fall as volts rise; a warped
-  // timbre target may be negative), so these are min/max, not release/peak.
-  int32_t chiff_floor_q30_;
-  int32_t chiff_top_q30_;
   // Where the render loop measures the value FROM. min(chiff_floor, 0): USAT
   // bounds [0, 2^30) and nothing else, so a note whose range reaches below
   // zero is rendered offset by its floor. Held as state rather than derived in
