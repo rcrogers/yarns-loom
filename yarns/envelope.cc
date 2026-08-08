@@ -329,8 +329,9 @@ static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 // The second has TWO consumers -- the mean's reserve and the walk's threshold
 // -- and applying it at one alone moves the deadline by 0.7 octaves, which is
 // why it is folded in here rather than at either call site.
-const uint32_t kChiffScaledRmsPerRoot_q15_5 =
-  (((3u * kOne_q15_5 + 1u) / 2u) * kChiffDrawRmsPerPeak_q16) >> 16;
+const uint32_t kChiffScaledRmsPerRoot_q15_5 = static_cast<uint32_t>(
+  1.5 * (static_cast<double>(kChiffDrawRmsPerPeak_q16) / 65536.0)
+      * kOne_q15_5 + 0.5);
 
 // THE RATE IS PASSED IN, not squared out of the root. The caller already has
 // 2^-t -- the loop runs on it -- and ChiffWalkInputFraction builds the INVERSE
