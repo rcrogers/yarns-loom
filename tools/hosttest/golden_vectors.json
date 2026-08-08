@@ -148,7 +148,7 @@
  },
  "default-ish": {
   "n": 36096,
-  "sha": "ed3f9f0897c02273",
+  "sha": "fc51a09c32abfd02",
   "probe": [
    22284,
    16600,
@@ -1030,7 +1030,7 @@
  },
  "slowest attack": {
   "n": 36096,
-  "sha": "32feb9c53d4d112f",
+  "sha": "89970cd945ecdf21",
   "probe": [
    32766,
    32659,
@@ -1746,7 +1746,7 @@
  },
  "inverted range": {
   "n": 135104,
-  "sha": "6fdb24fc36f9b781",
+  "sha": "80889859c07fefd5",
   "probe": [
    21331,
    19014,

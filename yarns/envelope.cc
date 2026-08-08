@@ -370,20 +370,25 @@ static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 // `input` as the rms of what the filter chases, which is the PEAK only for a
 // two-level input. The draws are sixteen levels, so the true rms is
 // kChiffDrawRmsPerPeak of the peak. THIS FACTOR HAS TWO CONSUMERS -- the mean's
-// reserve and ChiffInputFractionOctaves' inaudibility deadline -- and applying
+// reserve and the walk's inaudibility threshold -- and applying
 // it to one alone moves the deadline by 0.7 octaves. Folding it in here reaches
 // both, which is why it is here rather than at either call site.
 const uint32_t kChiffScaledRmsPerRoot_q15_5 =
   (((3u * kOne_q15_5 + 1u) / 2u) * kChiffDrawRmsPerPeak_q16) >> 16;
 
+// THE RATE IS PASSED IN, not squared out of the root. The caller already has
+// 2^-t -- the loop runs on it -- and ChiffWalkInputFraction builds the INVERSE
+// of this same correction from it. Deriving r two different ways (a table read
+// here, root^2 there) let the forward and inverse series disagree in their low
+// bits for no reason.
 static uint32_t ChiffScaledRmsPerInput_q15_5(
-    uint32_t slew_time_log2_q5_27) {
+    uint32_t slew_time_log2_q5_27, int32_t rate_q31_in) {
   // 2^(-t/2) in Q31, then into Q15.5 at kChiffScaledRmsPerRoot.
   const uint32_t root_q31 = static_cast<uint32_t>(
     SlewRateFromTimeLog2_q31(slew_time_log2_q5_27 >> 1));
-  // r = 2^-t = root^2, then 1 + r/4 + 3r^2/32 in Q31.
-  const uint64_t rate_q31 =
-    (static_cast<uint64_t>(root_q31) * root_q31) >> 31;
+  // 1 + r/4 + 3r^2/32 in Q31.
+  const uint64_t rate_q31 = static_cast<uint64_t>(
+    static_cast<uint32_t>(rate_q31_in));
   const uint64_t rate_sq_q31 = (rate_q31 * rate_q31) >> 31;
   const uint64_t correction_q31 =
     (1ull << 31) + (rate_q31 >> 2) + ((3ull * rate_sq_q31) >> 5);
@@ -501,13 +506,6 @@ static uint32_t ChiffWalkRemaining_u16(uint32_t phase_q32) {
 // A Q7.25 amount times this, high word kept, is the level the law asks for in
 // Q30 -- which is why the audibility search below reads it directly.
 const uint32_t kChiffAmountMaxRecip_q32 = 1082196485u;
-
-static uint32_t ChiffWalkAmount_q7_25(uint32_t start_q7_25, uint32_t phase_q32);
-static int32_t ChiffWalkInputFraction_q30(
-    uint32_t amount_q7_25, uint32_t slew_time_log2_q5_27, int32_t rate_q31_in);
-static uint32_t ChiffWalkSlewTimeLog2_q5_27(
-    uint32_t amount_q7_25, uint32_t end_slew_time_log2_q5_27);
-static uint32_t ChiffScaledRmsPerInput_q15_5(uint32_t slew_time_log2_q5_27);
 
 // THE AMOUNT WHOSE OUTPUT SITS AT THE INAUDIBILITY THRESHOLD, Q7.25.
 // CLOSED FORM. It was a twelve-iteration binary search, each iteration paying
@@ -1262,7 +1260,7 @@ void Envelope::RenderStage(
     // UNCAPPED, unlike the stage rate below: see kChiffFastestSlewTimeLog2.
     int32_t slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
     const uint32_t chiff_scaled_rms_per_input_q15_5 =
-      ChiffScaledRmsPerInput_q15_5(slew_time_q5_27);
+      ChiffScaledRmsPerInput_q15_5(slew_time_q5_27, slew_rate_q31);
     // NO SLEW-RATE FLOOR, and no chiff input rescale at it. Both existed
     // because ONE slew had to track the nominal level AND carry the chiff: if
     // the chiff's rate went below the stage's, the level stopped tracking. The
