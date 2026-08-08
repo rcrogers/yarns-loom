@@ -155,9 +155,10 @@ int chiff_render(
   // Rest level = the note's own min, so an inverted or negative range starts
   // where it ends rather than at a zero that is outside it.
   envelope.Init(static_cast<int16_t>(min_target));
-  // Re-seed AFTER Init, which consumes one stride of its own.
-  envelope.chiff_draws_ = (seed ? seed : 0xCAFEBABEu) | 1u;
-  envelope.chiff_draws_left_ = kChiffDrawsPerWord;
+  // NOT re-seeded here: next_chiff_seed is set above, BEFORE Init, and Init
+  // takes its stride off that. Overriding afterwards gave the page a different
+  // stream from the native harness, which is exactly what simparity exists to
+  // catch.
   envelope.NoteOn(adsr, min_target, max_target,
                   modulated_chiff_amount,
                   static_cast<uint8_t>(chiff_duration));
