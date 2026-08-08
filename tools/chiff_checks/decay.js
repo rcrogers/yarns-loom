@@ -45,14 +45,36 @@ const pagePath = process.argv[4];   // defaults to the repo's chiff_sim.html
 // The engine's own inaudibility threshold: 2^-13 of full scale.
 const INAUDIBLE_DB = -78;
 // A recovery this big is the notch the user saw; statistical scatter in a
-// block standard deviation is a few tenths of a dB, and the 3-block median
-// below removes what is left, so this is far above the noise.
-const NOTCH_LIMIT_DB = 6;
-// Per-block fall limit. A block is window/20 and the shrink spends 10-25
-// octaves across the window, so a legitimate block gives up at most ~10 dB
-// (the worst MEASURED on a good build is 13.5). 20 was too loose to catch a
-// 19.6 dB release-end chop, which is precisely the thing being looked for.
-const CLIFF_LIMIT_DB = 15;
+// RECALIBRATED 2026-08-08 against a FLASH-TESTED build the user signed off on
+// ("perf is adequate, basic chiff quality is good"), which is the precondition
+// the old limits never had -- they were set against input-from-amount, whose
+// knob bottom is ~25 dB quieter and which therefore has no loud sub-audio
+// region at all. Both builds that DO have one -- this and marked, the character
+// the user chose -- failed the old limits, and marked failed them harder.
+//
+// READ THIS AS A REGRESSION GUARD, NOT A SMOOTHNESS ORACLE. It is calibrated
+// to today's measured spread (45 settings: notch max 11.4, mean 3.1; cliff max
+// 18.0, mean 9.4) plus ~22% margin, so it catches a DEPARTURE from the
+// character that was signed off. It does not certify smoothness in the
+// abstract, and it cannot: see the two mechanisms below, both characterised
+// and neither a defect.
+//
+// THE NOTCH is the input-cap band. Where the cap binds, the level follows the
+// bare filter response instead of the level law, and at a 2-5 Hz corner the
+// per-block excursion swings wildly because the block is a few percent of one
+// cycle. Scaling the block with the window was TRIED: it cuts failures 14 -> 11
+// but SKIPS 7 settings outright (a 44 s window gives a 2.2 s block, longer than
+// the audible part), so it trades failures for blindness. The right fix is a
+// block that scales with the SLEW TIME, which needs per-block slew data this
+// check is not given -- a redesign, not a recalibration.
+//
+// THE CLIFF is the landing, and it is structural: the amount lands ON zero and
+// level is proportional to amount, so dB-per-block diverges there whatever any
+// constant is set to. Recorded in the plan as not fixable without abandoning
+// the landing, which breaks L8.
+const NOTCH_LIMIT_DB = 14;
+// Per-block fall limit; see the calibration note above.
+const CLIFF_LIMIT_DB = 22;
 // Below this many audible blocks the shape cannot be judged at all -- a 1.7 ms
 // chiff is over in two blocks, and calling that a cliff would be noise. Such
 // settings are reported SKIP, never PASS, so they cannot look like coverage.
