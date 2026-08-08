@@ -1149,11 +1149,15 @@ void Envelope::HandOffToNextStage(
     nominal_gap_q30 -= 2 * static_cast<int32_t>(                              \
       (static_cast<int64_t>(nominal_gap_q30) * stage_rate_q31) >> 32);        \
     combined_q30 += combined_slope_q30;                                       \
-    /* Matches USAT #15 with ASR #15: arithmetic shift, then saturate. */     \
+    /* The asm's USAT: arithmetic shift by kSampleBits, then saturate         \
+     * unsigned to kOutputSaturateBits. The upper bound is spelled from THAT   \
+     * constant and not as INT16_MAX -- the two are equal today, and a twin    \
+     * that agrees only by coincidence is how the pair drifts. */              \
     int32_t sample = (combined_q30 - nominal_gap_q30                          \
       + (chiff_state_q30 << kChiffStateShift)) >> kSampleBits;                \
+    const int32_t kSampleMax = (1 << kOutputSaturateBits) - 1;                \
     if (sample < 0) sample = 0;                                               \
-    if (sample > INT16_MAX) sample = INT16_MAX;                               \
+    if (sample > kSampleMax) sample = kSampleMax;                             \
     *sample_buffer++ = static_cast<int16_t>(sample);                          \
   } while (0)
 
