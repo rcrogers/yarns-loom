@@ -403,7 +403,7 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 // below 2^-13 of full scale the chiff is inaudible (-78 dBFS). The quantity
 // held to it is the SCALED rms, so the chiff's own sigma at that point is
 // 2.121x lower again.
-const uint32_t kChiffInaudibleShift = 13;
+const uint32_t kChiffInaudibleLevel_q30 = 4177340u;
 
 // THE KNOB'S OWN MAPS, AT WALK RESOLUTION. The walk passes BETWEEN knob
 // positions, so these take a Q7.25 amount and interpolate where the integer
@@ -509,53 +509,43 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
     uint32_t amount_q7_25, uint32_t end_slew_time_log2_q5_27);
 static uint32_t ChiffScaledRmsPerInput_q15_5(uint32_t slew_time_log2_q5_27);
 
-// THE AMOUNT WHOSE OUTPUT SITS AT THE INAUDIBILITY THRESHOLD, Q7.25. Both the
-// input and the filter's response rise with amount, so the output does too and
-// a binary search is well defined. The threshold is the codebase's own
-// kChiffInaudibleShift, held against the SCALED rms exactly as
-// ChiffInputFractionOctaves holds it.
+// THE AMOUNT WHOSE OUTPUT SITS AT THE INAUDIBILITY THRESHOLD, Q7.25.
+// CLOSED FORM. It was a twelve-iteration binary search, each iteration paying
+// a ChiffWalkSlewTimeLog2 and a ChiffScaledRmsPerInput, because the level used
+// to be a tangle of the input and the filter's response. Under the level law
+// it is not: level == amount / kChiffAmountMax exactly, so
+//
+//   input_full * (amount / kChiffAmountMax)  >=  kChiffInaudibleLevel
+//
+// solves directly for the amount. One 64/32 divide replaces the search.
+//
+// THE SEARCH WAS ALSO A LIABILITY, not just a cost: it made the threshold
+// reachable only through twelve rounds of the very maps whose calibration was
+// in question, which is how a wrong constant stayed invisible.
+//
+// WHERE THE CAP BINDS this is not exact -- there the level follows the bare
+// response instead of the law, so the true amount is higher. The threshold sits
+// well above the capped band at every setting measured; if that stops being
+// true the symptom is DURATION reading long at the bottom of AMOUNT.
 static uint32_t ChiffWalkAudibleAmount_q7_25(
-    uint32_t start_q7_25, int32_t input_full_q30, uint32_t end_slew_q5_27) {
-  // TRIED AND REVERTED: correcting by the plan's measured 0.83-0.87
-  // predicted/actual sigma ratio. It moves the ratio the WRONG WAY (1.22/1.38
-  // against 1.21/1.33), so that bias does not explain the residual.
-  const uint64_t inaudible =
-    (1ull << (30 - kChiffInaudibleShift)) * kOne_q15_5;
-  // THE PRODUCT COLLAPSES, so neither factor is computed. The input is
-  // min(1, level / response), so input * response is min(level, response) --
-  // the law where the input has room, the bare response where it is capped at
-  // full scale. That is the whole quantity this searches on, and it costs ONE
-  // ChiffScaledRmsPerInput where the two-factor form paid for that AND the
-  // reciprocal beside it, twelve times per NoteOn.
-  uint32_t lo = 0, hi = start_q7_25;
-  for (uint32_t i = 0; i < 12; ++i) {
-    const uint32_t mid = lo + ((hi - lo) >> 1);
-    const uint32_t response_q15_5 = ChiffScaledRmsPerInput_q15_5(
-      ChiffWalkSlewTimeLog2_q5_27(mid, end_slew_q5_27));
-    // uint32, so the product below is a umull and not a full 64x64.
-    const uint32_t level_q30 = static_cast<uint32_t>(
-      (static_cast<uint64_t>(mid) * kChiffAmountMaxRecip_q32) >> 32);
-    // Both in the two-factor form's own units: an input times a Q15.5
-    // response. The input is folded down BEFORE the kOne, or the triple
-    // product leaves 64 bits.
-    const uint64_t law =
-      ((static_cast<uint64_t>(input_full_q30) * level_q30) >> 30) * kOne_q15_5;
-    const uint64_t capped =
-      static_cast<uint64_t>(input_full_q30) * response_q15_5;
-    const uint64_t reached = law < capped ? law : capped;
-    if (reached < inaudible) lo = mid; else hi = mid;
-  }
-  return hi;
+    uint32_t start_q7_25, int32_t input_full_q30) {
+  if (input_full_q30 <= 0) return start_q7_25;
+  const uint64_t numerator = static_cast<uint64_t>(kChiffAmountMax) << 25;
+  const uint64_t scaled = numerator * kChiffInaudibleLevel_q30;
+  const uint32_t amount_q7_25 = DivU64ByU32(
+    static_cast<uint32_t>(scaled >> 32), static_cast<uint32_t>(scaled),
+    static_cast<uint32_t>(input_full_q30));
+  return amount_q7_25 < start_q7_25 ? amount_q7_25 : start_q7_25;
 }
 
 // The phase at which the curve has fallen to that amount, u16 of the duration.
 // This IS the walk's speed: make this phase arrive at the duration and the
 // chiff goes inaudible exactly there.
 static uint32_t ChiffWalkAudiblePhase_u16(
-    uint32_t start_q7_25, int32_t input_full_q30, uint32_t end_slew_q5_27) {
+    uint32_t start_q7_25, int32_t input_full_q30) {
   if (!start_q7_25) return 65536;
-  const uint32_t target_q7_25 = ChiffWalkAudibleAmount_q7_25(
-    start_q7_25, input_full_q30, end_slew_q5_27);
+  const uint32_t target_q7_25 =
+    ChiffWalkAudibleAmount_q7_25(start_q7_25, input_full_q30);
   uint32_t lo = 0, hi = 0xFFFFFFFFu;
   for (uint32_t i = 0; i < 16; ++i) {
     const uint32_t mid = lo + ((hi - lo) >> 1);
@@ -793,7 +783,7 @@ void Envelope::NoteOn(
       chiff_walk_phase_step_q32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(0xFFFFFFFFu / window_samples)
          * ChiffWalkAudiblePhase_u16(chiff_walk_start_q7_25_,
-             chiff_input_full_q30_, chiff_slew_time_log2_end_q5_27_)) >> 16);
+             chiff_input_full_q30_)) >> 16);
       // THE WALK'S FIRST STATE IS THE NOTE'S FIRST STATE. All three of the
       // chiff's numbers are read off the starting amount here; the slew time
       // was the one left out, so it entered the note carrying whatever the
