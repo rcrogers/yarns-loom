@@ -560,9 +560,13 @@ static uint32_t ChiffWalkAudiblePhase_u16(
     ChiffWalkAudibleAmount_q7_25(start_q7_25, input_full_q30);
   // Inaudible before the note starts: cross the axis at full speed.
   if (target_q7_25 >= start_q7_25) return 65536;
-  // The remaining fraction the walk has to reach, u16.
-  const uint32_t needed_u16 = static_cast<uint32_t>(
-    (static_cast<uint64_t>(target_q7_25) << 16) / start_q7_25);
+  // The remaining fraction the walk has to reach, u16. DivU64ByU32, NOT a
+  // plain 64/32: GCC 4.8 turns that into __aeabi_uldivmod, and 43ac801c got
+  // that helper to zero call sites in the firmware for a reason -- it drags in
+  // ~1.4 kB of library code. target < start is guaranteed above, so the
+  // quotient fits u16.
+  const uint32_t needed_u16 = DivU64ByU32(
+    target_q7_25 >> 16, target_q7_25 << 16, start_q7_25);
   // lut_env_expo rises, so the remaining fraction falls: find the last index
   // whose remaining is still >= needed.
   uint32_t lo = 0, hi = LUT_ENV_EXPO_SIZE - 1;
