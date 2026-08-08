@@ -237,27 +237,28 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
         mn>=0 && mx<=FS_OUT, mn+'..'+mx);
 }
 
-// A RANGE THAT SITS BELOW ZERO MUST STILL BE AUDIBLE WITH NO BIAS TO LIFT IT.
-// This is the shape a negative warped timbre target has: Oscillator::NoteOn
-// passes (0, warped_max_timbre), so an inverted timbre envelope runs from 0
-// DOWNWARD with bias 0. Every other negative-range check here carries a
-// standing bias of 20000, which lifts the signal into USAT's [0, 32767] and
-// hides the failure; the below-zero invariant check reads value_trace, the
-// INTERNAL value, which is also unaffected. So nothing asserted the thing that
-// actually reaches the DAC.
-// REGRESSED TWICE, which is why this is a check and not a patch. Compare
-// against the same range positive so the assertion cannot pass on a build that
-// renders nothing at all.
+// AN INVERTED ENVELOPE MODULATES DOWN FROM ITS BIAS, and the chiff must not
+// eat that. USER 2026-08-08: "modulating down from a bias is the right way to
+// think about it, not outputting negative timbre values" -- so a below-zero
+// range with NO bias rendering zero is CORRECT, not the defect. What must hold
+// is that the downward travel survives a live chiff: the mean clamp holds the
+// mean one scaled rms inside each rail, and for a mean already near the floor
+// that pushes it UP, compressing the very motion the inversion is made of.
+// MEASURED here, trough over a 20000 bias: 8125 with the chiff off against
+// 11138 at AMOUNT 127 -- 37% of the travel lost at the top of the knob. The
+// limit is set well clear of both so this reads a break, not the compression.
 {
-  const opts=' 0 0 gate=500 tail=300 bias_lfo=0';
-  const span=(r)=>{ const s=run('basic'+opts+' range='+r);
-    let mn=99999, mx=-99999; for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v; }
-    return mx-mn; };
-  const up=span(16383), down=span(-16383);
-  // Half the positive span: a working inversion is symmetric to within the
-  // rails, a broken one is exactly 0, so neither verdict is near the line.
-  check('below-zero range is audible with no bias (inverted timbre)',
-        down > up/2, 'span '+down+' against '+up+' for the same range positive');
+  const opts=' 90 range=-16383 gate=500 tail=300 bias_lfo=20000';
+  const trough=(a)=>meanWin(run('basic '+a+opts),120,150);
+  const off=trough(0), on=trough(127);
+  // AGAINST THE CHIFF-OFF TRAVEL, not an absolute trough: the question is how
+  // much of the inversion the clamp costs, and only a ratio asks that. Half is
+  // the limit because a working build sits at ~0.75 and a broken one at ~0,
+  // so neither verdict is near the line.
+  const kept=(20000-on)/(20000-off);
+  check('a full chiff may not cost half an inverted envelope\'s travel',
+        kept > 0.5, 'keeps '+(100*kept).toFixed(0)+'% of its downward travel'+
+        ' (trough '+on.toFixed(0)+' at AMOUNT 127 against '+off.toFixed(0)+')');
 }
 
 // The invariant again, on a range that sits BELOW zero: the clamp offset must
