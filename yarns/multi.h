@@ -123,7 +123,9 @@ struct PackedMulti {
     clock_manual_start : 1
     PACKED_MULTI_FREE_FIELD;
 
-  uint8_t control_change_mode; // Breaking: move to bitfield when convenient
+  // Breaking: 4 values need 2 bits, so folding this into the group above
+  // would free 6.
+  uint8_t control_change_mode;
   int8_t clock_offset;
 #if PACKED_MULTI_UNASSIGNED_BYTES
   uint8_t unassigned[PACKED_MULTI_UNASSIGNED_BYTES];

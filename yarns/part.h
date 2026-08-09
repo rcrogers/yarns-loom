@@ -231,7 +231,7 @@ struct PackedPart {
     aux_cv_2 : 4, // values free: 0
     tuning_factor : 4, // values free: 2
     oscillator_mode : 2, // values free: 1
-    oscillator_shape : 7, // Breaking: 1 bit unused, values unused: 77
+    oscillator_shape : 7, // values free: 61 (67 needed, so 6 bits will not do)
     tremolo_mod : kTimbreBits,
     vibrato_shape : kLFOShapeBits,
     timbre_lfo_shape : kLFOShapeBits,
