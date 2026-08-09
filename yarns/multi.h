@@ -93,7 +93,10 @@ struct PackedMulti {
 
   // What is left of the byte before the byte-aligned members below.  See
   // PackedPart::kFreeBits.
-#define PACKED_MULTI_FREE_BITS 7
+#ifndef PACKED_MULTI_EXTRA_FREE_BITS
+#define PACKED_MULTI_EXTRA_FREE_BITS 0 // Widened by the free-bits check
+#endif
+#define PACKED_MULTI_FREE_BITS (7 + PACKED_MULTI_EXTRA_FREE_BITS)
 #if PACKED_MULTI_FREE_BITS
   #define PACKED_MULTI_FREE_FIELD , free_bits : PACKED_MULTI_FREE_BITS
 #else
@@ -130,6 +133,7 @@ struct PackedMulti {
 #undef PACKED_MULTI_UNASSIGNED_BYTES
 #undef PACKED_MULTI_FREE_FIELD
 #undef PACKED_MULTI_FREE_BITS
+#undef PACKED_MULTI_EXTRA_FREE_BITS
 
 struct MultiSettings {
   uint8_t layout;

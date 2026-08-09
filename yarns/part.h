@@ -172,7 +172,10 @@ struct PackedPart {
   // What is left of the last byte once the bitfield run ends.  Named so that
   // sizeof() accounts for every bit; narrow it when adding a field.  A macro
   // because at zero the field must vanish -- zero-width bitfields are illegal.
-#define PACKED_PART_FREE_BITS 4
+#ifndef PACKED_PART_EXTRA_FREE_BITS
+#define PACKED_PART_EXTRA_FREE_BITS 0 // Widened by the free-bits check
+#endif
+#define PACKED_PART_FREE_BITS (4 + PACKED_PART_EXTRA_FREE_BITS)
 #if PACKED_PART_FREE_BITS
   #define PACKED_PART_FREE_FIELD , free_bits : PACKED_PART_FREE_BITS
 #else
@@ -261,6 +264,7 @@ struct PackedPart {
 
 #undef PACKED_PART_FREE_FIELD
 #undef PACKED_PART_FREE_BITS
+#undef PACKED_PART_EXTRA_FREE_BITS
 
 struct MidiSettings {
   uint8_t channel;

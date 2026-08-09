@@ -91,7 +91,15 @@ always_rebuild:
 $(STORAGE_PROBE_OBJ): $(STORAGE_PROBE_SRC) always_rebuild | $(BUILD_DIR)
 	$(CXX) -c $(CCFLAGS) $(CPPFLAGS) $< -o $@
 
-syx: $(BUILD_DIR)$(TARGET).syx $(STORAGE_PROBE_OBJ)
+# Each asserts that its scope's kFreeBits is not understated. Compiling them is
+# the whole test; they report nothing.
+FREE_BITS_CHECK_OBJS = $(BUILD_DIR)free_bits_check_part.o \
+                       $(BUILD_DIR)free_bits_check_multi.o
+
+$(BUILD_DIR)free_bits_check_%.o: yarns/tools/free_bits_check_%.cc always_rebuild | $(BUILD_DIR)
+	$(CXX) -c $(CCFLAGS) $(CPPFLAGS) $< -o $@
+
+syx: $(BUILD_DIR)$(TARGET).syx $(STORAGE_PROBE_OBJ) $(FREE_BITS_CHECK_OBJS)
 	@$(SIZE) $(TARGET_ELF) | awk 'NR==2 { \
 	  used = $$2 + $$3; \
 	  free = $(RAM_SIZE) - used - $(STACK_RESERVATION); \

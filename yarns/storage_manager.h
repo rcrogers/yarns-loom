@@ -49,10 +49,14 @@ const uint8_t kFlashWordBytes = 4;
 const uint16_t kPackedMaxSize =
     FlashStorage::MAX_DATA_SIZE / kFlashWordBytes * kFlashWordBytes;
 
+// Suspended for the free-bits checks, which deliberately overflow the page.
+#ifndef YARNS_FREE_BITS_CHECK
+
 // The blob fills the page exactly, so its size never moves and adding a setting
 // never invalidates a saved patch.  When this fires, PackedMulti::
 // kUnassignedBytes is the knob; the page is only exhausted once that hits zero.
 STATIC_ASSERT(kPackedSize == kPackedMaxSize, resize_unassigned_bytes_to_fill_page);
+#endif
 
 const uint8_t kBitsPerByte = 8;
 
@@ -73,8 +77,10 @@ const uint16_t kTotalFreeBits = kFreeBitsPerPartBitfield * kNumParts +
 
 // Keeps fungible bits fungible.  A whole free byte parked inside a struct is
 // stranded there, so take bytes out of unassigned only to spend them.
+#ifndef YARNS_FREE_BITS_CHECK
 STATIC_ASSERT(PackedMulti::kFreeBits < kBitsPerByte, multi_free_bits_exceed_byte);
 STATIC_ASSERT(PackedPart::kFreeBits < kBitsPerByte, part_free_bits_exceed_byte);
+#endif
 
 // Must fit both packed and tagged payloads.
 const uint16_t kStreamBufferSize =
