@@ -47,6 +47,12 @@ const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
 const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
 const uint32_t kFastFade = kRefreshFreq << 1;
 
+// Encoder acceleration. Each bucket of gap between detents drops one doubling,
+// so a detent inside the first bucket multiplies by 1 << kEncoderAccelMaxShift
+// and one slower than kEncoderAccelMaxShift buckets is not multiplied at all.
+const uint8_t kEncoderAccelBucketBits = 5; // 32 ms
+const int32_t kEncoderAccelMaxShift = 4; // x16
+
 /* static */
 const Ui::Command Ui::commands_[] = {
   { "*LOAD*", UI_MODE_LOAD_SELECT_PROGRAM, NULL },
@@ -196,23 +202,30 @@ void Ui::Poll() {
   }
   
   // Encoder increment, with tiered acceleration when scrolling rapidly in
-  // the same direction. Skipped in calibration adjustment because the
-  // handler already multiplies by 32 and fine control is wanted.
+  // the same direction. Only the encoder accelerates; relative CC arrives via
+  // Multi::UpdateController and is applied a detent at a time. Skipped in
+  // calibration adjustment because the handler already multiplies by 32 and
+  // fine control is wanted.
   int32_t increment = encoder_.increment();
   if (increment != 0) {
     const uint32_t now = system_clock.milliseconds();
     const uint32_t dt = now - encoder_last_increment_ms_;
     const int8_t sign = increment > 0 ? 1 : -1;
-    // 32-ms buckets: dt ∈ [0,32) ×16, [32,64) ×8, [64,96) ×4, [96,128) ×2,
-    // else ×1.
+    const bool reversed = encoder_last_increment_sign_ == -sign;
+
     int32_t accel_shift = 0;
     if (sign == encoder_last_increment_sign_ &&
         mode_ != UI_MODE_CALIBRATION_ADJUST_LEVEL) {
-      const int32_t s = 4 - static_cast<int32_t>(dt >> 5);
+      const int32_t s = kEncoderAccelMaxShift -
+          static_cast<int32_t>(dt >> kEncoderAccelBucketBits);
       if (s > 0) accel_shift = s;
     }
     encoder_last_increment_ms_ = now;
-    encoder_last_increment_sign_ = sign;
+    // A reversal ends the run instead of handing its speed to the new
+    // direction -- which is what made overshoot correction fly back past the
+    // target. Leaving no direction established costs the next detent its
+    // acceleration too, so speed has to be earned again.
+    encoder_last_increment_sign_ = reversed ? 0 : sign;
     queue_.AddEvent(CONTROL_ENCODER, 0, increment << accel_shift);
   }
 
