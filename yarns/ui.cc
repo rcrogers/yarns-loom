@@ -30,6 +30,7 @@
 #include "stmlib/system/system_clock.h"
 #include "stmlib/utils/print.h"
 
+#include "yarns/constants.h"
 #include "yarns/multi.h"
 #include "yarns/ui.h"
 #include "yarns/voice.h"
@@ -61,12 +62,13 @@ const int32_t kEncoderAccelMaxShift = 3; // x8
 const uint8_t kEncoderFastRunMax =
     kEncoderAccelDetentsPerDoubling * (kEncoderAccelMaxShift + 1);
 
-// What a ceiling costs in precision, for whoever retunes it: detents to cross
-// the widest setting (127) at full gain, and how long that takes at a vigorous
-// 25 detents/s.
+// The widest settings are the ones that take a MIDI value, so a sweep at full
+// gain is kWidestSettingRange >> kEncoderAccelMaxShift detents. What a ceiling
+// costs in precision, for whoever retunes it, at a vigorous 25 detents/s:
 //   x4   31 detents, 1.2 s
 //   x8   15 detents, 0.6 s
 //   x16   7 detents, 0.3 s -- a jump rather than a control
+const int16_t kWidestSettingRange = kNumMidiValues - 1;
 
 /* static */
 const Ui::Command Ui::commands_[] = {
