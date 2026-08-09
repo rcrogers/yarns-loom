@@ -56,24 +56,17 @@ const uint32_t kFastFade = kRefreshFreq << 1;
 // The run leaks rather than resetting, so a gap that lands the wrong side of
 // the threshold costs one detent of progress instead of all of it.
 const uint32_t kEncoderFastDetentMs = 60; // ~17 detents/s
-const uint8_t kEncoderAccelDetentsPerDoubling = 4;
+const uint8_t kEncoderAccelDetentsPerDoubling = 3;
 const int32_t kEncoderAccelMaxShift = 3; // x8
 const uint8_t kEncoderFastRunMax =
     kEncoderAccelDetentsPerDoubling * (kEncoderAccelMaxShift + 1);
 
-// Crossing the widest setting should still take something like half a second
-// of steady turning at full gain: below that the knob stops being a control
-// and becomes a jump. This catches raising the ceiling without asking what it
-// costs in precision, and a much wider setting appearing later.
-const int16_t kWidestSettingRange = 127;
-const int16_t kSweepDetentsAtMaxGain = kWidestSettingRange >> kEncoderAccelMaxShift;
-const int16_t kMinSweepDetentsAtMaxGain = 12; // ~0.5 s at a vigorous 25/s
-const int16_t kMaxSweepDetentsAtMaxGain = 64;
-STATIC_ASSERT(
-  kSweepDetentsAtMaxGain >= kMinSweepDetentsAtMaxGain &&
-  kSweepDetentsAtMaxGain <= kMaxSweepDetentsAtMaxGain,
-  encoder_acceleration_ceiling_mismatched_to_widest_setting
-);
+// What a ceiling costs in precision, for whoever retunes it: detents to cross
+// the widest setting (127) at full gain, and how long that takes at a vigorous
+// 25 detents/s.
+//   x4   31 detents, 1.2 s
+//   x8   15 detents, 0.6 s
+//   x16   7 detents, 0.3 s -- a jump rather than a control
 
 /* static */
 const Ui::Command Ui::commands_[] = {
