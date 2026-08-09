@@ -278,7 +278,6 @@ struct MidiSettings {
   uint8_t play_mode;
   uint8_t input_response;
   uint8_t sustain_polarity;
-  uint8_t padding[5];
 
   void Pack(PackedPart& packed) const {
     packed.channel = channel;
@@ -525,10 +524,8 @@ struct SequencerSettings {
   uint8_t num_steps;
   uint8_t clock_quantization;
   uint8_t loop_length;
-  uint8_t padding_fields[5];
 
   SequencerStep step[kNumSteps];
-  uint8_t padding_steps[2];
 
   void Pack(PackedPart& packed) const {
     std::fill(

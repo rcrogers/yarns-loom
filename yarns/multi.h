@@ -149,7 +149,6 @@ struct MultiSettings {
   uint8_t clock_manual_start;
   uint8_t control_change_mode;
   int8_t clock_offset;
-  uint8_t padding[8];
 
   void Pack(PackedMulti& packed) {
     for (uint8_t i = 0; i < 12; i++) {
