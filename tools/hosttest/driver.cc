@@ -91,6 +91,10 @@ static int g_value_trace = 0;
 // approximation whose error depends only on the slew time, so this is what
 // says how much of a real chiff's life is spent where the error is material.
 static int g_slew_trace = 0;
+// THE CHIFF TERM ITSELF, unclamped, with nothing subtracted. Every other way
+// of reading it is contaminated: the output carries the envelope and the bias,
+// and a difference against an AMOUNT 0 run carries both runs' rounding.
+static int g_chiff_state_trace = 0;
 // THE CHIFF'S STATE, as the model defines it: the drive it is being pushed
 // with, the slew time its filter is running at, and the input it is chasing.
 // Those three ARE the chiff -- everything audible follows from them. The model
@@ -121,6 +125,11 @@ static void RenderMs(double ms) {
     }
     if (g_slew_trace) {
       printf("%u %d\n", env.slew_time_log2_q5_27_, env.chiff_input_fraction_q30_);
+      continue;
+    }
+    if (g_chiff_state_trace) {
+      // scaled back up out of the loop's shifted domain, so it reads as s16
+      printf("%d\n", env.chiff_state_q30_ << 4 >> 15);
       continue;
     }
     if (g_value_trace) { printf("%d\n", env.value_q30_); continue; }
@@ -158,6 +167,7 @@ int main(int argc, char** argv) {
   g_value_range = OptInt(argc, argv, "value_range", 0);
   g_value_trace = OptInt(argc, argv, "value_trace", 0);
   g_slew_trace = OptInt(argc, argv, "slew_trace", 0);
+  g_chiff_state_trace = OptInt(argc, argv, "chiff_state_trace", 0);
   g_chiff_trace = OptInt(argc, argv, "chiff_trace", 0);
   g_bias_lfo_blocks = OptInt(argc, argv, "bias_lfo_blocks", 8);
 
