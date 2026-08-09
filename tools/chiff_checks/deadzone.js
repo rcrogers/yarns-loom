@@ -89,5 +89,21 @@ const span = a => a.length ? `${a[0].amt}..${a[a.length - 1].amt}` : 'never';
 console.log(`     filter moves over AMOUNT ${span(movedSlew)}`);
 console.log(`     drive  moves over AMOUNT ${span(movedDrive)}`);
 
+// L5: the filter must finish opening BEFORE the drive tops out, or the
+// harshest setting is drive pushing a signal the filter still holds down.
+const lastFilter = movedSlew.length ? movedSlew[movedSlew.length - 1].amt : 0;
+const lastDrive = movedDrive.length ? movedDrive[movedDrive.length - 1].amt : 0;
+if (!lastFilter || !lastDrive) {
+  console.log('FAIL L5: one of the two mechanisms never moves at all');
+  fails++;
+} else if (lastFilter >= lastDrive) {
+  console.log(`FAIL L5: the filter is still opening at AMOUNT ${lastFilter}, ` +
+              `at or past where the drive tops out (${lastDrive})`);
+  fails++;
+} else {
+  console.log(`PASS L5: the filter finishes at AMOUNT ${lastFilter}, ` +
+              `${lastDrive - lastFilter} positions before the drive tops out`);
+}
+
 console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL PASS');
 process.exit(fails ? 1 : 0);
