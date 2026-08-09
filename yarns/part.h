@@ -151,9 +151,9 @@ struct SequencerArpeggiatorResult { // Supports multiple return
 };
 
 struct PackedPart {
-  // 33 bits to spare per part: up to 29 from the last bitfield word's padding,
-  // plus 4 more if a new bitfield group is added (at the cost of 28 bits of
-  // word-alignment overhead).  Dense pitch encoding accounts for 24 of these.
+  // `make syx` reports the headroom; storage_manager.h derives it.  Dense pitch
+  // encoding below is why there is any: a byte per step would grow the part by
+  // 3 bytes, putting the multi over the flash page.
 
   // 128 MIDI notes + rest + tie
   typedef DenseArray<kNumSteps, SEQUENCER_STEP_TIE + 1> StepPitchDenseArray;
@@ -168,6 +168,17 @@ struct PackedPart {
 
   static const uint8_t kTimbreBits = 7; // values free: 0
   static const uint8_t kLFOShapeBits = 3; // values free: 0
+
+  // What is left of the last byte once the bitfield run ends.  Named so that
+  // sizeof() accounts for every bit; narrow it when adding a field.  A macro
+  // because at zero the field must vanish -- zero-width bitfields are illegal.
+#define PACKED_PART_FREE_BITS 4
+#if PACKED_PART_FREE_BITS
+  #define PACKED_PART_FREE_FIELD , free_bits : PACKED_PART_FREE_BITS
+#else
+  #define PACKED_PART_FREE_FIELD
+#endif
+  static const uint8_t kFreeBits = PACKED_PART_FREE_BITS;
 
   signed int
     // MidiSettings
@@ -243,9 +254,13 @@ struct PackedPart {
     step_offset : 5, // values free: 2 (see kNumSteps)
     num_steps : 5, // values free: 1
     clock_quantization : 1,
-    loop_length : 3; // values free: 0
+    loop_length : 3 // values free: 0
+    PACKED_PART_FREE_FIELD;
 
 }__attribute__((packed));
+
+#undef PACKED_PART_FREE_FIELD
+#undef PACKED_PART_FREE_BITS
 
 struct MidiSettings {
   uint8_t channel;

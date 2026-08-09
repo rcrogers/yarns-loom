@@ -33,16 +33,8 @@
 
 namespace yarns {
 
-// Assert packed size satisfies flash constraints
-STATIC_ASSERT(kPackedSize % 4 == 0, flash_aligns_packed);
-STATIC_ASSERT(kPackedSize <= FlashStorage::MAX_DATA_SIZE, flash_fits_packed);
-
-// Not a constraint -- a tripwire, so that a packed-layout change (which
-// invalidates every saved patch) has to be deliberate. When it fires:
-// uncomment the probe below to make the compiler name the new size in its
-// error, then update the assert.
-// char (*__debug_packed)[kPackedSize] = 1;
-STATIC_ASSERT(kPackedSize == 1016, uncomment_debug_packed_above_to_see_new_size);
+// The packed size is asserted in storage_manager.h, against the page rather
+// than a number kept by hand.
 
 STATIC_ASSERT(kStreamBufferSize >= kPackedSize, buffer_fits_packed);
 STATIC_ASSERT(kStreamBufferSize >= Multi::kTaggedPayloadSize, buffer_fits_tagged);

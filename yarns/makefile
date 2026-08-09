@@ -80,8 +80,22 @@ HEX2SYSEX = python tools/hex2sysex/hex2sysex.py
 $(BUILD_DIR)%.syx: $(BUILD_DIR)%.bin
 	$(HEX2SYSEX) $(SYSEX_FLAGS) --syx -o $@ $<
 
-syx: $(BUILD_DIR)$(TARGET).syx
+# Preset-storage budget, read back out of a probe that is compiled, never linked.
+STORAGE_PROBE_SRC = yarns/tools/storage_budget_probe.cc
+STORAGE_PROBE_OBJ = $(BUILD_DIR)storage_budget_probe.o
+
+# No generated dep file out here, and a stale budget is worse than a compile.
+.PHONY: always_rebuild
+always_rebuild:
+
+$(STORAGE_PROBE_OBJ): $(STORAGE_PROBE_SRC) always_rebuild | $(BUILD_DIR)
+	$(CXX) -c $(CCFLAGS) $(CPPFLAGS) $< -o $@
+
+syx: $(BUILD_DIR)$(TARGET).syx $(STORAGE_PROBE_OBJ)
 	@$(SIZE) $(TARGET_ELF) | awk 'NR==2 { \
 	  used = $$2 + $$3; \
 	  free = $(RAM_SIZE) - used - $(STACK_RESERVATION); \
 	  printf "(%cram_used%c, %d)\n(%cram_free%c, %d)\n", 39, 39, used, 39, 39, free }'
+	@$(NM) -t d --print-size --defined-only $(STORAGE_PROBE_OBJ) | \
+	  awk '$$4 ~ /^probe_/ { sub(/^probe_[0-9]+_/, "", $$4); \
+	    printf "(%cpreset_%s%c, %d)\n", 39, $$4, 39, $$2 - 1 }'

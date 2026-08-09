@@ -91,7 +91,23 @@ struct PackedMulti {
 
   int8_t custom_pitch_table[12];
 
-  unsigned int // 7 bits to spare
+  // What is left of the byte before the byte-aligned members below.  See
+  // PackedPart::kFreeBits.
+#define PACKED_MULTI_FREE_BITS 7
+#if PACKED_MULTI_FREE_BITS
+  #define PACKED_MULTI_FREE_FIELD , free_bits : PACKED_MULTI_FREE_BITS
+#else
+  #define PACKED_MULTI_FREE_FIELD
+#endif
+  static const uint8_t kFreeBits = PACKED_MULTI_FREE_BITS;
+
+  // Bytes belonging to no struct yet, so they can still be given to either
+  // scope.  Sized to make the blob exactly fill the flash page -- when the
+  // kPackedSize assert in storage_manager.h fires, this is the knob it means.
+#define PACKED_MULTI_UNASSIGNED_BYTES 4
+  static const uint8_t kUnassignedBytes = PACKED_MULTI_UNASSIGNED_BYTES;
+
+  unsigned int
     layout : 4, // values free: 1
     clock_tempo : 8, // values free: 54
     clock_swing : 7, // values free: 28
@@ -101,11 +117,19 @@ struct PackedMulti {
     clock_override : 1,
     remote_control_channel : 5, // values free: 15
     nudge_first_tick : 1,
-    clock_manual_start : 1;
+    clock_manual_start : 1
+    PACKED_MULTI_FREE_FIELD;
 
   uint8_t control_change_mode; // Breaking: move to bitfield when convenient
   int8_t clock_offset;
+#if PACKED_MULTI_UNASSIGNED_BYTES
+  uint8_t unassigned[PACKED_MULTI_UNASSIGNED_BYTES];
+#endif
 }__attribute__((packed));
+
+#undef PACKED_MULTI_UNASSIGNED_BYTES
+#undef PACKED_MULTI_FREE_FIELD
+#undef PACKED_MULTI_FREE_BITS
 
 struct MultiSettings {
   uint8_t layout;
