@@ -181,6 +181,9 @@ const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 // output is ALREADY the square, so there is nothing left for drive to do. The
 // crest factor the sixteen levels give away is what the drive spends.
 const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
+// Where the FILTER finishes opening. Independent of kChiffCleanAmount, which
+// is where the DRIVE starts; equal to it only by history.
+const uint32_t kChiffFilterOpenAmount = kChiffCleanAmount;
 // The state is held scaled DOWN by this many bits so the driven input cannot
 // leave Q30: undriven it reaches 2^29, and 16x that is 2^33. Shifting the
 // state instead costs nothing, because the output add takes a shifted operand.
@@ -388,10 +391,16 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
   if (end_slew_time_log2_q5_27 <= kChiffFastestSlewTimeLog2_q5_27) {
     return end_slew_time_log2_q5_27;
   }
-  // The rate sweep owns the lower half of the knob, so double and saturate.
+  // WHERE THE FILTER STOPS OPENING, which is NOT where the drive starts. They
+  // were the same constant (kChiffCleanAmount) because both happened to be 64;
+  // splitting them lets the corner reach its fast end before the drive begins.
+  // Q16 so a non-power-of-two open point is expressible; at 64 it is exactly 2
+  // and reproduces the old doubling bit for bit.
   const uint32_t kAmountMax_q7_25 = kChiffAmountMax << 25;
-  const uint64_t doubled_q7_25 = static_cast<uint64_t>(amount_q7_25)
-      * ((kChiffAmountMax + 1) / kChiffCleanAmount);
+  const uint32_t kOpenScale_q16 = static_cast<uint32_t>(
+    65536.0 * (kChiffAmountMax + 1) / kChiffFilterOpenAmount + 0.5);
+  const uint64_t doubled_q7_25 =
+      (static_cast<uint64_t>(amount_q7_25) * kOpenScale_q16) >> 16;
   const uint32_t rate_amount_q7_25 = doubled_q7_25 > kAmountMax_q7_25
       ? kAmountMax_q7_25 : static_cast<uint32_t>(doubled_q7_25);
   const uint32_t kWarpStep = (LUT_ENV_EXPO_SIZE - 1) >> kChiffAmountBits;
