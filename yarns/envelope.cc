@@ -183,7 +183,7 @@ const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
 // Where the FILTER finishes opening. Independent of kChiffCleanAmount, which
 // is where the DRIVE starts; equal to it only by history.
-const uint32_t kChiffFilterOpenAmount = kChiffCleanAmount;
+const uint32_t kChiffFilterOpenAmount = 110;  // EXPERIMENT
 // The state is held scaled DOWN by this many bits so the driven input cannot
 // leave Q30: undriven it reaches 2^29, and 16x that is 2^33. Shifting the
 // state instead costs nothing, because the output add takes a shifted operand.
@@ -412,7 +412,18 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
       ? lut_env_expo[(index + 1) * kWarpStep] : lo_u16;
   const uint32_t warped_u16 = lo_u16 + static_cast<uint32_t>(
       (static_cast<uint64_t>(hi_u16 - lo_u16) * frac_q25) >> 25);
-  const uint32_t warp_u16 = (warped_u16 << 16) / warp_max_u16;
+  const uint32_t warp_expo_u16 = (warped_u16 << 16) / warp_max_u16;
+  // EXPERIMENT -- A QUARTER OF THE WAY TOWARD A STRAIGHT LINE. The exponential
+  // curve alone starts a note's darkening late (124 ms into a 687 ms chiff);
+  // a straight line starts it at once but darkens the whole knob by octaves.
+  // A quarter of the way there buys the first and almost none of the second.
+  // >> 9 rather than a 64-bit divide: rate_amount is amount << 25, so >> 9 is
+  // amount << 16, and dividing that by a 32-bit constant is a multiply. The
+  // plain form is a 64-bit divide by a constant, which GCC 4.8 turns into
+  // __aeabi_uldivmod -- a helper this file has had reintroduced three times.
+  const uint32_t warp_linear_u16 = (rate_amount_q7_25 >> 9) / kChiffAmountMax;
+  // lut_env_expo is above the straight line everywhere, so this only subtracts.
+  const uint32_t warp_u16 = warp_expo_u16 - ((warp_expo_u16 - warp_linear_u16) >> 2);
   return end_slew_time_log2_q5_27 - static_cast<uint32_t>(
     (static_cast<uint64_t>(
        end_slew_time_log2_q5_27 - kChiffFastestSlewTimeLog2_q5_27) * warp_u16)
