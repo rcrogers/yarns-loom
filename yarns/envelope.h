@@ -96,11 +96,9 @@ class Envelope {
   void Rescale(int32_t numerator, int32_t denominator);
 
  private:
-  // Re-derive the slew coefficients after a stage change: the classic
-  // rate from the new stage's slew time and, if the chiff is live, the
-  // chiff's own slew slowing (toward its max slew time, compressed into
-  // the remaining stage when the stage is shorter than the chiff).
-  void RederiveSlewState();
+  // Point the slew time at the new stage: the stage's own when no chiff is
+  // live, otherwise bounded by the end of the walk's axis.
+  void SetSlewTimeForStage();
 
   // the +/- the chiff puts on the slew input -- half the note's
   // ALLOWED range times the shrink, so it does not follow the realized level.
@@ -159,7 +157,7 @@ class Envelope {
   // DIVIDED by 2^kChiffStateShift: 2^-kChiffDriveOctaves at or below the hinge,
   // 1.0 at full amount. Pre-dividing is what keeps the driven input inside Q30,
   // and it costs nothing because the state is carried scaled down to match.
-  int32_t chiff_drive_over_16_q30_;
+  int32_t chiff_drive_q30_;
 
   // This envelope's chiff draws: the current word, and how many of its fields
   // are still unspent. The word doubles as the xorshift state -- advancing it

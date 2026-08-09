@@ -168,6 +168,9 @@ const uint32_t kMaxSlewTimeLog2_q5_27 = 27u << 27;
 const uint32_t kChiffFastestSlewTimeLog2_q5_27 = (1u << 27) / 128;
 
 // chiff_amount lives in [0, kChiffAmountMax].
+// The fractional part of a Q5.27 slew time, i.e. everything below one octave.
+const uint32_t kSlewTimeFraction_q5_27 = (1u << 27) - 1;
+
 const uint32_t kChiffAmountBits = 7;
 const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 
@@ -183,7 +186,7 @@ const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
 // Where the FILTER finishes opening. Independent of kChiffCleanAmount, which
 // is where the DRIVE starts; equal to it only by history.
-const uint32_t kChiffFilterOpenAmount = 110;  // EXPERIMENT
+const uint32_t kChiffFilterOpenAmount = 110;
 // The state is held scaled DOWN by this many bits so the driven input cannot
 // leave Q30: undriven it reaches 2^29, and 16x that is 2^33. Shifting the
 // state instead costs nothing, because the output add takes a shifted operand.
@@ -244,7 +247,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_slew_time_log2_end_q5_27_ = 0;
   chiff_input_fraction_q30_ = 0;
   chiff_input_full_q30_ = 0;
-  chiff_drive_over_16_q30_ = 1 << (30 - kChiffStateShift);
+  chiff_drive_q30_ = 1 << (30 - kChiffStateShift);
   chiff_walk_start_q7_25_ = 0;
   chiff_walk_amount_q7_25_ = 0;
   chiff_walk_phase_q32_ = 0;
@@ -413,7 +416,7 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
   const uint32_t warped_u16 = lo_u16 + static_cast<uint32_t>(
       (static_cast<uint64_t>(hi_u16 - lo_u16) * frac_q25) >> 25);
   const uint32_t warp_expo_u16 = (warped_u16 << 16) / warp_max_u16;
-  // EXPERIMENT -- A QUARTER OF THE WAY TOWARD A STRAIGHT LINE. The exponential
+  // A QUARTER OF THE WAY TOWARD A STRAIGHT LINE. The exponential
   // curve alone starts a note's darkening late (124 ms into a 687 ms chiff);
   // a straight line starts it at once but darkens the whole knob by octaves.
   // A quarter of the way there buys the first and almost none of the second.
@@ -609,7 +612,7 @@ const uint32_t kChiffLog2PerScaledRms_q5_27 = static_cast<uint32_t>(
 // it, let the reciprocal come out below 1.0 and take the larger. Where it does,
 // the input IS the level -- the no-op at and above the hinge.
 // THE RATE IS PASSED IN, not derived: every caller already has it (the run
-// derives it for the loop, NoteOn for RederiveSlewState), and deriving it here
+// derives it for the loop, NoteOn for SetSlewTimeForStage), and deriving it here
 // as well would be a second read of the same table at the same argument.
 static int32_t ChiffWalkInputFraction_q30(
     uint32_t amount_q7_25, uint32_t slew_time_log2_q5_27, int32_t rate_q31_in) {
@@ -628,7 +631,7 @@ static int32_t ChiffWalkInputFraction_q30(
     (slew_time_log2_q5_27 >> 1) + kChiffLog2PerScaledRms_q5_27;
   const uint32_t shift = (g_q5_27 >> 27) + 1;
   const uint32_t two_pow_f_q31 = static_cast<uint32_t>(SlewRateFromTimeLog2_q31(
-    (1u << 27) - (g_q5_27 & 0x07FFFFFFu)));
+    (1u << 27) - (g_q5_27 & kSlewTimeFraction_q5_27)));
   const uint32_t scaled_q30 = static_cast<uint32_t>(
     (static_cast<uint64_t>(corrected_q30) * two_pow_f_q31) >> 31);
   // |chiff| <= input always, so an input past full scale asks for an output
@@ -639,7 +642,7 @@ static int32_t ChiffWalkInputFraction_q30(
   return static_cast<int32_t>(input_q30 > level_q30 ? input_q30 : level_q30);
 }
 
-static int32_t ChiffWalkDriveOver16_q30(uint32_t amount_q7_25) {
+static int32_t ChiffWalkDrive_q30(uint32_t amount_q7_25) {
   const uint32_t hinge_q7_25 = kChiffCleanAmount << 25;
   uint32_t drive_octaves_q5_27 = 0;
   if (amount_q7_25 > hinge_q7_25) {
@@ -717,7 +720,7 @@ void Envelope::NoteOn(
         window_samples ? static_cast<uint32_t>(chiff_amount) << 25 : 0;
       if (!chiff_walk_start_q7_25_) {
         chiff_input_fraction_q30_ = 0;
-        RederiveSlewState();
+        SetSlewTimeForStage();
         break;
       }
       // The slow end of the amount axis, which the walk descends toward. It is
@@ -773,7 +776,7 @@ void Envelope::NoteOn(
       chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
         chiff_walk_start_q7_25_, slew_time_log2_q5_27_,
         SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_));
-      RederiveSlewState();
+      SetSlewTimeForStage();
       break;
     }
   }
@@ -783,7 +786,7 @@ void Envelope::NoteOn(
 static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
   uint32_t integer_part = slew_time_log2_q5_27 >> 27;
   uint32_t two_pow_neg_fraction_u16 = Interpolate824(
-    lut_expo2_neg, (slew_time_log2_q5_27 & 0x07FFFFFFu) << 5);
+    lut_expo2_neg, (slew_time_log2_q5_27 & kSlewTimeFraction_q5_27) << 5);
   return (two_pow_neg_fraction_u16 << 15) >> integer_part;
 }
 
@@ -836,7 +839,7 @@ uint32_t ChiffWindowSamples(
     return window ? window : 1;
   }
   uint32_t int_part = static_cast<uint32_t>(exponent_q5_27) >> 27;
-  uint32_t frac_q27 = static_cast<uint32_t>(exponent_q5_27) & 0x07FFFFFFu;
+  uint32_t frac_q27 = static_cast<uint32_t>(exponent_q5_27) & kSlewTimeFraction_q5_27;
   int32_t scale_q31 = SlewRateFromTimeLog2_q31((1u << 27) - frac_q27);
   return static_cast<uint32_t>(
     ((static_cast<uint64_t>(attack_samples) << (int_part + 1)) * scale_q31) >> 31);
@@ -853,14 +856,10 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
   return static_cast<int32_t>(u_q32 - ((u_q32 * u_q32) >> 33));
 }
 
-void Envelope::RederiveSlewState() {
+void Envelope::SetSlewTimeForStage() {
   if (chiff_walk_start_q7_25_) {
-    // NOTHING ABOUT THE CHIFF'S SCHEDULE IS DERIVED HERE ANY MORE. The step
-    // and the rate decay are read off the walk at the top of every run, so
-    // whatever this wrote was overwritten before the loop ran; deriving them
-    // here as well was a Taylor expansion per stage change with no reader.
-    // The one thing left is a bound: the slew may not be slower than the end
-    // of the walk's own axis, which the run's writeback also holds it to.
+    // A bound, nothing more: the slew may not be slower than the end of the
+    // walk's own axis. The run's writeback holds it to the same limit.
     if (slew_time_log2_q5_27_ > chiff_slew_time_log2_end_q5_27_) {
       slew_time_log2_q5_27_ = chiff_slew_time_log2_end_q5_27_;
     }
@@ -969,10 +968,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // divide by the samples available, and take that step only if it is FASTER
   // than the one already running. A short release therefore compresses the
   // shrink; a long one changes nothing.
-  // Re-derive slew coefficients for the new stage, then let a release shorten
-  // the chiff's remaining time (below) -- in that order, because that work
-  // adjusts what RederiveSlewState just computed.
-  RederiveSlewState();
+  // Set the slew time for the new stage first: the release deadline below
+  // adjusts what this leaves.
+  SetSlewTimeForStage();
   if (stage == ENV_STAGE_RELEASE && stage_samples_left_ && chiff_walk_start_q7_25_) {
     // BOTH mechanisms get the same deadline. Speeding up only the chiff input
     // leaves the note ending with the slew still running at chiff speed, and
@@ -1197,7 +1195,7 @@ void Envelope::RenderStage(
       slew_time_step_q5_27 = run_samples
         ? (slew_time_end_q5_27 - slew_time_log2_q5_27_) / run_samples : 0;
       decay_q32 = DecayFromIncrement_q32(slew_time_step_q5_27);
-      chiff_drive_over_16_q30_ = ChiffWalkDriveOver16_q30(amount_q7_25);
+      chiff_drive_q30_ = ChiffWalkDrive_q30(amount_q7_25);
       // Against THIS run's start slew time: slew_time_log2_q5_27_ still holds
       // the run's start (the writeback to the end is at the loop's tail), and
       // amount_q7_25 is the start amount, so the pair is consistent.
@@ -1245,7 +1243,7 @@ void Envelope::RenderStage(
     // state's scaled-down domain. The drive already carries the 1/2^shift, so
     // this is <= input_q30 and cannot overflow however hard it is driven.
     const int32_t chiff_input_q30 = static_cast<int32_t>(
-      (static_cast<int64_t>(input_q30) * chiff_drive_over_16_q30_) >> 30);
+      (static_cast<int64_t>(input_q30) * chiff_drive_q30_) >> 30);
     // ONE LEVEL'S WORTH is what the loop holds, so a draw read as an odd
     // multiple (2 * draw - kChiffDrawMax) multiplies straight into the input it
     // chases. Dividing here rather than in the loop is what keeps the extreme

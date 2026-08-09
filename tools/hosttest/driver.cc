@@ -119,7 +119,7 @@ static void RenderMs(double ms) {
     ++g_block_counter;
     env.RenderSamples(buffer, bias_target_q31);
     if (g_chiff_trace) {
-      printf("%d %u %d\n", env.chiff_drive_over_16_q30_,
+      printf("%d %u %d\n", env.chiff_drive_q30_,
              env.slew_time_log2_q5_27_, env.ChiffInput_q30());
       continue;
     }
