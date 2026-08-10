@@ -47,19 +47,25 @@ const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
 const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
 const uint32_t kFastFade = kRefreshFreq << 1;
 
-// Encoder acceleration. The multiplier comes from how LONG the encoder has
-// been turning fast, not from how fast the last detent was: one gap is a
-// single noisy sample, and reading intent from it turns a two-detent nudge
-// into a leap. Counting detents is also a filter, so timing jitter cannot
-// launch the step size on its own.
+// Encoder acceleration. Speed sets how fast the multiplier climbs, not the
+// multiplier itself: a detent advances a running total by how far under the
+// slow threshold its gap was, and the total is what picks the multiplier.
 //
-// The run leaks rather than resetting, so a gap that lands the wrong side of
-// the threshold costs one detent of progress instead of all of it.
-const uint32_t kEncoderFastDetentMs = 60; // ~17 detents/s
-const uint8_t kEncoderAccelDetentsPerDoubling = 3;
+// Reading gain straight off one gap, as this used to, makes a two-detent
+// nudge leap and lets ordinary timing jitter swing the step size detent to
+// detent. Ignoring speed entirely, as it did next, means a blazing twist and
+// a merely brisk one climb at the same rate. Accumulating speed does both
+// jobs: a fast turn reaches the ceiling in a few detents, a slow one never
+// does, and jitter averages out instead of landing anywhere in particular.
+//
+// The total leaks rather than resetting, so one gap the wrong side of the
+// threshold costs a little progress instead of all of it.
+const uint8_t kEncoderSpeedBucketBits = 4; // 16 ms
+const uint8_t kEncoderMaxSpeedSteps = 4; // Slower than 64 ms leaks instead
+const uint8_t kEncoderRunPerDoubling = 5;
 const int32_t kEncoderAccelMaxShift = 3; // x8
-const uint8_t kEncoderFastRunMax =
-    kEncoderAccelDetentsPerDoubling * (kEncoderAccelMaxShift + 1);
+const uint8_t kEncoderRunMax =
+    kEncoderRunPerDoubling * (kEncoderAccelMaxShift + 1);
 
 // The widest settings take a MIDI value, so a sweep at full gain is 127 >>
 // kEncoderAccelMaxShift detents. What a ceiling costs in precision, for
@@ -228,21 +234,24 @@ void Ui::Poll() {
     const uint32_t dt = now - encoder_last_increment_ms_;
     const int8_t sign = increment > 0 ? 1 : -1;
 
+    const uint32_t speed_buckets = dt >> kEncoderSpeedBucketBits;
     if (encoder_last_increment_sign_ == -sign) {
       // A reversal is a change of intent rather than jitter, so the run ends
       // outright. Otherwise correcting an overshoot flies back past the
       // target at the speed that caused it.
       encoder_fast_run_ = 0;
     } else if (sign == encoder_last_increment_sign_ &&
-               dt <= kEncoderFastDetentMs) {
-      if (encoder_fast_run_ < kEncoderFastRunMax) ++encoder_fast_run_;
+               speed_buckets < kEncoderMaxSpeedSteps) {
+      const uint8_t advance = kEncoderMaxSpeedSteps - speed_buckets;
+      encoder_fast_run_ = encoder_fast_run_ + advance > kEncoderRunMax
+          ? kEncoderRunMax : encoder_fast_run_ + advance;
     } else if (encoder_fast_run_) {
       --encoder_fast_run_;
     }
 
     int32_t accel_shift = 0;
     if (mode_ != UI_MODE_CALIBRATION_ADJUST_LEVEL) {
-      accel_shift = encoder_fast_run_ / kEncoderAccelDetentsPerDoubling;
+      accel_shift = encoder_fast_run_ / kEncoderRunPerDoubling;
       if (accel_shift > kEncoderAccelMaxShift) {
         accel_shift = kEncoderAccelMaxShift;
       }
