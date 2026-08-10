@@ -62,7 +62,7 @@ const uint32_t kFastFade = kRefreshFreq << 1;
 // threshold costs a little progress instead of all of it.
 const uint8_t kEncoderSpeedBucketBits = 4; // 16 ms
 const uint8_t kEncoderMaxSpeedSteps = 4; // Slower than 64 ms leaks instead
-const uint8_t kEncoderRunPerDoubling = 5;
+const uint8_t kEncoderRunPerDoubling = 4;
 const int32_t kEncoderAccelMaxShift = 3; // x8
 const uint8_t kEncoderRunMax =
     kEncoderRunPerDoubling * (kEncoderAccelMaxShift + 1);
