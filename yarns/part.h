@@ -579,6 +579,26 @@ struct SequencerSettings {
   }
 };
 
+// Part::Get and Part::Set walk midi_, voicing_ and seq_ as a single run of
+// bytes, using PART_* offsets that sizeof() alone decides. That holds only
+// while each struct packs flush against the next, so none of them may want
+// alignment -- which stays true as long as their members are all bytes. A
+// wider member would silently insert a gap and slide every later setting's
+// address off its field.
+template<typename T> struct FlushPacked { char first; T rest; };
+STATIC_ASSERT(
+  sizeof(FlushPacked<MidiSettings>) == 1 + sizeof(MidiSettings),
+  midi_settings_would_leave_a_gap
+);
+STATIC_ASSERT(
+  sizeof(FlushPacked<VoicingSettings>) == 1 + sizeof(VoicingSettings),
+  voicing_settings_would_leave_a_gap
+);
+STATIC_ASSERT(
+  sizeof(FlushPacked<SequencerSettings>) == 1 + sizeof(SequencerSettings),
+  sequencer_settings_would_leave_a_gap
+);
+
 struct HeldKeys {
 
   static const uint8_t VELOCITY_SUSTAIN_MASK = 0x80;
