@@ -151,8 +151,12 @@ void Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
   bool sent_from_step_editor = channel & 0x80;
   
   // scale velocity to compensate for its min/max range, so that voices using
-  // velocity filtering can still have a full velocity range
+  // velocity filtering can still have a full velocity range. A note arriving
+  // at exactly min_velocity scales to zero, which MIDI reserves for note off,
+  // so the bottom of the range is held at one. With the default range this
+  // scaling is the identity and the floor never applies.
   velocity = ((velocity - midi_.min_velocity) << 7) / (midi_.max_velocity - midi_.min_velocity + 1);
+  if (!velocity) velocity = 1;
 
   if (seq_recording_) {
     if (!looped() && !sent_from_step_editor) {
