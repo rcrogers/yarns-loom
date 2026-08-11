@@ -64,6 +64,9 @@ const uint32_t kFastFade = kRefreshFreq << 1;
 // costs speed. Discharging is steeper than charging because slowing down is
 // an unambiguous request for precision, where speeding up is worth confirming
 // over a few detents.
+//
+// Together they clear the total outright at a gap of 160 ms, so any real pause
+// returns the encoder to single steps. No one constant says so.
 const uint8_t kEncoderSpeedBucketBits = 4; // 16 ms
 const uint8_t kEncoderMaxSpeedSteps = 4; // Neutral at 64 ms
 const uint8_t kEncoderDecaySteepness = 3;
