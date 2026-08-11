@@ -58,12 +58,17 @@ const uint32_t kFastFade = kRefreshFreq << 1;
 // jobs: a fast turn reaches the ceiling in a few detents, a slow one never
 // does, and jitter averages out instead of landing anywhere in particular.
 //
-// The total leaks rather than resetting, so one gap the wrong side of the
-// threshold costs a little progress instead of all of it.
+// The same measure that charges the total discharges it: a gap slower than
+// the threshold subtracts by how much it missed. Time therefore passes for
+// the total even when the encoder is only sampled on movement, so pausing
+// costs speed. Discharging is steeper than charging because slowing down is
+// an unambiguous request for precision, where speeding up is worth confirming
+// over a few detents.
 const uint8_t kEncoderSpeedBucketBits = 4; // 16 ms
-const uint8_t kEncoderMaxSpeedSteps = 4; // Slower than 64 ms leaks instead
+const uint8_t kEncoderMaxSpeedSteps = 4; // Neutral at 64 ms
+const uint8_t kEncoderDecaySteepness = 3;
 const uint8_t kEncoderRunPerDoubling = 4;
-const int32_t kEncoderAccelMaxShift = 3; // x8
+const int32_t kEncoderAccelMaxShift = 4; // x16
 const uint8_t kEncoderRunMax =
     kEncoderRunPerDoubling * (kEncoderAccelMaxShift + 1);
 
@@ -234,19 +239,20 @@ void Ui::Poll() {
     const uint32_t dt = now - encoder_last_increment_ms_;
     const int8_t sign = increment > 0 ? 1 : -1;
 
-    const uint32_t speed_buckets = dt >> kEncoderSpeedBucketBits;
-    if (encoder_last_increment_sign_ == -sign) {
-      // A reversal is a change of intent rather than jitter, so the run ends
-      // outright. Otherwise correcting an overshoot flies back past the
-      // target at the speed that caused it.
+    if (encoder_last_increment_sign_ != sign) {
+      // A reversal is a change of intent rather than jitter, so the total ends
+      // outright. Otherwise correcting an overshoot flies back past the target
+      // at the speed that caused it. Also covers the first detent of all,
+      // where there is no previous one to measure against.
       encoder_fast_run_ = 0;
-    } else if (sign == encoder_last_increment_sign_ &&
-               speed_buckets < kEncoderMaxSpeedSteps) {
-      const uint8_t advance = kEncoderMaxSpeedSteps - speed_buckets;
-      encoder_fast_run_ = encoder_fast_run_ + advance > kEncoderRunMax
-          ? kEncoderRunMax : encoder_fast_run_ + advance;
-    } else if (encoder_fast_run_) {
-      --encoder_fast_run_;
+    } else {
+      int32_t delta = static_cast<int32_t>(kEncoderMaxSpeedSteps) -
+          static_cast<int32_t>(dt >> kEncoderSpeedBucketBits);
+      if (delta < 0) delta *= kEncoderDecaySteepness;
+      int32_t total = encoder_fast_run_ + delta;
+      if (total < 0) total = 0;
+      if (total > kEncoderRunMax) total = kEncoderRunMax;
+      encoder_fast_run_ = total;
     }
 
     int32_t accel_shift = 0;
