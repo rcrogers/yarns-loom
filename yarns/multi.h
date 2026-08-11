@@ -110,7 +110,7 @@ struct PackedMulti {
   // Bytes belonging to no struct yet, so they can still be given to either
   // scope.  Sized to make the blob exactly fill the flash page -- when the
   // kPackedSize assert in storage_manager.h fires, this is the knob it means.
-#define PACKED_MULTI_UNASSIGNED_BYTES 5
+#define PACKED_MULTI_UNASSIGNED_BYTES 9
   static const uint8_t kUnassignedBytes = PACKED_MULTI_UNASSIGNED_BYTES;
 
   signed int
@@ -951,11 +951,10 @@ class Multi {
       size_t data_start = SerializeTaggedSectionBegin(b, TAGGED_SECTION_LOOPER);
       PackedPart packed;
       part_[p].looper().Pack(packed);
-      TaggedLooperPrefix prefix = {
-        p,
-        static_cast<uint8_t>(packed.looper_size),
-        static_cast<uint8_t>(packed.looper_oldest_index)
-      };
+      // The prefix keeps both fields so the wire format does not move: the
+      // count is still worth stating, and the index is now always zero because
+      // Pack rotates the ring. Firmware predating that reads this correctly.
+      TaggedLooperPrefix prefix = { p, part_[p].looper().num_notes(), 0 };
       b->Write(prefix);
       for (uint8_t i = 0; i < looper::kMaxNotes; i++) {
         TaggedLooperNote note = {
@@ -1038,15 +1037,27 @@ class Multi {
         if (!ReadTaggedObject(b, &prefix, section_end)) return;
         if (prefix.part_index >= kNumParts) return;
         PackedPart packed;
-        packed.looper_size = prefix.size;
-        packed.looper_oldest_index = prefix.oldest_index;
+        // Unpack expects the ring rotated to start at zero, with a velocity of
+        // zero ending it. Dumps written before that begin at oldest_index and
+        // carry their own count, so rotate on the way in. Velocity is floored
+        // because a dump predating b0db04dd can hold a zero, which would end
+        // the run early and drop the rest of the loop.
+        std::memset(
+            &packed.looper_notes[0], 0, sizeof(packed.looper_notes));
+        const uint8_t size = prefix.size > looper::kMaxNotes
+            ? looper::kMaxNotes : prefix.size;
+        const uint8_t oldest = prefix.oldest_index % looper::kMaxNotes;
         for (uint8_t i = 0; i < looper::kMaxNotes; i++) {
           TaggedLooperNote note = {};
           if (!ReadTaggedObject(b, &note, section_end)) break;
-          packed.looper_notes[i].on_pos = note.on_pos;
-          packed.looper_notes[i].off_pos = note.off_pos;
-          packed.looper_notes[i].pitch = note.pitch;
-          packed.looper_notes[i].velocity = note.velocity;
+          const uint8_t ordinal =
+              (i + looper::kMaxNotes - oldest) % looper::kMaxNotes;
+          if (ordinal >= size) continue;
+          packed.looper_notes[ordinal].on_pos = note.on_pos;
+          packed.looper_notes[ordinal].off_pos = note.off_pos;
+          packed.looper_notes[ordinal].pitch = note.pitch;
+          packed.looper_notes[ordinal].velocity =
+              note.velocity ? note.velocity : 1;
         }
         part_[prefix.part_index].mutable_looper().Unpack(packed);
         return;

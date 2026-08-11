@@ -161,10 +161,9 @@ struct PackedPart {
   uint8_t dense_step_pitches[StepPitchDenseArray::kNumBytes];
   uint8_t step_velocity[kNumSteps];  // 7 bits velocity + 1 bit slide
 
+  // No index or count: Deck::Pack rotates the ring so the oldest note is
+  // first, and a zero velocity marks where the notes stop.
   looper::PackedNote looper_notes[looper::kMaxNotes];
-  unsigned int
-    looper_oldest_index : looper::kBitsNoteIndex,
-    looper_size         : looper::kBitsNoteIndex;
 
   static const uint8_t kTimbreBits = 7; // values free: 0
   static const uint8_t kLFOShapeBits = 3; // values free: 0
@@ -175,7 +174,7 @@ struct PackedPart {
 #ifndef PACKED_PART_EXTRA_FREE_BITS
 #define PACKED_PART_EXTRA_FREE_BITS 0 // Widened by the free-bits check
 #endif
-#define PACKED_PART_FREE_BITS (4 + PACKED_PART_EXTRA_FREE_BITS)
+#define PACKED_PART_FREE_BITS (6 + PACKED_PART_EXTRA_FREE_BITS)
 #if PACKED_PART_FREE_BITS
   #define PACKED_PART_FREE_FIELD , free_bits : PACKED_PART_FREE_BITS
 #else

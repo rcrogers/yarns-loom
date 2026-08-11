@@ -115,7 +115,7 @@ class Deck {
     }
   }
 
-  inline bool num_notes() const { return size_; }
+  inline uint8_t num_notes() const { return size_; }
 
   void RemoveOldestNote();
   void RemoveNewestNote();

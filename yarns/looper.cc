@@ -70,13 +70,13 @@ void Deck::JumpToTick(int32_t tick_counter, NoteOnFn note_on_fn, NoteOffFn note_
 }
 
 void Deck::Unpack(PackedPart& storage) {
-  RemoveAll();
-  oldest_index_ = storage.looper_oldest_index;
-  size_ = storage.looper_size;
+  RemoveAll(); // Leaves oldest_index_ and size_ at zero
+  // Pack rotates the ring to start at zero and zeroes what follows, so the
+  // notes are the leading run of slots with a velocity.
+  while (size_ < kMaxNotes && storage.looper_notes[size_].velocity) ++size_;
   for (uint8_t ordinal = 0; ordinal < kMaxNotes; ++ordinal) {
-    uint8_t index = index_mod(oldest_index_ + ordinal);
-    PackedNote& packed_note = storage.looper_notes[index];
-    Note& note = notes_[index];
+    PackedNote& packed_note = storage.looper_notes[ordinal];
+    Note& note = notes_[ordinal];
 
     note.on_pos   = packed_note.on_pos  << (16 - kBitsPos);
     note.off_pos  = packed_note.off_pos << (16 - kBitsPos);
@@ -85,20 +85,28 @@ void Deck::Unpack(PackedPart& storage) {
 
     if (ordinal < size_) {
       ProcessNotes(note.on_pos, NULL, NULL);
-      LinkOn(index);
+      LinkOn(ordinal);
       ProcessNotes(note.off_pos, NULL, NULL);
-      LinkOff(index);
+      LinkOff(ordinal);
     }
   }
 }
 
 void Deck::Pack(PackedPart& storage) const {
-  storage.looper_oldest_index = oldest_index_;
-  storage.looper_size = size_;
+  // Store the ring already rotated so the oldest note is first, which makes
+  // its index implicit, and zero the slots past the end. A recorded note
+  // always has a velocity of at least one, so a zero velocity is what marks
+  // where the notes stop -- neither the index nor the count is written out.
+  // The zeroing is done here rather than left to the caller because the tagged
+  // path packs into an uninitialised local.
   for (uint8_t ordinal = 0; ordinal < kMaxNotes; ++ordinal) {
-    uint8_t index = index_mod(oldest_index_ + ordinal);
-    PackedNote& packed_note = storage.looper_notes[index];
-    const Note& note = notes_[index];
+    PackedNote& packed_note = storage.looper_notes[ordinal];
+    if (ordinal >= size_) {
+      packed_note.on_pos = packed_note.off_pos = 0;
+      packed_note.pitch = packed_note.velocity = 0;
+      continue;
+    }
+    const Note& note = notes_[index_mod(oldest_index_ + ordinal)];
 
     packed_note.on_pos    = (note.on_pos  - pos_offset) >> (16 - kBitsPos);
     packed_note.off_pos   = (note.off_pos - pos_offset) >> (16 - kBitsPos);
@@ -188,6 +196,10 @@ void Deck::ProcessNotes(uint16_t new_pos, NoteOnFn note_on_fn, NoteOffFn note_of
 }
 
 uint8_t Deck::RecordNoteOn(uint8_t pitch, uint8_t velocity) {
+  // Zero velocity is how Pack marks an empty slot, so one recorded here would
+  // truncate the loop on load, losing every note after it. Part::NoteOn holds
+  // the floor at one; this is the backstop if another caller appears.
+  if (!velocity) velocity = 1;
   if (size_ == kMaxNotes) {
     RemoveOldestNote();
   }
