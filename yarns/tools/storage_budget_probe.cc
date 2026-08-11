@@ -38,8 +38,8 @@ extern "C" {
 
 // The numeric prefix sets report order, since nm sorts alphabetically.
 
-char probe_1_bitfield_free_bits_per_part[kFreeBitsPerPartBitfield + 1];
-char probe_2_bitfield_free_bits_multi[kFreeBitsMultiBitfield + 1];
+char probe_1_usable_bits_per_part[kUsableBitsPerPart + 1];
+char probe_2_usable_bits_multi[kUsableBitsMulti + 1];
 char probe_3_fungible_free_bits[kFungibleFreeBits + 1];
 char probe_4_total_free_bits[kTotalFreeBits + 1];
 

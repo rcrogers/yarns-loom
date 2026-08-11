@@ -62,18 +62,18 @@ const uint8_t kBitsPerByte = 8;
 
 // Every count below is in PAGE bits -- storage as the flash holds it, not width
 // as a setting declares it.  The two differ by scope: a part setting of width W
-// takes W bits from kFreeBitsPerPartBitfield but 4W bits from the page, since
+// takes W bits from kUsableBitsPerPart but 4W bits from the page, since
 // every part carries its own copy.
 //
 // Bitfield bits are stuck where they are -- a part's cannot serve the multi,
 // nor one part another.  Fungible bits are inside no struct yet, so they can
 // still go to either scope: 8 bits per byte given to the multi, or per byte
 // given to EACH part, which costs kNumParts bytes.
-const uint16_t kFreeBitsPerPartBitfield = PackedPart::kFreeBits;
-const uint16_t kFreeBitsMultiBitfield = PackedMulti::kFreeBits;
+const uint16_t kUsableBitsPerPart = PackedPart::kFreeBits;
+const uint16_t kUsableBitsMulti = PackedMulti::kFreeBits;
 const uint16_t kFungibleFreeBits = PackedMulti::kUnassignedBytes * kBitsPerByte;
-const uint16_t kTotalFreeBits = kFreeBitsPerPartBitfield * kNumParts +
-    kFreeBitsMultiBitfield + kFungibleFreeBits;
+const uint16_t kTotalFreeBits = kUsableBitsPerPart * kNumParts +
+    kUsableBitsMulti + kFungibleFreeBits;
 
 // Keeps fungible bits fungible.  A whole free byte parked inside a struct is
 // stranded there, so take bytes out of unassigned only to spend them.
