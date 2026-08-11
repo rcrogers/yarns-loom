@@ -44,6 +44,9 @@
 namespace yarns {
 
 const uint8_t kNumParts = 4;
+// The setting counts divisions from 1; the packed field counts from 0, which
+// is the difference between needing three bits and two.
+const uint8_t kMinClockInputDivision = 1;
 // One paraphonic part, one voice per remaining output
 const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
 const uint8_t kMaxBarDuration = 32;
@@ -107,26 +110,26 @@ struct PackedMulti {
   // Bytes belonging to no struct yet, so they can still be given to either
   // scope.  Sized to make the blob exactly fill the flash page -- when the
   // kPackedSize assert in storage_manager.h fires, this is the knob it means.
-#define PACKED_MULTI_UNASSIGNED_BYTES 4
+#define PACKED_MULTI_UNASSIGNED_BYTES 5
   static const uint8_t kUnassignedBytes = PACKED_MULTI_UNASSIGNED_BYTES;
+
+  signed int
+    clock_offset : 7; // values free: 0
 
   unsigned int
     layout : 4, // values free: 1
     clock_tempo : 8, // values free: 54
     clock_swing : 7, // values free: 28
-    clock_input_division : 3, // Breaking: can 0-index for 1 fewer bit
+    clock_input_division : 2, // 0-indexed; see kMinClockInputDivision
     clock_output_division : 5, // values free: 0
     clock_bar_duration : 6, // values free: 30
     clock_override : 1,
     remote_control_channel : 5, // values free: 15
     nudge_first_tick : 1,
-    clock_manual_start : 1
+    clock_manual_start : 1,
+    control_change_mode : 2 // values free: 0
     PACKED_MULTI_FREE_FIELD;
 
-  // Breaking: 4 values need 2 bits, so folding this into the group above
-  // would free 6.
-  uint8_t control_change_mode;
-  int8_t clock_offset;
 #if PACKED_MULTI_UNASSIGNED_BYTES
   uint8_t unassigned[PACKED_MULTI_UNASSIGNED_BYTES];
 #endif
@@ -159,7 +162,8 @@ struct MultiSettings {
     packed.layout = layout;
     packed.clock_tempo = clock_tempo;
     packed.clock_swing = clock_swing;
-    packed.clock_input_division = clock_input_division;
+    packed.clock_input_division =
+        clock_input_division - kMinClockInputDivision;
     packed.clock_output_division = clock_output_division;
     packed.clock_bar_duration = clock_bar_duration;
     packed.clock_override = clock_override;
@@ -177,7 +181,8 @@ struct MultiSettings {
     layout = packed.layout;
     clock_tempo = packed.clock_tempo;
     clock_swing = packed.clock_swing;
-    clock_input_division = packed.clock_input_division;
+    clock_input_division =
+        packed.clock_input_division + kMinClockInputDivision;
     clock_output_division = packed.clock_output_division;
     clock_bar_duration = packed.clock_bar_duration;
     clock_override = packed.clock_override;
