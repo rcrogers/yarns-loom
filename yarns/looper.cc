@@ -71,6 +71,14 @@ void Deck::JumpToTick(int32_t tick_counter, NoteOnFn note_on_fn, NoteOffFn note_
 
 void Deck::Unpack(PackedPart& storage) {
   RemoveAll(); // Leaves oldest_index_ and size_ at zero
+  // Pack folds the phase offset into the note positions, so notes arriving
+  // from a blob already sit where they belong and the offset starts over.
+  // Leaving it set applies it twice: inaudibly at first, since that matches
+  // what was playing before the save, but every further save folds it in
+  // again and the loop marches earlier each time -- only showing itself at
+  // the next power cycle, which zeroes this the slow way. SwapParts hits the
+  // same edge, packing under one part's offset and unpacking under another's.
+  pos_offset = 0;
   // Pack rotates the ring to start at zero and zeroes what follows, so the
   // notes are the leading run of slots with a velocity.
   while (size_ < kMaxNotes && storage.looper_notes[size_].velocity) ++size_;
