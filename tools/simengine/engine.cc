@@ -162,13 +162,13 @@ int chiff_render(
   envelope.NoteOn(adsr, min_target, max_target,
                   modulated_chiff_amount,
                   static_cast<uint8_t>(chiff_duration));
-  // The NOMINAL duration, for the sim's marker. It is attack-relative
-  // (computed in NoteOn) and it is a sizing reference only -- nothing counts
-  // it down and nothing happens when it elapses -- so reading it once here is
-  // the whole story.
+  // The NOMINAL duration, for the sim's marker. Computed once in NoteOn and a
+  // sizing reference only -- nothing counts it down and nothing happens when
+  // it elapses -- so reading it once here is the whole story.
   int32_t chiff_window_samples =
-      static_cast<int32_t>(ChiffWindowSamples(adsr.attack_u32,
-          static_cast<uint8_t>(chiff_duration)));
+      static_cast<int32_t>(ChiffWindowSamples(Interpolate88(
+          lut_chiff_phase_increments,
+          static_cast<uint16_t>(chiff_duration) << (15 - 7))));
 
   int total = gate_samples + tail_samples;
   if (total > max_samples) total = max_samples;
@@ -232,19 +232,15 @@ int chiff_render(
 EMSCRIPTEN_KEEPALIVE
 int chiff_frame_hz() { return kFrameHz; }
 
-// CHIFF DURATION setting -> window samples. The window is now a multiple of the
-// ATTACK duration, so this takes the attack settings too (the same chain
-// BuildAdsr uses) -- there is no standalone duration table any more.
+// CHIFF DURATION setting -> window samples, through its own table and its own
+// velocity modulation. Independent of the attack.
 EMSCRIPTEN_KEEPALIVE
-int chiff_duration_samples(int setting, int attack_setting, int env_mod_attack,
-                           int velocity) {
-  uint32_t attack_u32 = Interpolate88(
-      lut_envelope_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(attack_setting),
-                    static_cast<int8_t>(env_mod_attack),
-                    static_cast<uint8_t>(velocity)) << (15 - 13));
-  return static_cast<int32_t>(
-      ChiffWindowSamples(attack_u32, static_cast<uint8_t>(setting)));
+int chiff_duration_samples(int setting, int mod_velocity, int velocity) {
+  return static_cast<int32_t>(ChiffWindowSamples(Interpolate88(
+      lut_chiff_phase_increments,
+      modulate_7_13(static_cast<uint8_t>(setting),
+                    static_cast<int8_t>(mod_velocity),
+                    static_cast<uint8_t>(velocity)) << (15 - 13))));
 }
 
 // ENV stage setting -> stage length in samples, via the real LUT chain.

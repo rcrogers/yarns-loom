@@ -13,7 +13,7 @@ function wrapChiffEngine(Module) {
     Array(19).fill('number'));
   const metaCount = Module.cwrap('chiff_meta_count', 'number', [])();
   const frameHz = Module.cwrap('chiff_frame_hz', 'number', [])();
-  const durationSamples = Module.cwrap('chiff_duration_samples', 'number', ['number']);
+  const durationSamples = Module.cwrap('chiff_duration_samples', 'number', ['number', 'number', 'number']);
   const stageSamples = Module.cwrap('chiff_stage_samples', 'number', ['number']);
 
   const META = ['totalSamples', 'gateSamples', 'chiffWindowSamples',

@@ -198,12 +198,15 @@ int main(int argc, char** argv) {
     // Diagnostic: the chiff window is now attack-relative, so read it back
     // from the envelope after a NoteOn rather than any absolute table.
     env.Init(0);
-    env.NoteOn(adsr, 0, 16383, amount, duration);
+    uint32_t chiff_increment = Interpolate88(
+      lut_chiff_phase_increments, static_cast<uint16_t>(duration) << (15 - 7));
+    env.NoteOn(adsr, 0, 16383, amount, chiff_increment);
     uint32_t attack_smp = adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 0;
+    // The ratio to the attack is now only a diagnostic, not the definition.
     fprintf(stderr,
       "attack %u smp, chiff %u smp (%.3fx attack), decay %u smp, release %u smp\n",
-      attack_smp, ChiffWindowSamples(adsr.attack_u32, duration),
-      attack_smp ? double(ChiffWindowSamples(adsr.attack_u32, duration)) / attack_smp : 0.0,
+      attack_smp, ChiffWindowSamples(chiff_increment),
+      attack_smp ? double(ChiffWindowSamples(chiff_increment)) / attack_smp : 0.0,
       adsr.decay_u32 ? UINT32_MAX / adsr.decay_u32 : 0,
       adsr.release_u32 ? UINT32_MAX / adsr.release_u32 : 0);
     return 0;

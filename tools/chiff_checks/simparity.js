@@ -192,15 +192,15 @@ new Promise((resolve, reject) => {
       `rails ${r.floorLevel}..${r.ceiling}, want ${wantFloor}..${wantCeil}`);
   }
 
-  // CHIFF DURATION is attack-relative now (no table): setting 64 == the attack,
-  // 0 == 1/8x, 127 == ~7.7x, via the firmware ChiffWindowSamples. Resolve
-  // through the engine (firmware code), not a JS reimplementation.
-  const atk = 40, atkSmp = page.ENGINE.stageSamples(atk);
-  const durAt = (d) => page.ENGINE.durationSamples(d, atk, 0, 0);
-  check('CHIFF DURATION 64 == attack duration', Math.abs(durAt(64) - atkSmp) <= 1,
-    `${durAt(64)} vs attack ${atkSmp}`);
-  check('CHIFF DURATION 0 == 1/8 attack', Math.abs(durAt(0) - Math.round(atkSmp / 8)) <= 2,
-    `${durAt(0)} vs ${Math.round(atkSmp / 8)}`);
+  // CHIFF DURATION is an absolute time on its own table: the envelope's own
+  // minimum of four samples up to twice its maximum, 20 s. Resolve through the
+  // engine (firmware code), not a JS reimplementation.
+  const durAt = (d) => page.ENGINE.durationSamples(d, 0, 0);
+  check('CHIFF DURATION 0 is the table minimum', durAt(0) <= 8, `${durAt(0)} samples`);
+  check('CHIFF DURATION 127 reaches ~20 s', durAt(127) > 800000, `${durAt(127)} samples`);
+  check('CHIFF DURATION rises with the setting',
+    durAt(0) < durAt(64) && durAt(64) < durAt(127),
+    `${durAt(0)} / ${durAt(64)} / ${durAt(127)}`);
   check('settings 20 and 21 are distinguishable',
     durAt(20) !== durAt(21), `${durAt(20)} vs ${durAt(21)} samples`);
   check('ENV ATTACK setting 16 resolves to the firmware stage length',
