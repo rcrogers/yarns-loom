@@ -277,7 +277,7 @@ void Voice::NoteOn(
   int16_t note, uint8_t velocity, uint8_t portamento,
   int8_t portamento_mod_velocity, bool trigger,
   ADSR& adsr, int16_t timbre_envelope_target,
-  uint8_t chiff_amount, uint8_t chiff_duration
+  uint8_t chiff_amount, uint32_t chiff_increment_u32
 ) {
   // Check if voice is still producing sound (gated or releasing).
   // Only check envelopes that are actually active for this voice.
@@ -317,12 +317,12 @@ void Voice::NoteOn(
   if (uses_audio()) oscillator_.NoteOn(
     adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE,
     ApplyPitchMods(note_source_), note_target_ + tuning_, timbre_envelope_target,
-    chiff_amount, chiff_duration);
+    chiff_amount, chiff_increment_u32);
   if (aux_1_envelope()) {
-    dc_output(DC_AUX_1)->NoteOn(adsr_, chiff_amount, chiff_duration);
+    dc_output(DC_AUX_1)->NoteOn(adsr_, chiff_amount, chiff_increment_u32);
   }
   if (aux_2_envelope()) {
-    dc_output(DC_AUX_2)->NoteOn(adsr_, chiff_amount, chiff_duration);
+    dc_output(DC_AUX_2)->NoteOn(adsr_, chiff_amount, chiff_increment_u32);
   }
 
   if (!has_cv_output()) return;

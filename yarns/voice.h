@@ -106,7 +106,7 @@ class Voice {
     int16_t note, uint8_t velocity, uint8_t portamento,
     int8_t portamento_mod_velocity, bool trigger,
     ADSR& adsr, int16_t timbre_envelope_target,
-    uint8_t chiff_amount, uint8_t chiff_duration
+    uint8_t chiff_amount, uint32_t chiff_increment_u32
   );
   void NoteOff(bool force = false);
   void ControlChange(uint8_t controller, uint8_t value);

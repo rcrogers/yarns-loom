@@ -110,7 +110,7 @@ struct PackedMulti {
   // Bytes belonging to no struct yet, so they can still be given to either
   // scope.  Sized to make the blob exactly fill the flash page -- when the
   // kPackedSize assert in storage_manager.h fires, this is the knob it means.
-#define PACKED_MULTI_UNASSIGNED_BYTES 9
+#define PACKED_MULTI_UNASSIGNED_BYTES 5
   static const uint8_t kUnassignedBytes = PACKED_MULTI_UNASSIGNED_BYTES;
 
   signed int
@@ -819,7 +819,7 @@ class Multi {
 
   // Setting counts per domain.  Validated by STATIC_ASSERTs in multi.cc.
   static const uint16_t kNumTaggedMultiSettings = 12;
-  static const uint16_t kNumTaggedPartSettings = 64;
+  static const uint16_t kNumTaggedPartSettings = 65;
 
   // Complete wire layout of a tagged payload.  Not used for actual I/O
   // (we stream element-by-element to avoid a large stack allocation), but

@@ -112,8 +112,9 @@ void Part::Init() {
   voicing_.env_mod_sustain = 0;
   voicing_.env_mod_release = 32;
   voicing_.chiff_amount = 32;
-  voicing_.chiff_duration = 90;  // ~2.8x the attack (see ChiffWindowSamples)
+  voicing_.chiff_duration = 65;  // ~2x the default attack, absolute
   voicing_.chiff_amount_mod_velocity = 0;
+  voicing_.chiff_duration_mod_velocity = 0;
 
   seq_.clock_division = 20;
   seq_.gate_length = 3;
@@ -851,9 +852,16 @@ void Part::VoiceNoteOn(
   uint8_t chiff_amount = modulate_7_13(
     voicing_.chiff_amount, voicing_.chiff_amount_mod_velocity, vel) >> 6;
 
+  // EXCITER DURATION is a time of its own now, read off its own table but
+  // shaped like every other envelope stage, so it modulates the same way.
+  uint32_t chiff_increment_u32 = Interpolate88(
+    lut_chiff_phase_increments,
+    modulate_7_13(voicing_.chiff_duration, voicing_.chiff_duration_mod_velocity, vel) << (15 - 13)
+  );
+
   voice->NoteOn(Tune(pitch), vel, portamento,
     voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2,
-    chiff_amount, voicing_.chiff_duration);
+    chiff_amount, chiff_increment_u32);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {

@@ -233,13 +233,22 @@ def envelope():
   min_samples = min_time * envelope_rate
   max_samples = max_time * envelope_rate
 
-  min_increment = excursion / max_samples
-  max_increment = excursion / min_samples
-  rates = numpy.linspace(numpy.power(max_increment, -gamma), numpy.power(min_increment, -gamma), num_duration_values)
-  values = list(numpy.power(rates, -1/gamma).astype(int))
-  values.append(values[-1])  # Interpolate88 guard entry
+  def phase_increments(seconds):
+    max_samples = seconds * envelope_rate
+    min_increment = excursion / max_samples
+    max_increment = excursion / min_samples
+    rates = numpy.linspace(numpy.power(max_increment, -gamma), numpy.power(min_increment, -gamma), num_duration_values)
+    values = list(numpy.power(rates, -1/gamma).astype(int))
+    values.append(values[-1])  # Interpolate88 guard entry
+    return values
+
   lookup_tables_32.append(
-      ('envelope_phase_increments', values)
+      ('envelope_phase_increments', phase_increments(max_time))
+  )
+  # The exciter window is a time like any envelope stage, on the same curve, but
+  # reaching twice as far so a chiff can outlast the longest stage.
+  lookup_tables_32.append(
+      ('chiff_phase_increments', phase_increments(2 * max_time))
   )
 
   # sample_counts = excursion / numpy.array(values)

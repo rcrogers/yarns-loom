@@ -174,7 +174,7 @@ struct PackedPart {
 #ifndef PACKED_PART_EXTRA_FREE_BITS
 #define PACKED_PART_EXTRA_FREE_BITS 0 // Widened by the free-bits check
 #endif
-#define PACKED_PART_FREE_BITS (6 + PACKED_PART_EXTRA_FREE_BITS)
+#define PACKED_PART_FREE_BITS (7 + PACKED_PART_EXTRA_FREE_BITS)
 #if PACKED_PART_FREE_BITS
   #define PACKED_PART_FREE_FIELD , free_bits : PACKED_PART_FREE_BITS
 #else
@@ -198,7 +198,8 @@ struct PackedPart {
     env_mod_sustain : kTimbreBits,
     env_mod_release : kTimbreBits,
     portamento_mod_velocity : kTimbreBits,
-    chiff_amount_mod_velocity : kTimbreBits;
+    chiff_amount_mod_velocity : kTimbreBits,
+    chiff_duration_mod_velocity : kTimbreBits;
 
   // MidiSettings
   unsigned int
@@ -350,6 +351,7 @@ struct VoicingSettings {
   uint8_t chiff_amount;
   uint8_t chiff_duration;
   int8_t chiff_amount_mod_velocity;
+  int8_t chiff_duration_mod_velocity;
 
   void Pack(PackedPart& packed) const {
     packed.allocation_mode = allocation_mode;
@@ -393,6 +395,7 @@ struct VoicingSettings {
     packed.chiff_amount = chiff_amount;
     packed.chiff_duration = chiff_duration;
     packed.chiff_amount_mod_velocity = chiff_amount_mod_velocity;
+    packed.chiff_duration_mod_velocity = chiff_duration_mod_velocity;
   }
 
   void Unpack(PackedPart& packed) {
@@ -437,6 +440,7 @@ struct VoicingSettings {
     chiff_amount = packed.chiff_amount;
     chiff_duration = packed.chiff_duration;
     chiff_amount_mod_velocity = packed.chiff_amount_mod_velocity;
+    chiff_duration_mod_velocity = packed.chiff_duration_mod_velocity;
   }
 
 };
@@ -496,6 +500,7 @@ enum PartSetting {
   PART_VOICING_CHIFF_AMOUNT,
   PART_VOICING_CHIFF_DURATION,
   PART_VOICING_CHIFF_AMOUNT_MOD_VELOCITY,
+  PART_VOICING_CHIFF_DURATION_MOD_VELOCITY,
   PART_VOICING_LAST = PART_VOICING_ALLOCATION_MODE + sizeof(VoicingSettings) - 1,
   PART_SEQUENCER_CLOCK_DIVISION,
   PART_SEQUENCER_GATE_LENGTH,

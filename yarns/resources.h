@@ -128,6 +128,7 @@ extern const int16_t ws_violent_overdrive[];
 extern const uint32_t lut_lfo_increments[];
 extern const uint32_t lut_portamento_increments[];
 extern const uint32_t lut_envelope_phase_increments[];
+extern const uint32_t lut_chiff_phase_increments[];
 extern const uint32_t lut_oscillator_increments[];
 extern const uint32_t lut_euclidean[];
 extern const int8_t lut_expo_slope_shift[];
@@ -272,9 +273,11 @@ extern const uint16_t chr_characters[];
 #define LUT_PORTAMENTO_INCREMENTS_SIZE 65
 #define LUT_ENVELOPE_PHASE_INCREMENTS 2
 #define LUT_ENVELOPE_PHASE_INCREMENTS_SIZE 129
-#define LUT_OSCILLATOR_INCREMENTS 3
+#define LUT_CHIFF_PHASE_INCREMENTS 3
+#define LUT_CHIFF_PHASE_INCREMENTS_SIZE 129
+#define LUT_OSCILLATOR_INCREMENTS 4
 #define LUT_OSCILLATOR_INCREMENTS_SIZE 97
-#define LUT_EUCLIDEAN 4
+#define LUT_EUCLIDEAN 5
 #define LUT_EUCLIDEAN_SIZE 1024
 #define LUT_EXPO_SLOPE_SHIFT 0
 #define LUT_EXPO_SLOPE_SHIFT_SIZE 16

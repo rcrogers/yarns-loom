@@ -57,10 +57,11 @@ struct ADSR {
   uint32_t attack_u32, decay_u32, release_u32; // Phase increments
 };
 
-// The nominal chiff window in samples, a multiple of the attack set by CHIFF
-// DURATION. Not file-local because the harnesses report it: it is the duration
-// every measurement is expressed against, and nothing else can derive it.
-uint32_t ChiffWindowSamples(uint32_t attack_increment_u32, uint8_t chiff_duration);
+// The nominal chiff window in samples, from the increment CHIFF DURATION picks
+// off lut_chiff_phase_increments -- the same reciprocal that turns any envelope
+// stage's increment into a span. Not file-local because the harnesses report
+// it: it is the duration every measurement is expressed against.
+uint32_t ChiffWindowSamples(uint32_t chiff_increment_u32);
 
 class Envelope {
  public:
@@ -73,7 +74,7 @@ class Envelope {
     ADSR& adsr,
     // Bounds stored as s32 but semantically s16
     int32_t min_target_s16, int32_t max_target_s16,
-    uint8_t chiff_amount, uint8_t chiff_duration
+    uint8_t chiff_amount, uint32_t chiff_increment_u32
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);

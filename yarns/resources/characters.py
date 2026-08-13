@@ -171,6 +171,9 @@ characters = {
   '\x83': 'dnlm',
   
   # LRDU arrow
+  '\xC6': 'gjlnad',    # Exciter amount: X bracketed top and bottom, a height
+  '\xC7': 'gjlnfebc',  # Exciter duration: X bracketed left and right, a width
+
   '\x84': 'jkl',
   '\x85': 'gpn',
   '\x86': 'ghj',
