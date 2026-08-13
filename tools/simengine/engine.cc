@@ -159,16 +159,19 @@ int chiff_render(
   // takes its stride off that. Overriding afterwards gave the page a different
   // stream from the native harness, which is exactly what simparity exists to
   // catch.
+  // CHIFF DURATION names a time on its own table; NoteOn takes the increment,
+  // not the setting. Converted once, because both are integers and passing the
+  // wrong one converts silently.
+  const uint32_t chiff_increment = Interpolate88(
+      lut_chiff_phase_increments,
+      static_cast<uint16_t>(chiff_duration) << (15 - 7));
   envelope.NoteOn(adsr, min_target, max_target,
-                  modulated_chiff_amount,
-                  static_cast<uint8_t>(chiff_duration));
+                  modulated_chiff_amount, chiff_increment);
   // The NOMINAL duration, for the sim's marker. Computed once in NoteOn and a
   // sizing reference only -- nothing counts it down and nothing happens when
   // it elapses -- so reading it once here is the whole story.
   int32_t chiff_window_samples =
-      static_cast<int32_t>(ChiffWindowSamples(Interpolate88(
-          lut_chiff_phase_increments,
-          static_cast<uint16_t>(chiff_duration) << (15 - 7))));
+      static_cast<int32_t>(ChiffWindowSamples(chiff_increment));
 
   int total = gate_samples + tail_samples;
   if (total > max_samples) total = max_samples;

@@ -11,15 +11,15 @@ let fails = 0;
 function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(detail?'  ['+detail+']':'')); if(!cond)fails++; }
 
 // 1. amount 0 = classic: monotone rising attack, no noise anywhere
-{ const s=run('basic 0 90');
+{ const s=run('basic 0 67');
   let steps=0; for(let i=1;i<45*1100;i++) if(s[i]<s[i-1]) steps++;
   check('amt0 attack monotone', steps===0, steps+' down-steps');
   check('amt0 no noise', noiseWin(s,1300,1900)<1, noiseWin(s,1300,1900).toFixed(2));
 }
 // 2. basic chiff: noise at onset, gone by ~window end, mean near the nominal value. The
-// window is now attack-relative; attack=249ms makes dur 90 (2.33x attack) land
-// at ~580ms, so the fixed measurement windows below still bracket it.
-{ const s=run('basic 96 90 attack=249'), d=run('basic 0 90 attack=249');
+// window is an absolute time now, off its own table: dur 49 is ~588ms, near
+// enough the ~580ms these fixed measurement windows were drawn around.
+{ const s=run('basic 96 49 attack=249'), d=run('basic 0 49 attack=249');
   const n0=noiseWin(s,0,100), n1=noiseWin(s,300,500), n2=noiseWin(s,700,1100);
   check('onset noise present', n0>50, n0.toFixed(1));
   check('noise fades by window end', n2<n0/50, n2.toFixed(2)+' vs onset '+n0.toFixed(1));
@@ -42,7 +42,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
         over.toFixed(1)+'% above note top (classic max '+dmx+')');
 }
 // 3. early release: noise continues into release, lands ~0 by release end (400ms)
-{ const s=run('early_release 96 127');  // long chiff forces compression
+{ const s=run('early_release 96 93');  // long chiff forces compression
   const nStart=noiseWin(s,60,160), nEnd=noiseWin(s,420,460), nAfter=noiseWin(s,480,600);
   check('release keeps noise', nStart>30, nStart.toFixed(1));
   check('noise lands by release end', nEnd<nStart/20, nEnd.toFixed(2));
@@ -53,7 +53,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
 // steps rather than an absolute constant -- the old absolute limit (FS_OUT/4)
 // sat BELOW the design's normal max step (10015 measured elsewhere in the same
 // trace), so it was passing on luck and failed the moment the chiff got denser.
-{ const s=run('retrigger 96 90');
+{ const s=run('retrigger 96 67');
   let mx=0; const a=600*45-45, b=602*45; // around the retrigger at 600ms
   for(let i=a;i<b;i++) mx=Math.max(mx,Math.abs(s[i]-s[i-1]));
   const elsewhere=[];
@@ -64,20 +64,20 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
     'retrigger step '+mx+' vs worst step elsewhere '+worstNormal);
 }
 // 5. held note: sustain has motion while window lives (dur 127 = 8s)
-{ const s=run('held 96 127');
+{ const s=run('held 96 93');
   const nSus=noiseWin(s,2000,3000), nLate=noiseWin(s,8200,8900);
   check('sustain has noise (8s chiff)', nSus>5, nSus.toFixed(1));
   check('noise closes by 8s', nLate<nSus/5, nLate.toFixed(2));
 }
 console.log(fails ? fails+' FAILURES' : 'ALL PASS');
 // 6. INVERTED range (CV DAC / negative timbre): the hardware-breaking case
-{ const s=run('inverted 0 90');
+{ const s=run('inverted 0 67');
   let up=0; for(let i=64;i<45*1100;i++) if(s[i]>s[i-1]) up++;
   check('inverted amt0 attack monotone down', up===0, up+' up-steps');
   let flat=0,run_=0; for(let i=45*100;i<45*1000;i++){ if(s[i]===s[i-1]){run_++;flat=Math.max(flat,run_);} else run_=0; }
   check('inverted amt0 no long plateaus', flat<200, 'longest flat '+flat+' samples');
 }
-{ const s=run('inverted 96 90 attack=249'), d=run('inverted 0 90 attack=249');
+{ const s=run('inverted 96 49 attack=249'), d=run('inverted 0 49 attack=249');
   const n0=noiseWin(s,0,100), n2=noiseWin(s,700,1100);
   check('inverted chiff onset noise', n0>50, n0.toFixed(1));
   check('inverted noise fades', n2<n0/50, n2.toFixed(2));
@@ -86,18 +86,18 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
   // Pinning check wants a slow (default) attack so 100-1000ms is still the
   // rising attack -- a short attack would reach a flat sustain there and this
   // measures dwell, not attack rate.
-  const sp=run('inverted 96 90');
+  const sp=run('inverted 96 67');
   let flat=0,run_=0; for(let i=45*100;i<45*1000;i++){ if(sp[i]===sp[i-1]){run_++;flat=Math.max(flat,run_);} else run_=0; }
   check('inverted chiff no pinning plateaus', flat<500, 'longest flat '+flat);
 }
 // 7. Late-window early release must not hang (restructure regression trap)
-{ const s=run('latehang 96 127');
+{ const s=run('latehang 96 93');
   const relStart=s[7000*45-1], relEnd=s[Math.min(7100*45, s.length-1)];
   check('latehang release falls', relEnd < relStart*0.15,
     (relStart/FS_OUT*100).toFixed(1)+'% -> '+(relEnd/FS_OUT*100).toFixed(1)+'%');
 }
 // 8. No kink at window end (attack=249 -> attack-relative window ~= 580ms)
-{ const s=run('basic 96 90 attack=249'), d=run('basic 0 90 attack=249');
+{ const s=run('basic 96 49 attack=249'), d=run('basic 0 49 attack=249');
   let worst=0;
   for(let w=590;w<730;w+=10){ let m=0,n=0;
     for(let i=w*45;i<(w+10)*45;i++){m+=s[i]-d[i];n++;}
@@ -106,7 +106,7 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
 }
 // 9. amount continuity ladder: 0 -> 1 step must not exceed later steps
 { const ladder=[0,1,2,4,8].map(a=>{
-    const s=run('basic '+a+' 90');
+    const s=run('basic '+a+' 67');
     let sum=0,n=0;
     for(let i=20*45;i<120*45;i++){sum+=Math.abs(s[i]-s[i-1]);n++;}
     return sum/n;
@@ -125,7 +125,7 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
 // way Oscillator::Render does -- target sampled per block from the envelope's
 // own value, then ramped toward it -- so the folding, the ramp and the
 // recovery all run.
-{ const s=run('basic 0 90 attack_setting=40 decay_setting=64 sustain_setting=70 '+
+{ const s=run('basic 0 43 attack_setting=40 decay_setting=64 sustain_setting=70 '+
               'release_setting=64 gate=2000 tail=1400 tremolo=24000');
   let mn=32767, mx=0; for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v; }
   check('bias path: output inside the DAC range', mn>=0 && mx<=32767, mn+'..'+mx);
