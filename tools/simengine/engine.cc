@@ -107,7 +107,8 @@ int chiff_render(
     int amplitude_mod_velocity, int velocity,
     int env_mod_attack, int env_mod_decay,
     int env_mod_sustain, int env_mod_release,
-    int chiff_amount, int chiff_duration, int chiff_amount_mod_velocity,
+    int chiff_amount, int chiff_duration,
+    int chiff_amount_mod_velocity, int chiff_duration_mod_velocity,
     int gate_samples, int tail_samples, int max_target,
     // The note's OTHER bound. Together with max_target these are NoteOn's two
     // rails, so the sim can render the ranges the firmware actually asks for:
@@ -164,7 +165,9 @@ int chiff_render(
   // wrong one converts silently.
   const uint32_t chiff_increment = Interpolate88(
       lut_chiff_phase_increments,
-      static_cast<uint16_t>(chiff_duration) << (15 - 7));
+      modulate_7_13(static_cast<uint8_t>(chiff_duration),
+                    static_cast<int8_t>(chiff_duration_mod_velocity),
+                    static_cast<uint8_t>(velocity)) << (15 - 13));
   envelope.NoteOn(adsr, min_target, max_target,
                   modulated_chiff_amount, chiff_increment);
   // The NOMINAL duration, for the sim's marker. Computed once in NoteOn and a

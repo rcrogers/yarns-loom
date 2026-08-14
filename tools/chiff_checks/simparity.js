@@ -103,6 +103,7 @@ const CASES = [
     maxTarget: -16383, biasLfo: 20000 },
 ];
 
+const LFO_BLOCKS = 32;   // blocks per half-cycle of the bias LFO
 const GATE_MS = 400, TAIL_MS = 400;
 
 // `let` at a script's top level lands in the realm's global LEXICAL scope, not
@@ -144,6 +145,10 @@ new Promise((resolve, reject) => {
       amount: c.amt, chiffDuration: c.chiffDur,
       gateMs: GATE_MS, tailMs: TAIL_MS, seed: 0xCAFEBABE,
       biasLfo: c.biasLfo || 0, tremolo: c.tremolo || 0,
+      // Stated on both sides rather than left to two defaults agreeing, which
+      // is what broke when the page's LFO period changed and the native
+      // driver's did not.
+      biasLfoBlocks: LFO_BLOCKS,
       maxTarget: c.maxTarget === undefined ? 32767 : c.maxTarget,
       minTarget: c.minTarget || 0,
     };
@@ -156,6 +161,7 @@ new Promise((resolve, reject) => {
       'peak=100', `gate=${GATE_MS}`, `tail=${TAIL_MS}`,
       `range=${c.maxTarget === undefined ? 32767 : c.maxTarget}`,
       `bias_lfo=${c.biasLfo || 0}`, `tremolo=${c.tremolo || 0}`,
+      `bias_lfo_blocks=${LFO_BLOCKS}`,
     ].join(' ');
     const native = execSync(`./test ${args}`, { cwd: HOSTTEST, maxBuffer: 1e9 })
       .toString().trim().split('\n').map(Number);

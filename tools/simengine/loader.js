@@ -10,15 +10,16 @@
 // node-specific require() so the browser can reuse it verbatim.
 function wrapChiffEngine(Module) {
   const render = Module.cwrap('chiff_render', 'number',
-    Array(19).fill('number'));
+    Array(25).fill('number'));
   const metaCount = Module.cwrap('chiff_meta_count', 'number', [])();
   const frameHz = Module.cwrap('chiff_frame_hz', 'number', [])();
-  const durationSamples = Module.cwrap('chiff_duration_samples', 'number', ['number', 'number', 'number']);
+  const durationSamples = Module.cwrap('chiff_duration_samples', 'number', ['number','number','number','number']);
   const stageSamples = Module.cwrap('chiff_stage_samples', 'number', ['number']);
 
   const META = ['totalSamples', 'gateSamples', 'chiffWindowSamples',
                 'attackSamples', 'decaySamples', 'releaseSamples',
-                'peak_u16', 'sustain_u16', 'ceiling', 'floor'];
+                'peak_u16', 'sustain_u16', 'chiffAmount',
+                'ceiling', 'floor'];
 
   let bufPtr = 0, bufCap = 0, metaPtr = 0;
 
@@ -28,7 +29,11 @@ function wrapChiffEngine(Module) {
     stageSamples,
     // p: attack, decay, sustain, release, amplitudeModVelocity, velocity,
     //    envModAttack/Decay/Sustain/Release, amount, chiffDuration,
-    //    gateSamples, tailSamples, maxTarget, seed
+    //    amountModVelocity, durationModVelocity, gateSamples, tailSamples,
+    //    maxTarget, minTarget,
+    //    tremolo, biasLfo, biasLfoBlocks, seed
+    // minTarget/tremolo/biasLfo all default to 0, which is the bias-free
+    // ordinary 0..maxTarget note every earlier render used.
     render(p) {
       const gateSamples = p.gateSamples | 0;
       const tailSamples = p.tailSamples | 0;
@@ -46,8 +51,12 @@ function wrapChiffEngine(Module) {
         p.envModAttack | 0, p.envModDecay | 0,
         p.envModSustain | 0, p.envModRelease | 0,
         p.amount | 0, p.chiffDuration | 0,
+        p.amountModVelocity | 0, p.durationModVelocity | 0,
         gateSamples, tailSamples,
         p.maxTarget === undefined ? 32767 : p.maxTarget | 0,
+        p.minTarget | 0,
+        p.tremolo | 0, p.biasLfo | 0,
+        p.biasLfoBlocks === undefined ? 8 : p.biasLfoBlocks | 0,
         p.seed >>> 0,
         bufPtr, bufCap, metaPtr);
 

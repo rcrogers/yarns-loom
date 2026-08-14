@@ -43,6 +43,18 @@ def main():
         sys.exit('expected 2 script blocks (engine + sim), got %d' % len(blocks))
     spliced = (html[:blocks[0].start()] + '<script>\n' + engine + '\n</script>'
                + html[blocks[0].end():])
+    # Splice the shared loader, so the page cannot drift from the copy the node
+    # checks use. Its module.exports tail is node-only, so it is dropped.
+    loader = open(os.path.join(os.path.dirname(engine_path), 'loader.js')).read()
+    loader = loader.split("if (typeof module !== 'undefined'")[0].rstrip()
+    spliced, n = re.subn(
+        r'// >>> loader\.js[^\n]*\n[\s\S]*?// <<< loader\.js',
+        lambda m: ('// >>> loader.js -- spliced by tools/simengine/inline_engine.py, '
+                   'do not edit here\n' + loader + '\n// <<< loader.js'),
+        spliced)
+    if n != 1:
+        sys.exit('inline_engine: loader.js markers not found in the sim script')
+
     # Stamp the firmware version (idempotent: matches any prior value).
     version = firmware_version()
     spliced, n = re.subn(r"const FW_VERSION = '[^']*';",
