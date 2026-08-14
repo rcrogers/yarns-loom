@@ -134,6 +134,7 @@ extern const uint32_t lut_euclidean[];
 extern const int8_t lut_expo_slope_shift[];
 extern const int8_t lut_fm_index_2x_upshifts[];
 extern const uint16_t chr_characters[];
+extern const uint16_t chr_blinking_characters[];
 #define STR_DUMMY 0  // dummy
 #define LUT_ENV_EXPO 0
 #define LUT_ENV_EXPO_SIZE 257
@@ -285,6 +286,8 @@ extern const uint16_t chr_characters[];
 #define LUT_FM_INDEX_2X_UPSHIFTS_SIZE 26
 #define CHR_CHARACTERS 0
 #define CHR_CHARACTERS_SIZE 256
+#define CHR_BLINKING_CHARACTERS 1
+#define CHR_BLINKING_CHARACTERS_SIZE 5
 
 }  // namespace yarns
 

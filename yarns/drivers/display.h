@@ -38,6 +38,7 @@ namespace yarns {
 const uint8_t kDisplayWidth = 2;
 const uint8_t kScrollBufferSize = 64;
 const uint16_t kBlinkMask = 512;
+const uint16_t kAllSegments = 0xFFFF;
 
 class Display {
  public:
@@ -58,6 +59,8 @@ class Display {
 
   inline void PrintMasks(const uint16_t* masks) {
     std::copy(&masks[0], &masks[kDisplayWidth], &mask_[0]);
+    // Raw segments say nothing about what blinks, so nothing does.
+    std::fill(&blink_mask_[0], &blink_mask_[kDisplayWidth], 0);
     use_mask_ = true;
   }
   
@@ -69,7 +72,11 @@ class Display {
   void Scroll();
   
   inline bool scrolling() const { return scrolling_; }
-  inline void set_blink(bool blinking) { blinking_ = blinking; }
+  // Blinking the whole field is the case where every segment blinks, so it
+  // composes with a glyph's own blinking segments instead of overriding them.
+  inline void set_blink(bool blinking) {
+    blink_override_ = blinking ? kAllSegments : 0;
+  }
 
   inline bool blink_high() const { return blink_counter_ < (kBlinkMask >> 1); }
  
@@ -87,7 +94,9 @@ class Display {
   uint16_t actual_brightness_;
 
   bool scrolling_;
-  bool blinking_;
+  uint16_t blink_override_;
+  // Segments of the short name that blink, named by the glyphs themselves.
+  uint16_t blink_mask_[kDisplayWidth];
   
   uint16_t scrolling_pre_delay_timer_;
   uint16_t scrolling_timer_;

@@ -74,7 +74,8 @@ void Display::Init() {
   fading_counter_ = 0;
   fading_increment_ = 0;
   
-  blinking_ = false;
+  blink_override_ = 0;
+  std::fill(&blink_mask_[0], &blink_mask_[kDisplayWidth], 0);
   brightness_ = UINT16_MAX;
 }
 
@@ -167,14 +168,19 @@ void Display::RefreshFast() {
   }
   if (redraw_[active_position_]) {
     redraw_[active_position_] = false;
-    if (brightness_pwm_cycle_ <= actual_brightness_
-        && (!blinking_ || blink_high())) {
-      if (use_mask_) {
-        Shift14SegmentsWord(mask_[active_position_]);
-      } else {
-        Shift14SegmentsWord(chr_characters[
-          static_cast<uint8_t>(displayed_buffer_[active_position_])]);
+    if (brightness_pwm_cycle_ <= actual_brightness_) {
+      uint16_t segments = use_mask_
+          ? mask_[active_position_]
+          : chr_characters[
+              static_cast<uint8_t>(displayed_buffer_[active_position_])];
+      if (!blink_high()) {
+        // blink_mask_ describes the short name; a scrolling long name is
+        // showing different characters than it was measured against.
+        uint16_t blink = blink_override_;
+        if (!scrolling_) blink |= blink_mask_[active_position_];
+        segments &= ~blink;
       }
+      Shift14SegmentsWord(segments);
       GPIOB->BSRR = kCharacterEnablePins[active_position_];
     } else {
       GPIOB->BRR = kCharacterEnablePins[active_position_];
@@ -183,11 +189,23 @@ void Display::RefreshFast() {
   brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
 }
 
+// What blinks in this glyph, if anything. Read once per Print, so the short
+// list costs less than a table with an entry for every character.
+static uint16_t BlinkingSegments(char c) {
+  for (const uint16_t* p = chr_blinking_characters; p[0]; p += 2) {
+    if (p[0] == static_cast<uint8_t>(c)) return p[1];
+  }
+  return 0;
+}
+
 void Display::Print(
   const char* short_buffer, const char* long_buffer,
   uint16_t brightness, uint16_t fade, char prefix
 ) {
   strncpy(short_buffer_, short_buffer, kDisplayWidth);
+  for (uint8_t i = 0; i < kDisplayWidth; ++i) {
+    blink_mask_[i] = BlinkingSegments(short_buffer_[i]);
+  }
 
 #ifdef APPLICATION
   strncpy(long_buffer_, long_buffer, kScrollBufferSize);
