@@ -37,8 +37,10 @@ namespace yarns {
 
 const uint8_t kDisplayWidth = 2;
 const uint8_t kScrollBufferSize = 64;
-const uint16_t kBlinkMask = 512;
-const uint16_t kAllSegments = 0xFFFF;
+// Counted in RefreshSlow, which Ui::Poll drives at 1kHz, so this is the blink
+// period in milliseconds -- shared by the prefix flash and by a glyph's second
+// frame. Divisible by 32, which keeps the prefix flash's fractions exact.
+const uint16_t kBlinkMask = 320;
 
 class Display {
  public:
@@ -59,8 +61,8 @@ class Display {
 
   inline void PrintMasks(const uint16_t* masks) {
     std::copy(&masks[0], &masks[kDisplayWidth], &mask_[0]);
-    // Raw segments say nothing about what blinks, so nothing does.
-    std::fill(&blink_mask_[0], &blink_mask_[kDisplayWidth], 0);
+    // Raw segments name no other frame, so they are their own.
+    std::copy(&masks[0], &masks[kDisplayWidth], &blink_frame_[0]);
     use_mask_ = true;
   }
   
@@ -72,11 +74,10 @@ class Display {
   void Scroll();
   
   inline bool scrolling() const { return scrolling_; }
-  // Blinking the whole field is the case where every segment blinks, so it
-  // composes with a glyph's own blinking segments instead of overriding them.
-  inline void set_blink(bool blinking) {
-    blink_override_ = blinking ? kAllSegments : 0;
-  }
+  // Blinking the whole field is the case where the other frame is blank. This
+  // writes the same frames Print does, so it has to follow the Print it applies
+  // to -- Ui::RefreshDisplay does, calling it after refresh_display().
+  void set_blink(bool blinking);
 
   inline bool blink_high() const { return blink_counter_ < (kBlinkMask >> 1); }
  
@@ -94,9 +95,11 @@ class Display {
   uint16_t actual_brightness_;
 
   bool scrolling_;
-  uint16_t blink_override_;
-  // Segments of the short name that blink, named by the glyphs themselves.
-  uint16_t blink_mask_[kDisplayWidth];
+  // What each position shows on the other side of the blink. Equal to what it
+  // shows now unless a glyph names something else, so most of the display most
+  // of the time does not blink at all.
+  uint16_t blink_frame_[kDisplayWidth];
+  void SetBlinkFrames();
   
   uint16_t scrolling_pre_delay_timer_;
   uint16_t scrolling_timer_;

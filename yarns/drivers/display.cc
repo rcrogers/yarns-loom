@@ -74,8 +74,7 @@ void Display::Init() {
   fading_counter_ = 0;
   fading_increment_ = 0;
   
-  blink_override_ = 0;
-  std::fill(&blink_mask_[0], &blink_mask_[kDisplayWidth], 0);
+  std::fill(&blink_frame_[0], &blink_frame_[kDisplayWidth], 0);
   brightness_ = UINT16_MAX;
 }
 
@@ -173,12 +172,11 @@ void Display::RefreshFast() {
           ? mask_[active_position_]
           : chr_characters[
               static_cast<uint8_t>(displayed_buffer_[active_position_])];
-      if (!blink_high()) {
-        // blink_mask_ describes the short name; a scrolling long name is
-        // showing different characters than it was measured against.
-        uint16_t blink = blink_override_;
-        if (!scrolling_) blink |= blink_mask_[active_position_];
-        segments &= ~blink;
+      // The frames describe the short name, and RefreshSlow points
+      // displayed_buffer_ elsewhere for a scrolling long name and for the
+      // prefix flash -- both of which already have their own other side.
+      if (!blink_high() && displayed_buffer_ == short_buffer_) {
+        segments = blink_frame_[active_position_];
       }
       Shift14SegmentsWord(segments);
       GPIOB->BSRR = kCharacterEnablePins[active_position_];
@@ -189,13 +187,28 @@ void Display::RefreshFast() {
   brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
 }
 
-// What blinks in this glyph, if anything. Read once per Print, so the short
-// list costs less than a table with an entry for every character.
-static uint16_t BlinkingSegments(char c) {
+// A glyph's other frame, or the only one it has. Read once per Print, so the
+// short list costs less than a table with an entry for every character.
+static uint16_t OtherFrame(char c) {
+  const uint8_t code = static_cast<uint8_t>(c);
   for (const uint16_t* p = chr_blinking_characters; p[0]; p += 2) {
-    if (p[0] == static_cast<uint8_t>(c)) return p[1];
+    if (p[0] == code) return p[1];
   }
-  return 0;
+  return chr_characters[code];
+}
+
+void Display::SetBlinkFrames() {
+  for (uint8_t i = 0; i < kDisplayWidth; ++i) {
+    blink_frame_[i] = OtherFrame(short_buffer_[i]);
+  }
+}
+
+void Display::set_blink(bool blinking) {
+  if (blinking) {
+    std::fill(&blink_frame_[0], &blink_frame_[kDisplayWidth], 0);
+  } else {
+    SetBlinkFrames();
+  }
 }
 
 void Display::Print(
@@ -203,9 +216,7 @@ void Display::Print(
   uint16_t brightness, uint16_t fade, char prefix
 ) {
   strncpy(short_buffer_, short_buffer, kDisplayWidth);
-  for (uint8_t i = 0; i < kDisplayWidth; ++i) {
-    blink_mask_[i] = BlinkingSegments(short_buffer_[i]);
-  }
+  SetBlinkFrames();
 
 #ifdef APPLICATION
   strncpy(long_buffer_, long_buffer, kScrollBufferSize);

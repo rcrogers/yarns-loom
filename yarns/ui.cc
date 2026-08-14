@@ -47,6 +47,10 @@ const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
 const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
 const uint32_t kFastFade = kRefreshFreq << 1;
 
+// Held keys blink at twice the display's rate, so the two read as different
+// things rather than as one thing slightly out of step.
+const uint16_t kHeldKeyBlinkMask = kBlinkMask >> 1;
+
 // Encoder acceleration. Speed sets how fast the multiplier climbs, not the
 // multiplier itself: a detent advances a running total by how far under the
 // slow threshold its gap was, and the total is what picks the multiplier.
@@ -1129,7 +1133,8 @@ void Ui::PrintLatch() {
   uint8_t note_ordinal = 0, display_pos = 0;
   uint8_t note_index = keys.stack.most_recent_note_index();
   stmlib::NoteEntry note_entry;
-  bool blink = system_clock.milliseconds() % 160 < 80;
+  bool blink = system_clock.milliseconds() % kHeldKeyBlinkMask
+      < (kHeldKeyBlinkMask >> 1);
   while (note_index) {
     if (note_ordinal >= (kNotesPerDisplayChar << 1)) break;
     display_pos = note_ordinal < kNotesPerDisplayChar ? 0 : 1;

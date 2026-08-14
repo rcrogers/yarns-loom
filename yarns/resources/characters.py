@@ -235,12 +235,13 @@ characters = {
   'null': 'null'
 }
 
-# Segments that blink rather than staying lit. Declared beside the glyph, so
-# nothing downstream has to know which characters are special -- the display
-# asks the character what blinks, the same way it asks what lights.
+# The other frame of a blinking glyph, whole rather than a difference, so it
+# can be any pattern instead of only a subset of the first. Declared beside the
+# glyph, so nothing downstream has to know which characters are special -- the
+# display asks a character for its other frame, the same way it asks what lights.
 blinking = {
-  '\xC6': 'ad',    # Exciter amount: the height rails come and go, the X stays
-  '\xC7': 'febc',  # Exciter duration: likewise the width rails
+  '\xC6': 'gjln',  # Exciter amount: the height rails drop away, the X holds
+  '\xC7': 'gjln',  # Exciter duration: likewise the width rails
 }
 
 character_table = []
@@ -248,9 +249,9 @@ for i in xrange(256):
   segments = characters.get(chr(i), '')
   character_table.append(sum(MASKS[segment] for segment in set(segments)))
 
-# (code, segments) pairs, ended by a zero code. Only a couple of glyphs blink,
-# so a short list costs a great deal less than a second 256-entry table, and it
-# is read once per Print rather than per refresh.
+# (code, frame) pairs, ended by a zero code. Only a couple of glyphs blink, so
+# a short list costs a great deal less than a second 256-entry table, and it is
+# read once per Print rather than per refresh.
 blink_table = []
 for code in sorted(blinking):
   blink_table.append(ord(code))
