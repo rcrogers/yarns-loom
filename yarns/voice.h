@@ -334,10 +334,10 @@ class CVOutput {
     return envelope_.stage() != ENV_STAGE_DEAD;
   }
   inline void NoteOn(
-      ADSR& adsr, uint8_t chiff_amount, uint8_t chiff_duration) {
+      ADSR& adsr, uint8_t chiff_amount, uint32_t chiff_increment_u32) {
     envelope_.NoteOn(
       adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1,
-      chiff_amount, chiff_duration);
+      chiff_amount, chiff_increment_u32);
   }
   inline void NoteOff(bool force = false) {
     if (!force) {
