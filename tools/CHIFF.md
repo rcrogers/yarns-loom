@@ -59,6 +59,13 @@ clipped quiet signal and an unclipped loud one. Read the engine's own state:
 `hosttest/passthrough.js` is the model as a check. `chiff_checks/deadzone.js`
 reads state rather than sound, so it is seed-independent.
 
+Scripts get the binary from `hosttest/harness.js`, which resolves it relative to
+itself — so they run from anywhere, and say what to build when it is missing.
+Use it rather than writing `./test`.
+
+**`report=1` prints to stderr.** Fold it in with `2>&1`; capturing it via
+`stdio` returns stdout, which is null. Two scripts shipped broken on this.
+
 ## Traps
 
 Each of these produced a confident wrong conclusion, more than once.
