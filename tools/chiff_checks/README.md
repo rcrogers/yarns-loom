@@ -1,5 +1,9 @@
 # chiff check scripts
 
+**Start at [`tools/CHIFF.md`](../CHIFF.md)** — what each tool proves, what it
+cannot see, and the measurement traps. This file covers only what is in this
+directory.
+
 `chiff_sim.html` no longer contains a model. It runs the compiled
 `yarns/envelope.cc` (see `tools/simengine/`), so the sim and the firmware
 cannot disagree — there is one implementation.
@@ -15,7 +19,8 @@ cannot disagree — there is one implementation.
 - `specimg.js` — spectrogram to PNG. Image inspection has matched the user's
   ears where scalar stats have not.
 - `highdur.js` — noise band vs CHIFF DURATION. NB the band metric cannot
-  separate noise from ordinary envelope motion; see the plan.
+  separate noise from ordinary envelope motion, so read it as a relative
+  comparison between builds, never as an absolute noise level.
 - `peakfloor.js` — the AMPLITUDE MOD VELOCITY -64 / velocity 127 corner, where
   peak_u16 reaches exactly 0. Lives here rather than in the host battery because
   that battery compiles only `yarns/envelope.cc`: it sets `peak_u16` directly
@@ -47,20 +52,11 @@ cannot disagree — there is one implementation.
   not move. Settings too short to judge (a 1.7 ms chiff is two blocks long)
   report SKIP, never PASS. Takes an optional page path, so a prototype branch's
   `chiff_sim.html` can be measured against the current one.
-  **OUT of `make check` since 2026-08-08, and its LIMITS are what is wrong.**
-  It took a per-block std after subtracting the block mean -- from a residual it
-  had already high-passed, so the mean was zero and subtracting it could only
-  remove signal, most of it where the chiff's filter is slowest. With that fixed
-  (8e1764dd) the notches it used to report largely vanish (6.1-7.2 dB -> 0.0)
-  and CLIFFS appear instead, 15.9-18.0 dB against a 15 dB limit. Both marked and
-  marked-2 now fail. DO NOT RAISE THE LIMITS TO GET GREEN: recalibrate them
-  against a build whose smoothness the user has signed off on, then wire it back
-  in -- the same rule under which it went in the first time.
-  WAS IN `make check` from 2026-08-05, when it first went green (worst notch
-  5.9 dB against the 6 dB limit). It is the slowest check by a wide margin --
-  25 configurations x 5 seeds, each a full render through the page -- and it is
-  the only automated reading of L6, "smooth transitions over the chiff
-  duration", which is a hard design law.
+  **IN `make check`, and its limits are calibrated, not derived.** They were
+  recalibrated against a build whose character was signed off on; do NOT raise
+  them to get green. Slowest check here by far — 25 configurations x 5 seeds,
+  each a full render — and the only automated reading of "smooth transitions
+  over the chiff duration".
 - `residual.js` — splits the chiff's effect into OFFSET (per-block mean of
   chiff minus nominal: the value sitting off where it should be) and WANDER
   (per-block standard deviation: what is audible), in absolute dBFS. RMS of the
@@ -69,7 +65,7 @@ cannot disagree — there is one implementation.
   wander is well below it. Give `tailMs` room to reach past the release.
 
 Also useful, outside this directory:
-- `tools/hosttest/build.sh` — 22-check battery on the native build.
+- `tools/hosttest/build.sh` — 41-check battery on the native build.
 - `tools/hosttest/passthrough.js` — **the model, as a check.** A note started
   at amount A must pass through the state every smaller amount holds at its
   onset. The chiff's state is three numbers — drive, slew time, input — read
@@ -86,15 +82,6 @@ Also useful, outside this directory:
 - `tools/hosttest/plot.js` — trace to PNG.
 - `tools/simengine/parity.js` — engine vs native build.
 
-## Removed
-
-The 62 scripts that predated the engine were deleted. They eval'd the JS
-model that `chiff_sim.html` no longer contains, so none of them ran, and a
-check script that cannot run is worse than no script — it has to be
-re-evaluated every time someone reads this directory. Recover any of them
-from the commit that added them (`git log --diff-filter=A -- tools/chiff_checks`)
-and port it via `page.js` before trusting its output.
-
 ## What this directory is for
 
 An agent iterating on the envelope without waiting for someone to listen to
@@ -104,6 +91,7 @@ only a human can interpret usually does not.
 
 ## History
 
-~64 earlier scripts lived here. They predated the compiled engine and eval'd a
-JS model that no longer exists, so they were deleted rather than left as traps.
-`git log --diff-filter=D -- tools/chiff_checks/` recovers them if ever needed.
+~64 scripts predating the compiled engine were deleted; they eval'd a JS model
+that no longer exists, and a check that cannot run is worse than none.
+`git log --diff-filter=D -- tools/chiff_checks/` recovers them. Port via
+`page.js` before trusting any output.
