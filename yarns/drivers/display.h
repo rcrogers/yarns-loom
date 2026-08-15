@@ -37,10 +37,14 @@ namespace yarns {
 
 const uint8_t kDisplayWidth = 2;
 const uint8_t kScrollBufferSize = 64;
-// Counted in RefreshSlow, which Ui::Poll drives at 1kHz, so this is the blink
-// period in milliseconds -- shared by the prefix flash and by a glyph's second
-// frame. Divisible by 32, which keeps the prefix flash's fractions exact.
+// Counted in RefreshSlow, which Ui::Poll drives at 1kHz, so these are periods
+// in milliseconds. Divisible by 32, which keeps the prefix flash's fractions
+// exact. ui.cc derives the held-key rate from this, so it may not move.
 const uint16_t kBlinkMask = 320;
+// A frame swap -- a glyph's second frame, or set_blink's blank -- runs at a
+// THIRD of the held-key rate (kBlinkMask >> 1), so the two read as different
+// things. Its own counter: sharing kBlinkMask would drag the held keys along.
+const uint16_t kFrameBlinkMask = 3 * (kBlinkMask >> 1);
 
 class Display {
  public:
@@ -79,7 +83,9 @@ class Display {
   // to -- Ui::RefreshDisplay does, calling it after refresh_display().
   void set_blink(bool blinking);
 
-  inline bool blink_high() const { return blink_counter_ < (kBlinkMask >> 1); }
+  inline bool frame_high() const {
+    return frame_counter_ < (kFrameBlinkMask >> 1);
+  }
  
  private:
   void Shift14SegmentsWord(uint16_t data);
@@ -114,6 +120,11 @@ class Display {
   uint16_t brightness_;
   bool redraw_[kDisplayWidth];
   uint16_t blink_counter_;
+  uint16_t frame_counter_;
+  // Whether the prefix flash actually transitions. Without it every prefix
+  // buffer holds the short name, and switching only breaks frame_high()'s
+  // `displayed_buffer_ == short_buffer_` test.
+  bool prefix_transitions_;
   
   DISALLOW_COPY_AND_ASSIGN(Display);
 };

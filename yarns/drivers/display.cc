@@ -76,6 +76,8 @@ void Display::Init() {
   
   std::fill(&blink_frame_[0], &blink_frame_[kDisplayWidth], 0);
   brightness_ = UINT16_MAX;
+  frame_counter_ = 0;
+  prefix_transitions_ = false;
 }
 
 void Display::Scroll() {
@@ -119,6 +121,7 @@ void Display::RefreshSlow() {
       ? long_buffer_ + scrolling_step_
       : (
         // 0...24/32: show normal short buffer
+        !prefix_transitions_ ||
         blink_counter_ < ((kBlinkMask >> 1) + (kBlinkMask >> 2))
         ? short_buffer_
         : (
@@ -143,6 +146,7 @@ void Display::RefreshSlow() {
     actual_brightness_ = brightness_;
   }
   blink_counter_ = (blink_counter_ + 1) % kBlinkMask;
+  frame_counter_ = (frame_counter_ + 1) % kFrameBlinkMask;
   std::fill(&redraw_[0], &redraw_[kDisplayWidth], true); // Force redraw
 
 #else
@@ -175,7 +179,7 @@ void Display::RefreshFast() {
       // The frames describe the short name, and RefreshSlow points
       // displayed_buffer_ elsewhere for a scrolling long name and for the
       // prefix flash -- both of which already have their own other side.
-      if (!blink_high() && displayed_buffer_ == short_buffer_) {
+      if (!frame_high() && displayed_buffer_ == short_buffer_) {
         segments = blink_frame_[active_position_];
       }
       Shift14SegmentsWord(segments);
@@ -231,6 +235,7 @@ void Display::Print(
 
   strncpy(prefix_show_buffer_, short_buffer, kDisplayWidth);
   strncpy(prefix_blank_buffer_, short_buffer, kDisplayWidth);
+  prefix_transitions_ = false;
   if (prefix != '\0') {
     if (short_buffer_[0] == ' ') { // All buffers show prefix, no transitions
       short_buffer_[0] = prefix;
@@ -239,6 +244,7 @@ void Display::Print(
     } else { // Only one buffer shows prefix
       prefix_show_buffer_[0] = prefix;
       prefix_blank_buffer_[0] = ' ';
+      prefix_transitions_ = true;
     }
   }
 }
