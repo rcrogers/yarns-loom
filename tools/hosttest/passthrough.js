@@ -16,7 +16,7 @@ const { execSync } = require('child_process');
 const HINGE = 64;
 const ARGS = ' 64 attack=900 chiff_trace=1';
 function trace(dir, amount) {
-  return execSync('./test basic ' + amount + ARGS, { cwd: dir, maxBuffer: 1e9 })
+  return require('./harness').run('basic ' + amount + ARGS)
     .toString().trim().split('\n').map((l) => {
       const [d, s, i] = l.split(' ').map(Number);
       return {

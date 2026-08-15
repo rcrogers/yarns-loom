@@ -90,9 +90,11 @@ const DURATIONS = [0, 5, 10, 20, 21, 33, 50, 68, 80, 90, 100, 110, 120, 127];
 // read the wrong length at every attack but one -- and the window here varies
 // with attack, which a flat table cannot express.
 function windowSamples(attack, duration) {
-  const out = execSync(`./test report 96 ${duration} attack_setting=${attack} report=1`,
-                       { cwd: HERE, stdio: ['ignore', 'ignore', 'pipe'] });
-  return +/chiff (\d+) smp/.exec(out.toString())[1];
+  // report=1 prints to stderr, so fold it into stdout -- capturing it via
+  // stdio:[ignore,ignore,pipe] returns STDOUT, which is null, and this threw.
+  const out = require('./harness').run(
+    `report 96 ${duration} attack_setting=${attack} report=1 2>&1`);
+  return +/chiff (\d+) smp/.exec(out)[1];
 }
 
 function run(attack, duration, amount) {

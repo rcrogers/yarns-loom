@@ -3,15 +3,17 @@
 // duration 20 -> 21 (185 -> 199 samples), so the metrics are sampled inside
 // each setting's OWN window, not a fixed time span.
 const { execSync } = require('child_process');
+const H = require('./harness');
 
 // ASK THE ENGINE. This used to parse lut_chiff_duration_samples out of
 // resources.cc, a table the firmware stopped using when the window became
 // ATTACK-RELATIVE -- so the column was wrong by whatever the attack was, and a
 // flat table cannot express an attack-relative window at all.
 function windowSamples(dur) {
-  const out = execSync(`./test report ${amount} ${dur} ${opts} report=1`,
-                       { stdio: ['ignore', 'ignore', 'pipe'] });
-  return +/chiff (\d+) smp/.exec(out.toString())[1];
+  // report=1 prints to stderr; capturing it via stdio returns STDOUT, which
+  // is null. Fold it into stdout instead.
+  const out = H.run(`report ${amount} ${dur} ${opts} report=1 2>&1`);
+  return +/chiff (\d+) smp/.exec(out)[1];
 }
 
 // argv: amount, then any KEY=VALUE driver overrides (attack/decay/release/
@@ -20,7 +22,7 @@ const amount = process.argv[2] || '96';
 const opts = process.argv.slice(3).filter(a => a.includes('=')).join(' ');
 
 function run(dur) {
-  const out = execSync(`./test basic ${amount} ${dur} ${opts}`, { maxBuffer: 1e9 });
+  const out = H.run(`basic ${amount} ${dur} ${opts}`);
   return out.toString().trim().split('\n').map(Number);
 }
 

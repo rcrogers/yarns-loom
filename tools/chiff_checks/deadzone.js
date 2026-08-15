@@ -12,10 +12,7 @@
 // matters: the constants say where a sweep SATURATES, which is not where it
 // stops being audible -- the corner can run past Nyquist well before the
 // nominal end, and did, by sixteen knob positions in one variant.
-const { execSync } = require('child_process');
-const path = require('path');
-
-const TEST = path.join(__dirname, '..', 'hosttest', 'test');
+const H = require('../hosttest/harness');
 const DURATION = 90;
 const FS = 45000;
 
@@ -38,9 +35,7 @@ function cornerHz(slewQ5_27) {
 const OPEN_HZ = FS / 2 - 1;
 
 function firstBlock(amount) {
-  const out = execSync(
-    `${TEST} basic ${amount} ${DURATION} gate=40 tail=0 chiff_trace=1`,
-    { encoding: 'utf8', maxBuffer: 1 << 26 });
+  const out = H.run(`basic ${amount} ${DURATION} gate=40 tail=0 chiff_trace=1`);
   const line = out.trim().split('\n')[0];
   if (!line) return null;
   const [drive, slew] = line.trim().split(/\s+/).map(Number);

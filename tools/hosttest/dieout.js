@@ -1,18 +1,18 @@
 const { execSync } = require('child_process');
-const T = '/Users/rcrogers/Repos/mutable-instruments/mutable-dev-environment/eurorack-modules/tools/hosttest/test';
+const H = require('./harness');
 const FS = 45000, BLOCK = 64;
 // The engine holds the SCALED rms (2.121 sigma) to kChiffInaudibleLevel, so the
 // sigma at that point is 2.121x lower. Compare like with like.
 const SIGMA_THRESH = 32767 * Math.pow(10, -48.2 / 20) / 2.121;
 const WIN = 24;                       // blocks per rms estimate
 function windowMs(dur, atk) {
-  const o = execSync(`${T} basic 32 ${dur} attack_setting=${atk} report=1 2>&1`, { encoding: 'utf8' });
+  const o = H.run(`basic 32 ${dur} attack_setting=${atk} report=1 2>&1`);
   return Number(o.match(/chiff (\d+) smp/)[1]) / FS * 1000;
 }
 function dieoutMs(amt, dur, atk, gateMs) {
-  const v = execSync(
-    `${T} basic ${amt} ${dur} attack_setting=${atk} gate=${Math.round(gateMs)} tail=${Math.round(gateMs*2)} chiff_state_trace=1`,
-    { encoding: 'utf8', maxBuffer: 1 << 28 }).trim().split('\n').map(Number);
+  const v = H.runNumbers(
+    `basic ${amt} ${dur} attack_setting=${atk} gate=${Math.round(gateMs)} ` +
+    `tail=${Math.round(gateMs*2)} chiff_state_trace=1`);
   let last = 0;
   for (let i = 0; i + WIN <= v.length; ++i) {
     let s = 0; for (let j = i; j < i + WIN; ++j) s += v[j] * v[j];

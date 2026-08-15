@@ -34,7 +34,7 @@ const ONSET_MS = 50;
 const SR = 45;  // samples per ms
 
 function run(args) {
-  return execSync('./test ' + args, { maxBuffer: 1e9 })
+  return require('./harness').run(args)
     .toString().trim().split('\n').map(Number);
 }
 

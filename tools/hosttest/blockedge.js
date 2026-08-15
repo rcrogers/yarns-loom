@@ -30,7 +30,7 @@ const ATTACKS = [8, 16, 24, 40, 64];
 // rather than ordinary curvature. Ratios seen on smooth material sit near 1.
 const LIMIT = 4;
 
-const run = args => execSync(`./test ${args}`, { maxBuffer: 1e9 })
+const run = args => require('./harness').run(args)
   .toString().trim().split('\n').map(Number);
 
 console.log(`AMOUNT ${amount}, tremolo ${tremolo}` +

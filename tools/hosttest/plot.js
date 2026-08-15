@@ -8,6 +8,11 @@ const fs = require('fs');
 
 const outPng = process.argv[2];
 const spanMs = parseFloat(process.argv[3]);
+// Without this, no arguments wrote a file literally named "undefined".
+if (!outPng || !(spanMs > 0) || process.argv.length < 5) {
+  console.error('usage: plot.js <out.png> <spanMs> "<driver args>" [more series...]');
+  process.exit(1);
+}
 const series = process.argv.slice(4).map(s => {
   const i = s.indexOf(':');
   return { label: s.slice(0, i), args: s.slice(i + 1) };
@@ -21,7 +26,7 @@ const N = Math.round(spanMs * FS / 1000);
 const COLORS = [[80, 170, 255], [255, 150, 60], [120, 220, 120], [230, 100, 200]];
 
 const traces = series.map(s => {
-  const raw = execSync(`./test ${s.args}`, { maxBuffer: 1e9 })
+  const raw = require('./harness').run(s.args)
     .toString().trim().split('\n').map(Number);
   return raw.slice(0, N);
 });

@@ -1,6 +1,7 @@
 // Firmware dart-port checks against sim-established expectations.
 const { execSync } = require('child_process');
-function run(args){ return execSync('./test '+args,{maxBuffer:1e9}).toString().trim().split('\n').map(Number); }
+const H = require('./harness');
+function run(args){ return H.runNumbers(args); }
 function noiseWin(s,aMs,bMs){ let sum=0,n=0;
   for(let i=Math.max(1,aMs*45);i<Math.min(bMs*45,s.length);i++){sum+=Math.abs(s[i]-s[i-1]);n++;}
   return n?sum/n:0; }
@@ -210,7 +211,7 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
 // file could see it, because every scenario had a non-negative floor.
 { const args='basic 0 90 range=-16383 bias_lfo=20000 bias_lfo_blocks=1000000 '+
              'gate=2000 tail=500 attack_setting=40';
-  const rng=execSync('./test '+args+' value_range=1',{maxBuffer:1e9})
+  const rng=H.run(args+' value_range=1')
     .toString().trim().split(/\s+/).map(Number);
   // The envelope must actually travel to its negative target, not sit pinned.
   check('negative range: the envelope reaches its target',
@@ -280,7 +281,7 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
 // 32767 * 65535 = 2147385345, which fits with 98302 to spare. Unbounded it does
 // not: MEASURED 36063 before the split, i.e. 2.36e9, an overflow -- and
 // value() returns int16_t, so 36063 wrapped there too.
-{ const range=(args)=>execSync('./test '+args,{maxBuffer:1e9})
+{ const range=(args)=>H.run(args)
     .toString().trim().split(/\s+/).map(Number);
   for (const args of ['bias_lfo=32767', 'bias_lfo=32767 tremolo=48000']) {
     const r=range('basic 96 90 value_range=1 range=32767 '+args);
