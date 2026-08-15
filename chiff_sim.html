@@ -102,7 +102,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
 <div class="wrap">
   <div class="rail">
     <header>
-      <h1>Exciter Envelope Simulator</h1>
+      <h1>Exciter Envelope Simulator<span id="variant" class="mono" hidden style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#b45309;color:#fff;font-size:11px;vertical-align:middle;letter-spacing:.02em"></span></h1>
       <p class="mono" id="fwver" style="color:var(--ink3);font-size:11px;margin-top:3px"></p>
     </header>
 
@@ -299,7 +299,11 @@ function wrapChiffEngine(Module) {
 // Firmware revision this page's inlined engine was built from. Rewritten by
 // tools/simengine/inline_engine.py at every re-inline, so a published artifact
 // self-identifies its firmware -- do not edit the value by hand.
-const FW_VERSION = '02e91654';
+const FW_VERSION = '0eb3f76c';
+// What makes this build different, stamped by inline_engine.py from the
+// constant in yarns/envelope.cc -- do not edit the value by hand. Empty on the
+// canonical page, which is the reference and wants no badge.
+const FW_VARIANT = 'slow-end cap 11 oct';
 
 // ---------------------------------------------------------------------------
 // This file contains NO DSP. Every sample below comes from the compiled
@@ -861,7 +865,13 @@ $('reroll').addEventListener('click', () => {
 ChiffEngine().then(mod => {
   ENGINE = wrapChiffEngine(mod);
   FS = ENGINE.frameHz;              // the firmware's own kFrameHz
-  $('fwver').textContent = 'firmware ' + FW_VERSION;
+  $('fwver').textContent = 'firmware ' + FW_VERSION
+    + (FW_VARIANT ? ' · ' + FW_VARIANT : '');
+  if (FW_VARIANT) {
+    $('variant').textContent = FW_VARIANT;
+    $('variant').hidden = false;
+    document.title = FW_VARIANT + ' — ' + document.title;
+  }
   update();
 });
 cv.addEventListener('mousemove', e => {

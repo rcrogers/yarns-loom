@@ -32,6 +32,29 @@ def firmware_version():
     return sha + ('-dirty' if dirty else '')
 
 
+def variant_label():
+    """A human-readable name for what makes THIS build different, read from the
+    source being built rather than typed in.
+
+    A published A/B page is identified only by its firmware SHA, which tells a
+    listener nothing about what they are hearing -- and the SHA is stamped from
+    HEAD, so an amended commit leaves it pointing at a hash that no longer
+    exists. Anything a human is asked to compare by ear needs a name.
+
+    Returns '' when the build has no distinguishing constant, which is the
+    canonical page: unlabelled is correct there, because it is the reference.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, '..', '..', 'yarns', 'envelope.cc')
+    try:
+        source = open(path).read()
+    except Exception:
+        return ''
+    match = re.search(r'^const uint32_t kChiffSlowEndOctaves = (\d+);',
+                      source, re.M)
+    return 'slow-end cap %s oct' % match.group(1) if match else ''
+
+
 def main():
     if not 3 <= len(sys.argv) <= 4:
         sys.exit(__doc__)
@@ -61,6 +84,11 @@ def main():
                          "const FW_VERSION = '%s';" % version, spliced)
     if n != 1:
         sys.exit('inline_engine: FW_VERSION marker not found in the sim script')
+
+    # OPTIONAL, unlike FW_VERSION: a page without the marker is simply not an
+    # A/B variant, so a missing marker is not an error.
+    spliced = re.sub(r"const FW_VARIANT = '[^']*';",
+                     "const FW_VARIANT = '%s';" % variant_label(), spliced)
     open(output, 'w').write(spliced)
     print('inlined %s into %s (firmware %s)' % (engine_path, output, version))
 
