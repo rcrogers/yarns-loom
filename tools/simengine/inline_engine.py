@@ -33,17 +33,17 @@ def firmware_version():
 
 
 def variant_label():
-    """A human-readable name for what makes THIS build different, read from the
-    source being built rather than typed in.
+    """A name for what makes an A/B build different, for a listener comparing
+    pages by ear. The SHA alone tells them nothing, and it is stamped from HEAD,
+    so an amended commit leaves it naming a hash that no longer exists.
 
-    A published A/B page is identified only by its firmware SHA, which tells a
-    listener nothing about what they are hearing -- and the SHA is stamped from
-    HEAD, so an amended commit leaves it pointing at a hash that no longer
-    exists. Anything a human is asked to compare by ear needs a name.
-
-    Returns '' when the build has no distinguishing constant, which is the
-    canonical page: unlabelled is correct there, because it is the reference.
+    OPT IN with SIM_LABEL_VARIANT=1. The canonical page is the reference and
+    carries no badge, so presence of the constant cannot be the trigger -- the
+    shipped build has it too. The VALUE is still read from the source, so a
+    labelled page cannot claim a cap it does not have.
     """
+    if not os.environ.get('SIM_LABEL_VARIANT'):
+        return ''
     here = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(here, '..', '..', 'yarns', 'envelope.cc')
     try:
