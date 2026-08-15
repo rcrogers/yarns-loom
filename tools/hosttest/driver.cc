@@ -215,6 +215,18 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  // seed=N SELECTS A REALIZATION. The envelope's PRNG seed lives in an
+  // anonymous namespace, so this TU cannot set it -- but Init hands out the
+  // next one on every call, advancing by a stride chosen to put successive
+  // seeds far apart in xorshift32's single orbit. So N spare Inits select the
+  // Nth sequence, which is the same mechanism a second voice would get.
+  //
+  // WITHOUT THIS THE HARNESS HAS EXACTLY ONE REALIZATION: every process starts
+  // fresh, so every run of every sweep in this directory was the same noise.
+  // One realization dips wherever it likes; the plan records a single seed
+  // inventing a 7.6 dB failure that twelve others put at 0.0.
+  const int seed = OptInt(argc, argv, "seed", 0);
+  for (int i = 0; i < seed; ++i) env.Init(0);
   env.Init(strcmp(scenario, "inverted") == 0 ? 16383 : 0);  // rest = release level
 
   if (strcmp(scenario, "basic") == 0) {
