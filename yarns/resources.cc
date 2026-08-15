@@ -3111,7 +3111,7 @@ const uint16_t chr_characters[] = {
        0,      0,      0,  65532,
 };
 const uint16_t chr_blinking_characters[] = {
-     198,  36864,    199,  27648,
+     198,    680,    199,    680,
        0,
 };
 
