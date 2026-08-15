@@ -203,6 +203,26 @@ const uint32_t kChiffStateShift = 4;
 // MUST NOT EXCEED kChiffStateShift: the drive is stored pre-divided by
 // 2^kChiffStateShift, so a wider span would leave the driven input outside Q30.
 const uint32_t kChiffDriveSpan_q5_27 = (5u << 27) / 2;  // 2.5 octaves
+// A CEILING ON THE SLOW END OF THE AMOUNT AXIS, in octaves of slew time.
+//
+// The slow end is otherwise the slowest slew that still settles inside the
+// chiff window, i.e. DURATION-DERIVED. Every amount below the filter's open
+// point is interpolated FROM it, so turning DURATION moves every cutoff on that
+// stretch, and at long windows the slew gets slow enough that the input rails
+// and the level law stops holding. Capping it makes the axis
+// duration-independent wherever the cap binds.
+//
+// THE WINDOW'S OWN LIMIT STILL APPLIES BELOW THE CAP, which is why this is a
+// min and not an assignment: a chiff whose whole window is shorter than this
+// time constant would otherwise be truncated by its own filter before it
+// reached amplitude, which is darker AND quieter -- the failure that made an
+// earlier pin look like it inverted the duration response.
+//
+// WHAT IT COSTS is the lowest corners the knob can reach, which is the
+// sub-audio wobble at the bottom of AMOUNT. That trade is the whole reason this
+// is a named constant and not a fixed choice.
+const uint32_t kChiffSlowEndOctaves = 11;
+const uint32_t kChiffSlowestSlewTimeLog2_q5_27 = kChiffSlowEndOctaves << 27;
 // The clip point, and the mean's reserve, is this many of the chiff's own
 // sigma: 2 x the stored scaled rms, i.e. 2 * 3/sqrt(2). Sized so the clean end
 // clips essentially nothing while reserving no more than it must.
@@ -480,10 +500,12 @@ const uint32_t kChiffAmountMaxRecip_q32 = static_cast<uint32_t>(
 // reachable only through twelve rounds of the very maps whose calibration was
 // in question, which is how a wrong constant stayed invisible.
 //
-// WHERE THE CAP BINDS this is not exact -- there the level follows the bare
-// response instead of the law, so the true amount is higher. The threshold sits
-// well above the capped band at every setting measured; if that stops being
-// true the symptom is DURATION reading long at the bottom of AMOUNT.
+// WHERE THE INPUT RAILS this is not exact -- there the level follows the bare
+// response instead of the law, so it is LOWER than the law says and the amount
+// at which the chiff truly goes inaudible is HIGHER than the one solved for
+// here. The walk therefore passes the real threshold EARLY, and the symptom is
+// DURATION reading SHORT at the bottom of AMOUNT. (This comment used to name
+// the opposite sign, which is how a measured die-out of 0.48 went unexplained.)
 static uint32_t ChiffWalkAudibleAmount_q7_25(
     uint32_t start_q7_25, int32_t input_full_q30) {
   if (input_full_q30 <= 0) return start_q7_25;
@@ -717,12 +739,11 @@ void Envelope::NoteOn(
       }
       // The slow end of the amount axis, which the walk descends toward. It is
       // computed first because the axis interpolates every amount FROM it.
-      // TRIED AND REVERTED TWICE (the second time with a working detector):
-      // pinning this to a constant, so the axis is duration-independent. It
-      // leaves the die-out ratio unchanged and costs level at the knob's
-      // bottom, so the duration-derived end stays.
-      chiff_slew_time_log2_end_q5_27_ =
-        SlewTimeLog2FromDuration_q5_27(window_samples);
+      // Capped, so the axis stops depending on DURATION once the window is long
+      // enough for the cap to bind; see kChiffSlowEndOctaves.
+      chiff_slew_time_log2_end_q5_27_ = std::min(
+        SlewTimeLog2FromDuration_q5_27(window_samples),
+        kChiffSlowestSlewTimeLog2_q5_27);
       // The chiff input is HALF THE NOTE'S ALLOWED RANGE times the walk's
       // fraction. Half the range is the largest symmetric +/- that can ever fit
       // inside it -- a bound, not a tuned fraction. Sized from the ALLOWED
