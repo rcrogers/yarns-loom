@@ -8,10 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { execSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..', '..');
-const HOSTTEST = path.join(ROOT, 'tools', 'hosttest');
 const html = fs.readFileSync(process.argv[2] || path.join(ROOT, 'chiff_sim.html'), 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 if (scripts.length !== 2) {
@@ -82,29 +80,70 @@ const check = (name, ok, detail) => {
   if (!ok) fails++;
 };
 
+// THE CASES, and how the native side is driven. These lived in a module shared
+// with tools/simengine/parity.js, which proved the BUILT engine matched native
+// while this proves the INLINED page does. That check was strictly weaker --
+// build.sh always inlines, so a fresh engine and a stale page cannot persist,
+// and every divergence that reached it reached this one too.
+const H = require('../hosttest/harness');
+
+const GATE_MS = 400, TAIL_MS = 400;
+const LFO_BLOCKS = 32;   // blocks per half-cycle of the bias LFO
+const SEED = 0xCAFEBABE;
+
 const CASES = [
   { name: 'user case (atk 16, dur 33, amt 127)',
-    atk: 16, dec: 64, sus: 70, rel: 64, amt: 127, chiffDur: 33 },
-  { name: 'long window (atk 40, dur 120)',
-    atk: 40, dec: 64, sus: 70, rel: 64, amt: 127, chiffDur: 120 },
+    attack: 16, decay: 64, sustain: 70, release: 64, amount: 127, chiffDuration: 33 },
+  { name: 'default-ish (atk 40, dur 90, amt 96)',
+    attack: 40, decay: 64, sustain: 70, release: 64, amount: 96, chiffDuration: 90 },
   { name: 'chiff off (amt 0)',
-    atk: 40, dec: 64, sus: 70, rel: 64, amt: 0, chiffDur: 90 },
-  // BIAS AND A NEGATIVE RANGE. Every case above renders bias 0 on an ordinary
-  // 0..32767 note, so the sim's bias arithmetic and its negative-range path
-  // were never compared against the firmware at all -- the sim could have
-  // drifted from the module in exactly the two places hardest to reason about.
+    attack: 40, decay: 64, sustain: 70, release: 64, amount: 0, chiffDuration: 90 },
+  { name: 'long window (dur 120)',
+    attack: 40, decay: 64, sustain: 70, release: 64, amount: 127, chiffDuration: 120 },
+  { name: 'short window (dur 5)',
+    attack: 20, decay: 50, sustain: 90, release: 40, amount: 64, chiffDuration: 5 },
+  // BIAS AND A NEGATIVE RANGE. Without these, the bias arithmetic and the
+  // negative-range path are never compared against the firmware at all -- the
+  // two places hardest to reason about.
   { name: 'bias: independent LFO + tremolo',
-    atk: 16, dec: 64, sus: 70, rel: 64, amt: 96, chiffDur: 33,
+    attack: 16, decay: 64, sustain: 70, release: 64, amount: 96, chiffDuration: 33,
     biasLfo: 20000, tremolo: 24000 },
-  // A range BELOW zero (a negative TIMBRE MOD ENV). Needs a bias to be visible
-  // at all: with none, the output saturate takes the whole thing to zero.
+  // A range BELOW zero (a negative TIMBRE MOD ENV). Needs a bias to be visible:
+  // with none, the output saturate takes the whole thing to zero.
   { name: 'negative range (max < 0) under bias',
-    atk: 40, dec: 64, sus: 70, rel: 64, amt: 96, chiffDur: 90,
+    attack: 40, decay: 64, sustain: 70, release: 64, amount: 96, chiffDuration: 90,
     maxTarget: -16383, biasLfo: 20000 },
 ];
 
-const LFO_BLOCKS = 32;   // blocks per half-cycle of the bias LFO
-const GATE_MS = 400, TAIL_MS = 400;
+const maxTargetOf = c => c.maxTarget === undefined ? 32767 : c.maxTarget;
+
+// Stated on both sides rather than left to two defaults agreeing, which is
+// what broke when the page's LFO period changed and the driver's did not.
+function nativeArgs(c) {
+  return [
+    'basic', c.amount, c.chiffDuration,
+    `attack_setting=${c.attack}`, `decay_setting=${c.decay}`,
+    `release_setting=${c.release}`, `sustain_setting=${c.sustain}`,
+    'peak=100', `gate=${GATE_MS}`, `tail=${TAIL_MS}`,
+    `range=${maxTargetOf(c)}`,
+    `bias_lfo=${c.biasLfo || 0}`, `tremolo=${c.tremolo || 0}`,
+    `bias_lfo_blocks=${LFO_BLOCKS}`,
+  ].join(' ');
+}
+
+function nativeSamples(c) {
+  return H.runNumbers(nativeArgs(c));
+}
+
+function compare(native, out) {
+  const n = Math.min(native.length, out.length);
+  let diffs = 0, first = -1;
+  for (let i = 0; i < n; i++) {
+    if (native[i] !== out[i]) { diffs++; if (first < 0) first = i; }
+  }
+  return { n, diffs, first, ok: diffs === 0 && n > 0 };
+}
+
 
 // `let` at a script's top level lands in the realm's global LEXICAL scope, not
 // on globalThis, so the page's state is reachable only by evaluating in the
@@ -135,45 +174,22 @@ new Promise((resolve, reject) => {
 
   for (const c of CASES) {
     Object.assign(values, {
-      atk: c.atk, dec: c.dec, sus: c.sus, rel: c.rel,
-      ampmod: 0, vel: 127, amt: c.amt, chiffDur: c.chiffDur,
+      atk: c.attack, dec: c.decay, sus: c.sustain, rel: c.release,
+      ampmod: 0, vel: 127, amt: c.amount, chiffDur: c.chiffDuration,
     });
     // Drive render() directly with the page's own params shape.
-    const p = {
-      attack: c.atk, decay: c.dec, sustain: c.sus, release: c.rel,
+    const res = page.render(Object.assign({}, c, {
       amplitudeModVelocity: 0, velocity: 127,
-      amount: c.amt, chiffDuration: c.chiffDur,
-      gateMs: GATE_MS, tailMs: TAIL_MS, seed: 0xCAFEBABE,
+      gateMs: GATE_MS, tailMs: TAIL_MS, seed: SEED,
       biasLfo: c.biasLfo || 0, tremolo: c.tremolo || 0,
-      // Stated on both sides rather than left to two defaults agreeing, which
-      // is what broke when the page's LFO period changed and the native
-      // driver's did not.
       biasLfoBlocks: LFO_BLOCKS,
-      maxTarget: c.maxTarget === undefined ? 32767 : c.maxTarget,
-      minTarget: c.minTarget || 0,
-    };
-    const res = page.render(p);
+      maxTarget: maxTargetOf(c), minTarget: c.minTarget || 0,
+    }));
 
-    const args = [
-      'basic', c.amt, c.chiffDur,
-      `attack_setting=${c.atk}`, `decay_setting=${c.dec}`,
-      `release_setting=${c.rel}`, `sustain_setting=${c.sus}`,
-      'peak=100', `gate=${GATE_MS}`, `tail=${TAIL_MS}`,
-      `range=${c.maxTarget === undefined ? 32767 : c.maxTarget}`,
-      `bias_lfo=${c.biasLfo || 0}`, `tremolo=${c.tremolo || 0}`,
-      `bias_lfo_blocks=${LFO_BLOCKS}`,
-    ].join(' ');
-    const native = execSync(`./test ${args}`, { cwd: HOSTTEST, maxBuffer: 1e9 })
-      .toString().trim().split('\n').map(Number);
-
-    const n = Math.min(native.length, res.out.length);
-    let diffs = 0, first = -1;
-    for (let i = 0; i < n; i++) {
-      if (native[i] !== res.out[i]) { diffs++; if (first < 0) first = i; }
-    }
-    check(`sim page == native build: ${c.name}`, diffs === 0 && n > 0,
-      diffs === 0 ? `${n} samples identical`
-        : `${diffs} differ, first at ${first}`);
+    const r = compare(nativeSamples(c), res.out);
+    check(`sim page == native build: ${c.name}`, r.ok,
+      r.ok ? `${r.n} samples identical`
+           : `${r.diffs} differ, first at ${r.first}`);
   }
 
   // THE NOTE'S SPAN MUST STAY INSIDE int16. NoteOn forms

@@ -15,7 +15,9 @@ cannot disagree — there is one implementation.
   slice of the HTML.
 - `simparity.js` — proves the page renders bit-identically to the natively
   compiled harness, and that settings resolve through the firmware LUTs.
-  Run after any change to the sim or the engine.
+  Run after any change to the sim or the engine. Seven cases, including a bias
+  LFO, tremolo and a negative range: without those the two paths hardest to
+  reason about were never compared against the firmware at all.
 - `specimg.js` — spectrogram to PNG. Image inspection has matched the user's
   ears where scalar stats have not.
 - `highdur.js` — noise band vs CHIFF DURATION. NB the band metric cannot
@@ -80,7 +82,6 @@ Also useful, outside this directory:
   "unfiltered white noise at 64, extremely harsh at 127".
 - `tools/hosttest/dursweep.js` — all 128 CHIFF DURATION settings.
 - `tools/hosttest/plot.js` — trace to PNG.
-- `tools/simengine/parity.js` — engine vs native build.
 
 ## What this directory is for
 
