@@ -33,4 +33,30 @@ function runNumbers(args, opts) {
   return run(args, opts).trim().split('\n').map(Number);
 }
 
-module.exports = { DIR, TEST, run, runNumbers, requireBuilt };
+// The chiff window in samples, straight from the driver's own report.
+//
+// report=1 prints to STDERR and returns early, so fold stderr in: capturing it
+// via stdio returns stdout, which is null. Two of the three copies of this
+// function shipped with that bug, which is why there is now one.
+function chiffWindowSamples(args) {
+  const out = run(`${args} report=1 2>&1`);
+  const m = /chiff (\d+) smp/.exec(out);
+  if (!m) throw new Error(`no chiff window in report for: ${args}\n${out}`);
+  return +m[1];
+}
+
+// Ask, do not hardcode. Cached: it costs a process.
+let frameHzCache = 0;
+function frameHz() {
+  if (!frameHzCache) {
+    const out = run('basic 32 64 report=1 2>&1');
+    const m = /rate (\d+) Hz/.exec(out);
+    if (!m) throw new Error(`driver reported no rate:\n${out}`);
+    frameHzCache = +m[1];
+  }
+  return frameHzCache;
+}
+
+module.exports = {
+  DIR, TEST, run, runNumbers, requireBuilt, chiffWindowSamples, frameHz,
+};

@@ -17,7 +17,7 @@ const { execSync } = require('child_process');
 
 const BINARY = process.argv[2] || 'test';
 const AMOUNT = +(process.argv[3] || 127);
-const FS = 45000, N = 256, HOP = 64;
+const FS = require('./harness').frameHz(), N = 256, HOP = 64;
 const BAND_LO = 5000, BAND_HI = 20000;   // the audible fizz
 const DIP_DB = 6;                        // below local median = a band
 const NEIGHBOURHOOD = 10;                // columns either side

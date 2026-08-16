@@ -207,8 +207,9 @@ int main(int argc, char** argv) {
     uint32_t attack_smp = adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 0;
     // The ratio to the attack is now only a diagnostic, not the definition.
     fprintf(stderr,
-      "attack %u smp, chiff %u smp (%.3fx attack), decay %u smp, release %u smp\n",
-      attack_smp, ChiffWindowSamples(chiff_increment),
+      "rate %u Hz, attack %u smp, chiff %u smp (%.3fx attack), "
+      "decay %u smp, release %u smp\n",
+      kFrameHz, attack_smp, ChiffWindowSamples(chiff_increment),
       attack_smp ? double(ChiffWindowSamples(chiff_increment)) / attack_smp : 0.0,
       adsr.decay_u32 ? UINT32_MAX / adsr.decay_u32 : 0,
       adsr.release_u32 ? UINT32_MAX / adsr.release_u32 : 0);

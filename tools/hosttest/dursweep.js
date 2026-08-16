@@ -10,10 +10,7 @@ const H = require('./harness');
 // ATTACK-RELATIVE -- so the column was wrong by whatever the attack was, and a
 // flat table cannot express an attack-relative window at all.
 function windowSamples(dur) {
-  // report=1 prints to stderr; capturing it via stdio returns STDOUT, which
-  // is null. Fold it into stdout instead.
-  const out = H.run(`report ${amount} ${dur} ${opts} report=1 2>&1`);
-  return +/chiff (\d+) smp/.exec(out)[1];
+  return H.chiffWindowSamples(`report ${amount} ${dur} ${opts}`);
 }
 
 // argv: amount, then any KEY=VALUE driver overrides (attack/decay/release/

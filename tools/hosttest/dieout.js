@@ -1,13 +1,12 @@
 const { execSync } = require('child_process');
 const H = require('./harness');
-const FS = 45000, BLOCK = 64;
+const FS = H.frameHz(), BLOCK = 64;
 // The engine holds the SCALED rms (2.121 sigma) to kChiffInaudibleLevel, so the
 // sigma at that point is 2.121x lower. Compare like with like.
 const SIGMA_THRESH = 32767 * Math.pow(10, -48.2 / 20) / 2.121;
 const WIN = 24;                       // blocks per rms estimate
 function windowMs(dur, atk) {
-  const o = H.run(`basic 32 ${dur} attack_setting=${atk} report=1 2>&1`);
-  return Number(o.match(/chiff (\d+) smp/)[1]) / FS * 1000;
+  return H.chiffWindowSamples(`basic 32 ${dur} attack_setting=${atk}`) / FS * 1000;
 }
 function dieoutMs(amt, dur, atk, gateMs) {
   const v = H.runNumbers(

@@ -18,7 +18,7 @@ const series = process.argv.slice(4).map(s => {
   return { label: s.slice(0, i), args: s.slice(i + 1) };
 });
 
-const FS = 45000;
+const FS = require('./harness').frameHz();
 const W = 1400, H = 620, PAD_L = 70, PAD_B = 40, PAD_T = 30, PAD_R = 20;
 const N = Math.round(spanMs * FS / 1000);
 

@@ -14,7 +14,7 @@
 // nominal end, and did, by sixteen knob positions in one variant.
 const H = require('../hosttest/harness');
 const DURATION = 90;
-const FS = 45000;
+const FS = H.frameHz();
 
 // THE CORNER, NOT THE SLEW TIME. The slew time keeps moving after the corner
 // has left the audio band, and a change nobody can hear is not a change. This
