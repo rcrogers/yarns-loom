@@ -139,8 +139,8 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
   // Release setting 64 is 795 ms, so the note is not done until ~2795. What is
   // left after that is NOT a bias artifact: a stage lands at 1 - e^-4 of its
   // span and the rest is shed slowly in DEAD, so a residual proportional to
-  // the sustain level is expected (open item 6 in the plan is about removing
-  // it). MEASURED: 53 without tremolo, 33 with -- bias makes it SMALLER, so
+  // the sustain level is expected. MEASURED: 53 without tremolo, 33 with --
+  // bias makes it SMALLER, so
   // the check is against the sustain level, not against zero.
   const tail=meanWin(s,3000,3100);
   check('bias path: post-release residual is small vs sustain', tail < a*0.02,

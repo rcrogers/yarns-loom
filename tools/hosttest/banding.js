@@ -3,8 +3,8 @@
 //
 // Rail dwell was the wrong proxy. Max pinned-run length is 1-6 samples across
 // every build tried, including one with the rail guard deleted entirely, so it
-// cannot discriminate: the relax aim already breaks pin-runs (see the plan --
-// it is the rail-dwell damper, and it is load-bearing). What matters is not
+// cannot discriminate: the relax aim already breaks pin-runs -- it is the
+// rail-dwell damper, and it is load-bearing. What matters is not
 // how long the value sticks but that sticking DISRUPTS THE NOISE PATTERN,
 // which shows up as vertical stripes in the spectrogram.
 //

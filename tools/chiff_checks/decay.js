@@ -70,8 +70,9 @@ const INAUDIBLE_DB = -78;
 //
 // THE CLIFF is the landing, and it is structural: the amount lands ON zero and
 // level is proportional to amount, so dB-per-block diverges there whatever any
-// constant is set to. Recorded in the plan as not fixable without abandoning
-// the landing, which breaks L8.
+// constant is set to. Not fixable without abandoning the landing, which is
+// what makes the chiff converge to the nominal envelope rather than merely
+// go quiet.
 const NOTCH_LIMIT_DB = 14;
 // Per-block fall limit; see the calibration note above.
 const CLIFF_LIMIT_DB = 22;
