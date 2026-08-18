@@ -542,21 +542,23 @@ New and improved values for `VO (VOICING)` setting:
 - Min/max stage times: ~0.089 ms (4 samples = 4/45000 of a second) to 10 seconds
 
 #### Exciter
-The exciter adds a burst of noise to the start of each note's envelope, in the manner of a struck or plucked string. It decays to nothing, so the envelope arrives at the shape its ADSR settings describe.
+The exciter adds a burst of noise to the start of each note, in the manner of a struck or plucked string.
+
+The noise has **its own decay envelope**, separate from the note's ADSR and usually much shorter. `EXCITER AMOUNT` sets how high that decay starts; `EXCITER DURATION` sets how long it takes to fall to silence. Once it has fallen, the note is left with exactly the shape its ADSR describes.
 
 - Configured per-part in `▽A (AMPLITUDE MENU)`
-- The exciter is part of the envelope, so it reaches every [envelope destination](#modulation-destinations-for-envelope-output): oscillator gain, oscillator timbre, and the envelope aux CV
+- The noise rides on the note's envelope, so it reaches every [envelope destination](#modulation-destinations-for-envelope-output): oscillator gain, oscillator timbre, and the envelope aux CV
 - Two glyphs, both an `X` between a pair of bars. `X̲̅` brackets it above and below (a height, for amount); `|X|` brackets it left and right (a width, for duration). The bars blink away and return, leaving the bare `X` on alternate frames — the panel shows two characters, and the bars are part of the first one
 - Part setting `X̲̅I (EXCITER AMOUNT INIT)` sets how much noise a note starts with
-    - Zero: no noise at all, and the envelope is exactly its nominal shape
+    - Zero: no noise at all, and the note is exactly its nominal ADSR shape
     - Turning clockwise: the noise grows brighter and louder as its filter opens
     - Past the middle of the range, the noise is also driven into clipping, becoming harsher and more square as it approaches maximum
 - Part setting `|X|I (EXCITER DURATION INIT)` sets how long the noise takes to decay
-    - An absolute length of time, from ~0.089 ms to ~20 seconds, independent of the ADSR stage times — note this reaches twice the 10 second maximum of an individual envelope stage
+    - An absolute length of time, from ~0.089 ms to ~20 seconds, independent of the ADSR stage times — note this reaches twice the 10 second maximum of an individual ADSR stage
+    - The decay is exponential, so most of the noise's character happens early in the note
     - A note's release cuts the decay short: the noise is forced to finish by the end of the release stage, so a short release truncates a long exciter
 - Part settings for the bipolar modulation of each voice's exciter by that voice's note velocity:
     - `X̲̅V (EXCITER AMOUNT MOD VEL)`, `|X|V (EXCITER DURATION MOD VEL)`
-- **Amount sets where the decay begins, and duration sets how long it takes to reach the bottom.** The noise decays by falling back down the amount range, so a note set to a high amount passes through the same character every lower amount would have used as its own starting point
 
 #### How the envelope adapts to interruptions
 Envelope adjusts to notes that begin/end while a stage or another note is in progress:
