@@ -441,7 +441,7 @@ function draw() {
   const dt = performance.now() - t0;
   lastRes = res; lastNominal = dia; lastLine = line; lastP = p;
   lastDead = excursionDeadSample(res.out, dia);
-  computeSpectrogram();
+  specData = null;   // sized and computed by drawSpectrogram
 
   const m = measure(res, dia);
   $('mLand').textContent = m.land.toFixed(1) + ' %';
@@ -590,7 +590,6 @@ const SPEC_WINDOW = 512;
 // bandwidth f/Q against a row width proportional to f is the same height at
 // every frequency. Relative resolution is cheap at the top, and going coarser
 // buys the settling time that makes the bottom possible at all.
-const SPEC_ROWS = 320, SPEC_COLS = 1400;
 const CQ_Q = 4.7;             // ~8 pixel rows per bin
 const CQ_PAD_TAUS = 3;        // reflection padding, in filter time constants
 // A FLOOR ON BANDWIDTH, SET BY THE RENDER. A filter of bandwidth B settles in
@@ -685,7 +684,12 @@ function cqRow(x, fs, f, bwFloor, droop) {
   return env;
 }
 
-function computeSpectrogram() {
+// COMPUTED AT THE PIXEL GRID, NOT RESAMPLED ONTO IT. A fixed 320x1400 analysis
+// box-resampled to the canvas duplicated some rows and merged others unevenly,
+// which drew as horizontal and vertical banding -- the analysis grid beating
+// against the pixel grid. One filter per pixel row, one column per pixel
+// column, and there is nothing left to alias.
+function computeSpectrogram(SPEC_COLS, SPEC_ROWS) {
   if (!lastRes) return;
   const out = lastRes.out, line = lastLine, totalN = lastRes.totalN;
   const base = new Float64Array(totalN);
@@ -713,7 +717,8 @@ function computeSpectrogram() {
       cells[row * SPEC_COLS + c] = acc / (s1 - s0);
     }
   }
-  specData = { cells, tMax: totalN / FS * 1000, fMax };
+  specData = { cells, cols: SPEC_COLS, rows: SPEC_ROWS,
+    tMax: totalN / FS * 1000, fMax };
 }
 
 function hslToRgb(h, s, l) {
@@ -727,7 +732,7 @@ function hslToRgb(h, s, l) {
 }
 
 function drawSpectrogram() {
-  if (!specData) return;
+  if (!lastRes) return;
   const dpr = window.devicePixelRatio || 1;
   const W = specCv.clientWidth, H = specCv.clientHeight;
   if (specCv.width !== W * dpr || specCv.height !== H * dpr) { specCv.width = W * dpr; specCv.height = H * dpr; }
@@ -735,25 +740,16 @@ function drawSpectrogram() {
   specCtx.clearRect(0, 0, W, H);
   const padL = 30, padB = 14, padT = 4, padR = 4;
   const pw = Math.max(1, Math.round(W - padL - padR)), ph = Math.max(1, Math.round(H - padT - padB));
-  // Render at pixel resolution with box-averaging over the frequency bins
-  // that fall in each row -- proper anti-aliased downsampling, so no moire
-  // striations from bilinear drawImage rescaling.
-  const { cells } = specData;
+  if (!specData || specData.cols !== pw || specData.rows !== ph) computeSpectrogram(pw, ph);
+  if (!specData) return;
+
+  const { cells, cols, rows } = specData;
   const tmp = document.createElement('canvas'); tmp.width = pw; tmp.height = ph;
   const tctx = tmp.getContext('2d'); const img = tctx.createImageData(pw, ph);
-  // The analysis is already log-spaced in frequency and uniform in time, so the
-  // draw is a straight resample of its grid.
+  // One cell per pixel, by construction.
   for (let py = 0; py < ph; py++) {
-    const r0 = Math.floor(py / ph * SPEC_ROWS);
-    const r1 = Math.max(r0 + 1, Math.floor((py + 1) / ph * SPEC_ROWS));
     for (let px = 0; px < pw; px++) {
-      const c0 = Math.floor(px / pw * SPEC_COLS);
-      const c1 = Math.max(c0 + 1, Math.floor((px + 1) / pw * SPEC_COLS));
-      let acc = 0, cnt = 0;
-      for (let r = r0; r < r1 && r < SPEC_ROWS; r++) {
-        for (let c = c0; c < c1 && c < SPEC_COLS; c++) { acc += cells[r * SPEC_COLS + c]; cnt++; }
-      }
-      const mag = cnt ? acc / cnt : 0;
+      const mag = cells[py * cols + px];
       const db = 20 * Math.log10(mag / SPEC_REF + 1e-12);
       const [r, g, bl] = rampColor((db + SPEC_RANGE_DB) / SPEC_RANGE_DB);
       const idx = (py * pw + px) * 4;

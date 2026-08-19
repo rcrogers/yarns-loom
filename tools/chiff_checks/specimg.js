@@ -135,7 +135,7 @@ loadPage().then(page => {
   const base = new Float64Array(totalN);
   for (let i = 0; i < totalN; i++) base[i] = (res.out[i] - ref[i]) / PEAK;
 
-  const W_PX = 1036, H = 320, fMax = FS / 2;
+  const W_PX = +(process.env.SPEC_W || 1036), H = +(process.env.SPEC_H || 320), fMax = FS / 2;
   const logMin = Math.log(SPEC_FMIN), logSpan = Math.log(fMax) - logMin;
   const rowHz = (row) => Math.exp(logMin + (1 - row / H) * logSpan);
 
