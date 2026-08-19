@@ -77,7 +77,7 @@ Each of these produced a confident wrong conclusion, more than once.
 range of its figure; a check whose range is a single value is seed-independent
 and needs none. MEASURED 2026-08-19: `peak overshoot is bounded` had been sized
 at 15% against seed 0's 9.8%, and 15 of 128 seeds exceed it. Most scripts outside
-the battery still hardcode one seed.
+the battery still hardcode one seed; `dieout.js` does not.
 
 **A per-block trace cannot see inside a block.** Every trace prints once per
 rendered block. Anything wrong at a run's start and right at its end is
