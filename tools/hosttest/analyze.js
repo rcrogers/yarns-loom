@@ -1,7 +1,11 @@
 // Firmware dart-port checks against sim-established expectations.
 const { execSync } = require('child_process');
 const H = require('./harness');
-function run(args){ return H.runNumbers(args); }
+// ONE REALIZATION IS NOT A RESULT: without a seed every scenario here renders
+// the same noise. battery.js sweeps CHIFF_SEED; bare, this is seed 0 as before.
+const SEED = process.env.CHIFF_SEED || '0';
+function seeded(args){ return /\bseed=/.test(args) ? args : args+' seed='+SEED; }
+function run(args){ return H.runNumbers(seeded(args)); }
 function noiseWin(s,aMs,bMs){ let sum=0,n=0;
   for(let i=Math.max(1,aMs*45);i<Math.min(bMs*45,s.length);i++){sum+=Math.abs(s[i]-s[i-1]);n++;}
   return n?sum/n:0; }
@@ -36,10 +40,12 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   // output. A chiff can therefore push the envelope above its dialled peak --
   // deliberately, and the user's call. What must still hold is that it stays
   // inside the DAC and that the overshoot is a transient's worth, not a
-  // different level: worst MEASURED is +10.9% at AMOUNT 127 with high sustain.
+  // different level.
+  // A MAX OVER A NOISE PROCESS, so the limit is sized from a distribution, not
+  // a draw. MEASURED over 128 seeds: 8.9%..18.1%, max already 18.1 by seed 7.
   const over=(mx-16383)*100/16383;
   check('stays inside the DAC range', mx<=32767, mx+'');
-  check('peak overshoot is bounded', over<15,
+  check('peak overshoot is bounded', over<20,
         over.toFixed(1)+'% above note top (classic max '+dmx+')');
 }
 // 3. early release: noise continues into release, lands ~0 by release end (400ms)
@@ -210,7 +216,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
 // file could see it, because every scenario had a non-negative floor.
 { const args='basic 0 90 range=-16383 bias_lfo=20000 bias_lfo_blocks=1000000 '+
              'gate=2000 tail=500 attack_setting=40';
-  const rng=H.run(args+' value_range=1')
+  const rng=H.run(seeded(args+' value_range=1'))
     .toString().trim().split(/\s+/).map(Number);
   // The envelope must actually travel to its negative target, not sit pinned.
   check('negative range: the envelope reaches its target',
@@ -280,7 +286,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
 // 32767 * 65535 = 2147385345, which fits with 98302 to spare. Unbounded it does
 // not: MEASURED 36063 before the split, i.e. 2.36e9, an overflow -- and
 // value() returns int16_t, so 36063 wrapped there too.
-{ const range=(args)=>H.run(args)
+{ const range=(args)=>H.run(seeded(args))
     .toString().trim().split(/\s+/).map(Number);
   for (const args of ['bias_lfo=32767', 'bias_lfo=32767 tremolo=48000']) {
     const r=range('basic 96 90 value_range=1 range=32767 '+args);

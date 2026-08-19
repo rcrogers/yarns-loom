@@ -13,7 +13,7 @@ of it are wrong in ways that look right.
 The root `Makefile` documents its own targets. In short:
 
     make sim        rebuild + re-inline the sim engine (always rebuilds)
-    make host       host C-reference battery (41 checks)
+    make host       host C-reference battery (41 checks x 8 seeds)
     make qemu       differential: render-loop asm == C reference, 10 scenarios
     make check      host + qemu + simparity + peakfloor + xvmod + strictmode + decay
     make firmware   flashable .syx
@@ -33,7 +33,7 @@ different *code paths* within it, and that is the whole point of the table.
 |---|---|---|
 | `make qemu` | the shipped ARM asm matches the C reference, bit for bit | anything above the render loop |
 | `hosttest/golden.js` | the output is unchanged, sample for sample, over 13 cases | whether a *change* is correct |
-| `make host` | 41 invariants: DAC range, bias independence, monotonicity, stage handoff | anything perceptual |
+| `make host` | 41 invariants over 8 seeds: DAC range, bias independence, monotonicity, stage handoff | anything perceptual |
 | `chiff_checks/simparity.js` | the published page renders identically to the native build | whether either is right |
 | `make cycles` | worst-case cost via the longest path through the CFG | anything the linker pulls in — watch `flash free` |
 | hardware | the display, the CV outputs, and how it sounds | — |
@@ -72,8 +72,12 @@ Each of these produced a confident wrong conclusion, more than once.
 
 **One seed is not a result.** Until `seed=N` existed, every sweep in
 `tools/hosttest` rendered the same noise. Per-seed spread at short durations is
-~2x — the same size as the effects being measured. Use eight, and quote the
-range, not just the mean. Most scripts here still hardcode one seed.
+~2x -- the same size as the effects being measured. `battery.js` now runs
+`analyze.js` once per seed and reports, per check, how many seeds passed and the
+range of its figure; a check whose range is a single value is seed-independent
+and needs none. MEASURED 2026-08-19: `peak overshoot is bounded` had been sized
+at 15% against seed 0's 9.8%, and 15 of 128 seeds exceed it. Most scripts outside
+the battery still hardcode one seed.
 
 **A per-block trace cannot see inside a block.** Every trace prints once per
 rendered block. Anything wrong at a run's start and right at its end is
