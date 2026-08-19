@@ -176,6 +176,22 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
         'longest ceiling dwell '+worst+' samples (bias holds 512)');
 }
 
+// THE CLIP PATH WITH A LIVE CHIFF; every clamp check above runs at AMOUNT 0.
+// The chiff must DITHER across the rail, not sit on it -- the mean clamp keeps
+// the mean one scaled rms inside each rail so the swing has room both ways.
+// MEASURED over 16 seeds: dwell 7..12 here, 449 with the bias alone.
+{ const args='basic 127 90 attack_setting=40 decay_setting=64 sustain_setting=70 '+
+             'release_setting=64 gate=1200 tail=800 bias_lfo=20000 bias_lfo_blocks=8';
+  const s=run(args);
+  let mn=99999, mx=-99999, hi=0, run_=0, worst=0;
+  for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v;
+    if(v>=32767){ hi++; run_++; if(run_>worst)worst=run_; } else run_=0; }
+  check('clip path + chiff: never leaves the DAC range', mn>=0 && mx<=32767, mn+'..'+mx);
+  check('clip path + chiff: the clamp bites', hi>100, hi+' samples on the ceiling');
+  check('clip path + chiff: no dwell at the rail', worst<=32,
+        'longest ceiling dwell '+worst+' (bias alone at AMOUNT 0 dwells 449)');
+}
+
 // THE INVARIANT, and it is the strongest check in this file: the output is
 // saturate(envelope + bias), where the envelope is bit-for-bit what it would
 // have been with bias 0. Equivalently, the envelope's OWN trajectory does not
