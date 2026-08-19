@@ -22,12 +22,21 @@
 //          the spectrum tilts toward Nyquist, which is what a driven multi-level
 //          input does before the drive is large enough to reach a random square.
 //
+// ONE REALIZATION CANNOT CARRY ANY OF THESE. MEASURED over 8 seeds before this
+// was fixed: rms spans 120..179 at AMOUNT 8 (49%), and kurt@11ms spans
+// 1.33..2.31 at AMOUNT 24 -- on a scale where a square is 1.00, uniform white
+// 1.79 and gaussian 3.00, so one draw spans two whole characters. Seed 0 sat at
+// or near the TOP of nearly every row. The table below is the MEAN over SEEDS
+// realizations, and the spread table under it is what says which columns to
+// trust: `step` moves 1-3%, the shape columns far more.
+//
 // JUDGE THE ONSET, NOT THE POOL. Pooled over a chiff's whole life every one of
 // these flattens out, which is how an earlier round concluded there was no
 // character axis at all.
 const { execSync } = require('child_process');
 
 const AMOUNTS = [0, 8, 16, 24, 32, 48, 64, 80, 96, 112, 127];
+const SEEDS = Number(process.env.SEEDS || 8);
 const ATTACK_MS = 249;
 const DURATION = 90;
 const ONSET_MS = 50;
@@ -97,34 +106,59 @@ function stats(residual) {
 }
 
 const common = ' ' + DURATION + ' attack=' + ATTACK_MS;
-const off = run('basic 0' + common);
 const onset = ONSET_MS * SR;
-
 // THE RATE DECAYS ACROSS ANY WINDOW WIDE ENOUGH TO POOL, so rho1 over 50 ms
 // reads the average of a sweep, not the rate the chiff STARTS at -- which is
 // the only rate AMOUNT sets. Take it over the first few ms as well.
 const ONSET_RHO_SAMPLES = 512;  // 11 ms
 
+const COLUMNS = ['step', 'rms', 'rho1@11ms', 'rho1@50ms', 'kurt@11ms', 'kurt', 'flip'];
+// Per amount, per seed, the seven statistics. Averaged across seeds for the
+// headline and ranged for the spread table -- the statistic is averaged, not
+// the samples: kurtosis of pooled draws is not the mean of their kurtoses.
+const perAmount = new Map();
+for (const amount of AMOUNTS) {
+  const rows = [];
+  for (let seed = 0; seed < SEEDS; ++seed) {
+    const off = run('basic 0' + common + ' seed=' + seed);
+    const on = run('basic ' + amount + common + ' seed=' + seed);
+    const residual = [];
+    for (let i = 0; i < onset; i++) residual.push(on[i] - off[i]);
+    const all = stats(residual);
+    const early = stats(residual.slice(0, ONSET_RHO_SAMPLES));
+    rows.push([all.step, all.rms, early.rho1, all.rho1, early.kurt, all.kurt, all.flip]);
+  }
+  perAmount.set(amount, rows);
+}
+const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length;
+const DECIMALS = [1, 1, 3, 3, 2, 2, 3];
+const WIDTHS = [8, 9, 10, 11, 10, 6, 8];
+
+console.log(`mean over ${SEEDS} seeds; ENV ATTACK ${ATTACK_MS} ms, `
+  + `EXCITER DURATION ${DURATION}, onset ${ONSET_MS} ms`);
 console.log(
   'AMOUNT  step      rms   rho1@11ms rho1@50ms kurt@11ms  kurt   flip   dB(step)');
 let ref = 0;
 for (const amount of AMOUNTS) {
-  const on = run('basic ' + amount + common);
-  const residual = [];
-  for (let i = 0; i < onset; i++) residual.push(on[i] - off[i]);
-  const s = stats(residual);
-  const early = stats(residual.slice(0, ONSET_RHO_SAMPLES));
-  if (amount === 64) ref = s.step;
-  console.log(
-    String(amount).padStart(6) +
-    s.step.toFixed(1).padStart(8) +
-    s.rms.toFixed(1).padStart(9) +
-    early.rho1.toFixed(3).padStart(10) +
-    s.rho1.toFixed(3).padStart(11) +
-    early.kurt.toFixed(2).padStart(10) +
-    s.kurt.toFixed(2).padStart(6) +
-    s.flip.toFixed(3).padStart(8) +
-    (s.step > 0 && ref > 0
-      ? (20 * Math.log10(s.step / ref)).toFixed(2).padStart(10) : ''.padStart(10)));
+  const rows = perAmount.get(amount);
+  const avg = COLUMNS.map((_, c) => mean(rows.map((r) => r[c])));
+  if (amount === 64) ref = avg[0];
+  console.log(String(amount).padStart(6) +
+    avg.map((v, c) => v.toFixed(DECIMALS[c]).padStart(WIDTHS[c])).join('') +
+    (avg[0] > 0 && ref > 0
+      ? (20 * Math.log10(avg[0] / ref)).toFixed(2).padStart(10) : ''.padStart(10)));
 }
 console.log('\ndB(step) is against AMOUNT 64, the hinge.');
+
+console.log(`\nSEED SPREAD (max - min over ${SEEDS} seeds). A column whose spread`);
+console.log('rivals its variation across AMOUNT is not measuring AMOUNT.');
+console.log(
+  'AMOUNT  step      rms   rho1@11ms rho1@50ms kurt@11ms  kurt   flip');
+for (const amount of AMOUNTS) {
+  const rows = perAmount.get(amount);
+  console.log(String(amount).padStart(6) +
+    COLUMNS.map((_, c) => {
+      const values = rows.map((r) => r[c]);
+      return (Math.max(...values) - Math.min(...values)).toFixed(DECIMALS[c]).padStart(WIDTHS[c]);
+    }).join(''));
+}
