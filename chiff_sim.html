@@ -180,7 +180,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     </div>
     <div class="spectrum">
       <div class="legend">
-        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; freq; residual vs mean, dark&rarr;bright = &minus;60&rarr;0 dB)</span>
+        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; log freq; residual vs mean, dark&rarr;bright = &minus;96&rarr;0 dB)</span>
         <span class="mono" style="margin-left:auto;color:var(--ink3)">re-roll seed to compare realizations</span>
       </div>
       <canvas id="specCv"></canvas>
@@ -589,6 +589,29 @@ const SPEC_MAX_FRAMES = 2400;
 // shows ABSOLUTE noise level -- amount 1 reads faint, 127 bright -- instead of
 // auto-normalizing each render to its own peak (which hid the amount scaling).
 const SPEC_REF = 24;
+// THE DISPLAY'S DYNAMIC RANGE. 60 dB clamped the bottom of the AMOUNT knob into
+// the floor colour; the chiff there runs 30-55 dB under the reference.
+const SPEC_RANGE_DB = 96;
+// THE BOTTOM OF THE LOG FREQUENCY AXIS. A linear axis to 22 kHz gave the first
+// three bins -- 94% of the chiff's energy at AMOUNT 1-8, MEASURED -- about two
+// pixel rows. Below this the transform has no resolution to show anyway: at a
+// 512-sample window the bins are 44 Hz wide.
+const SPEC_FMIN = 20;
+// A PERCEPTUAL RAMP, not one hue's lightness. Lightness alone resolves maybe a
+// dozen steps; varying hue and lightness together resolves several times that,
+// which is what makes a 10 dB difference at the bottom of the knob legible.
+const SPEC_RAMP = [
+  [  4,  6, 22], [ 32, 18, 88], [ 46, 70,142], [ 34,124,136],
+  [ 68,172,104], [168,208, 76], [248,230, 62], [255,252,190],
+];
+function rampColor(t) {
+  const x = Math.max(0, Math.min(1, t)) * (SPEC_RAMP.length - 1);
+  const i = Math.min(SPEC_RAMP.length - 2, Math.floor(x)), f = x - i;
+  const a = SPEC_RAMP[i], b = SPEC_RAMP[i + 1];
+  return [Math.round(a[0] + (b[0] - a[0]) * f),
+          Math.round(a[1] + (b[1] - a[1]) * f),
+          Math.round(a[2] + (b[2] - a[2]) * f)];
+}
 const specCv = $('specCv'), specCtx = specCv.getContext('2d');
 let specData = null;   // { frames, nFrames, maxBin, gPeak, tMax, fMax }
 
@@ -617,7 +640,7 @@ function computeSpectrogram() {
     for (let b = 0; b < maxBin; b++) { m[b] = Math.hypot(re[b], im[b]); if (m[b] > gPeak) gPeak = m[b]; }
     frames[f] = m;
   }
-  specData = { frames, nFrames, maxBin, gPeak, hop,
+  specData = { frames, nFrames, maxBin, gPeak, hop, binHz: FS / SPEC_FFT,
     tMax: (nFrames * hop) / FS * 1000, fMax: maxBin / bins * (FS / 2) };
 }
 
@@ -643,12 +666,17 @@ function drawSpectrogram() {
   // Render at pixel resolution with box-averaging over the frequency bins
   // that fall in each row -- proper anti-aliased downsampling, so no moire
   // striations from bilinear drawImage rescaling.
-  const { frames, nFrames, maxBin, gPeak } = specData;
+  const { frames, nFrames, maxBin, gPeak, binHz, fMax } = specData;
   const tmp = document.createElement('canvas'); tmp.width = pw; tmp.height = ph;
   const tctx = tmp.getContext('2d'); const img = tctx.createImageData(pw, ph);
+  // LOG FREQUENCY. Each row covers a constant RATIO of frequency, so the
+  // bottom two decades get real vertical space instead of two pixel rows.
+  const logMin = Math.log(SPEC_FMIN), logSpan = Math.log(fMax) - logMin;
+  const rowHz = (row) => Math.exp(logMin + (1 - row / ph) * logSpan);
   for (let py = 0; py < ph; py++) {
-    let b0 = Math.floor((1 - (py + 1) / ph) * maxBin);
-    let b1 = Math.floor((1 - py / ph) * maxBin);
+    let b0 = Math.floor(rowHz(py + 1) / binHz);
+    let b1 = Math.ceil(rowHz(py) / binHz);
+    if (b0 < 0) b0 = 0;
     if (b1 <= b0) b1 = b0 + 1;
     for (let px = 0; px < pw; px++) {
       // Average every frame landing in this pixel column, not just the nearest
@@ -664,9 +692,8 @@ function drawSpectrogram() {
       }
       const mag = cnt ? s / cnt
         : frames[Math.min(nFrames - 1, f0)][Math.min(b0, maxBin - 1)];
-      const db = 20 * Math.log10(mag / SPEC_REF + 1e-9);
-      const t = Math.max(0, Math.min(1, (db + 60) / 60));
-      const [r, g, bl] = hslToRgb(150, 55 + t * 20, 8 + t * 74);
+      const db = 20 * Math.log10(mag / SPEC_REF + 1e-12);
+      const [r, g, bl] = rampColor((db + SPEC_RANGE_DB) / SPEC_RANGE_DB);
       const idx = (py * pw + px) * 4;
       img.data[idx] = r; img.data[idx + 1] = g; img.data[idx + 2] = bl; img.data[idx + 3] = 255;
     }
@@ -676,9 +703,11 @@ function drawSpectrogram() {
   specCtx.drawImage(tmp, padL, padT);
   const specMeta = specData;
   specCtx.fillStyle = cssVar('--ink3'); specCtx.font = '9px ui-monospace, Menlo, monospace';
-  for (let f = 0; f <= specMeta.fMax; f += 3000) {
-    const y = padT + (1 - f / specMeta.fMax) * ph;
-    specCtx.fillText((f / 1000) + 'k', 2, y + 3);
+  const logMinL = Math.log(SPEC_FMIN), logSpanL = Math.log(specMeta.fMax) - logMinL;
+  for (const f of [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) {
+    if (f > specMeta.fMax) continue;
+    const y = padT + (1 - (Math.log(f) - logMinL) / logSpanL) * ph;
+    specCtx.fillText(f >= 1000 ? (f / 1000) + 'k' : String(f), 2, y + 3);
   }
   const step = specMeta.tMax > 2000 ? 500 : 200;
   for (let t = 0; t <= specMeta.tMax; t += step) {
