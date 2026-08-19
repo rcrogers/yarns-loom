@@ -180,7 +180,7 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     </div>
     <div class="spectrum">
       <div class="legend">
-        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; log freq; residual vs mean, dark&rarr;bright = &minus;96&rarr;0 dB)</span>
+        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; log freq; residual vs mean, constant-Q, dark&rarr;bright = &minus;96&rarr;0 dB)</span>
         <span class="mono" style="margin-left:auto;color:var(--ink3)">re-roll seed to compare realizations</span>
       </div>
       <canvas id="specCv"></canvas>
@@ -575,41 +575,39 @@ function paint(hoverX) {
   drawSpectrogram();
 }
 
-// ---- noise spectrogram (STFT of the residual: time x frequency) ----
-// SPEC_WINDOW sets harmonic fidelity and must not shrink: 512 samples is an
-// 11ms analysis window. SPEC_FFT zero-pads that window to twice the length,
-// which doubles bin DENSITY without touching the window -- finer frequency
-// display, identical resolving power. SPEC_HOP_MIN is pure time resolution
-// and costs only CPU, so it is 4x finer than the old 64.
-const SPEC_WINDOW = 512, SPEC_FFT = 1024, SPEC_HOP_MIN = 16, SPEC_FMAX = FS / 2;
-// Long renders would otherwise compute tens of thousands of columns for a
-// canvas ~1400px wide. Past this the hop widens instead.
-const SPEC_MAX_FRAMES = 2400;
-// MULTI-RESOLUTION. One window length cannot serve a log axis: at 20 Hz a pixel
-// row is half a hertz wide and at 20 kHz it is 500 Hz wide, so a single 512
-// window (43.9 Hz bins) is pixel-accurate only above ~1.9 kHz and draws the
-// whole bottom decade as one flat bin. Each tier is an independent STFT; every
-// row draws from the COARSEST tier that still resolves it, which keeps the time
-// resolution where transients live and spends it where they do not.
-//   512 -> 43.9 Hz bins, accurate above 1855 Hz, 11 ms window
-//  2048 -> 11.0 Hz             above  464 Hz, 46 ms
-//  8192 ->  2.7 Hz             above  116 Hz, 182 ms
-// 32768 ->  0.7 Hz             above   29 Hz, 728 ms  (long renders only)
-const SPEC_TIERS = [512, 2048, 8192, 32768];
-// A tier needs a few frames to be worth computing; below this it is skipped.
-const SPEC_MIN_FRAMES = 3;
-// FIXED brightness reference (~amount 127's residual peak) so the spectrogram
-// shows ABSOLUTE noise level -- amount 1 reads faint, 127 bright -- instead of
-// auto-normalizing each render to its own peak (which hid the amount scaling).
+// ---- noise spectrogram (constant-Q filterbank: time x log frequency) ----
+// SPEC_WINDOW belongs to the single-slice spectrum below, not to the
+// spectrogram: 512 samples is an 11 ms analysis window there. The spectrogram
+// itself no longer has a window at all -- see the filterbank.
+const SPEC_WINDOW = 512;
+// A CONSTANT-Q FILTERBANK, ONE FILTER PER ROW. No windows and no tiers: each
+// row's bandwidth is f/Q and its time constant Q/f, both varying continuously,
+// so nothing switches and nothing can band. It replaces a bank of fixed-window
+// STFTs that had to pick a window per row and seamed wherever the choice
+// changed -- cross-fading them blended the LEVELS and left the TEXTURES.
+//
+// Q SETS HOW MANY PIXEL ROWS A BIN COVERS, which is the point of a log axis:
+// bandwidth f/Q against a row width proportional to f is the same height at
+// every frequency. Relative resolution is cheap at the top, and going coarser
+// buys the settling time that makes the bottom possible at all.
+const SPEC_ROWS = 320, SPEC_COLS = 1400;
+const CQ_Q = 4.7;             // ~8 pixel rows per bin
+const CQ_PAD_TAUS = 3;        // reflection padding, in filter time constants
+// A FLOOR ON BANDWIDTH, SET BY THE RENDER. A filter of bandwidth B settles in
+// about 1/(pi*B) seconds; below this the picture is the analysis waking up.
+// Under the crossover the bins get relatively wider, which is the physical
+// limit of a short render rather than a choice.
+const CQ_SETTLES_PER_RENDER = 6;
 const SPEC_REF = 24;
 // THE DISPLAY'S DYNAMIC RANGE. 60 dB clamped the bottom of the AMOUNT knob into
 // the floor colour; the chiff there runs 30-55 dB under the reference.
 const SPEC_RANGE_DB = 96;
-// THE BOTTOM OF THE LOG FREQUENCY AXIS. A linear axis to 22 kHz gave the first
-// three bins -- 94% of the chiff's energy at AMOUNT 1-8, MEASURED -- about two
-// pixel rows. Below this the transform has no resolution to show anyway: at a
-// 512-sample window the bins are 44 Hz wide.
-const SPEC_FMIN = 20;
+// THE BOTTOM OF THE LOG AXIS. 5 Hz, not 20: the chiff's corner at the bottom of
+// AMOUNT is ~5 Hz, so an axis starting at 20 Hz cuts off the very thing it is
+// meant to show. The old fixed bin 0 spanned DC..22 Hz and swept it all into
+// one bright band, which is why this stayed invisible until the bins got fine
+// enough to look.
+const SPEC_FMIN = 5;
 // A PERCEPTUAL RAMP, not one hue's lightness. Lightness alone resolves maybe a
 // dozen steps; varying hue and lightness together resolves several times that,
 // which is what makes a 10 dB difference at the bottom of the knob legible.
@@ -626,48 +624,96 @@ function rampColor(t) {
           Math.round(a[2] + (b[2] - a[2]) * f)];
 }
 const specCv = $('specCv'), specCtx = specCv.getContext('2d');
-let specData = null;   // { frames, nFrames, maxBin, gPeak, tMax, fMax }
+let specData = null;   // { cells, tMax, fMax }
+
+// Halve the rate, [1,3,3,1]/8; a row only uses a level where its own frequency
+// is far below that level's Nyquist, so this is enough anti-aliasing. Its
+// passband droop is divided back out below -- at fs/8 it is -2.06 dB per stage
+// and it accumulates, drawing a step at every level boundary.
+function decimate(x) {
+  const n = x.length >> 1, d = new Float64Array(n), last = x.length - 1;
+  for (let i = 0; i < n; i++) {
+    const j = i * 2;
+    d[i] = (x[j > 0 ? j - 1 : 0] + 3 * x[j] +
+            3 * x[j + 1 < last ? j + 1 : last] + x[j + 2 < last ? j + 2 : last]) / 8;
+  }
+  return d;
+}
+function decimResponse(w) {
+  return Math.abs((2 * Math.cos(1.5 * w) + 6 * Math.cos(0.5 * w)) / 8);
+}
+
+// ZERO PHASE, BY RUNNING THE FILTER BOTH WAYS. A causal resonator's envelope
+// lags by about its own time constant, and that varies with the row -- so one
+// transient lands at a different X in every band, which reads as the bands
+// being misaligned in time. Forward lags and backward leads by the same amount,
+// so their geometric mean is centred at every frequency, and it is also the
+// average in dB, which is what the display shows.
+function cqRow(x, fs, f, bwFloor, droop) {
+  const bw = Math.max(f / CQ_Q, bwFloor);
+  const r = Math.exp(-Math.PI * bw / fs);
+  const theta = 2 * Math.PI * f / fs;
+  const pr = r * Math.cos(theta), pi = r * Math.sin(theta);
+  const n = x.length;
+  const pad = Math.min(n, Math.ceil(CQ_PAD_TAUS * fs / (Math.PI * bw)));
+  const a = 1 - r;
+  const run = (from, to, step) => {
+    let yr = 0, yi = 0;
+    for (let k = 0; k < pad; k++) {
+      const i = from + step * (pad - k);
+      const t = pr * yr - pi * yi + x[i >= 0 && i < n ? i : from];
+      yi = pr * yi + pi * yr; yr = t;
+    }
+    const mag = new Float64Array(n);
+    let e = 0;
+    for (let i = from; i !== to; i += step) {
+      const t = pr * yr - pi * yi + x[i];
+      yi = pr * yi + pi * yr; yr = t;
+      e += a * (Math.sqrt(yr * yr + yi * yi) - e);
+      mag[i] = e;
+    }
+    return mag;
+  };
+  const fwd = run(0, n, 1), bwd = run(n - 1, -1, -1);
+  // WHITE NOISE READS THE SAME AT EVERY ROW: a resonator's output rms is
+  // sigma/sqrt(1-r^2), which would slope upward with bandwidth, so dividing it
+  // out gives per-Hz density. The second factor lands on the fixed-bin
+  // display's calibration, so SPEC_REF is unchanged.
+  const scale = Math.sqrt(1 - r * r) * Math.sqrt(0.375 * 512) / droop;
+  const env = new Float64Array(n);
+  for (let i = 0; i < n; i++) env[i] = Math.sqrt(fwd[i] * bwd[i]) * scale;
+  return env;
+}
 
 function computeSpectrogram() {
   if (!lastRes) return;
   const out = lastRes.out, line = lastLine, totalN = lastRes.totalN;
-  const tiers = [];
-  for (const W of SPEC_TIERS) {
-    const FFT = W * 2;
-    const span = totalN - W;
-    if (span < W * SPEC_MIN_FRAMES) continue;
-    // A SIXTEENTH OF THE WINDOW. A quarter was measured to streak visibly at
-    // the bottom of the axis -- the long tiers had so few frames that each was
-    // stretched across many pixel columns. This costs ~3x the single-tier
-    // compute and is where the smoothness comes from.
-    const hop = Math.max(SPEC_HOP_MIN, W >> 4, Math.ceil(span / SPEC_MAX_FRAMES));
-    const nFrames = Math.max(1, Math.floor(span / hop));
-    const re = new Float64Array(FFT), im = new Float64Array(FFT);
-    const frames = new Array(nFrames);
-    // COMPARABLE ACROSS TIERS. A Hann-windowed frame of noise gives
-    // |X| proportional to sqrt(sum h^2), i.e. to sqrt(W), so without this a
-    // long tier reads louder than a short one on the same signal. Normalised
-    // against the shortest tier, so its calibration -- and SPEC_REF -- is
-    // unchanged.
-    const norm = 1 / Math.sqrt(W / SPEC_TIERS[0]);
-    for (let f = 0; f < nFrames; f++) {
-      const s0 = f * hop;
-      for (let k = 0; k < W; k++) {
-        const h = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (W - 1));
-        re[k] = ((out[s0 + k] - line[s0 + k]) / PEAK) * h * norm; im[k] = 0;
-      }
-      for (let k = W; k < FFT; k++) { re[k] = 0; im[k] = 0; }
-      fft(re, im);
-      const maxBin = FFT / 2;
-      const m = new Float64Array(maxBin);
-      for (let b = 0; b < maxBin; b++) m[b] = Math.hypot(re[b], im[b]);
-      frames[f] = m;
+  const base = new Float64Array(totalN);
+  for (let i = 0; i < totalN; i++) base[i] = (out[i] - line[i]) / PEAK;
+  const fMax = FS / 2;
+  const logMin = Math.log(SPEC_FMIN), logSpan = Math.log(fMax) - logMin;
+  const cells = new Float32Array(SPEC_ROWS * SPEC_COLS);
+  const levels = [base];
+  const bwFloor = CQ_SETTLES_PER_RENDER / (Math.PI * (totalN / FS));
+  for (let row = 0; row < SPEC_ROWS; row++) {
+    const f = Math.exp(logMin + (1 - (row + 0.5) / SPEC_ROWS) * logSpan);
+    // Decimate only while the row sits well under the next level's Nyquist.
+    let L = 0, droop = 1;
+    while (f < (FS / (1 << (L + 1))) / 8 && (levels[L].length >> 1) > 64) {
+      if (levels.length === L + 1) levels.push(decimate(levels[L]));
+      droop *= decimResponse(2 * Math.PI * f / (FS / (1 << L)));
+      L++;
     }
-    tiers.push({ frames, nFrames, hop, window: W, binHz: FS / FFT,
-                 maxBin: FFT / 2, centre: W / 2 });
+    const env = cqRow(levels[L], FS / (1 << L), f, bwFloor, droop);
+    for (let c = 0; c < SPEC_COLS; c++) {
+      const s0 = Math.floor(c / SPEC_COLS * env.length);
+      const s1 = Math.max(s0 + 1, Math.floor((c + 1) / SPEC_COLS * env.length));
+      let acc = 0;
+      for (let i = s0; i < s1 && i < env.length; i++) acc += env[i];
+      cells[row * SPEC_COLS + c] = acc / (s1 - s0);
+    }
   }
-  specData = tiers.length ? { tiers, totalN,
-    tMax: totalN / FS * 1000, fMax: FS / 2 } : null;
+  specData = { cells, tMax: totalN / FS * 1000, fMax };
 }
 
 function hslToRgb(h, s, l) {
@@ -692,39 +738,20 @@ function drawSpectrogram() {
   // Render at pixel resolution with box-averaging over the frequency bins
   // that fall in each row -- proper anti-aliased downsampling, so no moire
   // striations from bilinear drawImage rescaling.
-  const { tiers, totalN, fMax } = specData;
+  const { cells } = specData;
   const tmp = document.createElement('canvas'); tmp.width = pw; tmp.height = ph;
   const tctx = tmp.getContext('2d'); const img = tctx.createImageData(pw, ph);
-  // LOG FREQUENCY. Each row covers a constant RATIO of frequency, so the
-  // bottom two decades get real vertical space instead of two pixel rows.
-  const logMin = Math.log(SPEC_FMIN), logSpan = Math.log(fMax) - logMin;
-  const rowHz = (row) => Math.exp(logMin + (1 - row / ph) * logSpan);
-  // The coarsest tier that still resolves this row -- coarsest because it has
-  // the best time resolution. Falls back to the finest available.
-  const tierFor = (bandwidth) => {
-    let best = tiers[tiers.length - 1];
-    for (const t of tiers) if (t.binHz <= bandwidth) { best = t; break; }
-    return best;
-  };
+  // The analysis is already log-spaced in frequency and uniform in time, so the
+  // draw is a straight resample of its grid.
   for (let py = 0; py < ph; py++) {
-    const fLo = rowHz(py + 1), fHi = rowHz(py);
-    const t = tierFor(fHi - fLo);
-    let b0 = Math.max(0, Math.floor(fLo / t.binHz));
-    let b1 = Math.ceil(fHi / t.binHz);
-    if (b1 <= b0) b1 = b0 + 1;
-    // Frames whose centre lands in this pixel column, in SAMPLES so the tiers
-    // -- which have different hops and window lengths -- share one time axis.
+    const r0 = Math.floor(py / ph * SPEC_ROWS);
+    const r1 = Math.max(r0 + 1, Math.floor((py + 1) / ph * SPEC_ROWS));
     for (let px = 0; px < pw; px++) {
-      const s0 = px / pw * totalN, s1 = (px + 1) / pw * totalN;
-      let f0 = Math.ceil((s0 - t.centre) / t.hop);
-      let f1 = Math.ceil((s1 - t.centre) / t.hop);
-      if (f0 < 0) f0 = 0;
-      if (f1 > t.nFrames) f1 = t.nFrames;
-      if (f1 <= f0) { f0 = Math.min(t.nFrames - 1, Math.max(0, f0)); f1 = f0 + 1; }
+      const c0 = Math.floor(px / pw * SPEC_COLS);
+      const c1 = Math.max(c0 + 1, Math.floor((px + 1) / pw * SPEC_COLS));
       let acc = 0, cnt = 0;
-      for (let f = f0; f < f1; f++) {
-        const col = t.frames[f];
-        for (let b = b0; b < b1 && b < t.maxBin; b++) { acc += col[b]; cnt++; }
+      for (let r = r0; r < r1 && r < SPEC_ROWS; r++) {
+        for (let c = c0; c < c1 && c < SPEC_COLS; c++) { acc += cells[r * SPEC_COLS + c]; cnt++; }
       }
       const mag = cnt ? acc / cnt : 0;
       const db = 20 * Math.log10(mag / SPEC_REF + 1e-12);
