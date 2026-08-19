@@ -29,7 +29,14 @@
 // are comparable -- roughly the first half of the chiff -- the offset column is
 // confounded by the wander and should not be read as a standing error.
 //
+// ONE REALIZATION CANNOT CARRY ANY OF THIS. Offset, wander and total are all
+// statistics of a noise process, and the columns are read to the tenth of a dB.
+// Every figure below is pooled over SEEDS realizations; the RANGE column is the
+// spread of `total` across them, which is what says whether a reading is a
+// property of the engine or of one draw.
+//
 // Usage: node residual.js [amount] [attack] [chiffDuration] [gateMs] [tailMs]
+//        SEEDS=n to change the count (default 8)
 'use strict';
 const { loadPage } = require('./page');
 
@@ -45,14 +52,24 @@ loadPage().then(page => {
     attack, decay: 64, sustain: 70, release: 64,
     amplitudeModVelocity: 0, velocity: 100, chiffDuration,
     envModAttack: 0, envModDecay: 0, envModSustain: 0, envModRelease: 0,
-    amount, maxTarget: FULL, seed: 0xCAFEBABE,
+    amount, maxTarget: FULL,
     gateSamples: Math.round(gateMs * FS / 1000),
     tailSamples: Math.round(tailMs * FS / 1000),
   };
-  const r = E.render(p);
-  const dry = E.render(Object.assign({}, p, { amount: 0 })).out;
-  const wet = r.out, W = r.meta.chiffWindowSamples;
-  const n = Math.min(wet.length, dry.length);
+  // Distinct raw PRNG seeds; the engine takes the seed value directly.
+  const SEEDS = Number(process.env.SEEDS || 8);
+  const seedFor = (i) => (0xCAFEBABE + i * 0x9E3779B9) >>> 0;
+  const wets = [], drys = [];
+  let r = null;
+  for (let i = 0; i < SEEDS; ++i) {
+    const seeded = Object.assign({}, p, { seed: seedFor(i) });
+    const run = E.render(seeded);
+    if (!r) r = run;
+    wets.push(run.out);
+    drys.push(E.render(Object.assign({}, seeded, { amount: 0 })).out);
+  }
+  const wet = wets[0], dry = drys[0], W = r.meta.chiffWindowSamples;
+  const n = Math.min(...wets.map((w) => w.length), ...drys.map((d) => d.length));
 
   const dbfs = v => v > 0 ? 20 * Math.log10(v / FULL) : -999;
   const BLOCK = Math.round(0.02 * FS);   // 20 ms, independent of the window
@@ -60,27 +77,37 @@ loadPage().then(page => {
   console.log(`AMOUNT ${amount}  ENV ATTACK ${attack}  EXCITER DURATION ${chiffDuration}`);
   console.log(`window ${(W / FS * 1000).toFixed(0)} ms, gate ${gateMs} ms, ` +
               `full scale ${FULL}\n`);
-  console.log('    t(ms)   offset(LSB)  offset(dBFS)  wander(dBFS)   total(dBFS)   note');
+  console.log(`pooled over ${SEEDS} seeds; RANGE is the spread of total across them\n`);
+  console.log('    t(ms)   offset(LSB)  offset(dBFS)  wander(dBFS)   total(dBFS)  range(dB)   note');
   for (let b = 0; b * BLOCK < n; b++) {
     const lo = b * BLOCK, hi = Math.min(n, lo + BLOCK);
-    let sum = 0;
-    for (let i = lo; i < hi; i++) sum += wet[i] - dry[i];
-    const mean = sum / (hi - lo);
-    let sq = 0;
-    for (let i = lo; i < hi; i++) { const d = (wet[i] - dry[i]) - mean; sq += d * d; }
-    const sd = Math.sqrt(sq / (hi - lo));
-    // sqrt(offset^2 + wander^2): the excursion, which is neither column alone.
-    const total = Math.sqrt(mean * mean + sd * sd);
     const t = lo / FS * 1000;
-    // Only print a readable subset: every 5th block, plus around the window
-    // edge and the gate release, where the interesting transitions are.
     const nearEdge = Math.abs(lo - W) < 2 * BLOCK;
     const nearGate = Math.abs(lo - p.gateSamples) < 2 * BLOCK;
     if (b % 5 && !nearEdge && !nearGate) continue;
+    // Per seed, then averaged: a mean of magnitudes, not a magnitude of means,
+    // so cancellation between realizations cannot hide an offset.
+    let meanSum = 0, sdSum = 0, totalSum = 0;
+    let totalLo = Infinity, totalHi = -Infinity;
+    for (let s = 0; s < SEEDS; ++s) {
+      let sum = 0;
+      for (let i = lo; i < hi; i++) sum += wets[s][i] - drys[s][i];
+      const mean = sum / (hi - lo);
+      let sq = 0;
+      for (let i = lo; i < hi; i++) { const d = (wets[s][i] - drys[s][i]) - mean; sq += d * d; }
+      const sd = Math.sqrt(sq / (hi - lo));
+      // sqrt(offset^2 + wander^2): the excursion, which is neither column alone.
+      const total = Math.sqrt(mean * mean + sd * sd);
+      meanSum += Math.abs(mean); sdSum += sd; totalSum += total;
+      const totalDb = dbfs(total);
+      if (totalDb < totalLo) totalLo = totalDb;
+      if (totalDb > totalHi) totalHi = totalDb;
+    }
     const note = nearEdge ? '<- window edge' : nearGate ? '<- gate off' : '';
-    console.log(`  ${t.toFixed(0).padStart(6)}  ${mean.toFixed(1).padStart(11)}  ` +
-                `${dbfs(Math.abs(mean)).toFixed(1).padStart(12)}  ` +
-                `${dbfs(sd).toFixed(1).padStart(12)}  ` +
-                `${dbfs(total).toFixed(1).padStart(12)}   ${note}`);
+    console.log(`  ${t.toFixed(0).padStart(6)}  ${(meanSum / SEEDS).toFixed(1).padStart(11)}  ` +
+                `${dbfs(meanSum / SEEDS).toFixed(1).padStart(12)}  ` +
+                `${dbfs(sdSum / SEEDS).toFixed(1).padStart(12)}  ` +
+                `${dbfs(totalSum / SEEDS).toFixed(1).padStart(12)}  ` +
+                `${(totalHi - totalLo).toFixed(1).padStart(9)}   ${note}`);
   }
 }).catch(e => { console.error(e); process.exit(1); });
