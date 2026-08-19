@@ -79,6 +79,14 @@ range, not just the mean. Most scripts here still hardcode one seed.
 rendered block. Anything wrong at a run's start and right at its end is
 invisible to all of them; difference the output against an AMOUNT 0 run instead.
 
+**A verdict line in the wrong place is a green build.** `analyze.js` printed
+its PASS/FAIL summary two thirds of the way up the file and never called
+`process.exit`, so the 22 checks below it -- the whole bias path, the clip path,
+both bias-independence invariants -- could print FAIL *after* the word "ALL PASS"
+while the script exited 0 and `make host` stayed green. MEASURED by mutating a
+clip-path check to a limit it cannot meet. Fixed 2026-08-19; the lesson is to
+mutation-test the harness itself, not only the engine.
+
 **A stale binary answers the wrong question silently.** An unknown driver option
 is ignored, not rejected. Check the row count against the time you asked for.
 Rebuild the native harness after switching branches — `simparity` compares the

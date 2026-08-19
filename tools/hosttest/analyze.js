@@ -70,7 +70,6 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   check('sustain has noise (8s chiff)', nSus>5, nSus.toFixed(1));
   check('noise closes by 8s', nLate<nSus/5, nLate.toFixed(2));
 }
-console.log(fails ? fails+' FAILURES' : 'ALL PASS');
 // 6. INVERTED range (CV DAC / negative timbre): the hardware-breaking case
 { const s=run('inverted 0 67');
   let up=0; for(let i=64;i<45*1100;i++) if(s[i]>s[i-1]) up++;
@@ -289,3 +288,9 @@ console.log(fails ? fails+' FAILURES' : 'ALL PASS');
           r[0]>=0 && r[1]<=FS_OUT, r[0]+'..'+r[1]);
   }
 }
+
+// THE VERDICT, AT THE END, AND IT EXITS NONZERO. It used to sit two thirds of
+// the way up, so 22 checks below it printed FAIL after the word "ALL PASS" and
+// left the status 0. Mutation-verified.
+console.log(fails ? fails+' FAILURES' : 'ALL PASS');
+if (fails) process.exit(1);
