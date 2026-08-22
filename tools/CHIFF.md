@@ -124,6 +124,45 @@ that divides. It has been reintroduced three times.
 look, or ask. When someone says they cannot see the effect you measured, the
 metric is the suspect.
 
+## The spectrogram
+
+Rebuilt 2026-08-20 (`0375e50b`). It is a **Gabor transform**: one Gaussian
+bandpass per pixel row, evaluated in the frequency domain, on a log frequency
+axis. Rows are computed in parallel across workers, falling back to one thread
+and saying so in the readout.
+
+What it is good for: where the chiff's energy is, how its corner sweeps, whether
+a transition is smooth. It found a first-derivative discontinuity in the chiff's
+input schedule that no scalar metric had reported.
+
+**Drive it offline with `specimg.js out.png key=value`** — keys are the page's
+own control ids (`amt`, `chiffDur`, `atk`, `rel`, `gate`, `seed`, plus `w=`/`h=`).
+That renders THE PAGE'S OWN analysis; the file deliberately contains none of its
+own. Env `REASSIGN=1` and `PERCEPTUAL=1` set the overlay toggles, which the
+headless loader otherwise reports as off.
+
+Two optional modes, both off by default:
+
+- **Sharpen transients** (reassignment). Moves each point's energy to the instant
+  its own group delay names. A DURATION 0 impulse goes from 360 ms wide to 2 ms.
+  Off by default because the group delay is meaningless where the phase is, and
+  the chiff is noise over most of the knob — reassigning noise scatters it.
+- **Perceptual** (A-weighting + auditory bandwidths). The plain display shows
+  30 Hz 41 dB brighter than it is heard and 10 Hz 70 dB brighter, which is why
+  the bottom of the plot blazes on a chiff that sounds unremarkable. Use it for
+  "should I hear this", not for "what is the engine doing".
+
+**The dashed curve is the resolution limit** — what a single impulse at t=0
+would paint. Anything hugging its shape, or narrower than it at that height, is
+the instrument and not the exciter. It has to be drawn because it was mistaken
+for signal three times: an impulse's width, a decay's trailing edge, and content
+lingering after the chiff had stopped.
+
+**What it cannot see.** Nothing below the axis floor, which is 8 cycles per
+record — so it moves with the gate. Nothing about time finer than the drawn
+curve. And its holes are interference nulls, NOT absence of a frequency:
+MEASURED, halving the analysis bandwidth relocated 47 of 54 of them.
+
 ## Sim pages
 
 `chiff_sim.html` is committed with the engine inlined, so rebuilding the engine
