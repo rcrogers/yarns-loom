@@ -322,10 +322,9 @@ static uint32_t SlewTimeLog2FromDuration_q5_27(uint32_t samples) {
       log2_q5_27 - kSlewTimesPerStageLog2_q5_27, kMaxSlewTimeLog2_q5_27);
 }
 
-// Slew rate 2^-slew_time, Q31; defined below.
+// Slew rate 2^-slew_time, Q31; defined below. Uncapped, unlike
+// SlewRateFromSlewTime_q31, which a slew that has to track a target needs.
 static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
-// The same, capped at kMaxSlewRate for a slew that has to track a target.
-static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 
 // What one unit of 2^(-t/2) is worth, Q15.5. The 1.5 is 3/2 -- the 3 of the
 // exact form halved by its sqrt(1/4) at small rate -- and it CARRIES TWO
@@ -367,8 +366,6 @@ static uint32_t ChiffScaledRmsPerInput_q15_5(
 
 // Defined below (Hacker's Delight divlu); used by Rescale.
 static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
-
-// Defined below; chiff window in samples, scaled off the attack duration.
 
 // THE LEVEL THE WALK'S SPEED IS CALIBRATED AGAINST, as a fraction of full
 // scale. It is a CALIBRATED SPEC, not a threshold of audibility despite the
