@@ -97,8 +97,8 @@ class Envelope {
   void Rescale(int32_t numerator, int32_t denominator);
 
  private:
-  // Point the slew time at the new stage: the stage's own when no chiff is
-  // live, otherwise bounded by the end of the walk's axis.
+  // Bound the slew time by the end of the walk's axis. Only the chiff's own
+  // one-pole runs on it, so with no chiff live there is nothing to bound.
   void SetSlewTimeForStage();
 
   // the +/- the chiff puts on the slew input -- half the note's
@@ -145,13 +145,9 @@ class Envelope {
   // next stage's slew continues seamlessly from the current value.
   uint32_t stage_samples_left_;
 
-  // The stage's own slew time, log2 samples, Q5.27. RenderStage derives the
-  // rate from it once per run (2^-slew_time, via the exp2 table) and the loop
-  // applies it with a multiply.
-  uint32_t stage_slew_time_log2_q5_27_;
-  // 2^-stage_slew_time, capped, Q31. Derived in Trigger rather than per run:
-  // it moves only when the stage does, and deriving it costs an exp2 table
-  // interpolation.
+  // 2^-(the stage's slew time), capped, Q31. Derived in Trigger rather than
+  // per run: it moves only when the stage does, and deriving it costs an exp2
+  // table interpolation.
   int32_t stage_rate_q31_;
 
   // The character axis, as a multiplier on the chiff's filter input, ALREADY

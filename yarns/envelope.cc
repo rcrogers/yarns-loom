@@ -254,7 +254,6 @@ static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 void Envelope::Init(int16_t zero_value_s16) {
   phase_increment_u32_ = 0;
   stage_samples_left_ = 0;
-  stage_slew_time_log2_q5_27_ = 0;
   stage_rate_q31_ = SlewRateFromSlewTime_q31(0);
   slew_time_log2_q5_27_ = 0;
   chiff_slew_time_log2_end_q5_27_ = 0;
@@ -855,8 +854,6 @@ void Envelope::SetSlewTimeForStage() {
     if (slew_time_log2_q5_27_ > chiff_slew_time_log2_end_q5_27_) {
       slew_time_log2_q5_27_ = chiff_slew_time_log2_end_q5_27_;
     }
-  } else {
-    slew_time_log2_q5_27_ = stage_slew_time_log2_q5_27_;
   }
 }
 
@@ -927,16 +924,18 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // (31 - clz) plus a linear mantissa fraction (max error ~0.09, i.e. ~6%
   // of the time constant -- inaudible, and monotone in the increment).
   uint8_t leading_zeros = __builtin_clz(phase_increment_u32_);
+  // Local, not state: stage_rate_q31_ below is its only reader.
+  uint32_t stage_slew_time_log2_q5_27;
   if (leading_zeros >= 30) {
     // Increment <= 3: N >= ~2^30.5, whose shift saturates the cap anyway.
     // Computed separately because (leading_zeros + 1) << 27 would overflow.
-    stage_slew_time_log2_q5_27_ = kMaxSlewTimeLog2_q5_27;
+    stage_slew_time_log2_q5_27 = kMaxSlewTimeLog2_q5_27;
   } else {
     uint32_t mantissa_frac_q5_27 =
         ((phase_increment_u32_ << leading_zeros) & 0x7FFFFFFFu) >> 4;
     uint32_t log2_stage_samples_q5_27 =
         (static_cast<uint32_t>(leading_zeros + 1) << 27) - mantissa_frac_q5_27;
-    stage_slew_time_log2_q5_27_ = log2_stage_samples_q5_27 <= kSlewTimesPerStageLog2_q5_27
+    stage_slew_time_log2_q5_27 = log2_stage_samples_q5_27 <= kSlewTimesPerStageLog2_q5_27
       ? 0 // Floor, not a special case: slew time 0 is one sample per time
           // constant, the fastest the slew runs (see kMaxSlewRate_q31). The
           // subtraction below is unsigned, so it needs this anyway.
@@ -948,7 +947,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // THE STAGE'S RATE CHANGES ONLY HERE, so this is where it is derived. The
   // run used to re-derive it from the slew time every time, which is an exp2
   // table interpolation per run for a quantity that moves once per stage.
-  stage_rate_q31_ = SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27_);
+  stage_rate_q31_ = SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27);
   // A RELEASE CAN ONLY MAKE THE SHRINK FASTER, NEVER SLOWER. The chiff's own
   // schedule is sovereign -- it is what CHIFF DURATION dials -- but a note
   // that ends before the chiff has gone quiet would leave audible noise with
