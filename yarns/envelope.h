@@ -54,11 +54,12 @@ struct ADSR {
   uint32_t attack_u32, decay_u32, release_u32; // Phase increments
 };
 
-// The nominal chiff window in samples, from the increment CHIFF DURATION picks
-// off lut_chiff_phase_increments -- the same reciprocal that turns any envelope
-// stage's increment into a span. Not file-local because the harnesses report
-// it: it is the duration every measurement is expressed against.
-uint32_t ChiffWindowSamples(uint32_t chiff_increment_u32);
+// CHIFF DURATION picks an increment off lut_chiff_phase_increments; this is
+// the reciprocal that turns it into the audible duration in samples. Called
+// ONCE per note, where the table is read -- every Envelope::NoteOn below takes
+// the samples. Not file-local because the harnesses report it: it is the
+// duration every measurement is expressed against.
+uint32_t ChiffAudibleSamples(uint32_t chiff_duration_increment_u32);
 
 class Envelope {
  public:
@@ -71,7 +72,7 @@ class Envelope {
     ADSR& adsr,
     // Bounds stored as s32 but semantically s16
     int32_t min_target_s16, int32_t max_target_s16,
-    uint8_t chiff_amount, uint32_t chiff_increment_u32
+    uint8_t chiff_amount, uint32_t chiff_audible_samples
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);

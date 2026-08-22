@@ -854,14 +854,16 @@ void Part::VoiceNoteOn(
 
   // EXCITER DURATION is a time of its own now, read off its own table but
   // shaped like every other envelope stage, so it modulates the same way.
-  uint32_t chiff_increment_u32 = Interpolate88(
+  // Converted HERE, once: a note starts up to four envelopes and they all want
+  // the same duration.
+  uint32_t chiff_audible_samples = ChiffAudibleSamples(Interpolate88(
     lut_chiff_phase_increments,
     modulate_7_13(voicing_.chiff_duration, voicing_.chiff_duration_mod_velocity, vel) << (15 - 13)
-  );
+  ));
 
   voice->NoteOn(Tune(pitch), vel, portamento,
     voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2,
-    chiff_amount, chiff_increment_u32);
+    chiff_amount, chiff_audible_samples);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {

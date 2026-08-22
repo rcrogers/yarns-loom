@@ -656,7 +656,7 @@ void Envelope::NoteOn(
   ADSR& adsr,
   // Bounds stored as s32 but semantically s16
   int32_t min_target_s16, int32_t max_target_s16,
-  uint8_t chiff_amount, uint32_t chiff_increment_u32
+  uint8_t chiff_amount, uint32_t chiff_audible_samples
 ) {
   adsr_ = &adsr;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
@@ -698,9 +698,9 @@ void Envelope::NoteOn(
       // (slew time and rate) is set up for the attack; the slewed
       // value carries across a retrigger for continuity.
       Trigger(ENV_STAGE_ATTACK);
-      // The chiff window is a time of its own, set by CHIFF DURATION, with no
-      // reference to the attack.
-      uint32_t window_samples = ChiffWindowSamples(chiff_increment_u32);
+      // The chiff's audible duration is a time of its own, set by CHIFF
+      // DURATION, with no reference to the attack.
+      uint32_t window_samples = chiff_audible_samples;
       // The nominal duration is a SIZING REFERENCE, not a countdown: it sets
       // how fast the chiff input shrinks and how fast the slew slows, and
       // nothing observes it elapsing. AMOUNT 0 arms nothing, which is the one
@@ -803,8 +803,9 @@ static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27) {
 
 // The window a chiff is sized against, in samples. Same reciprocal the envelope
 // stages use to turn a phase increment into a span.
-uint32_t ChiffWindowSamples(uint32_t chiff_increment_u32) {
-  return chiff_increment_u32 ? (UINT32_MAX / chiff_increment_u32) : UINT32_MAX;
+uint32_t ChiffAudibleSamples(uint32_t chiff_duration_increment_u32) {
+  return chiff_duration_increment_u32
+      ? (UINT32_MAX / chiff_duration_increment_u32) : UINT32_MAX;
 }
 
 // decay = 1 - 2^-increment in Q32, via 2-term Taylor of 1 - 2^-x about x = 0

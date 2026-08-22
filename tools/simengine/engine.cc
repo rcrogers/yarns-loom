@@ -163,18 +163,18 @@ int chiff_render(
   // CHIFF DURATION names a time on its own table; NoteOn takes the increment,
   // not the setting. Converted once, because both are integers and passing the
   // wrong one converts silently.
-  const uint32_t chiff_increment = Interpolate88(
+  const uint32_t chiff_audible_samples = ChiffAudibleSamples(Interpolate88(
       lut_chiff_phase_increments,
       modulate_7_13(static_cast<uint8_t>(chiff_duration),
                     static_cast<int8_t>(chiff_duration_mod_velocity),
-                    static_cast<uint8_t>(velocity)) << (15 - 13));
+                    static_cast<uint8_t>(velocity)) << (15 - 13)));
   envelope.NoteOn(adsr, min_target, max_target,
-                  modulated_chiff_amount, chiff_increment);
+                  modulated_chiff_amount, chiff_audible_samples);
   // The NOMINAL duration, for the sim's marker. Computed once in NoteOn and a
   // sizing reference only -- nothing counts it down and nothing happens when
   // it elapses -- so reading it once here is the whole story.
   int32_t chiff_window_samples =
-      static_cast<int32_t>(ChiffWindowSamples(chiff_increment));
+      static_cast<int32_t>(chiff_audible_samples);
 
   int total = gate_samples + tail_samples;
   if (total > max_samples) total = max_samples;
@@ -242,7 +242,7 @@ int chiff_frame_hz() { return kFrameHz; }
 // velocity modulation. Independent of the attack.
 EMSCRIPTEN_KEEPALIVE
 int chiff_duration_samples(int setting, int mod_velocity, int velocity) {
-  return static_cast<int32_t>(ChiffWindowSamples(Interpolate88(
+  return static_cast<int32_t>(ChiffAudibleSamples(Interpolate88(
       lut_chiff_phase_increments,
       modulate_7_13(static_cast<uint8_t>(setting),
                     static_cast<int8_t>(mod_velocity),
