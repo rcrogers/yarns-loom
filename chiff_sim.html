@@ -162,6 +162,8 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     <div class="group checks"><h2>Overlays</h2>
       <label><input type="checkbox" id="showNominal" checked> Nominal (chiff-free) value</label>
       <label><input type="checkbox" id="showNoise" checked> Noise band (|step|, smoothed)</label>
+      <label><input type="checkbox" id="reassign"> Sharpen transients (reassignment)</label>
+      <label><input type="checkbox" id="perceptual"> Perceptual (A-weighted, auditory bandwidths)</label>
     </div>
   </div>
 
@@ -180,8 +182,8 @@ button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2p
     </div>
     <div class="spectrum">
       <div class="legend">
-        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; log freq; residual vs mean, constant-Q, dark&rarr;bright = &minus;96&rarr;0 dB)</span>
-        <span class="mono" style="margin-left:auto;color:var(--ink3)">re-roll seed to compare realizations</span>
+        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; log freq; residual vs mean, constant-Q, dark&rarr;bright = &minus;96&rarr;0 dB; dashed curve = resolution limit)</span>
+        <span class="mono" id="specMode" style="margin-left:auto;color:var(--ink3)">re-roll seed to compare realizations</span>
       </div>
       <canvas id="specCv"></canvas>
     </div>
@@ -580,33 +582,24 @@ function paint(hoverX) {
 // spectrogram: 512 samples is an 11 ms analysis window there. The spectrogram
 // itself no longer has a window at all -- see the filterbank.
 const SPEC_WINDOW = 512;
-// A CONSTANT-Q FILTERBANK, ONE FILTER PER ROW. No windows and no tiers: each
-// row's bandwidth is f/Q and its time constant Q/f, both varying continuously,
-// so nothing switches and nothing can band. It replaces a bank of fixed-window
-// STFTs that had to pick a window per row and seamed wherever the choice
-// changed -- cross-fading them blended the LEVELS and left the TEXTURES.
-//
-// Q SETS HOW MANY PIXEL ROWS A BIN COVERS, which is the point of a log axis:
-// bandwidth f/Q against a row width proportional to f is the same height at
-// every frequency. Relative resolution is cheap at the top, and going coarser
-// buys the settling time that makes the bottom possible at all.
-const CQ_Q = 4.7;             // ~8 pixel rows per bin
-const CQ_PAD_TAUS = 3;        // reflection padding, in filter time constants
-// A FLOOR ON BANDWIDTH, SET BY THE RENDER. A filter of bandwidth B settles in
-// about 1/(pi*B) seconds; below this the picture is the analysis waking up.
-// Under the crossover the bins get relatively wider, which is the physical
-// limit of a short render rather than a choice.
-const CQ_SETTLES_PER_RENDER = 6;
-const SPEC_REF = 24;
+// MEASURED against the Gabor transform: the peak cell runs 1.35 at AMOUNT 1,
+// 28 at 32 and 113 at 96, so this puts the loudest setting at the top of the
+// ramp and AMOUNT 1 around -39 dB into it.
+const SPEC_REF = 120;
 // THE DISPLAY'S DYNAMIC RANGE. 60 dB clamped the bottom of the AMOUNT knob into
 // the floor colour; the chiff there runs 30-55 dB under the reference.
 const SPEC_RANGE_DB = 96;
-// THE BOTTOM OF THE LOG AXIS. 5 Hz, not 20: the chiff's corner at the bottom of
-// AMOUNT is ~5 Hz, so an axis starting at 20 Hz cuts off the very thing it is
-// meant to show. The old fixed bin 0 spanned DC..22 Hz and swept it all into
-// one bright band, which is why this stayed invisible until the bins got fine
-// enough to look.
-const SPEC_FMIN = 5;
+// THE BOTTOM OF THE LOG AXIS SCALES WITH THE RECORD, because resolution there
+// does. A band at f needs about f/CQ_Q of width, whose kernel is ~1/(2*pi*sigma)
+// wide in TIME -- so below a few cycles per record a row cannot be localised at
+// all and its energy smears across the whole width. Drawing such rows is drawing
+// the analysis. At this many cycles the lowest row still has usable time
+// resolution: a 1.4 s render floors at ~5.7 Hz, a 0.3 s one at ~27 Hz, and an
+// 8 s one opens down to 1 Hz where the resolution genuinely exists.
+// MEASURED, and this is what the floor is protecting against: widening the
+// bottom bands to cut their smear pulled near-DC bins in, and a 0.7 Hz
+// component of a 1.4 s record is a flat bar across the entire plot.
+const SPEC_FMIN_CYCLES = 8;
 // A PERCEPTUAL RAMP, not one hue's lightness. Lightness alone resolves maybe a
 // dozen steps; varying hue and lightness together resolves several times that,
 // which is what makes a 10 dB difference at the bottom of the knob legible.
@@ -623,102 +616,427 @@ function rampColor(t) {
           Math.round(a[2] + (b[2] - a[2]) * f)];
 }
 const specCv = $('specCv'), specCtx = specCv.getContext('2d');
-let specData = null;   // { cells, tMax, fMax }
+let specData = null;   // { cells, cols, rows, tMax, fMax }
 
-// Halve the rate, [1,3,3,1]/8; a row only uses a level where its own frequency
-// is far below that level's Nyquist, so this is enough anti-aliasing. Its
-// passband droop is divided back out below -- at fs/8 it is -2.06 dB per stage
-// and it accumulates, drawing a step at every level boundary.
-function decimate(x) {
-  const n = x.length >> 1, d = new Float64Array(n), last = x.length - 1;
-  for (let i = 0; i < n; i++) {
-    const j = i * 2;
-    d[i] = (x[j > 0 ? j - 1 : 0] + 3 * x[j] +
-            3 * x[j + 1 < last ? j + 1 : last] + x[j + 2 < last ? j + 2 : last]) / 8;
-  }
-  return d;
-}
-function decimResponse(w) {
-  return Math.abs((2 * Math.cos(1.5 * w) + 6 * Math.cos(0.5 * w)) / 8);
+// A GABOR TRANSFORM: one Gaussian bandpass per pixel row, evaluated in the
+// frequency domain.
+//
+// WHY NOT A RESONATOR. The previous version used a single complex one-pole per
+// row. A one-pole is not a bandpass: at Q = 4.7 its response at DC is only
+// 16.5 dB below its peak. The chiff spans 60+ dB across frequency, so every row
+// above the energy simply re-displayed the low end -- vertical bands running the
+// full height, no falloff toward high frequencies, and bands at 20 kHz on a
+// signal whose corner is 5 Hz. Every artifact chased before this was that leak.
+//
+// A GAUSSIAN KERNEL IS THE RIGHT SHAPE. It is its own transform, so it is
+// compact in both domains, and its skirts fall off faster than any polynomial
+// filter: at CQ_SIGMAS the rejection is ~109 dB, which is well past the signal's
+// own dynamic range. It is symmetric, so the result is ZERO PHASE and every row
+// is time-aligned without running anything backwards.
+//
+// AND IT DELETES THREE CLASSES OF BUG. There is no decimation pyramid, so no
+// per-level rate scaling, no anti-alias droop to compensate, and no tier
+// boundaries to seam. One transform, one normalisation, no fudge factors.
+// Q = 3 puts a bin at ~16 pixel rows. It also sets TIME SMEAR, because the two
+// are the same number: sigma_t = 1/(2*pi*sigma_f), so widening the bin narrows
+// the blur. MEASURED at the bottom of the axis, where it matters -- a 4-sample
+// impulse paints 556 ms at 10 Hz with Q = 4.7 and 374 ms with Q = 3. The cost is
+// paid at the top, where smear goes from 9 ms to 14 ms at 1 kHz and nothing
+// audible depends on it.
+const CQ_Q = 3.0;
+// KERNEL SUPPORT, AND IT MUST CLEAR THE DISPLAY FLOOR. Cutting the kernel is a
+// rectangular window in FREQUENCY, which rings in TIME -- so if the cut happens
+// anywhere the display can still draw, an impulse grows a tail that is pure
+// truncation. MEASURED: at 4 sigma the edge sits at -69 dB, plainly visible on a
+// -96 dB ramp, and a 4-sample chiff at DURATION 0 painted low-frequency content
+// past 600 ms when the residual is exactly zero after 100 ms. 5.5 sigma puts the
+// edge at -131 dB, under the floor with room to spare.
+const CQ_SIGMAS = 5.0;
+const CQ_MIN_BINS = 16;
+// Deposit points per display column when reassigning; see the note below.
+const CQ_REASSIGN_OVERSAMPLE = 4;
+// TIME REASSIGNMENT. The kernel's width is a resolution limit, not a sampling
+// one, so no amount of supersampling narrows it -- but the transform's PHASE
+// still carries where the energy actually came from. The local group delay is
+// Re(z_t / z), where z_t uses the window t*h(t); in the frequency domain that
+// is the derivative of the Gaussian, which is closed form. Depositing each
+// point's energy at t + delay collapses an impulse toward the instant that
+// produced it instead of smearing it over the kernel.
+
+// A FLOOR ON BANDWIDTH, SET BY THE RENDER. A band of width B cannot resolve
+// detail faster than ~1/B; asking for finer than the render supports paints the
+// analysis, not the signal. Below the crossover the bins widen, which is the
+// physical limit of a short render rather than a choice.
+const CQ_SETTLES_PER_RENDER = 6;
+
+function nextPow2(n) { let m = 1; while (m < n) m <<= 1; return m; }
+
+// In-place inverse, 1/N scaled, built from the forward transform by conjugation
+// so there is only one FFT in the page.
+function ifft(re, im, len) {
+  const n = len || re.length;
+  for (let i = 0; i < n; i++) im[i] = -im[i];
+  fft(re, im, n);
+  for (let i = 0; i < n; i++) { re[i] /= n; im[i] = -im[i] / n; }
 }
 
-// ZERO PHASE, BY RUNNING THE FILTER BOTH WAYS. A causal resonator's envelope
-// lags by about its own time constant, and that varies with the row -- so one
-// transient lands at a different X in every band, which reads as the bands
-// being misaligned in time. Forward lags and backward leads by the same amount,
-// so their geometric mean is centred at every frequency, and it is also the
-// average in dB, which is what the display shows.
-function cqRow(x, fs, f, bwFloor, droop) {
-  const bw = Math.max(f / CQ_Q, bwFloor);
-  const r = Math.exp(-Math.PI * bw / fs);
-  const theta = 2 * Math.PI * f / fs;
-  const pr = r * Math.cos(theta), pi = r * Math.sin(theta);
-  const n = x.length;
-  const pad = Math.min(n, Math.ceil(CQ_PAD_TAUS * fs / (Math.PI * bw)));
-  const a = 1 - r;
-  const run = (from, to, step) => {
-    let yr = 0, yi = 0;
-    for (let k = 0; k < pad; k++) {
-      const i = from + step * (pad - k);
-      const t = pr * yr - pi * yi + x[i >= 0 && i < n ? i : from];
-      yi = pr * yi + pi * yr; yr = t;
-    }
-    const mag = new Float64Array(n);
-    let e = 0;
-    for (let i = from; i !== to; i += step) {
-      const t = pr * yr - pi * yi + x[i];
-      yi = pr * yi + pi * yr; yr = t;
-      e += a * (Math.sqrt(yr * yr + yi * yi) - e);
-      mag[i] = e;
-    }
-    return mag;
-  };
-  const fwd = run(0, n, 1), bwd = run(n - 1, -1, -1);
-  // WHITE NOISE READS THE SAME AT EVERY ROW: a resonator's output rms is
-  // sigma/sqrt(1-r^2), which would slope upward with bandwidth, so dividing it
-  // out gives per-Hz density. The second factor lands on the fixed-bin
-  // display's calibration, so SPEC_REF is unchanged.
-  const scale = Math.sqrt(1 - r * r) * Math.sqrt(0.375 * 512) / droop;
-  const env = new Float64Array(n);
-  for (let i = 0; i < n; i++) env[i] = Math.sqrt(fwd[i] * bwd[i]) * scale;
-  return env;
-}
+// THE ROW ENGINE, AND IT IS ALSO THE WORKER. This function is stringified into
+// the worker source below, so both threads execute the SAME TEXT -- there is no
+// second implementation to drift. Everything it needs arrives in `job`; it
+// touches no page state and returns its slice of the cell grid.
+function spectrogramRows(job) {
+  const { res, totalN, FS, PEAK, COLS, ROWS, rowStart, rowEnd } = job;
+  const { CQ_Q, CQ_SIGMAS, CQ_MIN_BINS, CQ_SETTLES_PER_RENDER,
+          SPEC_FMIN_CYCLES, CQ_REASSIGN_OVERSAMPLE } = job;
+  const CQ_REASSIGN = job.reassign;
 
-// COMPUTED AT THE PIXEL GRID, NOT RESAMPLED ONTO IT. A fixed 320x1400 analysis
-// box-resampled to the canvas duplicated some rows and merged others unevenly,
-// which drew as horizontal and vertical banding -- the analysis grid beating
-// against the pixel grid. One filter per pixel row, one column per pixel
-// column, and there is nothing left to alias.
-function computeSpectrogram(SPEC_COLS, SPEC_ROWS) {
-  if (!lastRes) return;
-  const out = lastRes.out, line = lastLine, totalN = lastRes.totalN;
-  const base = new Float64Array(totalN);
-  for (let i = 0; i < totalN; i++) base[i] = (out[i] - line[i]) / PEAK;
-  const fMax = FS / 2;
-  const logMin = Math.log(SPEC_FMIN), logSpan = Math.log(fMax) - logMin;
-  const cells = new Float32Array(SPEC_ROWS * SPEC_COLS);
-  const levels = [base];
+  // ONE forward transform of the whole residual. Every row is a windowed slice
+  // of this spectrum, so the signal is only transformed once.
+  // PAD PAST THE KERNEL, PER ROW. A Gaussian of width sigma_f in frequency is
+  // 1/(2*pi*sigma_f) wide in TIME, so without room the transform wraps and the
+  // loud onset reappears at the right-hand edge. That width scales as 1/f, so a
+  // single padded length sized for the BOTTOM row makes every top row pay for
+  // padding it does not need -- and the top rows are the expensive ones, because
+  // their kernels span the most bins. Each row takes the shortest transform that
+  // clears its own kernel; padding never changes the result, so rows computed at
+  // different lengths agree exactly and there is no seam.
   const bwFloor = CQ_SETTLES_PER_RENDER / (Math.PI * (totalN / FS));
-  for (let row = 0; row < SPEC_ROWS; row++) {
-    const f = Math.exp(logMin + (1 - (row + 0.5) / SPEC_ROWS) * logSpan);
-    // Decimate only while the row sits well under the next level's Nyquist.
-    let L = 0, droop = 1;
-    while (f < (FS / (1 << (L + 1))) / 8 && (levels[L].length >> 1) > 64) {
-      if (levels.length === L + 1) levels.push(decimate(levels[L]));
-      droop *= decimResponse(2 * Math.PI * f / (FS / (1 << L)));
-      L++;
+  const spectra = new Map();   // NFFT -> { XR, XI }
+  const spectrumFor = (NFFT) => {
+    let e = spectra.get(NFFT);
+    if (!e) {
+      const XR = new Float64Array(NFFT), XI = new Float64Array(NFFT);
+      for (let i = 0; i < totalN; i++) XR[i] = res[i];
+      fft(XR, XI);
+      e = { XR, XI };
+      spectra.set(NFFT, e);
     }
-    const env = cqRow(levels[L], FS / (1 << L), f, bwFloor, droop);
-    for (let c = 0; c < SPEC_COLS; c++) {
-      const s0 = Math.floor(c / SPEC_COLS * env.length);
-      const s1 = Math.max(s0 + 1, Math.floor((c + 1) / SPEC_COLS * env.length));
-      let acc = 0;
-      for (let i = s0; i < s1 && i < env.length; i++) acc += env[i];
-      cells[row * SPEC_COLS + c] = acc / (s1 - s0);
+    return e;
+  };
+  const fMax = FS / 2;
+  const fMin = SPEC_FMIN_CYCLES / (totalN / FS);
+  const logMin = Math.log(fMin), logSpan = Math.log(fMax) - logMin;
+  const cells = new Float32Array((rowEnd - rowStart) * COLS);
+  const baseNFFT = nextPow2(totalN);
+  // Reused across rows; a row uses the first M entries.
+  let zr = new Float64Array(baseNFFT), zi = new Float64Array(baseNFFT);
+  let tr = new Float64Array(baseNFFT), ti = new Float64Array(baseNFFT);
+  const acc = new Float64Array(COLS), wgt = new Float64Array(COLS);
+
+  for (let row = rowStart; row < rowEnd; row++) {
+    const f = Math.exp(logMin + (1 - (row + 0.5) / ROWS) * logSpan);
+    // PERCEPTUAL MODE. Two things separate this display from hearing, and both
+    // are per-row constants.
+    //  BANDWIDTH. Ours is constant-Q; the ear is ~25-35 Hz wide below 500 Hz and
+    //  constant-Q about 9 above. At 30 Hz ours is 10 Hz against the ear's 28, so
+    //  we resolve -- and smear in time -- detail the ear never separates.
+    //  LEVEL. Brightness is flat in dBFS and hearing is not: A-weighting puts
+    //  30 Hz 41 dB down and 10 Hz 70 dB down against 1 kHz. That gap is why the
+    //  bottom of the plot blazes while the sound is unremarkable.
+    const erb = 24.7 * (0.00437 * f + 1);
+    const bw = Math.max(job.perceptual ? erb : f / CQ_Q, bwFloor);
+    let weight = 1;
+    if (job.perceptual) {
+      const f2 = f * f;
+      const ra = (12194 * 12194 * f2 * f2) /
+        ((f2 + 20.6 * 20.6) *
+         Math.sqrt((f2 + 107.7 * 107.7) * (f2 + 737.9 * 737.9)) *
+         (f2 + 12194 * 12194));
+      weight = ra * Math.pow(10, 2.00 / 20);
+    }
+    // sigma of the AMPLITUDE kernel, set so |G|^2 is -3 dB at bw/2.
+    const sigma = bw / (2 * Math.sqrt(Math.LN2));
+    // This row's kernel reach in time, and the shortest transform that clears it.
+    const reach = Math.ceil(CQ_SIGMAS * FS / (2 * Math.PI * sigma));
+    let NFFT = baseNFFT;
+    while (NFFT < totalN + 2 * reach) NFFT <<= 1;
+    const { XR, XI } = spectrumFor(NFFT);
+    const df = FS / NFFT;
+    const timeFrac = totalN / NFFT;
+    const halfBins = Math.max(1, Math.ceil(CQ_SIGMAS * sigma / df));
+    const centre = Math.round(f / df);
+    // SIZE THE TRANSFORM TO THE BINS THAT EXIST, not to the kernel's nominal
+    // width. Near the top of the axis half the kernel lies past Nyquist and was
+    // being discarded anyway, so those rows -- the expensive ones -- were paying
+    // for a transform twice the size they use. Same output, half the work.
+    const loBin = Math.max(1, centre - halfBins);
+    const hiBin = Math.min(NFFT / 2 - 1, centre + halfBins);
+    if (hiBin < loBin) { continue; }
+    // SUPERSAMPLE THE DEPOSIT GRID WHEN REASSIGNING. Zero-padding the baseband
+    // spectrum interpolates in time -- no new information, but more points to
+    // scatter. Without it each envelope sample lands in its own column and the
+    // columns outnumber the samples, so the deposits trace sparse curves
+    // through empty cells: the tendrils. They are undersampling, not the
+    // divergence they look like -- the median delay here is a third of a column.
+    let M = nextPow2(Math.max(hiBin - loBin + 1, CQ_MIN_BINS));
+    if (CQ_REASSIGN) M = Math.max(M, nextPow2(CQ_REASSIGN_OVERSAMPLE * COLS));
+    if (M > zr.length) { zr = new Float64Array(M); zi = new Float64Array(M); }
+    zr.fill(0, 0, M); zi.fill(0, 0, M);
+    // ANALYTIC: positive frequencies only, doubled. Without it every row would
+    // also see the mirror image of the band below DC.
+    // THE GAUSSIAN BY RECURRENCE, not by Math.exp per bin. On a uniform grid
+    // exp(-(d*h)^2/2) satisfies g(d+1) = g(d) * ratio(d), ratio(d+1) = ratio(d) * B
+    // with A = exp(-h^2/2) and B = exp(-h^2) -- two multiplies a bin instead of a
+    // transcendental. MEASURED: this loop ran ~2M exp calls and was 416 ms of a
+    // 491 ms transform, against 75 ms for every FFT in it.
+    // ROLL THE KERNEL OFF BELOW THE AXIS FLOOR, SMOOTHLY. A band wide enough to
+    // reach DC collects components whose period exceeds the record; those cannot
+    // be placed in time at all, so they paint the full width as a flat bar.
+    // Constant-Q never got wide enough at the bottom for this to bite; auditory
+    // bandwidths do -- ERB at 25 Hz is 27 Hz against constant-Q's 8 -- and the
+    // bar appeared at exactly the rows whose kernel crossed DC.
+    // IT HAS TO BE A TAPER, NOT A CUT. Clipping the kernel at a bin was tried
+    // and is worse: a hard edge in frequency rings in time, which is the same
+    // defect that made CQ_SIGMAS matter. This factor is Gaussian-complementary,
+    // so the product with the kernel stays smooth.
+    const hpSigma = fMin;
+    const hpLimit = 4 * hpSigma;
+    const h = df / sigma;
+    const B = Math.exp(-h * h);
+    const dLo = loBin - centre;
+    let g = Math.exp(-0.5 * (dLo * h) * (dLo * h));
+    let ratio = Math.exp(-0.5 * h * h) * Math.pow(B, dLo);
+    let norm2 = 0;
+    // M is a power of two, so the wrap is a mask -- and a mask is correct for
+    // negative d, because JS bitwise ops are two's complement.
+    const mask = M - 1;
+    if (CQ_REASSIGN && tr.length < M) { tr = new Float64Array(M); ti = new Float64Array(M); }
+    if (CQ_REASSIGN) { tr.fill(0, 0, M); ti.fill(0, 0, M); }
+    // t*h(t) has transform (i/2pi) dG/df, and dG/df = -(f-fc)/sigma^2 * G.
+    const tScale = -1 / (2 * Math.PI * sigma * sigma);
+    // TWO LOOPS, NOT ONE WITH A FLAG IN IT. This runs once per kernel bin --
+    // over a million times per frame -- and testing the mode in there cost 80%
+    // of the transform even with the branch never taken.
+    if (CQ_REASSIGN) {
+      for (let k = loBin; k <= hiBin; k++) {
+        const d = k - centre;
+        const idx = d & mask;          // centre bin lands at baseband index 0
+        const fk = k * df;
+        const gh = fk < hpLimit
+          ? g * (1 - Math.exp(-0.5 * (fk / hpSigma) * (fk / hpSigma))) : g;
+        const wr = 2 * XR[k] * gh, wi = 2 * XI[k] * gh;
+        zr[idx] = wr; zi[idx] = wi;
+        // multiply by -i * (d*df) / (2 pi sigma^2)
+        const a = tScale * (d * df);
+        tr[idx] = wi * a;              // (-i)*(wr+i*wi)*a = a*wi - i*a*wr
+        ti[idx] = -wr * a;
+        norm2 += gh * gh;
+        g *= ratio; ratio *= B;
+      }
+    } else {
+      for (let k = loBin; k <= hiBin; k++) {
+        const d = k - centre;
+        const idx = d & mask;
+        const fk = k * df;
+        const gh = fk < hpLimit
+          ? g * (1 - Math.exp(-0.5 * (fk / hpSigma) * (fk / hpSigma))) : g;
+        zr[idx] = 2 * XR[k] * gh;
+        zi[idx] = 2 * XI[k] * gh;
+        norm2 += gh * gh;
+        g *= ratio; ratio *= B;
+      }
+    }
+    ifft(zr, zi, M);
+    if (CQ_REASSIGN) ifft(tr, ti, M);
+    // WHITE NOISE READS THE SAME AT EVERY ROW. For input of per-sample sigma s,
+    // rms|z| = 2*s*sqrt(NFFT*norm2)/M, so this recovers s -- a per-Hz density,
+    // which is what makes a flat spectrum draw flat. The second factor is the
+    // display's own calibration and leaves SPEC_REF unchanged.
+    const scale = norm2 > 0
+      ? (M / (2 * Math.sqrt(NFFT * norm2))) * Math.sqrt(0.375 * 512) * weight : 0;
+
+    // The envelope has M points across the NFFT span; the plot shows totalN of
+    // it. Average when a column covers several points, interpolate when it
+    // covers less than one -- at low rows the envelope genuinely is that smooth.
+    const rowOff = (row - rowStart) * COLS;
+    const span = timeFrac * M / COLS;
+    if (CQ_REASSIGN) {
+      // Scatter each point's POWER into the column its own group delay names.
+      acc.fill(0); wgt.fill(0);
+      const usable = Math.min(M, Math.ceil(timeFrac * M));
+      const secPerSample = NFFT / (M * FS);      // one envelope step, in seconds
+      const maxDelay = CQ_SIGMAS / (2 * Math.PI * sigma);   // the kernel's reach
+      for (let i = 0; i < usable; i++) {
+        const zrr = zr[i], zii = zi[i];
+        const p = zrr * zrr + zii * zii;
+        if (p <= 0) continue;
+        // Re(z_t / z) = Re(z_t * conj(z)) / |z|^2
+        const delay = (tr[i] * zrr + ti[i] * zii) / p;
+        // NO ENERGY CAN COME FROM OUTSIDE THE KERNEL'S OWN REACH, so a delay
+        // longer than that is spurious by construction. It happens where the
+        // analytic signal passes near a zero: the denominator vanishes, the
+        // phase is undefined, and the estimate sweeps smoothly through huge
+        // values -- which is why the strays trace continuous tendrils rather
+        // than scattering. MEASURED at 300 Hz, kernel reach 15 ms: delays up to
+        // 92 ms, six times further than anything could have travelled.
+        if (delay > maxDelay || delay < -maxDelay) continue;
+        const c = ((i * secPerSample + delay) / (totalN / FS) * COLS) | 0;
+        if (c >= 0 && c < COLS) { acc[c] += p; wgt[c] += 1; }
+      }
+      for (let c = 0; c < COLS; c++)
+        cells[rowOff + c] = wgt[c] ? Math.sqrt(acc[c] / wgt[c]) * scale : 0;
+    } else if (span >= 1) {
+      for (let c = 0; c < COLS; c++) {
+        const i0 = (c * span) | 0;
+        let i1 = ((c + 1) * span) | 0;
+        if (i1 >= M) i1 = M - 1;
+        let a2 = 0, n = 0;
+        for (let i = i0; i <= i1; i++) {
+          const ar = zr[i], ai = zi[i];
+          a2 += ar * ar + ai * ai; n++;
+        }
+        cells[rowOff + c] = Math.sqrt(a2 / n) * scale;
+      }
+    } else {
+      for (let c = 0; c < COLS; c++) {
+        const a = c * span;
+        const i0 = a | 0, t = a - i0;
+        const j = i0 + 1 < M ? i0 + 1 : M - 1;
+        const r0 = zr[i0], m0 = zi[i0], r1 = zr[j], m1 = zi[j];
+        const p0 = Math.sqrt(r0 * r0 + m0 * m0), p1 = Math.sqrt(r1 * r1 + m1 * m1);
+        cells[rowOff + c] = (p0 * (1 - t) + p1 * t) * scale;
+      }
     }
   }
-  specData = { cells, cols: SPEC_COLS, rows: SPEC_ROWS,
-    tMax: totalN / FS * 1000, fMax };
+  return cells;
+}
+
+
+// ---- dispatch: workers when the host allows them, this thread otherwise ----
+//
+// The row loop is embarrassingly parallel -- every row reads the same residual
+// and writes its own slice -- so it splits across cores with no coordination.
+// The worker source is BUILT FROM THE FUNCTIONS THEMSELVES via toString(), so a
+// worker cannot drift from the main thread: it is the same text.
+//
+// Blob workers may be refused by a host's content policy. If construction or
+// the first message throws, everything falls back to computing here, and the
+// readout says which happened -- a silent fallback would look like a mystery
+// slowdown.
+let specWorkers = null, specWorkerState = 'untried', specWorkerUrl = null;
+let specWatchdog = 0, specDrawMs = 0;
+// Give up on the pool and recompute here. Anything that leaves the workers
+// silent -- a refused blob, a script that never loaded, a thrown job -- lands
+// here, and the readout says so rather than the page just stopping.
+function specStatus(text) {
+  const el = $('specMode');
+  if (el) el.textContent = text + '  \u00b7  re-roll seed to compare realizations';
+}
+function specWorkerFailed(why) {
+  if (!specWorkers || !specWorkers.length) return;
+  for (const w of specWorkers) { try { w.terminate(); } catch (e) {} }
+  specWorkers = [];
+  specWorkerState = 'single-threaded (' + why + ')';
+  specData = null;
+  drawSpectrogram();
+}
+function specWorkerPool() {
+  if (specWorkers !== null) return specWorkers;
+  specWorkers = [];
+  try {
+    const src = [
+      'const fftTwiddles = new Map();',
+      twiddlesFor.toString(), fft.toString(), ifft.toString(),
+      nextPow2.toString(), spectrogramRows.toString(),
+      'onmessage = (e) => { const c = spectrogramRows(e.data);' +
+      ' postMessage({ id: e.data.id, cells: c }, [c.buffer]); };',
+    ].join('\n');
+    // DO NOT REVOKE THE URL. A worker fetches its script asynchronously, so
+    // revoking right after construction races that fetch: the workers exist,
+    // the count looks right, and they never answer.
+    specWorkerUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const n = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
+    for (let i = 0; i < n; i++) {
+      const w = new Worker(specWorkerUrl);
+      // A worker that fails to LOAD errors before any job is posted, so the
+      // handler has to exist from birth rather than being attached at dispatch.
+      w.onerror = () => specWorkerFailed('worker error');
+      specWorkers.push(w);
+    }
+    specWorkerState = specWorkers.length + ' workers';
+  } catch (err) {
+    specWorkers = [];
+    specWorkerState = 'single-threaded (workers refused)';
+  }
+  return specWorkers;
+}
+
+function specJob(COLS, ROWS, rowStart, rowEnd, res, totalN) {
+  return { res, totalN, FS, PEAK, COLS, ROWS, rowStart, rowEnd,
+    reassign: $('reassign').checked, perceptual: $('perceptual').checked,
+    CQ_Q, CQ_SIGMAS, CQ_MIN_BINS, CQ_SETTLES_PER_RENDER,
+    SPEC_FMIN_CYCLES, CQ_REASSIGN_OVERSAMPLE };
+}
+
+// The residual, once, in the form the row engine wants.
+function specResidual() {
+  const out = lastRes.out, line = lastLine, totalN = lastRes.totalN;
+  const res = new Float64Array(totalN);
+  for (let i = 0; i < totalN; i++) res[i] = (out[i] - line[i]) / PEAK;
+  return res;
+}
+
+function specMeta(COLS, ROWS, cells) {
+  const totalN = lastRes.totalN;
+  return { cells, cols: COLS, rows: ROWS, tMax: totalN / FS * 1000,
+    fMin: SPEC_FMIN_CYCLES / (totalN / FS), fMax: FS / 2,
+    bwFloor: CQ_SETTLES_PER_RENDER / (Math.PI * (totalN / FS)),
+    reassign: $('reassign').checked, perceptual: $('perceptual').checked,
+    workers: specWorkerState };
+}
+
+// Synchronous, always available. Used as the fallback and by the check scripts,
+// which drive computeSpectrogram directly.
+function computeSpectrogram(COLS, ROWS) {
+  if (!lastRes) return;
+  const totalN = lastRes.totalN;
+  const cells = spectrogramRows(
+    specJob(COLS, ROWS, 0, ROWS, specResidual(), totalN));
+  specData = specMeta(COLS, ROWS, cells);
+}
+
+let specToken = 0;
+// Parallel, asynchronous. Resolves false if there are no workers to use.
+function computeSpectrogramAsync(COLS, ROWS, done) {
+  const pool = specWorkerPool();
+  if (!pool.length) return false;
+  const totalN = lastRes.totalN, res = specResidual();
+  const t0 = performance.now();
+  const token = ++specToken;
+  const cells = new Float32Array(ROWS * COLS);
+  let pending = pool.length;
+  // Rows are split evenly; cost per row is uneven, but the bands interleave
+  // cheap and expensive rows enough that a static split is close to balanced.
+  pool.forEach((w, k) => {
+    const rowStart = Math.floor(k * ROWS / pool.length);
+    const rowEnd = Math.floor((k + 1) * ROWS / pool.length);
+    if (rowEnd <= rowStart) { if (--pending === 0) finish(); return; }
+    w.onmessage = (e) => {
+      if (e.data.id !== token) return;             // a superseded render
+      cells.set(e.data.cells, rowStart * COLS);
+      if (--pending === 0) finish();
+    };
+    w.onerror = () => { specWorkerState = 'single-threaded (worker error)';
+      specWorkers = []; if (--pending === 0) finish(); };
+    const job = specJob(COLS, ROWS, rowStart, rowEnd, res, totalN);
+    job.id = token;
+    w.postMessage(job);
+  });
+  function finish() {
+    if (token !== specToken) return;
+    clearTimeout(specWatchdog); specWatchdog = 0;
+    specData = specMeta(COLS, ROWS, cells);
+    specDrawMs = Math.round(performance.now() - t0);
+    done();
+  }
+  // WATCHDOG. If the pool goes quiet the page would simply stop updating, which
+  // is indistinguishable from a hang. Fall back and say why.
+  specStatus(specWorkerState + '  \u00b7  rendering\u2026');
+  clearTimeout(specWatchdog);
+  specWatchdog = setTimeout(() => {
+    if (token === specToken) specWorkerFailed('workers did not answer');
+  }, 4000);
+  return true;
 }
 
 function hslToRgb(h, s, l) {
@@ -735,13 +1053,23 @@ function drawSpectrogram() {
   if (!lastRes) return;
   const dpr = window.devicePixelRatio || 1;
   const W = specCv.clientWidth, H = specCv.clientHeight;
+  const padL = 30, padB = 14, padT = 4, padR = 4;
+  const pw = Math.max(1, Math.round(W - padL - padR)), ph = Math.max(1, Math.round(H - padT - padB));
+  // DO NOT CLEAR BEFORE THE DATA IS READY. While a parallel render is in flight
+  // there is nothing new to draw, and clearing first would blank the canvas on
+  // every slider move -- the old frame is a better thing to show than nothing.
+  const fresh = specData && specData.cols === pw && specData.rows === ph &&
+    specData.reassign === $('reassign').checked &&
+    specData.perceptual === $('perceptual').checked;
+  if (!fresh) {
+    if (!computeSpectrogramAsync(pw, ph, drawSpectrogram)) computeSpectrogram(pw, ph);
+    if (!specData || specData.cols !== pw || specData.rows !== ph) return;
+    if (specData.reassign !== $('reassign').checked) return;
+    if (specData.perceptual !== $('perceptual').checked) return;
+  }
   if (specCv.width !== W * dpr || specCv.height !== H * dpr) { specCv.width = W * dpr; specCv.height = H * dpr; }
   specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   specCtx.clearRect(0, 0, W, H);
-  const padL = 30, padB = 14, padT = 4, padR = 4;
-  const pw = Math.max(1, Math.round(W - padL - padR)), ph = Math.max(1, Math.round(H - padT - padB));
-  if (!specData || specData.cols !== pw || specData.rows !== ph) computeSpectrogram(pw, ph);
-  if (!specData) return;
 
   const { cells, cols, rows } = specData;
   const tmp = document.createElement('canvas'); tmp.width = pw; tmp.height = ph;
@@ -760,13 +1088,38 @@ function drawSpectrogram() {
   specCtx.imageSmoothingEnabled = false;
   specCtx.drawImage(tmp, padL, padT);
   const specMeta = specData;
+  specStatus((specData.workers || '') + (specDrawMs ? '  \u00b7  ' + specDrawMs + ' ms' : ''));
   specCtx.fillStyle = cssVar('--ink3'); specCtx.font = '9px ui-monospace, Menlo, monospace';
-  const logMinL = Math.log(SPEC_FMIN), logSpanL = Math.log(specMeta.fMax) - logMinL;
-  for (const f of [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) {
-    if (f > specMeta.fMax) continue;
+  const logMinL = Math.log(specMeta.fMin), logSpanL = Math.log(specMeta.fMax) - logMinL;
+  for (const f of [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) {
+    if (f > specMeta.fMax || f < specMeta.fMin) continue;
     const y = padT + (1 - (Math.log(f) - logMinL) / logSpanL) * ph;
     specCtx.fillText(f >= 1000 ? (f / 1000) + 'k' : String(f), 2, y + 3);
   }
+  // THE RESOLUTION LIMIT, DRAWN. Everything below a row's own kernel width is
+  // the analysis, not the signal -- and that has now been mistaken for signal
+  // three times: the DURATION 0 wedge, the rightward smear, and low-frequency
+  // content lingering after the chiff has stopped. This curve is what a single
+  // impulse at t=0 would paint, so any feature hugging its shape is the
+  // instrument rather than the exciter. It is per-row and it costs nothing.
+  specCtx.save();
+  specCtx.strokeStyle = cssVar('--ink3');
+  specCtx.globalAlpha = 0.45;
+  specCtx.setLineDash([3, 3]);
+  specCtx.lineWidth = 1;
+  specCtx.beginPath();
+  for (let py = 0; py <= ph; py += 2) {
+    const f = Math.exp(logMinL + (1 - py / ph) * logSpanL);
+    const erbW = 24.7 * (0.00437 * f + 1);
+    const bw = Math.max(specMeta.perceptual ? erbW : f / CQ_Q, specMeta.bwFloor);
+    const sigmaT = 1 / (2 * Math.PI * (bw / (2 * Math.sqrt(Math.LN2))));
+    const x = padL + (CQ_SIGMAS * sigmaT * 1000) / specMeta.tMax * pw;
+    const y = padT + py;
+    if (py === 0) specCtx.moveTo(x, y); else specCtx.lineTo(x, y);
+  }
+  specCtx.stroke();
+  specCtx.restore();
+
   const step = specMeta.tMax > 2000 ? 500 : 200;
   for (let t = 0; t <= specMeta.tMax; t += step) {
     const x = padL + t / specMeta.tMax * pw;
@@ -774,8 +1127,30 @@ function drawSpectrogram() {
   }
 }
 
-function fft(re, im) {
-  const n = re.length;
+// Twiddle tables, cached per transform length. The previous form advanced the
+// twiddle by a complex multiply inside the butterfly -- four multiplies and two
+// adds of pure overhead per butterfly, on top of the four the butterfly needs,
+// and the repeated multiply accumulated rounding across a stage. The
+// spectrogram runs hundreds of transforms of a handful of sizes, so a table per
+// size is built once and reused.
+const fftTwiddles = new Map();
+function twiddlesFor(n) {
+  let t = fftTwiddles.get(n);
+  if (!t) {
+    const half = n >> 1;
+    const cos = new Float64Array(half), sin = new Float64Array(half);
+    for (let k = 0; k < half; k++) {
+      const a = -2 * Math.PI * k / n;
+      cos[k] = Math.cos(a); sin[k] = Math.sin(a);
+    }
+    t = { cos, sin };
+    fftTwiddles.set(n, t);
+  }
+  return t;
+}
+
+function fft(re, im, len) {
+  const n = len || re.length;
   for (let i = 1, j = 0; i < n; i++) {
     let bit = n >> 1;
     for (; j & bit; bit >>= 1) j ^= bit;
@@ -783,16 +1158,17 @@ function fft(re, im) {
     if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr;
                  const ti = im[i]; im[i] = im[j]; im[j] = ti; }
   }
+  const { cos, sin } = twiddlesFor(n);
   for (let len = 2; len <= n; len <<= 1) {
-    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    const half = len >> 1, step = n / len;
     for (let i = 0; i < n; i += len) {
-      let cr = 1, ci = 0;
-      for (let k = 0; k < len / 2; k++) {
-        const a = i + k, b = a + len / 2;
-        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+      for (let k = 0, w = 0; k < half; k++, w += step) {
+        const cr = cos[w], ci = sin[w];
+        const a = i + k, b = a + half;
+        const rb = re[b], ib = im[b];
+        const tr = rb * cr - ib * ci, ti = rb * ci + ib * cr;
         re[b] = re[a] - tr; im[b] = im[a] - ti;
         re[a] += tr; im[a] += ti;
-        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
       }
     }
   }
@@ -943,7 +1319,7 @@ function update() {
 ['atk','dec','sus','rel','ampmod','vel','gate','amt','chiffDur','durMod',
  'biasLfo','tremolo','maxTarget','minTarget'].forEach(id =>
   $(id).addEventListener('input', update));
-['showNominal','showNoise'].forEach(id =>
+['showNominal','showNoise','reassign','perceptual'].forEach(id =>
   $(id).addEventListener('change', () => paint(null)));
 $('reroll').addEventListener('click', () => {
   seed = (Math.random() * 0xFFFFFFFF) >>> 0; update();
