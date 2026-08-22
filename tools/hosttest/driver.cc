@@ -250,6 +250,17 @@ int main(int argc, char** argv) {
     RenderMs(100);
     env.NoteOn(adsr, 0, 16383, amount, chiff_increment);
     RenderMs(1500);
+  } else if (strcmp(scenario, "chiff_then_off") == 0) {
+    // A chiff note, then a note with AMOUNT 0 on the same envelope. The only
+    // path on which chiff state -- the walked slew time above all -- can enter
+    // a note that has no chiff. Every other case either has a chiff throughout
+    // or has none at all, so nothing else can catch state carried across.
+    env.NoteOn(adsr, 0, 16383, amount, chiff_increment);
+    RenderMs(300);
+    env.NoteOff();
+    RenderMs(100);
+    env.NoteOn(adsr, 0, 16383, 0, chiff_increment);
+    RenderMs(1500);
   } else if (strcmp(scenario, "inverted") == 0) {
     // Numerically inverted range (CV DAC / negative timbre): min > max
     env.NoteOn(adsr, 16383, 0, amount, chiff_increment);

@@ -25,6 +25,10 @@ const UPDATE = process.argv.includes('--update');
 // Chosen to cover the paths that have actually broken: a chiff that outlives
 // its stage, a window shorter than a block, the compressed release, hold
 // stages, inverted ranges, and both ends of the amount range.
+//
+// 'chiff then off' covers the one path none of the others reach: chiff state
+// carried into a note that has NO chiff. 'chiff off' starts from Init, so it
+// cannot see it.
 const CASES = [
   ['chiff outlives attack',   'basic 127 33 attack_setting=16'],
   ['default-ish',             'basic 96 90 attack_setting=40'],
@@ -36,6 +40,7 @@ const CASES = [
   ['slowest attack',          'basic 127 50 attack_setting=127'],
   ['early release',           'early_release 96 127'],
   ['retrigger',               'retrigger 96 90'],
+  ['chiff then off',          'chiff_then_off 96 90'],
   ['inverted range',          'inverted 96 90'],
   ['late-window release',     'latehang 96 127'],
   ['held into sustain',       'held 96 127'],
