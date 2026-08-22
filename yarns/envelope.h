@@ -32,10 +32,7 @@ namespace yarns {
 
 using namespace stmlib;
 
-// Envelope instances that can be live at once, and therefore the number of
-// per-envelope slots in the shared chiff draw buffer. Wrapping past it hands
-// two envelopes the SAME random sequence, which is the one property the
-// per-envelope offset exists to provide.
+// Envelope instances that can be live at once.
 //
 // It is stated here rather than derived because Envelope must not depend on
 // its owners (voice.h already includes this header). multi.h holds the layout
@@ -151,9 +148,10 @@ class Envelope {
   int32_t stage_rate_q31_;
 
   // The character axis, as a multiplier on the chiff's filter input, ALREADY
-  // DIVIDED by 2^kChiffStateShift: 2^-kChiffDriveOctaves at or below the hinge,
-  // 1.0 at full amount. Pre-dividing is what keeps the driven input inside Q30,
-  // and it costs nothing because the state is carried scaled down to match.
+  // DIVIDED by 2^kChiffStateShift: 1.0 at or below the hinge, rising to
+  // 2^kChiffDriveSpan at full amount. Pre-dividing is what keeps the driven
+  // input inside Q30, and it costs nothing because the state is carried
+  // scaled down to match.
   int32_t chiff_drive_q30_;
 
   // This envelope's chiff draws: the current word, and how many of its fields

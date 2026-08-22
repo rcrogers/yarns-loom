@@ -387,10 +387,10 @@ template<> struct MaxLayoutEnvelopes<0> {
   static const int value = LayoutEnvelopes<0>::value;
 };
 
-// The shared chiff draw buffer is sized from kMaxChiffEnvelopes (envelope.h,
-// which cannot see its owners). EXACTLY equal: too few aliases two envelopes
-// onto one random sequence, too many spends RAM on slots nothing can claim.
-typedef char chiff_draw_slots_must_equal_the_hungriest_layout[
+// kMaxChiffEnvelopes (envelope.h, which cannot see its owners) states how many
+// envelopes can be live at once. EXACTLY equal to the hungriest layout's fold,
+// so the stated number cannot drift from the layout map.
+typedef char chiff_envelopes_must_equal_the_hungriest_layout[
     (MaxLayoutEnvelopes<LAYOUT_LAST - 1>::value == kMaxChiffEnvelopes)
         ? 1 : -1];
 

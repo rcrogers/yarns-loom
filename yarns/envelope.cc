@@ -55,10 +55,8 @@ namespace {
   // the chunking below stays a shift and a mask. That is ASSERTED below, not
   // just asserted here.
   const uint32_t kChiffDrawBits = 4;
-  // THE WORD THE DRAWS ARE PACKED INTO. Everything below derives from this type
-  // rather than from a literal 32, which is what the width used to be written
-  // as -- a number that is only correct as long as nobody changes the buffer's
-  // element type, with nothing to notice if they do.
+  // THE WORD THE DRAWS ARE PACKED INTO. Everything below derives its width from
+  // this type, so changing the type moves the packing with it.
   typedef uint32_t ChiffDrawWord;
   const uint32_t kBitsPerByte = 8;
   const uint32_t kChiffDrawBitsPerWord = sizeof(ChiffDrawWord) * kBitsPerByte;
@@ -185,7 +183,7 @@ const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 // crest factor the sixteen levels give away is what the drive spends.
 const uint32_t kChiffCleanAmount = (kChiffAmountMax + 1) / 2;
 // Where the FILTER finishes opening. Independent of kChiffCleanAmount, which
-// is where the DRIVE starts; equal to it only by history.
+// is where the DRIVE starts.
 const uint32_t kChiffFilterOpenAmount = 110;
 // The state is held scaled DOWN by this many bits so the driven input cannot
 // leave Q30: undriven it reaches 2^29, and 16x that is 2^33. Shifting the
@@ -214,9 +212,8 @@ const uint32_t kChiffDriveSpan_q5_27 = (5u << 27) / 2;  // 2.5 octaves
 //
 // THE WINDOW'S OWN LIMIT STILL APPLIES BELOW THE CAP, which is why this is a
 // min and not an assignment: a chiff whose whole window is shorter than this
-// time constant would otherwise be truncated by its own filter before it
-// reached amplitude, which is darker AND quieter -- the failure that made an
-// earlier pin look like it inverted the duration response.
+// time constant would be truncated by its own filter before it reached
+// amplitude, which is darker AND quieter.
 //
 // WHAT IT COSTS is the lowest corners the knob can reach, which is the
 // sub-audio wobble at the bottom of AMOUNT. That trade is the whole reason this
@@ -265,12 +262,10 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_walk_phase_q32_ = 0;
   chiff_walk_phase_step_q32_ = 0;
   // Bias is a CONTINUOUS control, not note state -- nothing else resets it,
-  // because it must survive NoteOn/NoteOff to stay smooth. But Init means
-  // "from a known state", and it was the one thing Init left alone: in the
-  // firmware it is whatever the object was constructed with, and anywhere the
-  // envelope is reused (the sim renders every note through one static) the
-  // previous note's bias leaked into the next one's FIRST BLOCK, which then
-  // ramped from the wrong place. Found as a 63-sample sim-vs-native mismatch.
+  // because it must survive NoteOn/NoteOff to stay smooth. Init means "from a
+  // known state", so it is reset HERE and only here: a reused envelope (the
+  // sim renders every note through one static) would otherwise ramp its first
+  // block from the previous note's bias.
   bias_q31_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_q30_ = zero_value_q30;
@@ -299,12 +294,12 @@ void Envelope::NoteOff() {
 // the +/- the chiff puts on the slew input. Sized from the note's
 // ALLOWED range (set in NoteOn) and NOT from the level the note actually
 // reaches, so the noise does not thin out at a low sustain or a low peak --
-// the exciter hits the same way however hard the note is played.
+// the chiff hits the same way however hard the note is played.
 //
 // Making room is the MEAN's job (RenderStage holds it clear of the rails), not
-// the chiff input's. Sizing the chiff input from the room between the level
-// and the rails was tried and rejected: the room vanishes as the level reaches
-// the peak, so the excursion notched there.
+// the chiff input's. Sizing the input from the room between the level and the
+// rails instead would notch the excursion at the peak, where that room
+// vanishes.
 int32_t Envelope::ChiffInput_q30() const {
   return static_cast<int32_t>(
     (static_cast<int64_t>(chiff_input_full_q30_) * chiff_input_fraction_q30_)
@@ -406,11 +401,9 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
   if (end_slew_time_log2_q5_27 <= kChiffFastestSlewTimeLog2_q5_27) {
     return end_slew_time_log2_q5_27;
   }
-  // WHERE THE FILTER STOPS OPENING, which is NOT where the drive starts. They
-  // were the same constant (kChiffCleanAmount) because both happened to be 64;
-  // splitting them lets the corner reach its fast end before the drive begins.
-  // Q16 so a non-power-of-two open point is expressible; at 64 it is exactly 2
-  // and reproduces the old doubling bit for bit.
+  // WHERE THE FILTER STOPS OPENING, which is NOT where the drive starts:
+  // separating the two lets the corner reach its fast end before the drive
+  // begins. Q16 so a non-power-of-two open point is expressible.
   const uint32_t kAmountMax_q7_25 = kChiffAmountMax << 25;
   const uint32_t kOpenScale_q16 = static_cast<uint32_t>(
     65536.0 * (kChiffAmountMax + 1) / kChiffFilterOpenAmount + 0.5);
@@ -433,9 +426,8 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
   // a straight line starts it at once but darkens the whole knob by octaves.
   // A quarter of the way there buys the first and almost none of the second.
   // >> 9 rather than a 64-bit divide: rate_amount is amount << 25, so >> 9 is
-  // amount << 16, and dividing that by a 32-bit constant is a multiply. The
-  // plain form is a 64-bit divide by a constant, which GCC 4.8 turns into
-  // __aeabi_uldivmod -- a helper this file has had reintroduced three times.
+  // amount << 16, and dividing that by a 32-bit constant is a multiply. GCC 4.8
+  // turns the 64-bit form into __aeabi_uldivmod, which nothing here may call.
   const uint32_t warp_linear_u16 = (rate_amount_q7_25 >> 9) / kChiffAmountMax;
   // lut_env_expo is above the straight line everywhere, so this only subtracts.
   const uint32_t warp_u16 = warp_expo_u16 - ((warp_expo_u16 - warp_linear_u16) >> 2);
@@ -486,25 +478,19 @@ const uint32_t kChiffAmountMaxRecip_q32 = static_cast<uint32_t>(
   ((1ull << kChiffAmountRecipShift) + kChiffAmountMax - 1) / kChiffAmountMax);
 
 // THE AMOUNT WHOSE OUTPUT SITS AT THE INAUDIBILITY THRESHOLD, Q7.25.
-// CLOSED FORM. It was a twelve-iteration binary search, each iteration paying
-// a ChiffWalkSlewTimeLog2 and a ChiffScaledRmsPerInput, because the level used
-// to be a tangle of the input and the filter's response. Under the level law
-// it is not: level == amount / kChiffAmountMax exactly, so
+// CLOSED FORM, because the level law makes it one: level == amount /
+// kChiffAmountMax exactly, so
 //
 //   input_full * (amount / kChiffAmountMax)  >=  kChiffInaudibleLevel
 //
-// solves directly for the amount. One 64/32 divide replaces the search.
-//
-// THE SEARCH WAS ALSO A LIABILITY, not just a cost: it made the threshold
-// reachable only through twelve rounds of the very maps whose calibration was
-// in question, which is how a wrong constant stayed invisible.
+// solves directly for the amount, in one 64/32 divide and without evaluating
+// any of the maps whose calibration the threshold depends on.
 //
 // WHERE THE INPUT RAILS this is not exact -- there the level follows the bare
 // response instead of the law, so it is LOWER than the law says and the amount
 // at which the chiff truly goes inaudible is HIGHER than the one solved for
 // here. The walk therefore passes the real threshold EARLY, and the symptom is
-// DURATION reading SHORT at the bottom of AMOUNT. (This comment used to name
-// the opposite sign, which is how a measured die-out of 0.48 went unexplained.)
+// DURATION reading SHORT at the bottom of AMOUNT.
 static uint32_t ChiffWalkAudibleAmount_q7_25(
     uint32_t start_q7_25, int32_t input_full_q30) {
   if (input_full_q30 <= 0) return start_q7_25;
@@ -520,18 +506,15 @@ static uint32_t ChiffWalkAudibleAmount_q7_25(
 // This IS the walk's speed: make this phase arrive at the duration and the
 // chiff goes inaudible exactly there.
 //
-// IT INVERTS lut_env_expo BY SEARCHING THE TABLE, not by bisecting the curve.
-// The old form ran sixteen iterations of ChiffWalkAmount -- a table read, an
-// interpolation and a 64-bit multiply each -- to inverse-interpolate a 257-entry
-// MONOTONE table. Eight compares against the table itself land on the bracket,
+// IT INVERTS lut_env_expo BY SEARCHING THE TABLE, not by bisecting the curve:
+// the table is 257 entries and MONOTONE, so eight compares land on the bracket
 // and one linear interpolation inside it finishes the job.
 //
-// "ALREADY INAUDIBLE AT THE ONSET" IS AN EARLY RETURN, NOT A CLAMPED ZERO. The
-// old code ended `return phase_u16 ? phase_u16 : 1`, which turned that case --
-// target == start, so the phase to reach it is zero -- into a walk running at
-// 1/65536 speed -- the walk then never crosses the axis, so the chiff is never
-// scheduled to decay at all. The right answer is the FASTEST walk, not the
-// slowest.
+// "ALREADY INAUDIBLE AT THE ONSET" IS AN EARLY RETURN, NOT A CLAMPED ZERO.
+// There the phase to reach the target is zero, and clamping that to 1 would
+// mean a walk at 1/65536 speed -- one that never crosses the axis, so the
+// chiff would never be scheduled to decay at all. The right answer is the
+// FASTEST walk, not the slowest.
 static uint32_t ChiffWalkAudiblePhase_u16(
     uint32_t start_q7_25, int32_t input_full_q30) {
   if (!start_q7_25) return 65536;
@@ -540,8 +523,7 @@ static uint32_t ChiffWalkAudiblePhase_u16(
   // Inaudible before the note starts: cross the axis at full speed.
   if (target_q7_25 >= start_q7_25) return 65536;
   // The remaining fraction the walk has to reach, u16. DivU64ByU32, NOT a
-  // plain 64/32: GCC 4.8 turns that into __aeabi_uldivmod, and 43ac801c got
-  // that helper to zero call sites in the firmware for a reason -- it drags in
+  // plain 64/32: GCC 4.8 turns that into __aeabi_uldivmod, which drags in
   // ~1.4 kB of library code. target < start is guaranteed above, so the
   // quotient fits u16.
   const uint32_t needed_u16 = DivU64ByU32(
@@ -747,18 +729,13 @@ void Envelope::NoteOn(
       // fraction. Half the range is the largest symmetric +/- that can ever fit
       // inside it -- a bound, not a tuned fraction. Sized from the ALLOWED
       // range rather than the realized one, so a quiet note gets the same
-      // exciter as a loud one.
+      // chiff as a loud one.
       // NO DRIVE IS DERIVED HERE. It is read off the walk's amount, which
-      // starts at exactly this note's amount, so the first run computes it --
-      // through ChiffWalkDriveOver16, by a reciprocal multiply rather than the
-      // 64-bit divide by 63 that this used to do. Nothing reads the member in
-      // between, so the old form was a __aeabi_uldivmod call whose result was
-      // overwritten before use; it was the last call site of that helper.
+      // starts at exactly this note's amount, so the first run computes it
+      // through ChiffWalkDrive_q30; nothing reads the member in between.
       // DURATION STAYS DURATION WITHOUT A CORRECTION TERM. The drive makes the
-      // chiff louder, and the old shrink had to be given extra octaves to stop
-      // it singing past its duration. The walk needs none: the drive is read
-      // off the amount, so it relaxes as the amount descends and is gone by the
-      // time the walk lands.
+      // chiff louder, but it is read off the amount, so it relaxes as the
+      // amount descends and is gone by the time the walk lands.
       // THE WALK IS THE WHOLE SCHEDULE. DURATION is a time-based modulation of
       // AMOUNT: the amount descends its own axis and the drive, the slew time
       // and the input are all read off it by the maps the knob itself uses, so
@@ -773,15 +750,12 @@ void Envelope::NoteOn(
         (static_cast<uint64_t>(0xFFFFFFFFu / window_samples)
          * ChiffWalkAudiblePhase_u16(chiff_walk_start_q7_25_,
              chiff_input_full_q30_)) >> 16);
-      // THE WALK'S FIRST STATE IS THE NOTE'S FIRST STATE. All three of the
-      // chiff's numbers are read off the starting amount here; the slew time
-      // was the one left out, so it entered the note carrying whatever the
-      // PREVIOUS note had ramped it to (or, on a first note, the STAGE's slew
-      // time, which is not the chiff's at all). The first run then derived its
-      // step from that stale value, and only the run's END landed on the walk.
-      // The onset is the loudest, most character-defining part of the chiff,
-      // and a window can be shorter than one block, so a whole chiff can live
-      // inside the block that would get this wrong.
+      // THE WALK'S FIRST STATE IS THE NOTE'S FIRST STATE: all three of the
+      // chiff's numbers are read off the starting amount HERE. Leaving any of
+      // them to the first run means entering the note on the previous note's
+      // value, and the onset is the loudest, most character-defining part of
+      // the chiff -- a window can be shorter than one block, so a whole chiff
+      // can live inside the block that would get it wrong.
       slew_time_log2_q5_27_ = ChiffWalkSlewTimeLog2_q5_27(
         chiff_walk_start_q7_25_, chiff_slew_time_log2_end_q5_27_);
       // AFTER the slew time, which the input is now solved against.
@@ -944,9 +918,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
           kMaxSlewTimeLog2_q5_27
         );
   }
-  // THE STAGE'S RATE CHANGES ONLY HERE, so this is where it is derived. The
-  // run used to re-derive it from the slew time every time, which is an exp2
-  // table interpolation per run for a quantity that moves once per stage.
+  // THE STAGE'S RATE CHANGES ONLY HERE, so this is where it is derived: it
+  // costs an exp2 table interpolation, and deriving it per run instead would
+  // pay that for a quantity that moves once per stage.
   stage_rate_q31_ = SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27);
   // A RELEASE CAN ONLY MAKE THE SHRINK FASTER, NEVER SLOWER. The chiff's own
   // schedule is sovereign -- it is what CHIFF DURATION dials -- but a note
@@ -970,11 +944,8 @@ void Envelope::Trigger(EnvelopeStage stage) {
     // stage's own time constant -- a click at the end of every note.
     // UNDER THE WALK THERE IS ONE DEADLINE AND ONE MECHANISM: finish the walk
     // by the release's end. The slew time and the input follow on their own,
-    // because both are read off the amount the walk has reached. A second
-    // deadline on the slew time used to be imposed here as well; the walk
-    // recomputes the slew step from scratch on the next run, so that one had
-    // no reader -- it was a divide and a Taylor expansion writing state that
-    // was overwritten a few hundred cycles later.
+    // because both are read off the amount the walk has reached, and the next
+    // run recomputes the slew step from scratch.
     const uint32_t walk_step_q32 =
       (0xFFFFFFFFu - chiff_walk_phase_q32_) / stage_samples_left_;
     if (walk_step_q32 > chiff_walk_phase_step_q32_) {
@@ -1045,10 +1016,8 @@ void Envelope::HandOffToNextStage(
 // literal and costs no register -- which matters, because the body is at the
 // register ceiling exactly (a 13th "r" operand does not allocate).
 
-// THE OPERANDS BOTH ASM BLOCKS SHARE, written once. They were copied out by
-// hand into each, eleven of them, with nothing forcing the two lists to agree
-// -- and the two blocks must agree, since the QEMU differential only proves
-// asm == C, not asm == asm.
+// THE OPERANDS BOTH ASM BLOCKS SHARE, written once so the two lists cannot
+// disagree: the QEMU differential proves asm == C, not asm == asm.
 #define YARNS_CHIFF_ASM_STATE                                                 \
   [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),                 \
   [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),                      \
@@ -1127,25 +1096,21 @@ void Envelope::RenderStage(
     // bias), because the mean clamp below holds nominal + bias clear of the
     // rails to leave the chiff room.
     // Folding bias into the integrator instead, with one clamp bounding the
-    // sum, let the clamp write bias back into the envelope: at rest under a
-    // negative bias the state pinned at 0 and the envelope came back at +bias.
-    // The value then diverged by exactly the bias amplitude every time the sum
-    // touched a rail. The battery pins this as an invariant.
+    // sum, would let the clamp write bias back into the envelope: the value
+    // then diverges by the bias amplitude every time the sum touches a rail.
+    // The battery pins bias independence as an invariant.
     const int32_t bias_q30 = bias_q31 >> 1;
     // A PER-RUN COPY. The loop decays the rate every sample; writing that back
     // would compound the schedule once per block and collapse the chiff in a
     // few of them. The persistent encoding is the slew TIME, set once below.
     //
-    // THESE TWO IN-LOOP INSTRUCTIONS ARE WORTH 5 CYCLES PER SAMPLE, 24.0% ->
-    // 20.2% OF THE CPU. Deleting them costs nothing to build: the writeback
-    // already advances the slew time by the whole run, so the next run derives
-    // an advanced rate and the decay SCHEDULE is unchanged -- only its
-    // resolution, per run instead of per sample.
-    // Long chiffs barely notice, but a chiff that lives a single block loses
-    // its darkening ENTIRELY, and no per-run constant restores the chirp.
-    // SHORT CHIFFS ARE NOT A CORNER CASE: the window inherits the attack's
-    // velocity modulation, so it reaches a fraction of a millisecond at high
-    // velocity on the shipped default. Rejected by ear twice.
+    // THE PER-SAMPLE DECAY IS WORTH ITS 5 CYCLES PER SAMPLE (~4% of the CPU).
+    // Dropping it still builds and leaves the decay SCHEDULE unchanged -- the
+    // writeback advances the slew time by the whole run either way -- but it
+    // coarsens the resolution to per run, and a chiff that lives a single
+    // block then loses its darkening ENTIRELY. That is not a corner case: the
+    // window inherits the attack's velocity modulation, so it reaches a
+    // fraction of a millisecond at high velocity on the shipped default.
     // Both are per-RUN: derived here, consumed by this run's loop and its
     // writeback, and nothing carries them to the next run -- it re-derives
     // them from the walk.
@@ -1339,11 +1304,9 @@ void Envelope::RenderStage(
     while (sample_buffer != segment_end) {
       const uint32_t samples_left =
         static_cast<uint32_t>(segment_end - sample_buffer);
-      // WHOLE WORDS DO NOT LEAVE THE LOOP. Fetching the draws inside it is
-      // what removes the chunk loop, and the chunk loop was not bookkeeping:
-      // the render body pins twelve registers, so every one of them was
-      // SPILLED AND RELOADED at each word boundary, which cost more than the
-      // bookkeeping it replaced.
+      // WHOLE WORDS DO NOT LEAVE THE LOOP: the render body pins twelve
+      // registers, so a chunk loop around it SPILLS AND RELOADS every one of
+      // them at each word boundary -- more than the bookkeeping it saves.
       // THE REGISTER BUDGET IS EXACTLY FOURTEEN and this is at it: eleven
       // values, the draws word, and ip/lr as scratch. The loop's end test is
       // the one operand that does not get a register -- it is read from memory
