@@ -680,13 +680,13 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `SX` Exponential sine
 - Timbre: exponentiation amount
 
-#### `-s`, `-^`, `-e` Wavefolding transfer functions
+#### `-^`, `-s`, `-e` Wavefolding transfer functions
 - Timbre: folding amount (amplification of the carrier wave into the transfer function)
 - Shapes: 18 variants, grouped under 3 distinct transfer functions
-- Carrier wave (first symbol): sine (`S`), triangle (`^`), expo (`e`)
+- Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
-- Transfer function (second symbol): sine (`s`), triangle (`^`), expo (`e`)
-- Biased variants of transfer function (`ˢ`, `ˇ`, `ə`): offset the transfer function input by a quarter cycle, producing asymmetric harmonics
+- Transfer function (second symbol): triangle (`^`), sine (`s`), expo (`e`)
+- Biased variants of transfer function (`ˇ`, `ˢ`, `ə`): offset the transfer function input by a quarter cycle, producing asymmetric harmonics
 
 #### `FM` Frequency modulation
 - Timbre: modulation index

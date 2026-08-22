@@ -49,6 +49,12 @@ static const uint32_t kTransferPeakPhase = 1u << (32 - 2);
 // Biased variants add a DC bias (after amplification) to shift the operating
 // point on the transfer function, creating asymmetric harmonic content.
 static const uint32_t kTransferAsymmetricBias = kTransferPeakPhase / 2;  // 1/8 cycle -- max asymmetry
+// Order of the carrier and transfer curves within the transfer shape enum.
+enum TransferCurve {
+  TRANSFER_CURVE_TRI,
+  TRANSFER_CURVE_SINE,
+  TRANSFER_CURVE_EXP
+};
 
 /* static */
 Oscillator::RenderFn Oscillator::fn_table_[] = {
@@ -157,7 +163,7 @@ int16_t Oscillator::WarpTimbre(
 
   if (
     shape == OSC_SHAPE_EXP_SINE ||
-    (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
+    (shape >= OSC_SHAPE_TRI_THRU_TRI && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
     shape >= OSC_SHAPE_FM
   ) {
     // Soft-knee compression: unity gain at low timbre, asymptotes to
@@ -165,10 +171,10 @@ int16_t Oscillator::WarpTimbre(
     // t - t^2/(knee + t) to avoid 32-bit overflow.
     //
     // Crest factor compensates for carrier/transfer steepness:
-    // sine=1, tri=2 (derivative discontinuities), expo=3 (peak slope).
+    // tri=2 (derivative discontinuities), sine=1, expo=3 (peak slope).
     // Combined factor is carrier * transfer.
     uint8_t crest_factor;
-    if (shape >= OSC_SHAPE_SINE_THRU_SINE &&
+    if (shape >= OSC_SHAPE_TRI_THRU_TRI &&
         shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
       crest_factor = transfer_crest_factor_;
     } else if (shape == OSC_SHAPE_EXP_SINE) {
@@ -200,10 +206,10 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   shape_ = new_shape;
 
   transfer_crest_factor_ = 1;
-  if (new_shape >= OSC_SHAPE_SINE_THRU_SINE &&
+  if (new_shape >= OSC_SHAPE_TRI_THRU_TRI &&
       new_shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
-    static const uint8_t slope_factor[] = {1, 2, 3}; // sine, tri, expo
-    uint8_t index = new_shape - OSC_SHAPE_SINE_THRU_SINE;
+    static const uint8_t slope_factor[] = {2, 1, 3}; // tri, sine, expo
+    uint8_t index = new_shape - OSC_SHAPE_TRI_THRU_TRI;
     transfer_carrier_ = index % 3;
     transfer_function_ = index / 6;
     transfer_bias_ = (index % 6) >= 3 ? kTransferAsymmetricBias : 0;
@@ -211,8 +217,9 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
         * slope_factor[transfer_function_];
     // Halve max transfer gain when triangle is involved (carrier or transfer)
     // to compensate for its derivative discontinuities.
-    transfer_gain_shift_ = (transfer_carrier_ == 1 || transfer_function_ == 1)
-        ? 1 : 0;
+    transfer_gain_shift_ =
+        (transfer_carrier_ == TRANSFER_CURVE_TRI ||
+         transfer_function_ == TRANSFER_CURVE_TRI) ? 1 : 0;
   }
 }
 
@@ -580,9 +587,9 @@ void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_mix) {
   // shift and an xor is the wrong trade.
   // Both indices come from `% 3` and `/ 6`, so neither can leave [0, 2].
   const uint16_t* carrier_table =
-      carrier_index == 0 ? lut_sine_quadrant : lut_expo_quadrant;
+      carrier_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant : lut_expo_quadrant;
   const uint16_t* transfer_table =
-      transfer_index == 0 ? lut_sine_quadrant : lut_expo_quadrant;
+      transfer_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant : lut_expo_quadrant;
 
 #define TRANSFER_LOOP(CARRIER, TRANSFER) \
   RENDER_PERIODIC( \
@@ -592,15 +599,15 @@ void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_mix) {
     this_sample = TRANSFER; \
   )
 
-  if (carrier_index == 1) {
-    if (transfer_index == 1) {
+  if (carrier_index == TRANSFER_CURVE_TRI) {
+    if (transfer_index == TRANSFER_CURVE_TRI) {
       TRANSFER_LOOP(triangle(phase), triangle(transfer_phase))
     } else {
       TRANSFER_LOOP(triangle(phase),
                     quadrant_lookup(transfer_table, transfer_phase))
     }
   } else {
-    if (transfer_index == 1) {
+    if (transfer_index == TRANSFER_CURVE_TRI) {
       TRANSFER_LOOP(quadrant_lookup(carrier_table, phase),
                     triangle(transfer_phase))
     } else {
