@@ -95,10 +95,6 @@ class Envelope {
   void Rescale(int32_t numerator, int32_t denominator);
 
  private:
-  // Bound the slew time by the end of the walk's axis. Only the chiff's own
-  // one-pole runs on it, so with no chiff live there is nothing to bound.
-  void SetSlewTimeForStage();
-
   // the +/- the chiff puts on the slew input -- half the note's
   // ALLOWED range times the shrink, so it does not follow the realized level.
   int32_t ChiffInput_q30() const;

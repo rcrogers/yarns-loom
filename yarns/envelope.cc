@@ -604,9 +604,9 @@ const uint32_t kChiffLog2PerScaledRms_q5_27 = static_cast<uint32_t>(
 // at 1.0 near the hinge, so rather than deriving that crossing and testing for
 // it, let the reciprocal come out below 1.0 and take the larger. Where it does,
 // the input IS the level -- the no-op at and above the hinge.
-// THE RATE IS PASSED IN, not derived: every caller already has it (the run
-// derives it for the loop, NoteOn for SetSlewTimeForStage), and deriving it here
-// as well would be a second read of the same table at the same argument.
+// THE RATE IS PASSED IN, not derived: every caller already has it, and
+// deriving it here would be a second read of the same table at the same
+// argument.
 static int32_t ChiffWalkInputFraction_q30(
     uint32_t amount_q7_25, uint32_t slew_time_log2_q5_27, int32_t rate_q31_in) {
   const uint32_t level_q30 = static_cast<uint32_t>(
@@ -712,7 +712,6 @@ void Envelope::NoteOn(
         window_samples ? static_cast<uint32_t>(chiff_amount) << 25 : 0;
       if (!chiff_walk_start_q7_25_) {
         chiff_input_fraction_q30_ = 0;
-        SetSlewTimeForStage();
         break;
       }
       // The slow end of the amount axis, which the walk descends toward. It is
@@ -759,7 +758,6 @@ void Envelope::NoteOn(
       chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
         chiff_walk_start_q7_25_, slew_time_log2_q5_27_,
         SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_));
-      SetSlewTimeForStage();
       break;
     }
   }
@@ -817,16 +815,6 @@ static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
     __builtin_log(2.0) * 268435456.0 + 0.5);
   int64_t u_q32 = (static_cast<int64_t>(increment_q5_27) * kLn2_q28) >> 23;
   return static_cast<int32_t>(u_q32 - ((u_q32 * u_q32) >> 33));
-}
-
-void Envelope::SetSlewTimeForStage() {
-  if (chiff_walk_start_q7_25_) {
-    // A bound, nothing more: the slew may not be slower than the end of the
-    // walk's own axis. The run's writeback holds it to the same limit.
-    if (slew_time_log2_q5_27_ > chiff_slew_time_log2_end_q5_27_) {
-      slew_time_log2_q5_27_ = chiff_slew_time_log2_end_q5_27_;
-    }
-  }
 }
 
 // Update current stage and its state. The slew always moves from the current
@@ -931,9 +919,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // divide by the samples available, and take that step only if it is FASTER
   // than the one already running. A short release therefore compresses the
   // shrink; a long one changes nothing.
-  // Set the slew time for the new stage first: the release deadline below
-  // adjusts what this leaves.
-  SetSlewTimeForStage();
   if (stage == ENV_STAGE_RELEASE && stage_samples_left_ && chiff_walk_start_q7_25_) {
     // BOTH mechanisms get the same deadline. Speeding up only the chiff input
     // leaves the note ending with the slew still running at chiff speed, and
