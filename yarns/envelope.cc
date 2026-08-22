@@ -1385,14 +1385,12 @@ void Envelope::RenderStage(
     chiff_draws_ = draw_state;
     chiff_draws_left_ = static_cast<uint8_t>(draws_left);
     {
-      // The walk's end-of-run slew time becomes the next run's start.
-      uint32_t slew_time_log2_end = slew_time_log2_q5_27_
-        + slew_time_step_q5_27 * run_samples;
-      if (slew_time_log2_end > chiff_slew_time_log2_end_q5_27_) {
-        slew_time_log2_end = chiff_slew_time_log2_end_q5_27_;
-      }
-      // Nothing to reconcile: the next run derives its rate from this time.
-      slew_time_log2_q5_27_ = slew_time_log2_end;
+      // The walk's end-of-run slew time becomes the next run's start. No bound
+      // needed: the step is (end - start) / run_samples with the end taken from
+      // ChiffWalkSlewTimeLog2, which returns at or under the axis end, and the
+      // integer divide truncates -- so this lands at or under that end. The
+      // battery watches the invariant.
+      slew_time_log2_q5_27_ += slew_time_step_q5_27 * run_samples;
     }
 
     // value_q30_ is the realized envelope -- nominal plus the chiff -- and it
