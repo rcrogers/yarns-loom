@@ -311,6 +311,28 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   }
 }
 
+// THE CHIFF'S SLEW TIME NEVER PASSES THE END OF ITS AXIS. The walk's map
+// returns at or under the end, and the per-run writeback re-clamps to it, so
+// nothing should ever exceed it. Read from the engine, both fields, so this
+// cannot drift from whatever the engine believes the end to be.
+{
+  let worst = -1, worstAt = '';
+  for (const amount of [1, 24, 64, 96, 127]) {
+    for (const duration of [0, 40, 67, 90, 127]) {
+      const rows = H.run('basic '+amount+' '+duration+' slew_trace=1 seed='+SEED)
+        .toString().trim().split('\n');
+      for (const row of rows) {
+        const f = row.trim().split(/\s+/).map(Number);
+        if (f.length < 3) continue;
+        const over = f[0] - f[2];          // slew time minus the axis end
+        if (over > worst) { worst = over; worstAt = 'amount '+amount+' dur '+duration; }
+      }
+    }
+  }
+  check('chiff slew time stays inside its axis', worst <= 0,
+        'worst overshoot '+worst+' q5.27 at '+worstAt);
+}
+
 // THE VERDICT, AT THE END, AND IT EXITS NONZERO. It used to sit two thirds of
 // the way up, so 22 checks below it printed FAIL after the word "ALL PASS" and
 // left the status 0. Mutation-verified.

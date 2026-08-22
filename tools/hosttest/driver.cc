@@ -124,7 +124,11 @@ static void RenderMs(double ms) {
       continue;
     }
     if (g_slew_trace) {
-      printf("%u %d\n", env.slew_time_log2_q5_27_, env.chiff_input_fraction_q30_);
+      // Third field is the END OF THE AXIS -- the slowest slew this note's
+      // duration allows. The engine's own value, never re-derived here: a
+      // second derivation would be a second source of truth.
+      printf("%u %d %u\n", env.slew_time_log2_q5_27_,
+             env.chiff_input_fraction_q30_, env.chiff_slew_time_log2_end_q5_27_);
       continue;
     }
     if (g_chiff_state_trace) {
