@@ -45,48 +45,43 @@ using namespace stmlib;
 // and never writes it, so advancing it is three instructions with no load, no
 // store, and no buffer to index.
 namespace {
-  // Bits per sample. FOUR LEVELS OF DETAIL ARE NOT THE POINT -- SIXTEEN LEVELS
-  // ARE: a filter chasing a two-level input has a two-level output once its
-  // rate reaches 1, i.e. a square, so "unfiltered" and "overdriven" collide and
-  // the drive has nothing left to shape (the drive above the hinge then has nothing to shape). A multi-level input makes the unfiltered
-  // midpoint NOISE, which costs 4.8 dB of level against a square of the same
-  // peak -- and that 4.8 dB is exactly what the drive above the hinge reclaims.
-  // FOUR divides a word evenly, so a word holds a whole number of samples and
-  // the chunking below stays a shift and a mask. That is ASSERTED below, not
-  // just asserted here.
+  // Bits per draw. Sixteen levels, for two reasons:
+  //   - A two-level input's output IS a square once the rate reaches 1, so
+  //     "unfiltered" and "overdriven" collide and the drive has nothing to
+  //     shape. Sixteen makes the unfiltered midpoint noise instead, which sits
+  //     kChiffDrawRmsFractionOfMax below a square of the same peak -- and that
+  //     gap is what the drive reclaims.
+  //   - Four bits divide a 32-bit word evenly, so the chunking below stays a
+  //     shift and a mask. Asserted, not assumed.
   const uint32_t kChiffDrawBits = 4;
-  // THE WORD THE DRAWS ARE PACKED INTO. Everything below derives its width from
-  // this type, so changing the type moves the packing with it.
+  // The word the draws are packed into. xorshift32 pins the width at 32: its
+  // shift constants are only valid there.
   typedef uint32_t ChiffDrawWord;
-  const uint32_t kBitsPerByte = 8;
-  const uint32_t kChiffDrawBitsPerWord = sizeof(ChiffDrawWord) * kBitsPerByte;
-  const uint32_t kChiffDrawsPerWord = kChiffDrawBitsPerWord / kChiffDrawBits;
+  const uint32_t kChiffDrawsPerWord = 32 / kChiffDrawBits;
   // A DRAW MAY NOT STRADDLE A WORD. Both render loops extract one with a single
   // ubfx at a compile-time offset, so a draw width that did not divide the word
   // would silently read across the boundary. Pre-C++11 here, hence the negative
   // array size rather than static_assert.
   typedef char kChiffDrawBitsMustDivideTheWord[
-      (kChiffDrawBitsPerWord % kChiffDrawBits == 0) ? 1 : -1];
-  // THE LEVELS ARE THE ODD MULTIPLES of 1/kChiffDrawMax of the chiff input:
-  // level = 2 * draw - kChiffDrawMax for a draw in [0, kChiffDrawMax], so they
-  // run +/-1, +/-3 ... +/-kChiffDrawMax and the set is SYMMETRIC about zero.
+      (32 % kChiffDrawBits == 0) ? 1 : -1];
+  // THE LEVELS ARE THE ODD MULTIPLES of 1/kChiffDrawValueMax of the chiff input:
+  // level = 2 * draw - kChiffDrawValueMax for a draw in [0, kChiffDrawValueMax], so they
+  // run +/-1, +/-3 ... +/-kChiffDrawValueMax and the set is SYMMETRIC about zero.
   // Symmetry is not a nicety: the chiff must be zero-mean, and an asymmetric
   // set (what a plain sign-extended field gives, [-8, 7]) leaves a standing
   // offset of half a level -- ~1000 LSB at full scale -- and makes the
   // symmetric state clip asymmetric about the signal it is clipping.
   // Reading the draw as an odd multiple costs one add and one subtract.
-  const int32_t kChiffDrawMax = (1 << kChiffDrawBits) - 1;
-  // rms/peak of that set, Q16: sqrt((4n^2 - 1)/3) / (2n - 1) for
-  // n = 2^(kChiffDrawBits - 1) levels per side, i.e. sqrt(85)/15 at four bits.
-  // A square is 1.0 here; this is 4.2 dB below it, and that gap IS the drive's
-  // room above the hinge. Kurtosis is 1.79 against a square's 1.00.
-  // sqrt((4n^2 - 1)/3) / (2n - 1) for n levels per side, DERIVED from the
-  // draw width rather than fitted to it, so widening a draw moves it.
-  const uint32_t kChiffDrawLevelsPerSide = 1u << (kChiffDrawBits - 1);
-  const uint32_t kChiffDrawRmsPerPeak_q16 = static_cast<uint32_t>(
+  const int32_t kChiffDrawValueMax = (1 << kChiffDrawBits) - 1;
+  // The draw set's rms over its largest value, Q16: sqrt((4n^2 - 1)/3)/(2n - 1)
+  // for n magnitudes, i.e. sqrt(85)/15 = 0.6146 at four bits -- 4.23 dB below a
+  // square of the same peak, which is the room the drive has. DERIVED from the
+  // draw width, so widening a draw moves it.
+  const uint32_t kChiffNumDrawMagnitudes = 1u << (kChiffDrawBits - 1);
+  const uint32_t kChiffDrawRmsFractionOfMax_q16 = static_cast<uint32_t>(
     65536.0 * __builtin_sqrt(
-      (4.0 * kChiffDrawLevelsPerSide * kChiffDrawLevelsPerSide - 1.0) / 3.0)
-      / (2.0 * kChiffDrawLevelsPerSide - 1.0) + 0.5);
+      (4.0 * kChiffNumDrawMagnitudes * kChiffNumDrawMagnitudes - 1.0) / 3.0)
+      / (2.0 * kChiffNumDrawMagnitudes - 1.0) + 0.5);
   typedef char kChiffDrawsMustFillWholeWords[
       (kAudioBlockSize % kChiffDrawsPerWord == 0) ? 1 : -1];
 
@@ -332,7 +327,7 @@ static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 // -- and applying it at one alone moves the deadline by 0.7 octaves, which is
 // why it is folded in here rather than at either call site.
 const uint32_t kChiffScaledRmsPerRoot_q15_5 = static_cast<uint32_t>(
-  1.5 * (static_cast<double>(kChiffDrawRmsPerPeak_q16) / 65536.0)
+  1.5 * (static_cast<double>(kChiffDrawRmsFractionOfMax_q16) / 65536.0)
       * kOne_q15_5 + 0.5);
 
 // THE RATE IS PASSED IN, not squared out of the root. The caller already has
@@ -948,7 +943,7 @@ void Envelope::HandOffToNextStage(
 
 // ONE RENDERED SAMPLE, written once and used by every loop below so they
 // cannot drift: the whole-word loop and the head/tail loop, in both the ARM
-// asm and the C reference. `draw` is the raw 0..kChiffDrawMax field.
+// asm and the C reference. `draw` is the raw 0..kChiffDrawValueMax field.
 //
 // Two independent one-poles. The chiff's chases +/- the chiff input at its own
 // decaying rate; nominal chases the stage's aim at the STAGE's rate. The
@@ -1000,7 +995,7 @@ void Envelope::HandOffToNextStage(
   [decay] "r"(chiff_slew_rate_decay_q32), [qinput] "r"(chiff_input_per_level_q30),            \
   [clip] "r"(chiff_clip_threshold_q26), [srate] "r"(stage_slew_rate_q31),             \
   [cslope] "r"(combined_slope_q30),                                           \
-  [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),               \
+  [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawValueMax),               \
   [stshift] "i"((kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)), [sbits] "i"(kSampleBits),                  \
   [satbits] "i"(kOutputSaturateBits)
 
@@ -1012,7 +1007,7 @@ void Envelope::HandOffToNextStage(
      * term. Two instructions saved per one-pole. The dropped bit is a half   \
      * LSB per sample and cannot accumulate: at a one-pole's fixed point the  \
      * step is zero, so the error is bounded by the last step, not summed. */ \
-    int32_t delta_q30 = (2 * (draw) - kChiffDrawMax)                          \
+    int32_t delta_q30 = (2 * (draw) - kChiffDrawValueMax)                          \
       * chiff_input_per_level_q30 - chiff_slew_state_q26;                          \
     chiff_slew_state_q26 += 2 * static_cast<int32_t>(                              \
       (static_cast<int64_t>(delta_q30) * chiff_slew_rate_q31) >> 32);               \
@@ -1180,12 +1175,12 @@ void Envelope::RenderStage(
     const int32_t chiff_input_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(input_q30) * chiff_drive_q4_26_) >> 30);
     // ONE LEVEL'S WORTH is what the loop holds, so a draw read as an odd
-    // multiple (2 * draw - kChiffDrawMax) multiplies straight into the input it
+    // multiple (2 * draw - kChiffDrawValueMax) multiplies straight into the input it
     // chases. Dividing here rather than in the loop is what keeps the extreme
     // level EQUAL to the input, so |chiff| <= input still holds exactly and the
     // clip point below still binds where it says it does.
     // A constant divisor: GCC turns it into a multiply and a shift, once a run.
-    const int32_t chiff_input_per_level_q30 = chiff_input_q30 / kChiffDrawMax;
+    const int32_t chiff_input_per_level_q30 = chiff_input_q30 / kChiffDrawValueMax;
     // The chiff's rms times 2.121, as a level: the per-input figure
     // times the input. Dividing by 2^15.5 would be a 64-bit division, so
     // multiply by the same constant and shift 31 instead (46341^2 is 2^31 to
@@ -1334,7 +1329,7 @@ void Envelope::RenderStage(
           for (uint32_t i = 0; i < kChiffDrawsPerWord; ++i) {
             YARNS_CHIFF_RENDER_SAMPLE(
               static_cast<int32_t>((draws >> (i * kChiffDrawBits))
-                                   & kChiffDrawMax));
+                                   & kChiffDrawValueMax));
           }
           draws = NextChiffDraws(draws);
         }
@@ -1377,7 +1372,7 @@ void Envelope::RenderStage(
 #else
     while (sample_buffer != chunk_end) {
       // One draw, consumed low end first, matching the asm's UBFX then LSR.
-      YARNS_CHIFF_RENDER_SAMPLE(static_cast<int32_t>(draws & kChiffDrawMax));
+      YARNS_CHIFF_RENDER_SAMPLE(static_cast<int32_t>(draws & kChiffDrawValueMax));
       draws >>= kChiffDrawBits;
     }
 #endif
