@@ -145,7 +145,7 @@ const uint32_t kSlewTimesPerStageLog2_q5_27 = 2u << 27;
 
 // Caps how slow a slew may get, so the exp2 helper's `>> integer_part` stays
 // well-defined. 2^27 samples is ~50 minutes at 45 kHz, already absurd.
-const uint32_t kMaxSlewTimeLog2_q5_27 = 27u << 27;
+const uint32_t kMaxRepresentableSlewTimeLog2_q5_27 = 27u << 27;
 
 // THE CHIFF'S FASTEST SLEW TIME, and it is nearly ZERO on purpose: at rate 1.0
 // the one-pole's output IS its input, so the hinge is genuinely unfiltered.
@@ -160,7 +160,7 @@ const uint32_t kMaxSlewTimeLog2_q5_27 = 27u << 27;
 // two-level input the output is a square rather than noise, so unfiltered and
 // overdriven collapse into one signal and the drive has nothing left to shape.
 // 1/128 octave in Q5.27.
-const uint32_t kChiffFastestSlewTimeLog2_q5_27 = (1u << 27) / 128;
+const uint32_t kChiffMinSlewTimeLog2_q5_27 = (1u << 27) / 128;
 
 // chiff_amount lives in [0, kChiffAmountMax].
 // The fractional part of a Q5.27 slew time, i.e. everything below one octave.
@@ -215,8 +215,8 @@ const uint32_t kChiffDriveSpan_q5_27 = (5u << 27) / 2;  // 2.5 octaves
 // WHAT IT COSTS is the lowest corners the knob can reach, which is the
 // sub-audio wobble at the bottom of AMOUNT. That trade is the whole reason this
 // is a named constant and not a fixed choice.
-const uint32_t kChiffSlowEndOctaves = 11;
-const uint32_t kChiffSlowestSlewTimeLog2_q5_27 = kChiffSlowEndOctaves << 27;
+const uint32_t kChiffMaxSlewTimeOctaves = 11;
+const uint32_t kChiffMaxSlewTimeLog2_q5_27 = kChiffMaxSlewTimeOctaves << 27;
 // The clip point, and the mean's reserve, is this many of the chiff's own
 // sigma: 2 x the stored scaled rms, i.e. 2 * 3/sqrt(2). Sized so the clean end
 // clips essentially nothing while reserving no more than it must.
@@ -246,11 +246,11 @@ const uint32_t kStageAimOvershoot_u16 = static_cast<uint32_t>(
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 
 void Envelope::Init(int16_t zero_value_s16) {
-  phase_increment_u32_ = 0;
+  stage_phase_increment_u32_ = 0;
   stage_samples_left_ = 0;
-  stage_rate_q31_ = SlewRateFromSlewTime_q31(0);
-  slew_time_log2_q5_27_ = 0;
-  chiff_slew_time_log2_end_q5_27_ = 0;
+  stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(0);
+  chiff_slew_time_log2_q5_27_ = 0;
+  chiff_slew_time_at_amount_zero_q5_27_ = 0;
   chiff_input_fraction_q30_ = 0;
   chiff_input_full_q30_ = 0;
   chiff_drive_q30_ = 1 << (30 - kChiffStateShift);
@@ -307,7 +307,7 @@ int32_t Envelope::ChiffInput_q30() const {
 // clamped to [0, kMaxSlewTimeLog2]. The /4 is kSlewTimesPerStageLog2 -- four
 // slew times per stage. log2 as integer bits plus a linear mantissa fraction
 // (max error ~0.09, same approximation spirit as Trigger's).
-static uint32_t SlewTimeLog2FromDuration_q5_27(uint32_t samples) {
+static uint32_t ChiffSlewTimeFromSamples_q5_27(uint32_t samples) {
   if (samples < 4) return 0;  // the fastest slew, not a jump; see kMaxSlewRate
   uint32_t leading_zeros = __builtin_clz(samples);
   uint32_t integer_bits = 31 - leading_zeros;
@@ -316,7 +316,7 @@ static uint32_t SlewTimeLog2FromDuration_q5_27(uint32_t samples) {
   uint32_t log2_q5_27 = (integer_bits << 27) + mantissa_frac_q5_27;
   if (log2_q5_27 <= kSlewTimesPerStageLog2_q5_27) return 0;
   return std::min(
-      log2_q5_27 - kSlewTimesPerStageLog2_q5_27, kMaxSlewTimeLog2_q5_27);
+      log2_q5_27 - kSlewTimesPerStageLog2_q5_27, kMaxRepresentableSlewTimeLog2_q5_27);
 }
 
 // Slew rate 2^-slew_time, Q31; defined below. Uncapped, unlike
@@ -390,10 +390,10 @@ const uint32_t kChiffInaudibleAmplitude_q30 = static_cast<uint32_t>(
 // that a decaying chiff wears the timbre the amount it is passing through would
 // have as its onset, and that only holds if the decay reads the same curve the
 // knob does.
-static uint32_t ChiffWalkSlewTimeLog2_q5_27(
-    uint32_t amount_q7_25, uint32_t end_slew_time_log2_q5_27) {
-  if (end_slew_time_log2_q5_27 <= kChiffFastestSlewTimeLog2_q5_27) {
-    return end_slew_time_log2_q5_27;
+static uint32_t ChiffSlewTimeAtAmount_q5_27(
+    uint32_t amount_q7_25, uint32_t slew_time_at_amount_zero_q5_27) {
+  if (slew_time_at_amount_zero_q5_27 <= kChiffMinSlewTimeLog2_q5_27) {
+    return slew_time_at_amount_zero_q5_27;
   }
   // WHERE THE FILTER STOPS OPENING, which is NOT where the drive starts:
   // separating the two lets the corner reach its fast end before the drive
@@ -425,9 +425,9 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
   const uint32_t warp_linear_u16 = (rate_amount_q7_25 >> 9) / kChiffAmountMax;
   // lut_env_expo is above the straight line everywhere, so this only subtracts.
   const uint32_t warp_u16 = warp_expo_u16 - ((warp_expo_u16 - warp_linear_u16) >> 2);
-  return end_slew_time_log2_q5_27 - static_cast<uint32_t>(
+  return slew_time_at_amount_zero_q5_27 - static_cast<uint32_t>(
     (static_cast<uint64_t>(
-       end_slew_time_log2_q5_27 - kChiffFastestSlewTimeLog2_q5_27) * warp_u16)
+       slew_time_at_amount_zero_q5_27 - kChiffMinSlewTimeLog2_q5_27) * warp_u16)
     >> 16);
 }
 
@@ -711,10 +711,10 @@ void Envelope::NoteOn(
       // The slow end of the amount axis, which the walk descends toward. It is
       // computed first because the axis interpolates every amount FROM it.
       // Capped, so the axis stops depending on DURATION once the window is long
-      // enough for the cap to bind; see kChiffSlowEndOctaves.
-      chiff_slew_time_log2_end_q5_27_ = std::min(
-        SlewTimeLog2FromDuration_q5_27(window_samples),
-        kChiffSlowestSlewTimeLog2_q5_27);
+      // enough for the cap to bind; see kChiffMaxSlewTimeOctaves.
+      chiff_slew_time_at_amount_zero_q5_27_ = std::min(
+        ChiffSlewTimeFromSamples_q5_27(window_samples),
+        kChiffMaxSlewTimeLog2_q5_27);
       // The chiff input is HALF THE NOTE'S ALLOWED RANGE times the walk's
       // fraction. Half the range is the largest symmetric +/- that can ever fit
       // inside it -- a bound, not a tuned fraction. Sized from the ALLOWED
@@ -746,12 +746,12 @@ void Envelope::NoteOn(
       // value, and the onset is the loudest, most character-defining part of
       // the chiff -- a window can be shorter than one block, so a whole chiff
       // can live inside the block that would get it wrong.
-      slew_time_log2_q5_27_ = ChiffWalkSlewTimeLog2_q5_27(
-        chiff_amount_initial_q7_25_, chiff_slew_time_log2_end_q5_27_);
+      chiff_slew_time_log2_q5_27_ = ChiffSlewTimeAtAmount_q5_27(
+        chiff_amount_initial_q7_25_, chiff_slew_time_at_amount_zero_q5_27_);
       // AFTER the slew time, which the input is now solved against.
       chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
-        chiff_amount_initial_q7_25_, slew_time_log2_q5_27_,
-        SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_));
+        chiff_amount_initial_q7_25_, chiff_slew_time_log2_q5_27_,
+        SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_));
       break;
     }
   }
@@ -804,7 +804,7 @@ uint32_t ChiffAudibleSamples(uint32_t chiff_duration_increment_u32) {
 // (u = x*ln2): decay ~ u - u^2/2. Exact enough since `increment` is a tiny
 // per-sample shift step. Q32 (small positive) so the ramp step is a single
 // SMMUL: rate -= (rate * decay) >> 32.
-static inline int32_t DecayFromIncrement_q32(uint32_t increment_q5_27) {
+static inline int32_t ChiffSlewRateDecayFromTimeStep_q32(uint32_t increment_q5_27) {
   const uint32_t kLn2_q28 = static_cast<uint32_t>(
     __builtin_log(2.0) * 268435456.0 + 0.5);
   int64_t u_q32 = (static_cast<int64_t>(increment_q5_27) * kLn2_q28) >> 23;
@@ -826,19 +826,19 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // curve the slew traces); a hold's has converged to its target.
   if (!chiff_input_fraction_q30_) {
     stage_start_q30_ = nominal_q30_;
-  } else if (phase_increment_u32_) {
+  } else if (stage_phase_increment_u32_) {
     // Phase runs 0 -> ~UINT32_MAX across the stage, but a stage that ran to
     // completion leaves stage_samples_left_ == 0, which WRAPS the product back
     // to phase 0 -- aliasing "fully elapsed" onto "not started" and anchoring
     // the new stage at the old stage's START instead of where it landed. That
     // collapses the next stage's nominal value (and yanks the value with it)
     // whenever the chiff is still live at a handoff. Saturate instead.
-    uint32_t phase_u32 = stage_samples_left_
-      ? 0u - stage_samples_left_ * phase_increment_u32_
+    uint32_t stage_phase_u32 = stage_samples_left_
+      ? 0u - stage_samples_left_ * stage_phase_increment_u32_
       : UINT32_MAX;
     // No landing fraction: the slew aims past its target, so lut_env_expo's own
     // normalization already describes where the value is.
-    uint32_t expo_u16 = Interpolate824(lut_env_expo, phase_u32);
+    uint32_t expo_u16 = Interpolate824(lut_env_expo, stage_phase_u32);
     stage_start_q30_ += static_cast<int32_t>(
       (static_cast<int64_t>(target_q30_ - stage_start_q30_) * expo_u16) >> 16);
   } else {
@@ -847,14 +847,14 @@ void Envelope::Trigger(EnvelopeStage stage) {
   stage_ = stage;
   target_q30_ = stage_target_q30_[stage]; // Cache against new NoteOn
   switch (stage) {
-    case ENV_STAGE_ATTACK : phase_increment_u32_ = adsr_->attack_u32  ; break;
-    case ENV_STAGE_DECAY  : phase_increment_u32_ = adsr_->decay_u32   ; break;
-    case ENV_STAGE_RELEASE: phase_increment_u32_ = adsr_->release_u32 ; break;
+    case ENV_STAGE_ATTACK : stage_phase_increment_u32_ = adsr_->attack_u32  ; break;
+    case ENV_STAGE_DECAY  : stage_phase_increment_u32_ = adsr_->decay_u32   ; break;
+    case ENV_STAGE_RELEASE: stage_phase_increment_u32_ = adsr_->release_u32 ; break;
     default:
       // Hold stage: no countdown; keep slewing toward the target with the
       // rate inherited from the previous stage, converging asymptotically.
       // The chiff window, if live, keeps running on its own timetable.
-      phase_increment_u32_ = 0;
+      stage_phase_increment_u32_ = 0;
       return;
   }
 
@@ -863,13 +863,13 @@ void Envelope::Trigger(EnvelopeStage stage) {
     return Trigger(static_cast<EnvelopeStage>(stage + 1));
   }
 
-  if (!phase_increment_u32_) {
+  if (!stage_phase_increment_u32_) {
     // Degenerate zero increment: treat as a hold
     return;
   }
 
   // Nominal stage duration in samples
-  stage_samples_left_ = UINT32_MAX / phase_increment_u32_;
+  stage_samples_left_ = UINT32_MAX / stage_phase_increment_u32_;
 
   // Slew shift from stage duration: with N = 2^32 / increment samples and
   // k = 2^kSlewTimesPerStageLog2 time constants per stage, the time
@@ -877,16 +877,16 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // log2(N) = 32 - log2(increment); log2(increment) is approximated as
   // (31 - clz) plus a linear mantissa fraction (max error ~0.09, i.e. ~6%
   // of the time constant -- inaudible, and monotone in the increment).
-  uint8_t leading_zeros = __builtin_clz(phase_increment_u32_);
-  // Local, not state: stage_rate_q31_ below is its only reader.
+  uint8_t leading_zeros = __builtin_clz(stage_phase_increment_u32_);
+  // Local, not state: stage_slew_rate_q31_ below is its only reader.
   uint32_t stage_slew_time_log2_q5_27;
   if (leading_zeros >= 30) {
     // Increment <= 3: N >= ~2^30.5, whose shift saturates the cap anyway.
     // Computed separately because (leading_zeros + 1) << 27 would overflow.
-    stage_slew_time_log2_q5_27 = kMaxSlewTimeLog2_q5_27;
+    stage_slew_time_log2_q5_27 = kMaxRepresentableSlewTimeLog2_q5_27;
   } else {
     uint32_t mantissa_frac_q5_27 =
-        ((phase_increment_u32_ << leading_zeros) & 0x7FFFFFFFu) >> 4;
+        ((stage_phase_increment_u32_ << leading_zeros) & 0x7FFFFFFFu) >> 4;
     uint32_t log2_stage_samples_q5_27 =
         (static_cast<uint32_t>(leading_zeros + 1) << 27) - mantissa_frac_q5_27;
     stage_slew_time_log2_q5_27 = log2_stage_samples_q5_27 <= kSlewTimesPerStageLog2_q5_27
@@ -895,13 +895,13 @@ void Envelope::Trigger(EnvelopeStage stage) {
           // subtraction below is unsigned, so it needs this anyway.
       : std::min(
           log2_stage_samples_q5_27 - kSlewTimesPerStageLog2_q5_27,
-          kMaxSlewTimeLog2_q5_27
+          kMaxRepresentableSlewTimeLog2_q5_27
         );
   }
   // THE STAGE'S RATE CHANGES ONLY HERE, so this is where it is derived: it
   // costs an exp2 table interpolation, and deriving it per run instead would
   // pay that for a quantity that moves once per stage.
-  stage_rate_q31_ = SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27);
+  stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27);
   // A RELEASE CAN ONLY MAKE THE SHRINK FASTER, NEVER SLOWER. The chiff's own
   // schedule is sovereign -- it is what CHIFF DURATION dials -- but a note
   // that ends before the chiff has gone quiet would leave audible noise with
@@ -997,11 +997,11 @@ void Envelope::HandOffToNextStage(
 // disagree: the QEMU differential proves asm == C, not asm == asm.
 #define YARNS_CHIFF_ASM_STATE                                                 \
   [chiff] "+r"(chiff_state_q30), [gap] "+r"(nominal_gap_q30),                 \
-  [rate] "+r"(slew_rate_q31), [comb] "+r"(combined_q30),                      \
+  [rate] "+r"(chiff_slew_rate_q31), [comb] "+r"(combined_q30),                      \
   [buf] "+r"(sample_buffer), [draws] "+r"(draws)
 #define YARNS_CHIFF_ASM_INPUTS                                                \
-  [decay] "r"(decay_q32), [qinput] "r"(chiff_input_per_level_q30),            \
-  [clip] "r"(chiff_clip_scaled_q30), [srate] "r"(stage_rate_q31),             \
+  [decay] "r"(chiff_slew_rate_decay_q32), [qinput] "r"(chiff_input_per_level_q30),            \
+  [clip] "r"(chiff_clip_scaled_q30), [srate] "r"(stage_slew_rate_q31),             \
   [cslope] "r"(combined_slope_q30),                                           \
   [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawMax),               \
   [stshift] "i"(kChiffStateShift), [sbits] "i"(kSampleBits),                  \
@@ -1009,8 +1009,8 @@ void Envelope::HandOffToNextStage(
 
 #define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
   do {                                                                        \
-    slew_rate_q31 -= static_cast<int32_t>(                                    \
-      (static_cast<int64_t>(slew_rate_q31) * decay_q32) >> 32);               \
+    chiff_slew_rate_q31 -= static_cast<int32_t>(                                    \
+      (static_cast<int64_t>(chiff_slew_rate_q31) * chiff_slew_rate_decay_q32) >> 32);               \
     /* (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word  \
      * term. Two instructions saved per one-pole. The dropped bit is a half   \
      * LSB per sample and cannot accumulate: at a one-pole's fixed point the  \
@@ -1018,7 +1018,7 @@ void Envelope::HandOffToNextStage(
     int32_t delta_q30 = (2 * (draw) - kChiffDrawMax)                          \
       * chiff_input_per_level_q30 - chiff_state_q30;                          \
     chiff_state_q30 += 2 * static_cast<int32_t>(                              \
-      (static_cast<int64_t>(delta_q30) * slew_rate_q31) >> 32);               \
+      (static_cast<int64_t>(delta_q30) * chiff_slew_rate_q31) >> 32);               \
     /* The clipped value feeds back: a saturating one-pole, not a waveshaped  \
      * output. MEASURED to reach an exact square wave at 16x drive where      \
      * clipping the output only approaches one. */                            \
@@ -1028,7 +1028,7 @@ void Envelope::HandOffToNextStage(
       chiff_state_q30 = -chiff_clip_scaled_q30;                               \
     }                                                                         \
     nominal_gap_q30 -= 2 * static_cast<int32_t>(                              \
-      (static_cast<int64_t>(nominal_gap_q30) * stage_rate_q31) >> 32);        \
+      (static_cast<int64_t>(nominal_gap_q30) * stage_slew_rate_q31) >> 32);        \
     combined_q30 += combined_slope_q30;                                       \
     /* The asm's USAT: arithmetic shift by kSampleBits, then saturate         \
      * unsigned to kOutputSaturateBits. The upper bound is spelled from THAT   \
@@ -1058,7 +1058,7 @@ void Envelope::RenderStage(
   // One straight run, bounded by the block, the stage countdown, and (while
   // live) the chiff window. Whichever expires hands off or re-enters -- once,
   // not re-checked per sample.
-  const bool timed = phase_increment_u32_ != 0;
+  const bool timed = stage_phase_increment_u32_ != 0;
   // NO CHIFF ON/OFF ANYWHERE IN HERE. There is no window to be inside of and no
   // mode to be in: with AMOUNT 0 the walk's fraction is zero, so the chiff
   // input is zero, the slew stops slowing and the rate is the stage's -- every line
@@ -1097,7 +1097,7 @@ void Envelope::RenderStage(
     // writeback, and nothing carries them to the next run -- it re-derives
     // them from the walk.
     uint32_t slew_time_step_q5_27 = 0;
-    int32_t decay_q32 = 0;
+    int32_t chiff_slew_rate_decay_q32 = 0;
     // THE WALK, ADVANCED ONCE PER RUN. All three of the chiff's axes -- the
     // slew time, the drive and the input -- are read off the amount this run
     // sits at, by the maps the knob itself uses. The loop's per-sample rate
@@ -1128,18 +1128,18 @@ void Envelope::RenderStage(
       const uint32_t amount_q7_25 = chiff_amount_q7_25_;
       chiff_amount_q7_25_ =
         ChiffAmountAtPhase_q7_25(chiff_amount_initial_q7_25_, phase_end_q32);
-      const uint32_t slew_time_end_q5_27 = ChiffWalkSlewTimeLog2_q5_27(
-        chiff_amount_q7_25_, chiff_slew_time_log2_end_q5_27_);
+      const uint32_t slew_time_end_q5_27 = ChiffSlewTimeAtAmount_q5_27(
+        chiff_amount_q7_25_, chiff_slew_time_at_amount_zero_q5_27_);
       slew_time_step_q5_27 = run_samples
-        ? (slew_time_end_q5_27 - slew_time_log2_q5_27_) / run_samples : 0;
-      decay_q32 = DecayFromIncrement_q32(slew_time_step_q5_27);
+        ? (slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) / run_samples : 0;
+      chiff_slew_rate_decay_q32 = ChiffSlewRateDecayFromTimeStep_q32(slew_time_step_q5_27);
       chiff_drive_q30_ = ChiffWalkDrive_q30(amount_q7_25);
-      // Against THIS run's start slew time: slew_time_log2_q5_27_ still holds
+      // Against THIS run's start slew time: chiff_slew_time_log2_q5_27_ still holds
       // the run's start (the writeback to the end is at the loop's tail), and
       // amount_q7_25 is the start amount, so the pair is consistent.
       chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
-        amount_q7_25, slew_time_log2_q5_27_,
-        SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_));
+        amount_q7_25, chiff_slew_time_log2_q5_27_,
+        SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_));
       chiff_phase_q32_ = phase_end_q32;
     }
 
@@ -1153,11 +1153,11 @@ void Envelope::RenderStage(
     // accumulators for it: the loop decayed the rate per sample while the
     // writeback raised the time per run, with nothing holding the two to the
     // same schedule. Derived, the rate cannot drift from it.
-    uint32_t slew_time_q5_27 = slew_time_log2_q5_27_;
+    uint32_t slew_time_q5_27 = chiff_slew_time_log2_q5_27_;
     // UNCAPPED, unlike the stage rate below: see kChiffFastestSlewTimeLog2.
-    int32_t slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
+    int32_t chiff_slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
     const uint32_t chiff_scaled_rms_per_input_q15_5 =
-      ChiffScaledRmsPerInput_q15_5(slew_time_q5_27, slew_rate_q31);
+      ChiffScaledRmsPerInput_q15_5(slew_time_q5_27, chiff_slew_rate_q31);
     // NO SLEW-RATE FLOOR, and no chiff input rescale at it. Both existed
     // because ONE slew had to track the nominal level AND carry the chiff: if
     // the chiff's rate went below the stage's, the level stopped tracking. The
@@ -1175,7 +1175,7 @@ void Envelope::RenderStage(
     // NOT SMMLA, which would make each one-pole two instructions instead of
     // four: SMMLA is the ARMv7E-M DSP extension (Cortex-M4). The assembler
     // rejects it for -mcpu=cortex-m3, which is what this builds for.
-    const int32_t stage_rate_q31 = stage_rate_q31_;
+    const int32_t stage_slew_rate_q31 = stage_slew_rate_q31_;
     const int32_t input_q30 = ChiffInput_q30();
     // What the filter chases: the input driven by the character axis, in the
     // state's scaled-down domain. The drive already carries the 1/2^shift, so
@@ -1244,7 +1244,7 @@ void Envelope::RenderStage(
     int32_t nominal_end_q30 = nominal_q30;
     {
       const int32_t gap_q30 = stage_aim_q30 - nominal_q30;
-      int64_t step = ((static_cast<int64_t>(gap_q30) * stage_rate_q31) >> 31)
+      int64_t step = ((static_cast<int64_t>(gap_q30) * stage_slew_rate_q31) >> 31)
         * static_cast<int32_t>(run_samples);
       if ((gap_q30 >= 0 && step > gap_q30) || (gap_q30 < 0 && step < gap_q30)) {
         step = gap_q30;
@@ -1399,7 +1399,7 @@ void Envelope::RenderStage(
       // ChiffWalkSlewTimeLog2, which returns at or under the axis end, and the
       // integer divide truncates -- so this lands at or under that end. The
       // battery watches the invariant.
-      slew_time_log2_q5_27_ += slew_time_step_q5_27 * run_samples;
+      chiff_slew_time_log2_q5_27_ += slew_time_step_q5_27 * run_samples;
     }
 
     // value_q30_ is the realized envelope -- nominal plus the chiff -- and it

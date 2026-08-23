@@ -132,7 +132,7 @@ class Envelope {
   // Nonzero for timed stages (attack/decay/release); doubles as the source
   // of the stage's nominal sample count. Zero for hold stages
   // (sustain/dead), which slew toward their target indefinitely.
-  uint32_t phase_increment_u32_;
+  uint32_t stage_phase_increment_u32_;
 
   // Timed stages: samples remaining before handing off to the next stage.
   // The slew ends wherever it is at that point -- no snap to target; the
@@ -142,7 +142,7 @@ class Envelope {
   // 2^-(the stage's slew time), capped, Q31. Derived in Trigger rather than
   // per run: it moves only when the stage does, and deriving it costs an exp2
   // table interpolation.
-  int32_t stage_rate_q31_;
+  int32_t stage_slew_rate_q31_;
 
   // The character axis, as a multiplier on the chiff's filter input, ALREADY
   // DIVIDED by 2^kChiffStateShift: 1.0 at or below the hinge, rising to
@@ -216,8 +216,8 @@ class Envelope {
   // encodings; keeping both meant two accumulators that could drift apart.
   // RenderStage derives the rate once per run. Slew time is unsigned: a
   // magnitude, 0..kMaxSlewTimeLog2, whose max exceeds 2^31 as Q5.27.
-  uint32_t slew_time_log2_q5_27_;             // Current slew time, log2 samples
-  uint32_t chiff_slew_time_log2_end_q5_27_;   // Max slew time the chiff's own
+  uint32_t chiff_slew_time_log2_q5_27_;             // Current slew time, log2 samples
+  uint32_t chiff_slew_time_at_amount_zero_q5_27_;   // Max slew time the chiff's own
                                              // goes, from its duration
   // Where the current stage began. With the stage phase (closed-form from the
   // countdown) this anchors the nominal value -- start + (target - start) *

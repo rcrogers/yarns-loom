@@ -120,15 +120,15 @@ static void RenderMs(double ms) {
     env.RenderSamples(buffer, bias_target_q31);
     if (g_chiff_trace) {
       printf("%d %u %d\n", env.chiff_drive_q30_,
-             env.slew_time_log2_q5_27_, env.ChiffInput_q30());
+             env.chiff_slew_time_log2_q5_27_, env.ChiffInput_q30());
       continue;
     }
     if (g_slew_trace) {
       // Third field is the END OF THE AXIS -- the slowest slew this note's
       // duration allows. The engine's own value, never re-derived here: a
       // second derivation would be a second source of truth.
-      printf("%u %d %u\n", env.slew_time_log2_q5_27_,
-             env.chiff_input_fraction_q30_, env.chiff_slew_time_log2_end_q5_27_);
+      printf("%u %d %u\n", env.chiff_slew_time_log2_q5_27_,
+             env.chiff_input_fraction_q30_, env.chiff_slew_time_at_amount_zero_q5_27_);
       continue;
     }
     if (g_chiff_state_trace) {
