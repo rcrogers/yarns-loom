@@ -108,11 +108,13 @@ class Envelope {
   inline void AdjustBias(int32_t delta_q31) { bias_q31_ += delta_q31; }
 
   inline int16_t tremolo(uint16_t strength_u16) const {
-    int32_t relative_value_q15 = (value_q30_ - stage_target_q30_[ENV_STAGE_RELEASE]) >> (30 - 15);
+    int32_t relative_value_q15 = (value_without_bias_q1_30_ - stage_target_q1_30_[ENV_STAGE_RELEASE]) >> (30 - 15);
     return relative_value_q15 * -strength_u16 >> 16;
   }
 
-  inline int16_t value() const { return value_q30_ >> (30 - 15); }
+  inline int16_t value_without_bias() const {
+    return value_without_bias_q1_30_ >> (30 - 15);
+  }
   inline EnvelopeStage stage() const { return stage_; }
 
  private:
@@ -120,8 +122,8 @@ class Envelope {
 
   // Q30 in int32_t; the top integer bit is headroom for the slew delta
   // (target - value spans up to 2^31 - 1, still within int32).
-  int32_t stage_target_q30_[ENV_NUM_STAGES];
-  int32_t target_q30_, value_q30_;
+  int32_t stage_target_q1_30_[ENV_NUM_STAGES];
+  int32_t target_q1_30_, value_without_bias_q1_30_;
 
   // Q31 (full s32; no overshoot, slope is pre-scaled by block size).
   int32_t bias_q31_;
@@ -192,7 +194,7 @@ class Envelope {
   // out = saturate(mean + chiff), where mean = nominal + bias held one scaled
   // rms (2.121 sigma) inside each DAC rail so the chiff has room. The chiff is
   // ADDED to a mean that already has it, so it is never clipped, and the clamp
-  // does not feed back: value_q30_ is nominal + chiff and carries no bias.
+  // does not feed back: value_without_bias_q1_30_ is nominal + chiff and carries no bias.
   //
   // ONE THING DECAYS: THE AMOUNT. DURATION is a time-based modulation of it,
   // and the drive, the slew time and the input are all read off it by the maps
@@ -222,7 +224,7 @@ class Envelope {
   // Where the current stage began. With the stage phase (closed-form from the
   // countdown) this anchors the nominal value -- start + (target - start) *
   // lut_env_expo[phase] -- with no iterated level state.
-  int32_t stage_start_q30_;
+  int32_t stage_start_q1_30_;
   // How much of chiff_input_full_q30_ is in use, Q30 (1<<30 == all of it). Set
   // per run from the amount the walk has reached. Dimensionless, so unlike the
   // levels it does not rescale.
@@ -235,13 +237,13 @@ class Envelope {
   // zero is rendered offset by its floor. Held as state rather than derived in
   // RenderStage because a local stays live across the whole per-run path, and
   // GCC spills it there.
-  int32_t clamp_base_q30_;
+  int32_t value_floor_q1_30_;
   // THE THREE TERMS the output is built from. nominal is the chiff-free
   // envelope -- its own one-pole, running at the STAGE's rate, chasing the
   // stage's aim. chiff_state is the zero-mean filtered chiff input -- its own
   // one-pole, running at the CHIFF's rate. bias is the terminal add.
-  // value_q30_ is kept as nominal + chiff for the consumers that read it.
-  int32_t nominal_q30_;
+  // value_without_bias_q1_30_ is kept as nominal + chiff for the consumers that read it.
+  int32_t nominal_value_q1_30_;
   int32_t chiff_slew_state_q26_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);

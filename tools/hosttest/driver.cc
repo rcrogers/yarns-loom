@@ -79,7 +79,7 @@ static int g_block_counter = 0;
 // directly any more: state pinned at 0 under a positive bias recovers a
 // NEGATIVE value, and pinned at full under a negative bias recovers one above
 // the note's peak. The output samples cannot show this -- they are clamped and
-// look fine either way -- so this reads value_q30_ between blocks, which is
+// look fine either way -- so this reads value_without_bias_q1_30_ between blocks, which is
 // exactly where it is written.
 static int g_value_range = 0;
 // Print the envelope value per block instead of its extremes. If bias behaves
@@ -136,10 +136,10 @@ static void RenderMs(double ms) {
       printf("%d\n", env.chiff_slew_state_q26_ << 4 >> 15);
       continue;
     }
-    if (g_value_trace) { printf("%d\n", env.value_q30_); continue; }
+    if (g_value_trace) { printf("%d\n", env.value_without_bias_q1_30_); continue; }
     if (g_value_range) {
-      if (env.value_q30_ < g_value_min) g_value_min = env.value_q30_;
-      if (env.value_q30_ > g_value_max) g_value_max = env.value_q30_;
+      if (env.value_without_bias_q1_30_ < g_value_min) g_value_min = env.value_without_bias_q1_30_;
+      if (env.value_without_bias_q1_30_ > g_value_max) g_value_max = env.value_without_bias_q1_30_;
       continue;
     }
     for (size_t j = 0; j < kAudioBlockSize; ++j) {

@@ -357,7 +357,7 @@ class CVOutput {
     return volts_dac_code(0) - envelope_value();
   }
   inline uint16_t envelope_value() {
-    int32_t value = (envelope_bias_ + envelope_.value()) << 1;
+    int32_t value = (envelope_bias_ + envelope_.value_without_bias()) << 1;
     CONSTRAIN(value, 0, UINT16_MAX);
     return value;
    }
