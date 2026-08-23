@@ -119,7 +119,9 @@ static void RenderMs(double ms) {
     ++g_block_counter;
     env.RenderSamples(buffer, bias_target_q31);
     if (g_chiff_trace) {
-      printf("%d %u %d\n", env.chiff_drive_q4_26_,
+      // The amount, not the drive: drive, slew time and input are all pure
+      // functions of it, and it costs no member to expose.
+      printf("%u %u %d\n", env.chiff_amount_q7_25_,
              env.chiff_slew_time_log2_q5_27_, env.ChiffSlewInput_q30());
       continue;
     }

@@ -51,7 +51,7 @@ and were caught only by flashing.
 Output statistics cannot see the model. Level and centroid match equally for a
 clipped quiet signal and an unclipped loud one. Read the engine's own state:
 
-    test basic <amount> <duration> chiff_trace=1        drive, slew time, input
+    test basic <amount> <duration> chiff_trace=1        amount, slew time, input
     test basic <amount> <duration> chiff_state_trace=1  the chiff term alone
     test basic <amount> <duration> slew_trace=1         slew time per block
     test basic <amount> <duration> seed=<n>             select a realization

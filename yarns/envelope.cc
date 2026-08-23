@@ -230,7 +230,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_slew_time_at_amount_zero_q5_27_ = 0;
   chiff_slew_input_fraction_q30_ = 0;
   chiff_slew_input_max_q30_ = 0;
-  chiff_drive_q4_26_ = 1 << kChiffSlewStateFractionalBits;  // drive 1.0
   chiff_amount_initial_q7_25_ = 0;
   chiff_amount_q7_25_ = 0;
   chiff_phase_q32_ = 0;
@@ -1020,6 +1019,7 @@ void Envelope::RenderStage(
     //     the attack's velocity modulation.
     uint32_t slew_time_step_q5_27 = 0;
     int32_t chiff_slew_rate_decay_q32 = 0;
+    int32_t chiff_drive_q4_26 = 1 << kChiffSlewStateFractionalBits;  // 1.0
     // THE DECAY, ADVANCED ONCE PER RUN. All three of the chiff's axes -- the
     // slew time, the drive and the input -- are read off the amount this run
     // sits at, by the maps the knob itself uses. The loop's per-sample rate
@@ -1055,7 +1055,7 @@ void Envelope::RenderStage(
       slew_time_step_q5_27 = run_samples
         ? (slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) / run_samples : 0;
       chiff_slew_rate_decay_q32 = ChiffSlewRateDecayFromTimeStep_q32(slew_time_step_q5_27);
-      chiff_drive_q4_26_ = ChiffDriveAtAmount_q30(amount_q7_25);
+      chiff_drive_q4_26 = ChiffDriveAtAmount_q30(amount_q7_25);
       // Against THIS run's start slew time: chiff_slew_time_log2_q5_27_ still holds
       // the run's start (the writeback to the end is at the loop's tail), and
       // amount_q7_25 is the start amount, so the pair is consistent.
@@ -1096,7 +1096,7 @@ void Envelope::RenderStage(
     // state's scaled-down domain. The drive already carries the 1/2^shift, so
     // this cannot overflow however hard it is driven.
     const int32_t chiff_driven_slew_input_q26 = static_cast<int32_t>(
-      (static_cast<int64_t>(chiff_slew_input_q30) * chiff_drive_q4_26_) >> 30);
+      (static_cast<int64_t>(chiff_slew_input_q30) * chiff_drive_q4_26) >> 30);
     // ONE LEVEL'S WORTH is what the loop holds, so a draw read as an odd
     // multiple (2 * draw - kChiffDrawValueMax) multiplies straight into the input it
     // chases. Dividing here rather than in the loop is what keeps the extreme

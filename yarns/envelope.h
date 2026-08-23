@@ -146,12 +146,6 @@ class Envelope {
   // table interpolation.
   int32_t stage_slew_rate_q31_;
 
-  // The character axis, as a multiplier on the chiff's filter input, ALREADY
-  // DIVIDED by 2^(30 - 26): 1.0 at or below kChiffAmountForDriveBegin, rising to
-  // 2^kChiffDriveSpan at full amount. Pre-dividing is what keeps the driven
-  // input inside Q30, and it costs nothing because the state is carried
-  // scaled down to match.
-  int32_t chiff_drive_q4_26_;
 
   // This envelope's chiff draws: the current word, and how many of its fields
   // are still unspent. The word doubles as the xorshift state -- advancing it
