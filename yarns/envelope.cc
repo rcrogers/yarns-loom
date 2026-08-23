@@ -1040,8 +1040,13 @@ void Envelope::HandOffToNextStage(
      * unsigned to kOutputSaturateBits. The upper bound is spelled from THAT   \
      * constant and not as INT16_MAX -- the two are equal today, and a twin    \
      * that agrees only by coincidence is how the pair drifts. */              \
-    int32_t sample = (combined_q30 - nominal_gap_q30                          \
-      + (chiff_state_q30 << kChiffStateShift)) >> kSampleBits;                \
+    /* Reinterpreted as signed BEFORE the shift: the accumulator is modular,   \
+     * the shift must be arithmetic to match the asm's asr, and the true value  \
+     * of this sum is in int32 range. */                                        \
+    int32_t sample = static_cast<int32_t>(combined_q30                          \
+      - static_cast<uint32_t>(nominal_gap_q30)                                  \
+      + static_cast<uint32_t>(chiff_state_q30 << kChiffStateShift))             \
+      >> kSampleBits;                                                           \
     const int32_t kSampleMax = (1 << kOutputSaturateBits) - 1;                \
     if (sample < 0) sample = 0;                                               \
     if (sample > kSampleMax) sample = kSampleMax;                             \
@@ -1254,27 +1259,37 @@ void Envelope::RenderStage(
     }
     const int32_t bias_end_q30 =
       bias_q30 + bias_slope_q30 * static_cast<int32_t>(run_samples);
-    int32_t combined_q30, combined_end_q30;
+    // UNSIGNED, and it is a modular accumulator rather than a number: the aim
+    // plus a full-scale bias can exceed INT32_MAX (MEASURED 2.167e9 at a slow
+    // attack over a full range with the bias railed). Nothing reads it alone --
+    // every use subtracts the nominal gap first, and THAT is in range -- so the
+    // wrap cancels exactly. Unsigned makes the wrap defined instead of UB; the
+    // two places that reinterpret the result as signed cast back below.
+    uint32_t combined_q30, combined_end_q30;
     if (lo_q30 < hi_q30) {
-      combined_q30 = ClampOffset(nominal_q30 + bias_q30, lo_q30, hi_q30)
-        + bias_q30;
-      combined_end_q30 =
+      combined_q30 = static_cast<uint32_t>(
+        ClampOffset(nominal_q30 + bias_q30, lo_q30, hi_q30) + bias_q30);
+      combined_end_q30 = static_cast<uint32_t>(
         ClampOffset(nominal_end_q30 + bias_end_q30, lo_q30, hi_q30)
-        + bias_end_q30;
+        + bias_end_q30);
     } else {
       // Chiff wider than the rails: centre it and let the output saturate.
-      combined_q30 = (kValueMax_q30 >> 1) - nominal_q30;
-      combined_end_q30 = (kValueMax_q30 >> 1) - nominal_end_q30;
+      combined_q30 = static_cast<uint32_t>((kValueMax_q30 >> 1) - nominal_q30);
+      combined_end_q30 =
+        static_cast<uint32_t>((kValueMax_q30 >> 1) - nominal_end_q30);
     }
+    // The difference is small and signed; the wrap in the subtraction is what
+    // makes reinterpreting it as int32 give the true delta.
     const int32_t combined_slope_q30 = run_samples
-      ? (combined_end_q30 - combined_q30) / static_cast<int32_t>(run_samples)
+      ? static_cast<int32_t>(combined_end_q30 - combined_q30)
+          / static_cast<int32_t>(run_samples)
       : 0;
     // TRACK THE GAP TO THE AIM, NOT THE VALUE. A one-pole on the value is
     // sub/smull/add; the same motion on the gap is a pure geometric decay,
     // smull/sub -- the shape the rate decay above already uses. The aim folds
     // into the offset register, so the output is one subtract either way.
     int32_t nominal_gap_q30 = stage_aim_q30 - nominal_q30;
-    combined_q30 += stage_aim_q30;
+    combined_q30 += static_cast<uint32_t>(stage_aim_q30);
 
     // ONE WORD IS kChiffDrawsPerWord SAMPLES of draws, so a run can straddle a
     // word boundary. Chunk the loop there rather than regenerating per sample.
