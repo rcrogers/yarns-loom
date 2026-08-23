@@ -175,10 +175,10 @@ class Envelope {
   // Where the walk is, where it began, how fast it crosses, and the amount it
   // has reached. The amount is CARRIED rather than re-derived because this
   // run's end is next run's start -- one curve evaluation per run, not two.
-  uint32_t chiff_walk_start_q7_25_;
-  uint32_t chiff_walk_amount_q7_25_;
-  uint32_t chiff_walk_phase_q32_;
-  uint32_t chiff_walk_phase_step_q32_;
+  uint32_t chiff_amount_initial_q7_25_;
+  uint32_t chiff_amount_q7_25_;
+  uint32_t chiff_phase_q32_;
+  uint32_t chiff_phase_step_q32_;
 
   // CHIFF. A filtered noise added to the envelope, with its own filter state.
   //

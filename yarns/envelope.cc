@@ -132,11 +132,8 @@ inline int32_t ClampOffset(int32_t mean, int32_t lo, int32_t hi) {
 const uint32_t kOne_q15_5 = static_cast<uint32_t>(
   32768.0 * __builtin_sqrt(2.0) + 0.5);
 
-// What lut_env_expo lands on: yarns/resources/lookup_tables.py normalises the
-// table by its own maximum and scales to 65535, so its last entry IS this and
-// the curve reads as a fraction of it. Naming it is what lets the walk's
-// normalisation fold away (see ChiffWalkRemaining_u16) instead of dividing by
-// a value re-read from the table on every call.
+// lut_env_expo's last entry. Naming it lets ChiffAmountAtPhase_q7_25 normalise
+// by subtraction instead of dividing by a value re-read from the table.
 const uint32_t kEnvExpoFull_u16 = 65535;
 
 // Number of slew time constants a timed stage spans, as log2 in Q5.27.
@@ -257,10 +254,10 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_input_fraction_q30_ = 0;
   chiff_input_full_q30_ = 0;
   chiff_drive_q30_ = 1 << (30 - kChiffStateShift);
-  chiff_walk_start_q7_25_ = 0;
-  chiff_walk_amount_q7_25_ = 0;
-  chiff_walk_phase_q32_ = 0;
-  chiff_walk_phase_step_q32_ = 0;
+  chiff_amount_initial_q7_25_ = 0;
+  chiff_amount_q7_25_ = 0;
+  chiff_phase_q32_ = 0;
+  chiff_phase_step_q32_ = 0;
   // Bias is a CONTINUOUS control, not note state -- nothing else resets it,
   // because it must survive NoteOn/NoteOff to stay smooth. Init means "from a
   // known state", so it is reset HERE and only here: a reused envelope (the
@@ -383,7 +380,7 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 // costs no code and pulls in no libm -- verified by the image being byte
 // identical to the build that had the literal.
 const double kChiffInaudibleDbFs = -48.2;
-const uint32_t kChiffInaudibleLevel_q30 = static_cast<uint32_t>(
+const uint32_t kChiffInaudibleAmplitude_q30 = static_cast<uint32_t>(
   static_cast<double>(1u << 30)
     * __builtin_pow(10.0, kChiffInaudibleDbFs / 20.0) + 0.5);
 
@@ -447,21 +444,6 @@ static uint32_t ChiffWalkSlewTimeLog2_q5_27(
 // chiff converge rather than merely go quiet -- a one-pole reaches zero only if
 // what it chases reaches zero -- and it is the same construction the ADSR
 // stages use to land ON their target.
-static uint32_t ChiffWalkRemaining_u16(uint32_t phase_q32) {
-  const uint32_t index = phase_q32 >> 24;
-  const uint32_t frac_u8 = (phase_q32 >> 16) & 0xFF;
-  const uint32_t lo = lut_env_expo[index];
-  const uint32_t hi = index < LUT_ENV_EXPO_SIZE - 1
-    ? lut_env_expo[index + 1] : lut_env_expo[LUT_ENV_EXPO_SIZE - 1];
-  const uint32_t done_u16 = lo + (((hi - lo) * frac_u8) >> 8);
-  // THE NORMALISATION IS A SUBTRACT, NOT A DIVIDE. The table's last entry is
-  // kEnvExpoFull, and x * 2^16 / kEnvExpoFull is EXACTLY x for every x below
-  // that entry -- the quotient's fractional part only reaches 1 at the entry
-  // itself. So the general form, which read the table again and then divided
-  // by what it read, computes the complement and nothing else.
-  return done_u16 < kEnvExpoFull_u16
-    ? kEnvExpoFull_u16 - done_u16 + (done_u16 ? 0 : 1) : 0;
-}
 
 // A RECIPROCAL, NOT A DIVIDE: GCC 4.8 does not strength-reduce a 64-bit divide
 // by a constant, so the plain form calls __aeabi_uldivmod, which costs ~1.4 kB
@@ -488,11 +470,11 @@ const uint32_t kChiffAmountMaxRecip_q32 = static_cast<uint32_t>(
 // at which the chiff truly goes inaudible is HIGHER than the one solved for
 // here. The walk therefore passes the real threshold EARLY, and the symptom is
 // DURATION reading SHORT at the bottom of AMOUNT.
-static uint32_t ChiffWalkAudibleAmount_q7_25(
+static uint32_t ChiffInaudibleAmount_q7_25(
     uint32_t start_q7_25, int32_t input_full_q30) {
   if (input_full_q30 <= 0) return start_q7_25;
   const uint64_t numerator = static_cast<uint64_t>(kChiffAmountMax) << 25;
-  const uint64_t scaled = numerator * kChiffInaudibleLevel_q30;
+  const uint64_t scaled = numerator * kChiffInaudibleAmplitude_q30;
   const uint32_t amount_q7_25 = DivU64ByU32(
     static_cast<uint32_t>(scaled >> 32), static_cast<uint32_t>(scaled),
     static_cast<uint32_t>(input_full_q30));
@@ -512,41 +494,54 @@ static uint32_t ChiffWalkAudibleAmount_q7_25(
 // mean a walk at 1/65536 speed -- one that never crosses the axis, so the
 // chiff would never be scheduled to decay at all. The right answer is the
 // FASTEST walk, not the slowest.
-static uint32_t ChiffWalkAudiblePhase_u16(
+static uint32_t ChiffInaudiblePhase_u16(
     uint32_t start_q7_25, int32_t input_full_q30) {
   if (!start_q7_25) return 65536;
   const uint32_t target_q7_25 =
-    ChiffWalkAudibleAmount_q7_25(start_q7_25, input_full_q30);
+    ChiffInaudibleAmount_q7_25(start_q7_25, input_full_q30);
   // Inaudible before the note starts: cross the axis at full speed.
   if (target_q7_25 >= start_q7_25) return 65536;
   // The remaining fraction the walk has to reach, u16. DivU64ByU32, NOT a
   // plain 64/32: GCC 4.8 turns that into __aeabi_uldivmod, which drags in
   // ~1.4 kB of library code. target < start is guaranteed above, so the
   // quotient fits u16.
-  const uint32_t needed_u16 = DivU64ByU32(
+  const uint32_t inaudible_amount_fraction_u16 = DivU64ByU32(
     target_q7_25 >> 16, target_q7_25 << 16, start_q7_25);
   // lut_env_expo rises, so the remaining fraction falls: find the last index
   // whose remaining is still >= needed.
   uint32_t lo = 0, hi = LUT_ENV_EXPO_SIZE - 1;
   while (hi - lo > 1) {
     const uint32_t mid = (lo + hi) >> 1;
-    if (kEnvExpoFull_u16 - lut_env_expo[mid] >= needed_u16) lo = mid;
+    if (kEnvExpoFull_u16 - lut_env_expo[mid] >= inaudible_amount_fraction_u16) lo = mid;
     else hi = mid;
   }
   const uint32_t above = kEnvExpoFull_u16 - lut_env_expo[lo];
   const uint32_t below = kEnvExpoFull_u16 - lut_env_expo[hi];
   const uint32_t span = above - below;
   const uint32_t frac_u8 = span
-    ? (((above - needed_u16) << 8) / span) : 0;
-  // ChiffWalkRemaining reads the index from phase >> 24 and the fraction from
+    ? (((above - inaudible_amount_fraction_u16) << 8) / span) : 0;
+  // ChiffAmountAtPhase reads the index from phase >> 24 and the fraction from
   // the next byte down, so a u16 phase is exactly index:fraction.
   const uint32_t phase_u16 = (lo << 8) | (frac_u8 > 255 ? 255 : frac_u8);
   return phase_u16 ? phase_u16 : 1;
 }
 
-static uint32_t ChiffWalkAmount_q7_25(uint32_t start_q7_25, uint32_t phase_q32) {
+static uint32_t ChiffAmountAtPhase_q7_25(
+    uint32_t initial_q7_25, uint32_t phase_q32) {
+  const uint32_t index = phase_q32 >> 24;
+  const uint32_t frac_u8 = (phase_q32 >> 16) & 0xFF;
+  const uint32_t lo = lut_env_expo[index];
+  const uint32_t hi = index < LUT_ENV_EXPO_SIZE - 1
+    ? lut_env_expo[index + 1] : lut_env_expo[LUT_ENV_EXPO_SIZE - 1];
+  const uint32_t done_u16 = lo + (((hi - lo) * frac_u8) >> 8);
+  // THE NORMALISATION IS A SUBTRACT, NOT A DIVIDE. The table's last entry is
+  // kEnvExpoFull, and x * 2^16 / kEnvExpoFull is EXACTLY x for every x below
+  // that entry -- the quotient's fractional part only reaches 1 at the entry
+  // itself.
+  const uint32_t amount_fraction_u16 = done_u16 < kEnvExpoFull_u16
+    ? kEnvExpoFull_u16 - done_u16 + (done_u16 ? 0 : 1) : 0;
   return static_cast<uint32_t>(
-    (static_cast<uint64_t>(start_q7_25) * ChiffWalkRemaining_u16(phase_q32)) >> 16);
+    (static_cast<uint64_t>(initial_q7_25) * amount_fraction_u16) >> 16);
 }
 
 // OCTAVES OF DRIVE PER UNIT OF AMOUNT ABOVE THE HINGE, Q32 -- one constant
@@ -577,10 +572,9 @@ const uint32_t kChiffLog2PerScaledRms_q5_27 = static_cast<uint32_t>(
 // slew time is kChiffFastestSlewTimeLog2 there, the response clamps at 1.0,
 // and the expression collapses to amount / kChiffAmountMax.
 //
-// WHY LINEAR IN AMOUNT: it is the law the walk ALREADY ASSUMES, since
-// ChiffWalkRemaining decays the amount exponentially on the strength of level
-// being proportional to amount. Making that hold everywhere is what makes the
-// decay exponential in dB across the whole knob, which is L7.
+// WHY LINEAR IN AMOUNT: the decay already assumes it. ChiffAmountAtPhase falls
+// exponentially on the strength of the amplitude being proportional to the
+// amount, and that is what makes the decay exponential in dB across the knob.
 //
 // THE MIN IS A REAL BOUND, NOT DEFENSIVE: |chiff| <= input always, so an input
 // past full scale asks for an output that cannot occur. Where it binds, the
@@ -609,7 +603,7 @@ const uint32_t kChiffLog2PerScaledRms_q5_27 = static_cast<uint32_t>(
 // argument.
 static int32_t ChiffWalkInputFraction_q30(
     uint32_t amount_q7_25, uint32_t slew_time_log2_q5_27, int32_t rate_q31_in) {
-  const uint32_t level_q30 = static_cast<uint32_t>(
+  const uint32_t amount_fraction_q30 = static_cast<uint32_t>(
     (static_cast<uint64_t>(amount_q7_25) * kChiffAmountMaxRecip_q32) >> 32);
   // (1 - r/4 - r^2/32): ChiffScaledRmsPerInput's own correction, inverted to
   // the same two terms so the two agree where it matters most.
@@ -619,7 +613,7 @@ static int32_t ChiffWalkInputFraction_q30(
   const uint32_t correction_q31 =
     (1u << 31) - (rate_q31 >> 2) - (rate_sq_q31 >> 5);
   const uint32_t corrected_q30 = static_cast<uint32_t>(
-    (static_cast<uint64_t>(level_q30) * correction_q31) >> 31);
+    (static_cast<uint64_t>(amount_fraction_q30) * correction_q31) >> 31);
   const uint32_t g_q5_27 =
     (slew_time_log2_q5_27 >> 1) + kChiffLog2PerScaledRms_q5_27;
   const uint32_t shift = (g_q5_27 >> 27) + 1;
@@ -632,7 +626,7 @@ static int32_t ChiffWalkInputFraction_q30(
   const uint32_t ceiling_q30 = shift >= 31 ? 0u : ((1u << 30) >> shift);
   if (scaled_q30 >= ceiling_q30) return 1 << 30;
   const uint32_t input_q30 = scaled_q30 << shift;
-  return static_cast<int32_t>(input_q30 > level_q30 ? input_q30 : level_q30);
+  return static_cast<int32_t>(input_q30 > amount_fraction_q30 ? input_q30 : amount_fraction_q30);
 }
 
 static int32_t ChiffWalkDrive_q30(uint32_t amount_q7_25) {
@@ -708,9 +702,9 @@ void Envelope::NoteOn(
       // THE WALK'S START AMOUNT IS THE LIVENESS FLAG. It is zero exactly when
       // this note has no chiff, so no separate armed/disarmed state exists to
       // fall out of step with it.
-      chiff_walk_start_q7_25_ =
+      chiff_amount_initial_q7_25_ =
         window_samples ? static_cast<uint32_t>(chiff_amount) << 25 : 0;
-      if (!chiff_walk_start_q7_25_) {
+      if (!chiff_amount_initial_q7_25_) {
         chiff_input_fraction_q30_ = 0;
         break;
       }
@@ -738,13 +732,13 @@ void Envelope::NoteOn(
       // a note started at any amount decays THROUGH the states every smaller
       // amount has as its onset. Nothing else decays; there is nothing to keep
       // in step with anything.
-      chiff_walk_amount_q7_25_ = chiff_walk_start_q7_25_;
-      chiff_walk_phase_q32_ = 0;
+      chiff_amount_q7_25_ = chiff_amount_initial_q7_25_;
+      chiff_phase_q32_ = 0;
       // The walk crosses the AUDIBLE part of the axis in exactly the duration;
       // the inaudible remainder is where it finishes converging to nominal.
-      chiff_walk_phase_step_q32_ = static_cast<uint32_t>(
+      chiff_phase_step_q32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(0xFFFFFFFFu / window_samples)
-         * ChiffWalkAudiblePhase_u16(chiff_walk_start_q7_25_,
+         * ChiffInaudiblePhase_u16(chiff_amount_initial_q7_25_,
              chiff_input_full_q30_)) >> 16);
       // THE WALK'S FIRST STATE IS THE NOTE'S FIRST STATE: all three of the
       // chiff's numbers are read off the starting amount HERE. Leaving any of
@@ -753,10 +747,10 @@ void Envelope::NoteOn(
       // the chiff -- a window can be shorter than one block, so a whole chiff
       // can live inside the block that would get it wrong.
       slew_time_log2_q5_27_ = ChiffWalkSlewTimeLog2_q5_27(
-        chiff_walk_start_q7_25_, chiff_slew_time_log2_end_q5_27_);
+        chiff_amount_initial_q7_25_, chiff_slew_time_log2_end_q5_27_);
       // AFTER the slew time, which the input is now solved against.
       chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
-        chiff_walk_start_q7_25_, slew_time_log2_q5_27_,
+        chiff_amount_initial_q7_25_, slew_time_log2_q5_27_,
         SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_));
       break;
     }
@@ -919,7 +913,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // divide by the samples available, and take that step only if it is FASTER
   // than the one already running. A short release therefore compresses the
   // shrink; a long one changes nothing.
-  if (stage == ENV_STAGE_RELEASE && stage_samples_left_ && chiff_walk_start_q7_25_) {
+  if (stage == ENV_STAGE_RELEASE && stage_samples_left_ && chiff_amount_initial_q7_25_) {
     // BOTH mechanisms get the same deadline. Speeding up only the chiff input
     // leaves the note ending with the slew still running at chiff speed, and
     // the ~2% of the stage's span that a slew has left at handoff is then
@@ -929,10 +923,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
     // by the release's end. The slew time and the input follow on their own,
     // because both are read off the amount the walk has reached, and the next
     // run recomputes the slew step from scratch.
-    const uint32_t walk_step_q32 =
-      (0xFFFFFFFFu - chiff_walk_phase_q32_) / stage_samples_left_;
-    if (walk_step_q32 > chiff_walk_phase_step_q32_) {
-      chiff_walk_phase_step_q32_ = walk_step_q32;
+    const uint32_t phase_step_q32 =
+      (0xFFFFFFFFu - chiff_phase_q32_) / stage_samples_left_;
+    if (phase_step_q32 > chiff_phase_step_q32_) {
+      chiff_phase_step_q32_ = phase_step_q32;
     }
   }
 }
@@ -1111,7 +1105,7 @@ void Envelope::RenderStage(
     // ALL THREE, NOT TWO: leaving the input pinned while the other two walk
     // costs the pass-through invariant (up to 18 dB of input error) and stops
     // the chiff converging at all -- it parks instead of landing.
-    if (chiff_walk_start_q7_25_) {
+    if (chiff_amount_initial_q7_25_) {
       // SATURATE ON THE HIGH WORD AND ON THE ROOM LEFT, not on a 64-bit
       // compare: the product is the only wide quantity here, and asking
       // whether it fits is asking whether its high word is empty and its low
@@ -1119,23 +1113,23 @@ void Envelope::RenderStage(
       // build the sum in a register pair and compare it against a pair of
       // immediates -- a umlal, a umull and a two-word compare for a question
       // that one umull answers.
-      const uint32_t room_q32 = 0xFFFFFFFFu - chiff_walk_phase_q32_;
+      const uint32_t phase_remaining_q32 = 0xFFFFFFFFu - chiff_phase_q32_;
       const uint64_t advanced =
-        static_cast<uint64_t>(chiff_walk_phase_step_q32_) * run_samples;
+        static_cast<uint64_t>(chiff_phase_step_q32_) * run_samples;
       const uint32_t advanced_q32 = static_cast<uint32_t>(advanced);
       const uint32_t phase_end_q32 =
-        (advanced >> 32) == 0 && advanced_q32 < room_q32
-          ? chiff_walk_phase_q32_ + advanced_q32 : 0xFFFFFFFFu;
+        (advanced >> 32) == 0 && advanced_q32 < phase_remaining_q32
+          ? chiff_phase_q32_ + advanced_q32 : 0xFFFFFFFFu;
       // THIS RUN'S START IS LAST RUN'S END, for both the amount and the slew
       // time: the amount is a pure function of the phase and the phase is
       // continuous, so they are the same numbers. Only the END is derived, and
       // it is carried forward. One curve evaluation and one map evaluation per
       // run instead of two and two.
-      const uint32_t amount_q7_25 = chiff_walk_amount_q7_25_;
-      chiff_walk_amount_q7_25_ =
-        ChiffWalkAmount_q7_25(chiff_walk_start_q7_25_, phase_end_q32);
+      const uint32_t amount_q7_25 = chiff_amount_q7_25_;
+      chiff_amount_q7_25_ =
+        ChiffAmountAtPhase_q7_25(chiff_amount_initial_q7_25_, phase_end_q32);
       const uint32_t slew_time_end_q5_27 = ChiffWalkSlewTimeLog2_q5_27(
-        chiff_walk_amount_q7_25_, chiff_slew_time_log2_end_q5_27_);
+        chiff_amount_q7_25_, chiff_slew_time_log2_end_q5_27_);
       slew_time_step_q5_27 = run_samples
         ? (slew_time_end_q5_27 - slew_time_log2_q5_27_) / run_samples : 0;
       decay_q32 = DecayFromIncrement_q32(slew_time_step_q5_27);
@@ -1146,7 +1140,7 @@ void Envelope::RenderStage(
       chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
         amount_q7_25, slew_time_log2_q5_27_,
         SlewRateFromTimeLog2_q31(slew_time_log2_q5_27_));
-      chiff_walk_phase_q32_ = phase_end_q32;
+      chiff_phase_q32_ = phase_end_q32;
     }
 
     // The chiff's scaled rms, computed once here because the mean clamp needs
