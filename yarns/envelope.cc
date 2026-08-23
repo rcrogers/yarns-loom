@@ -137,6 +137,11 @@ const uint32_t kChiffMinSlewTimeLog2_q5_27 = (1u << 27) / 128;
 const uint32_t kSlewTimeFraction_q5_27 = (1u << 27) - 1;
 
 const uint32_t kChiffAmountBits = 7;
+// AMOUNT arrives at the resolution modulate_7_13 works in, six bits below the
+// knob step. Velocity modulation resolves to those bits, and discarding them
+// would quantise a modulated chiff to the 128 positions of the panel.
+const uint32_t kChiffAmountModulatedFractionalBits = 6;
+const uint32_t kChiffAmountFractionalBits = 25;
 const uint32_t kChiffAmountMax = (1u << kChiffAmountBits) - 1;
 
 // Same slew, same clip threshold, more signal at it -- and the clip saturates
@@ -510,7 +515,7 @@ static int32_t ChiffDriveAtAmount_q4_26(uint32_t amount_q7_25) {
 void Envelope::NoteOn(
   ADSR& adsr,
   int32_t min_target_s16, int32_t max_target_s16,
-  uint8_t chiff_amount, uint32_t chiff_audible_samples
+  uint16_t chiff_amount_q7_6, uint32_t chiff_audible_samples
 ) {
   adsr_ = &adsr;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
@@ -551,8 +556,10 @@ void Envelope::NoteOn(
       // A sizing reference: it sets how fast the amount falls.
       // The initial amount is the liveness flag -- zero exactly when this note
       // has no chiff, so liveness has one source.
-      chiff_amount_initial_q7_25_ =
-        chiff_audible_samples ? static_cast<uint32_t>(chiff_amount) << 25 : 0;
+      chiff_amount_initial_q7_25_ = chiff_audible_samples
+        ? static_cast<uint32_t>(chiff_amount_q7_6)
+            << (kChiffAmountFractionalBits - kChiffAmountModulatedFractionalBits)
+        : 0;
       if (!chiff_amount_initial_q7_25_) {
         chiff_slew_input_fraction_q30_ = 0;
         break;

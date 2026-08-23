@@ -136,12 +136,16 @@ int chiff_render(
 
   next_chiff_seed = seed ? seed : 0xCAFEBABEu;
 
-  // EXCITER AMT VEL MOD, mirroring Part::VoiceNoteOn: modulate_7_13 works in
-  // 13 bits, so shift back to the 7-bit 0..127 the amount is.
-  uint8_t modulated_chiff_amount = modulate_7_13(
+  // EXCITER AMT VEL MOD, mirroring Part::VoiceNoteOn: passed on at
+  // modulate_7_13's own resolution, clamped to the top of the setting range.
+  uint16_t modulated_chiff_amount_q7_6 = modulate_7_13(
       static_cast<uint8_t>(chiff_amount),
       static_cast<int8_t>(chiff_amount_mod_velocity),
-      static_cast<uint8_t>(velocity)) >> 6;
+      static_cast<uint8_t>(velocity));
+  const uint16_t kChiffAmountMax_q7_6 = 127 << 6;
+  if (modulated_chiff_amount_q7_6 > kChiffAmountMax_q7_6) {
+    modulated_chiff_amount_q7_6 = kChiffAmountMax_q7_6;
+  }
 
   // THE SPAN MUST FIT int16. NoteOn forms `int16_t scale_s16 = max - min`, so a
   // span outside [-32768, 32767] wraps and then min_target_q31 + scale * peak
@@ -169,7 +173,7 @@ int chiff_render(
                     static_cast<int8_t>(chiff_duration_mod_velocity),
                     static_cast<uint8_t>(velocity)) << (15 - 13)));
   envelope.NoteOn(adsr, min_target, max_target,
-                  modulated_chiff_amount, chiff_audible_samples);
+                  modulated_chiff_amount_q7_6, chiff_audible_samples);
   // The NOMINAL duration, for the sim's marker. Computed once in NoteOn and a
   // sizing reference only -- nothing counts it down and nothing happens when
   // it elapses -- so reading it once here is the whole story.
@@ -218,7 +222,7 @@ int chiff_render(
       adsr.release_u32 ? static_cast<int32_t>(UINT32_MAX / adsr.release_u32) : 0;
   meta[META_PEAK_U16] = adsr.peak_u16;
   meta[META_SUSTAIN_U16] = adsr.sustain_u16;
-  meta[META_CHIFF_AMOUNT] = modulated_chiff_amount;
+  meta[META_CHIFF_AMOUNT] = modulated_chiff_amount_q7_6 >> 6;
   // The Q30 rails in the rendered samples' units. SIGNED, not clipped to the
   // DAC range: a negative range's rails are genuinely below zero, and clipping
   // them reported 0 and drew the wrong line. Identical for any rail that is

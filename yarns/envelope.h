@@ -77,7 +77,7 @@ class Envelope {
   void NoteOn(
     ADSR& adsr,
     int32_t min_target_s16, int32_t max_target_s16,
-    uint8_t chiff_amount, uint32_t chiff_audible_samples
+    uint16_t chiff_amount_q7_6, uint32_t chiff_audible_samples
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
