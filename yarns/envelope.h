@@ -57,16 +57,16 @@ struct ADSR {
 // report the duration every measurement is expressed against.
 uint32_t ChiffAudibleSamples(uint32_t chiff_duration_increment_u32);
 
-// THE OUTPUT IS THREE INDEPENDENT TERMS:
-//   nominal  the chiff-free envelope; its own one-pole at the STAGE's rate,
+// The output is three independent terms:
+//   nominal  the chiff-free envelope; its own slew at the STAGE's rate,
 //            chasing the stage's adjusted target.
-//   chiff    its own one-pole at the CHIFF's rate, chasing one of sixteen
+//   chiff    its own slew at the CHIFF's rate, chasing one of sixteen
 //            levels spanning +/- the slew input, drawn per sample. Zero-mean.
-//   bias     added at the point of use, never integrated.
+//   bias     added at the point of use, outside both slews.
 //
 // out = saturate(mean + chiff), with mean = nominal + bias held two chiff
-// amplitudes inside each DAC rail, so the chiff always fits and the clamp never
-// feeds back. value_without_bias() is nominal + chiff, carrying no bias.
+// amplitudes inside each DAC rail. value_without_bias() is nominal + chiff,
+// carrying no bias.
 class Envelope {
  public:
   Envelope() { }
@@ -76,14 +76,11 @@ class Envelope {
   void NoteOff();
   void NoteOn(
     ADSR& adsr,
-    // Bounds stored as s32 but semantically s16
     int32_t min_target_s16, int32_t max_target_s16,
     uint8_t chiff_amount, uint32_t chiff_audible_samples
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
-  // ONE render path. The worst case is a live chiff, and at AMOUNT 0 the same
-  // loop degenerates by itself: a zero input holds the one-pole at zero.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
@@ -96,13 +93,6 @@ class Envelope {
   );
 
   void Rescale(int32_t numerator, int32_t denominator);
-
- private:
-  // The +/- the filter chases: half the note's ALLOWED range times the amount
-  // fraction, so it does not follow the value the note actually reaches.
-  int32_t ChiffSlewInput_q30() const;
-
- public:
 
   // Steps the bias directly, bypassing RenderSamples' per-block slew, so an
   // instantaneous jump (a pitch-driven timbre step at NoteOn) is not smoothed
@@ -122,9 +112,10 @@ class Envelope {
   inline EnvelopeStage stage() const { return stage_; }
 
  private:
+  int32_t ChiffSlewInput_q30() const;
+
   ADSR* adsr_;
 
-  // The integer bit is headroom for the slew delta, which spans up to 2^31 - 1.
   int32_t note_target_q30_[ENV_NUM_STAGES];
   int32_t stage_target_q30_, value_without_bias_q30_;
 
@@ -143,22 +134,17 @@ class Envelope {
   // next stage's slew continues seamlessly from the current value.
   uint32_t stage_samples_left_;
 
-  // 2^-(the stage's slew time), capped, Q31. Derived in Trigger rather than
-  // per run: it moves only when the stage does, and deriving it costs an exp2
-  // table interpolation.
+  // 2^-(the stage's slew time), capped, Q31. Derived in Trigger, where the
+  // stage moves; it costs an exp2 table interpolation.
   int32_t stage_slew_rate_q31_;
-
 
   // The current draw word and how many of its fields are unspent. The word IS
   // the xorshift state, and both carry across runs.
   uint32_t chiff_draws_;
   uint8_t chiff_draws_left_;
 
-  // DURATION IS A TIME-BASED MODULATION OF AMOUNT: the whole decay is this one
-  // quantity falling to zero, with the slew time, drive and input read off it
-  // by the maps the knob uses.
-  //   - Q7.25, not knob resolution: 128 steps across the duration would be
-  //     coarser than a run for a long chiff.
+  // DURATION is a time-based modulation of AMOUNT: the whole decay is this one
+  // quantity falling to zero.
   uint32_t chiff_amount_initial_q7_25_;
   uint32_t chiff_amount_q7_25_;
   uint32_t chiff_phase_q32_;
@@ -173,7 +159,7 @@ class Envelope {
   int32_t chiff_slew_state_q26_;
 
   // Where the current stage began. With the stage phase this anchors the
-  // nominal value in closed form, with no iterated level state.
+  // nominal value in closed form.
   int32_t stage_start_q30_;
   int32_t nominal_value_q30_;
   // min(note floor, 0). USAT bounds [0, 2^30), so a note reaching below zero is
