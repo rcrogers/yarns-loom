@@ -149,7 +149,7 @@ class Envelope {
   // 2^kChiffDriveSpan at full amount. Pre-dividing is what keeps the driven
   // input inside Q30, and it costs nothing because the state is carried
   // scaled down to match.
-  int32_t chiff_drive_q30_;
+  int32_t chiff_drive_q4_26_;
 
   // This envelope's chiff draws: the current word, and how many of its fields
   // are still unspent. The word doubles as the xorshift state -- advancing it
@@ -242,7 +242,7 @@ class Envelope {
   // one-pole, running at the CHIFF's rate. bias is the terminal add.
   // value_q30_ is kept as nominal + chiff for the consumers that read it.
   int32_t nominal_q30_;
-  int32_t chiff_state_q30_;
+  int32_t chiff_slew_state_q26_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

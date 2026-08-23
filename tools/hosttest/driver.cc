@@ -119,7 +119,7 @@ static void RenderMs(double ms) {
     ++g_block_counter;
     env.RenderSamples(buffer, bias_target_q31);
     if (g_chiff_trace) {
-      printf("%d %u %d\n", env.chiff_drive_q30_,
+      printf("%d %u %d\n", env.chiff_drive_q4_26_,
              env.chiff_slew_time_log2_q5_27_, env.ChiffInput_q30());
       continue;
     }
@@ -133,7 +133,7 @@ static void RenderMs(double ms) {
     }
     if (g_chiff_state_trace) {
       // scaled back up out of the loop's shifted domain, so it reads as s16
-      printf("%d\n", env.chiff_state_q30_ << 4 >> 15);
+      printf("%d\n", env.chiff_slew_state_q26_ << 4 >> 15);
       continue;
     }
     if (g_value_trace) { printf("%d\n", env.value_q30_); continue; }
