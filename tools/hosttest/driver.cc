@@ -166,9 +166,9 @@ int main(int argc, char** argv) {
   const char* scenario = argc > 1 ? argv[1] : "basic";
   uint8_t amount = argc > 2 ? atoi(argv[2]) : 96;
   uint8_t duration = argc > 3 ? atoi(argv[3]) : 67;
-  // CHIFF DURATION names a time on its own table now; NoteOn takes the
-  // increment, not the setting. Converted once here because the two are both
-  // integers and passing the wrong one converts silently.
+  // CHIFF DURATION names a time on its own table; NoteOn takes the increment,
+  // not the setting. Converted once here because the two are both integers and
+  // passing the wrong one converts silently.
   const uint32_t chiff_audible_samples = ChiffAudibleSamples(Interpolate88(
     lut_chiff_phase_increments, static_cast<uint16_t>(duration) << (15 - 7)));
   // KEY=VALUE flag so it never lands in the positional attack_ms slot.
@@ -206,12 +206,9 @@ int main(int argc, char** argv) {
   if (rel_set >= 0) adsr.release_u32 = IncFromSetting(rel_set);
   if (sus_set >= 0) adsr.sustain_u16 = SustainFromSetting(sus_set);
   if (OptInt(argc, argv, "report", 0)) {
-    // Diagnostic: the chiff window is now attack-relative, so read it back
-    // from the envelope after a NoteOn rather than any absolute table.
-    env.Init(0);
-    env.NoteOn(adsr, 0, 16383, amount, chiff_audible_samples);
     uint32_t attack_smp = adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 0;
-    // The ratio to the attack is now only a diagnostic, not the definition.
+    // The ratio to the attack is a reading convenience. The two are
+    // independent: nothing below the duration table depends on the attack.
     fprintf(stderr,
       "rate %u Hz, attack %u smp, chiff %u smp (%.3fx attack), "
       "decay %u smp, release %u smp\n",

@@ -102,7 +102,8 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   check('latehang release falls', relEnd < relStart*0.15,
     (relStart/FS_OUT*100).toFixed(1)+'% -> '+(relEnd/FS_OUT*100).toFixed(1)+'%');
 }
-// 8. No kink at window end (attack=249 -> attack-relative window ~= 580ms)
+// 8. No kink at window end (dur 49 -> ~588ms, as in 2; the long attack is
+// there so the kink would sit on a rising envelope, not a settled one)
 { const s=run('basic 96 49 attack=249'), d=run('basic 0 49 attack=249');
   let worst=0;
   for(let w=590;w<730;w+=10){ let m=0,n=0;

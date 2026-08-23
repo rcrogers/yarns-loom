@@ -1,14 +1,12 @@
 // Sweep the CHIFF DURATION setting 0..127 and report per-duration chiff
-// metrics. The user's decisive hardware finding is an overflow-like cliff at
-// duration 20 -> 21 (185 -> 199 samples), so the metrics are sampled inside
-// each setting's OWN window, not a fixed time span.
+// metrics. Every metric is sampled inside the setting's OWN window: the length
+// spans three orders of magnitude across the sweep, so a fixed span would
+// measure the onset at one end and silence at the other.
 const { execSync } = require('child_process');
 const H = require('./harness');
 
-// ASK THE ENGINE. This used to parse lut_chiff_duration_samples out of
-// resources.cc, a table the firmware stopped using when the window became
-// ATTACK-RELATIVE -- so the column was wrong by whatever the attack was, and a
-// flat table cannot express an attack-relative window at all.
+// ASK THE ENGINE, do not parse a table: one derivation of the length, and it
+// is the firmware's.
 function windowSamples(dur) {
   return H.chiffWindowSamples(`report ${amount} ${dur} ${opts}`);
 }
