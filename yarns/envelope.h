@@ -79,7 +79,7 @@ class Envelope {
   // Single render path: this is a realtime system, so the worst case (chiff
   // live) is the only case that matters; a lean chiff-off variant would only
   // optimize the best case. At AMOUNT 0 the same loop degenerates by itself:
-  // chiff input 0 -> the chiff one-pole holds 0 -> the scaled rms is 0, so the
+  // chiff input 0 -> the chiff one-pole holds 0 -> the amplitude is 0, so the
   // mean clamp is a no-op and the output is nominal + bias.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
@@ -96,7 +96,7 @@ class Envelope {
 
  private:
   // the +/- the chiff puts on the slew input -- half the note's
-  // ALLOWED range times the shrink, so it does not follow the realized level.
+  // ALLOWED range times the amount fraction, so it does not follow the realized value.
   int32_t ChiffSlewInput_q30() const;
 
  public:
@@ -147,7 +147,7 @@ class Envelope {
   int32_t stage_slew_rate_q31_;
 
   // The character axis, as a multiplier on the chiff's filter input, ALREADY
-  // DIVIDED by 2^kChiffStateShift: 1.0 at or below the hinge, rising to
+  // DIVIDED by 2^(30 - 26): 1.0 at or below kChiffAmountForDriveBegin, rising to
   // 2^kChiffDriveSpan at full amount. Pre-dividing is what keeps the driven
   // input inside Q30, and it costs nothing because the state is carried
   // scaled down to match.
@@ -160,23 +160,17 @@ class Envelope {
   uint32_t chiff_draws_;
   uint8_t chiff_draws_left_;
 
-  // THE AMOUNT WALK (prototype). DURATION is a time-based modulation of AMOUNT:
-  // the chiff's entire decay is this one quantity falling linearly to zero over
-  // the duration, with the rate and the drive read off it by the SAME maps the
-  // knob uses. So a chiff started at any amount decays THROUGH the states every
-  // smaller amount has as its onset.
-  // THE CLOCK IS dB, NOT KNOB UNITS. Walking the amount axis evenly plateaus
-  // then collapses, because the axis' top half spans a few dB while its bottom
-  // few units span tens. Smoothness over the duration outranks knob linearity.
-  // Level goes as 2^(-t/2) in the slew time, so the LINEAR SLEW-TIME RAMP
-  // already is the exponential decay; what the walk adds is the drive relaxing
-  // to 1 first, over the share of the duration its own dB earns.
-  // Q5.27, carried finely: at knob resolution this would step 128 times across
-  // the duration, coarser than a run for a long chiff -- the granularity
-  // already measured to kill the chirp.
-  // Where the walk is, where it began, how fast it crosses, and the amount it
-  // has reached. The amount is CARRIED rather than re-derived because this
-  // run's end is next run's start -- one curve evaluation per run, not two.
+  // DURATION IS A TIME-BASED MODULATION OF AMOUNT: the whole decay is this one
+  // quantity falling to zero, with the rate, the drive and the input read off
+  // it by the SAME maps the knob uses. So a chiff started at any amount decays
+  // THROUGH the states every smaller amount has as its onset.
+  //   - The clock is dB, not knob units: the axis' top half spans a few dB
+  //     while its bottom few units span tens, so stepping it evenly would
+  //     plateau then collapse.
+  //   - Q7.25, carried finely: at knob resolution this would step 128 times
+  //     across the duration, coarser than a run for a long chiff.
+  //   - The amount is carried rather than re-derived, because this run's end
+  //     is the next run's start.
   uint32_t chiff_amount_initial_q7_25_;
   uint32_t chiff_amount_q7_25_;
   uint32_t chiff_phase_q32_;
@@ -186,7 +180,7 @@ class Envelope {
   //
   // THREE TERMS MAKE THE OUTPUT, and they are independent:
   //   nominal   the envelope with no chiff. Its own one-pole, running at the
-  //             STAGE's rate, chasing the stage's aim.
+  //             STAGE's rate, chasing the stage's adjusted target.
   //   chiff     this. Its own one-pole, running at the CHIFF's rate, chasing
   //             one of sixteen levels spanning +/- the chiff input, drawn per
   //             sample from this envelope's own PRNG. Symmetric, so zero-mean.
@@ -202,22 +196,10 @@ class Envelope {
   // states every smaller amount has as its onset, and nothing has to be kept in
   // step with anything.
   //
-  // AMOUNT IS A LEVEL LAW. level = amount / kChiffAmountMax across the whole
-  // knob; the input is that divided by the filter's response, capped at full
-  // scale. At AMOUNT 0 the input is zero, the chiff one-pole holds zero, and
-  // the output is nominal + bias.
-  //
-  // NOTHING NAMES THE OUTPUT. What you hear is the input times the filter's
-  // response. KEEP THE CAUSAL CHAIN VISIBLE: an effect may cause a further
-  // effect, but an effect must not be promoted into a thing that acts on its
-  // own with the chain back to a mechanism lost. Every recurring confusion here
-  // was that -- input mistaken for output, or one effect assumed to have one
-  // cause.
-  //
-  // ONLY THE SLEW TIME IS STORED. The rate is 2^-slew_time, one quantity in two
-  // encodings; keeping both meant two accumulators that could drift apart.
-  // RenderStage derives the rate once per run. Slew time is unsigned: a
-  // magnitude, 0..kMaxSlewTimeLog2, whose max exceeds 2^31 as Q5.27.
+  // AMPLITUDE IS PROPORTIONAL TO AMOUNT, across the whole knob. The slew input
+  // is solved backwards from that, so the filter's own losses cancel. At
+  // AMOUNT 0 the input is zero, the one-pole holds zero, and the output is
+  // nominal + bias.
   uint32_t chiff_slew_time_log2_q5_27_;             // Current slew time, log2 samples
   uint32_t chiff_slew_time_at_amount_zero_q5_27_;   // Max slew time the chiff's own
                                              // goes, from its duration
@@ -226,7 +208,7 @@ class Envelope {
   // lut_env_expo[phase] -- with no iterated level state.
   int32_t stage_start_q1_30_;
   // How much of chiff_slew_input_max_q30_ is in use, Q30 (1<<30 == all of it). Set
-  // per run from the amount the walk has reached. Dimensionless, so unlike the
+  // per run from the amount reached. Dimensionless, so unlike the
   // levels it does not rescale.
   int32_t chiff_slew_input_fraction_q30_;
   // Half the note's ALLOWED range: the chiff input at fraction 1.0, i.e.
@@ -240,7 +222,7 @@ class Envelope {
   int32_t value_floor_q1_30_;
   // THE THREE TERMS the output is built from. nominal is the chiff-free
   // envelope -- its own one-pole, running at the STAGE's rate, chasing the
-  // stage's aim. chiff_state is the zero-mean filtered chiff input -- its own
+  // stage's adjusted target. The chiff's slew state is the zero-mean filtered chiff input -- its own
   // one-pole, running at the CHIFF's rate. bias is the terminal add.
   // value_without_bias_q1_30_ is kept as nominal + chiff for the consumers that read it.
   int32_t nominal_value_q1_30_;

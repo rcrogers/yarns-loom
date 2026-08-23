@@ -178,7 +178,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
 
 // THE CLIP PATH WITH A LIVE CHIFF; every clamp check above runs at AMOUNT 0.
 // The chiff must DITHER across the rail, not sit on it -- the mean clamp keeps
-// the mean one scaled rms inside each rail so the swing has room both ways.
+// the mean two chiff amplitudes inside each rail so the swing has room both ways.
 // MEASURED over 16 seeds: dwell 7..12 here, 449 with the bias alone.
 { const args='basic 127 90 attack_setting=40 decay_setting=64 sustain_setting=70 '+
              'release_setting=64 gate=1200 tail=800 bias_lfo=20000 bias_lfo_blocks=8';
@@ -264,7 +264,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
 // think about it, not outputting negative timbre values" -- so a below-zero
 // range with NO bias rendering zero is CORRECT, not the defect. What must hold
 // is that the downward travel survives a live chiff: the mean clamp holds the
-// mean one scaled rms inside each rail, and for a mean already near the floor
+// mean two chiff amplitudes inside each rail, and for a mean already near the floor
 // that pushes it UP, compressing the very motion the inversion is made of.
 // MEASURED here, trough over a 20000 bias: 8125 with the chiff off against
 // 11138 at AMOUNT 127 -- 37% of the travel lost at the top of the knob. The
