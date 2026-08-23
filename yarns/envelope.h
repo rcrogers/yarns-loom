@@ -32,12 +32,9 @@ namespace yarns {
 
 using namespace stmlib;
 
-// Envelope instances that can be live at once.
-//
-// It is stated here rather than derived because Envelope must not depend on
-// its owners (voice.h already includes this header). multi.h holds the layout
-// map, folds the true maximum out of it, and asserts that fold EQUALS this --
-// so the compiler, not a comment, is what keeps the number honest.
+// Envelope instances that can be live at once. Stated here because Envelope
+// must not depend on its owners; multi.h folds the true maximum out of the
+// layout map and asserts it EQUALS this.
 const size_t kMaxChiffEnvelopes = 13;
 
 enum EnvelopeStage {
@@ -56,11 +53,20 @@ struct ADSR {
 
 // CHIFF DURATION picks an increment off lut_chiff_phase_increments; this is
 // the reciprocal that turns it into the audible duration in samples. Called
-// ONCE per note, where the table is read -- every Envelope::NoteOn below takes
-// the samples. Not file-local because the harnesses report it: it is the
-// duration every measurement is expressed against.
+// once per note, where the table is read. Exported because the harnesses
+// report the duration every measurement is expressed against.
 uint32_t ChiffAudibleSamples(uint32_t chiff_duration_increment_u32);
 
+// THE OUTPUT IS THREE INDEPENDENT TERMS:
+//   nominal  the chiff-free envelope; its own one-pole at the STAGE's rate,
+//            chasing the stage's adjusted target.
+//   chiff    its own one-pole at the CHIFF's rate, chasing one of sixteen
+//            levels spanning +/- the slew input, drawn per sample. Zero-mean.
+//   bias     added at the point of use, never integrated.
+//
+// out = saturate(mean + chiff), with mean = nominal + bias held two chiff
+// amplitudes inside each DAC rail, so the chiff always fits and the clamp never
+// feeds back. value_without_bias() is nominal + chiff, carrying no bias.
 class Envelope {
  public:
   Envelope() { }
@@ -76,17 +82,14 @@ class Envelope {
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
-  // Single render path: this is a realtime system, so the worst case (chiff
-  // live) is the only case that matters; a lean chiff-off variant would only
-  // optimize the best case. At AMOUNT 0 the same loop degenerates by itself:
-  // chiff input 0 -> the chiff one-pole holds 0 -> the amplitude is 0, so the
-  // mean clamp is a no-op and the output is nominal + bias.
+  // ONE render path. The worst case is a live chiff, and at AMOUNT 0 the same
+  // loop degenerates by itself: a zero input holds the one-pole at zero.
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
   );
-  // Trimmed to the same arg footprint as RenderStage so the transition
-  // tail-call stays flat (sibling call, no per-transition frame).
+  // Same arg footprint as RenderStage, so the transition is a sibling call
+  // with no per-transition frame.
   void HandOffToNextStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31
@@ -95,20 +98,21 @@ class Envelope {
   void Rescale(int32_t numerator, int32_t denominator);
 
  private:
-  // the +/- the chiff puts on the slew input -- half the note's
-  // ALLOWED range times the amount fraction, so it does not follow the realized value.
+  // The +/- the filter chases: half the note's ALLOWED range times the amount
+  // fraction, so it does not follow the value the note actually reaches.
   int32_t ChiffSlewInput_q30() const;
 
  public:
 
-  // Step the running bias state directly, bypassing the per-block slew that
-  // RenderSamples applies. Used to absorb an instantaneous bias jump (e.g. a
-  // pitch-driven timbre step at NoteOn) so it doesn't get smoothed into an
-  // audible glide, while continuous (LFO) bias motion stays slewed.
+  // Steps the bias directly, bypassing RenderSamples' per-block slew, so an
+  // instantaneous jump (a pitch-driven timbre step at NoteOn) is not smoothed
+  // into an audible glide. Continuous LFO motion still goes through the slew.
   inline void AdjustBias(int32_t delta_q31) { bias_q31_ += delta_q31; }
 
   inline int16_t tremolo(uint16_t strength_u16) const {
-    int32_t relative_value_q15 = (value_without_bias_q1_30_ - stage_target_q1_30_[ENV_STAGE_RELEASE]) >> (30 - 15);
+    int32_t relative_value_q15 =
+      (value_without_bias_q1_30_
+       - stage_target_q1_30_[ENV_STAGE_RELEASE]) >> (30 - 15);
     return relative_value_q15 * -strength_u16 >> 16;
   }
 
@@ -147,78 +151,34 @@ class Envelope {
   int32_t stage_slew_rate_q31_;
 
 
-  // This envelope's chiff draws: the current word, and how many of its fields
-  // are still unspent. The word doubles as the xorshift state -- advancing it
-  // is three instructions with no memory traffic -- and both carry across runs,
-  // since a block may be rendered in several.
+  // The current draw word and how many of its fields are unspent. The word IS
+  // the xorshift state, and both carry across runs.
   uint32_t chiff_draws_;
   uint8_t chiff_draws_left_;
 
   // DURATION IS A TIME-BASED MODULATION OF AMOUNT: the whole decay is this one
-  // quantity falling to zero, with the rate, the drive and the input read off
-  // it by the SAME maps the knob uses. So a chiff started at any amount decays
-  // THROUGH the states every smaller amount has as its onset.
-  //   - The clock is dB, not knob units: the axis' top half spans a few dB
-  //     while its bottom few units span tens, so stepping it evenly would
-  //     plateau then collapse.
-  //   - Q7.25, carried finely: at knob resolution this would step 128 times
-  //     across the duration, coarser than a run for a long chiff.
-  //   - The amount is carried rather than re-derived, because this run's end
-  //     is the next run's start.
+  // quantity falling to zero, with the slew time, drive and input read off it
+  // by the maps the knob uses.
+  //   - Q7.25, not knob resolution: 128 steps across the duration would be
+  //     coarser than a run for a long chiff.
   uint32_t chiff_amount_initial_q7_25_;
   uint32_t chiff_amount_q7_25_;
   uint32_t chiff_phase_q32_;
   uint32_t chiff_phase_step_q32_;
 
-  // CHIFF. A filtered noise added to the envelope, with its own filter state.
-  //
-  // THREE TERMS MAKE THE OUTPUT, and they are independent:
-  //   nominal   the envelope with no chiff. Its own one-pole, running at the
-  //             STAGE's rate, chasing the stage's adjusted target.
-  //   chiff     this. Its own one-pole, running at the CHIFF's rate, chasing
-  //             one of sixteen levels spanning +/- the chiff input, drawn per
-  //             sample from this envelope's own PRNG. Symmetric, so zero-mean.
-  //   bias      added at the point of use and never integrated.
-  // out = saturate(mean + chiff), where mean = nominal + bias held one scaled
-  // rms (2.121 sigma) inside each DAC rail so the chiff has room. The chiff is
-  // ADDED to a mean that already has it, so it is never clipped, and the clamp
-  // does not feed back: value_without_bias_q1_30_ is nominal + chiff and carries no bias.
-  //
-  // ONE THING DECAYS: THE AMOUNT. DURATION is a time-based modulation of it,
-  // and the drive, the slew time and the input are all read off it by the maps
-  // the knob itself uses -- so a chiff started at any amount decays THROUGH the
-  // states every smaller amount has as its onset, and nothing has to be kept in
-  // step with anything.
-  //
-  // AMPLITUDE IS PROPORTIONAL TO AMOUNT, across the whole knob. The slew input
-  // is solved backwards from that, so the filter's own losses cancel. At
-  // AMOUNT 0 the input is zero, the one-pole holds zero, and the output is
-  // nominal + bias.
-  uint32_t chiff_slew_time_log2_q5_27_;             // Current slew time, log2 samples
-  uint32_t chiff_slew_time_at_amount_zero_q5_27_;   // Max slew time the chiff's own
-                                             // goes, from its duration
+  uint32_t chiff_slew_time_log2_q5_27_;
+  uint32_t chiff_slew_time_at_amount_zero_q5_27_;
   // Where the current stage began. With the stage phase (closed-form from the
   // countdown) this anchors the nominal value -- start + (target - start) *
   // lut_env_expo[phase] -- with no iterated level state.
   int32_t stage_start_q1_30_;
-  // How much of chiff_slew_input_max_q30_ is in use, Q30 (1<<30 == all of it). Set
-  // per run from the amount reached. Dimensionless, so unlike the
-  // levels it does not rescale.
+  // Dimensionless, so unlike the levels it does not rescale.
   int32_t chiff_slew_input_fraction_q30_;
-  // Half the note's ALLOWED range: the chiff input at fraction 1.0, i.e.
-  // before any decay. A LEVEL, so it rescales with the others.
+  // Half the note's ALLOWED range. A level, so it rescales with the others.
   int32_t chiff_slew_input_max_q30_;
-  // Where the render loop measures the value FROM. min(chiff_floor, 0): USAT
-  // bounds [0, 2^30) and nothing else, so a note whose range reaches below
-  // zero is rendered offset by its floor. Held as state rather than derived in
-  // RenderStage because a local stays live across the whole per-run path, and
-  // GCC spills it there.
+  // min(note floor, 0). USAT bounds [0, 2^30), so a note reaching below zero is
+  // rendered offset by its floor. State, not a local: GCC spills it there.
   int32_t value_floor_q1_30_;
-  // THE THREE TERMS the output is built from. nominal is the chiff-free
-  // envelope -- its own one-pole, running at the STAGE's rate, chasing the
-  // stage's adjusted target. The chiff's slew state is the zero-mean filtered chiff input -- its own
-  // one-pole, running at the CHIFF's rate. bias is the terminal add.
-  // value_without_bias_q1_30_ is kept as nominal + chiff for the consumers that read it.
   int32_t nominal_value_q1_30_;
   int32_t chiff_slew_state_q26_;
 
