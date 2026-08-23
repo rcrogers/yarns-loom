@@ -97,7 +97,7 @@ class Envelope {
  private:
   // the +/- the chiff puts on the slew input -- half the note's
   // ALLOWED range times the shrink, so it does not follow the realized level.
-  int32_t ChiffInput_q30() const;
+  int32_t ChiffSlewInput_q30() const;
 
  public:
 
@@ -225,13 +225,13 @@ class Envelope {
   // countdown) this anchors the nominal value -- start + (target - start) *
   // lut_env_expo[phase] -- with no iterated level state.
   int32_t stage_start_q1_30_;
-  // How much of chiff_input_full_q30_ is in use, Q30 (1<<30 == all of it). Set
+  // How much of chiff_slew_input_max_q30_ is in use, Q30 (1<<30 == all of it). Set
   // per run from the amount the walk has reached. Dimensionless, so unlike the
   // levels it does not rescale.
-  int32_t chiff_input_fraction_q30_;
+  int32_t chiff_slew_input_fraction_q30_;
   // Half the note's ALLOWED range: the chiff input at fraction 1.0, i.e.
   // before any decay. A LEVEL, so it rescales with the others.
-  int32_t chiff_input_full_q30_;
+  int32_t chiff_slew_input_max_q30_;
   // Where the render loop measures the value FROM. min(chiff_floor, 0): USAT
   // bounds [0, 2^30) and nothing else, so a note whose range reaches below
   // zero is rendered offset by its floor. Held as state rather than derived in

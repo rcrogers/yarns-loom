@@ -245,8 +245,8 @@ void Envelope::Init(int16_t zero_value_s16) {
   stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(0);
   chiff_slew_time_log2_q5_27_ = 0;
   chiff_slew_time_at_amount_zero_q5_27_ = 0;
-  chiff_input_fraction_q30_ = 0;
-  chiff_input_full_q30_ = 0;
+  chiff_slew_input_fraction_q30_ = 0;
+  chiff_slew_input_max_q30_ = 0;
   chiff_drive_q4_26_ = 1 << kChiffSlewStateFractionalBits;  // drive 1.0
   chiff_amount_initial_q7_25_ = 0;
   chiff_amount_q7_25_ = 0;
@@ -291,9 +291,9 @@ void Envelope::NoteOff() {
 // the chiff input's. Sizing the input from the room between the level and the
 // rails instead would notch the excursion at the peak, where that room
 // vanishes.
-int32_t Envelope::ChiffInput_q30() const {
+int32_t Envelope::ChiffSlewInput_q30() const {
   return static_cast<int32_t>(
-    (static_cast<int64_t>(chiff_input_full_q30_) * chiff_input_fraction_q30_)
+    (static_cast<int64_t>(chiff_slew_input_max_q30_) * chiff_slew_input_fraction_q30_)
     >> 30);
 }
 
@@ -471,13 +471,13 @@ const uint32_t kChiffAmountMaxRecip_q32 = static_cast<uint32_t>(
 // here. The walk therefore passes the real threshold EARLY, and the symptom is
 // DURATION reading SHORT at the bottom of AMOUNT.
 static uint32_t ChiffInaudibleAmount_q7_25(
-    uint32_t start_q7_25, int32_t input_full_q30) {
-  if (input_full_q30 <= 0) return start_q7_25;
+    uint32_t start_q7_25, int32_t slew_input_max_q30) {
+  if (slew_input_max_q30 <= 0) return start_q7_25;
   const uint64_t numerator = static_cast<uint64_t>(kChiffAmountMax) << 25;
   const uint64_t scaled = numerator * kChiffInaudibleAmplitude_q30;
   const uint32_t amount_q7_25 = DivU64ByU32(
     static_cast<uint32_t>(scaled >> 32), static_cast<uint32_t>(scaled),
-    static_cast<uint32_t>(input_full_q30));
+    static_cast<uint32_t>(slew_input_max_q30));
   return amount_q7_25 < start_q7_25 ? amount_q7_25 : start_q7_25;
 }
 
@@ -495,10 +495,10 @@ static uint32_t ChiffInaudibleAmount_q7_25(
 // chiff would never be scheduled to decay at all. The right answer is the
 // FASTEST walk, not the slowest.
 static uint32_t ChiffInaudiblePhase_u16(
-    uint32_t start_q7_25, int32_t input_full_q30) {
+    uint32_t start_q7_25, int32_t slew_input_max_q30) {
   if (!start_q7_25) return 65536;
   const uint32_t target_q7_25 =
-    ChiffInaudibleAmount_q7_25(start_q7_25, input_full_q30);
+    ChiffInaudibleAmount_q7_25(start_q7_25, slew_input_max_q30);
   // Inaudible before the note starts: cross the axis at full speed.
   if (target_q7_25 >= start_q7_25) return 65536;
   // The remaining fraction the walk has to reach, u16. DivU64ByU32, NOT a
@@ -601,7 +601,7 @@ const uint32_t kChiffAmplitudeGainCoefficientLog2_q5_27 = static_cast<uint32_t>(
 // THE RATE IS PASSED IN, not derived: every caller already has it, and
 // deriving it here would be a second read of the same table at the same
 // argument.
-static int32_t ChiffWalkInputFraction_q30(
+static int32_t ChiffSlewInputFractionAtAmount_q30(
     uint32_t amount_q7_25, uint32_t slew_time_log2_q5_27, int32_t rate_q31_in) {
   const uint32_t amount_fraction_q30 = static_cast<uint32_t>(
     (static_cast<uint64_t>(amount_q7_25) * kChiffAmountMaxRecip_q32) >> 32);
@@ -625,8 +625,8 @@ static int32_t ChiffWalkInputFraction_q30(
   // that cannot occur. Saturate in the shift's own terms, before it wraps.
   const uint32_t ceiling_q30 = shift >= 31 ? 0u : ((1u << 30) >> shift);
   if (scaled_q30 >= ceiling_q30) return 1 << 30;
-  const uint32_t input_q30 = scaled_q30 << shift;
-  return static_cast<int32_t>(input_q30 > amount_fraction_q30 ? input_q30 : amount_fraction_q30);
+  const uint32_t slew_input_fraction_q30 = scaled_q30 << shift;
+  return static_cast<int32_t>(slew_input_fraction_q30 > amount_fraction_q30 ? slew_input_fraction_q30 : amount_fraction_q30);
 }
 
 static int32_t ChiffDriveAtAmount_q30(uint32_t amount_q7_25) {
@@ -672,7 +672,7 @@ void Envelope::NoteOn(
   // half the note's ALLOWED range, in the stage targets' Q30
   // domain (a target is s16 << 15, so half the range is |scale| << 14). The
   // range may be numerically inverted, hence the magnitude.
-  chiff_input_full_q30_ =
+  chiff_slew_input_max_q30_ =
     (scale_s16 < 0 ? -static_cast<int32_t>(scale_s16) : scale_s16) << 14;
 
   switch (stage_) {
@@ -704,7 +704,7 @@ void Envelope::NoteOn(
       chiff_amount_initial_q7_25_ =
         window_samples ? static_cast<uint32_t>(chiff_amount) << 25 : 0;
       if (!chiff_amount_initial_q7_25_) {
-        chiff_input_fraction_q30_ = 0;
+        chiff_slew_input_fraction_q30_ = 0;
         break;
       }
       // The slow end of the amount axis, which the walk descends toward. It is
@@ -738,7 +738,7 @@ void Envelope::NoteOn(
       chiff_phase_step_q32_ = static_cast<uint32_t>(
         (static_cast<uint64_t>(0xFFFFFFFFu / window_samples)
          * ChiffInaudiblePhase_u16(chiff_amount_initial_q7_25_,
-             chiff_input_full_q30_)) >> 16);
+             chiff_slew_input_max_q30_)) >> 16);
       // THE WALK'S FIRST STATE IS THE NOTE'S FIRST STATE: all three of the
       // chiff's numbers are read off the starting amount HERE. Leaving any of
       // them to the first run means entering the note on the previous note's
@@ -748,7 +748,7 @@ void Envelope::NoteOn(
       chiff_slew_time_log2_q5_27_ = ChiffSlewTimeAtAmount_q5_27(
         chiff_amount_initial_q7_25_, chiff_slew_time_at_amount_zero_q5_27_);
       // AFTER the slew time, which the input is now solved against.
-      chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
+      chiff_slew_input_fraction_q30_ = ChiffSlewInputFractionAtAmount_q30(
         chiff_amount_initial_q7_25_, chiff_slew_time_log2_q5_27_,
         SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_));
       break;
@@ -823,7 +823,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // off the value is the exact classic slew, so use it directly; a timed
   // stage's nominal value is closed-form from its phase (the same lut_env_expo
   // curve the slew traces); a hold's has converged to its target.
-  if (!chiff_input_fraction_q30_) {
+  if (!chiff_slew_input_fraction_q30_) {
     stage_start_q1_30_ = nominal_value_q1_30_;
   } else if (stage_phase_increment_u32_) {
     // Phase runs 0 -> ~UINT32_MAX across the stage, but a stage that ran to
@@ -999,7 +999,7 @@ void Envelope::HandOffToNextStage(
   [rate] "+r"(chiff_slew_rate_q31), [comb] "+r"(target_with_all_bias_q30),                      \
   [buf] "+r"(sample_buffer), [draws] "+r"(draws)
 #define YARNS_CHIFF_ASM_INPUTS                                                \
-  [decay] "r"(chiff_slew_rate_decay_q32), [qinput] "r"(chiff_input_per_level_q30),            \
+  [decay] "r"(chiff_slew_rate_decay_q32), [qinput] "r"(chiff_driven_slew_input_scaled_q26),            \
   [clip] "r"(chiff_clip_threshold_q26), [srate] "r"(stage_slew_rate_q31),             \
   [cslope] "r"(target_with_all_bias_slope_q30),                                           \
   [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawValueMax),               \
@@ -1015,7 +1015,7 @@ void Envelope::HandOffToNextStage(
      * LSB per sample and cannot accumulate: at a one-pole's fixed point the  \
      * step is zero, so the error is bounded by the last step, not summed. */ \
     int32_t delta_q30 = (2 * (draw) - kChiffDrawValueMax)                          \
-      * chiff_input_per_level_q30 - chiff_slew_state_q26;                          \
+      * chiff_driven_slew_input_scaled_q26 - chiff_slew_state_q26;                          \
     chiff_slew_state_q26 += 2 * static_cast<int32_t>(                              \
       (static_cast<int64_t>(delta_q30) * chiff_slew_rate_q31) >> 32);               \
     /* The clipped value feeds back: a saturating one-pole, not a waveshaped  \
@@ -1136,7 +1136,7 @@ void Envelope::RenderStage(
       // Against THIS run's start slew time: chiff_slew_time_log2_q5_27_ still holds
       // the run's start (the writeback to the end is at the loop's tail), and
       // amount_q7_25 is the start amount, so the pair is consistent.
-      chiff_input_fraction_q30_ = ChiffWalkInputFraction_q30(
+      chiff_slew_input_fraction_q30_ = ChiffSlewInputFractionAtAmount_q30(
         amount_q7_25, chiff_slew_time_log2_q5_27_,
         SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_));
       chiff_phase_q32_ = phase_end_q32;
@@ -1175,19 +1175,19 @@ void Envelope::RenderStage(
     // four: SMMLA is the ARMv7E-M DSP extension (Cortex-M4). The assembler
     // rejects it for -mcpu=cortex-m3, which is what this builds for.
     const int32_t stage_slew_rate_q31 = stage_slew_rate_q31_;
-    const int32_t input_q30 = ChiffInput_q30();
+    const int32_t chiff_slew_input_q30 = ChiffSlewInput_q30();
     // What the filter chases: the input driven by the character axis, in the
     // state's scaled-down domain. The drive already carries the 1/2^shift, so
-    // this is <= input_q30 and cannot overflow however hard it is driven.
-    const int32_t chiff_input_q30 = static_cast<int32_t>(
-      (static_cast<int64_t>(input_q30) * chiff_drive_q4_26_) >> 30);
+    // this cannot overflow however hard it is driven.
+    const int32_t chiff_driven_slew_input_q26 = static_cast<int32_t>(
+      (static_cast<int64_t>(chiff_slew_input_q30) * chiff_drive_q4_26_) >> 30);
     // ONE LEVEL'S WORTH is what the loop holds, so a draw read as an odd
     // multiple (2 * draw - kChiffDrawValueMax) multiplies straight into the input it
     // chases. Dividing here rather than in the loop is what keeps the extreme
     // level EQUAL to the input, so |chiff| <= input still holds exactly and the
     // clip point below still binds where it says it does.
     // A constant divisor: GCC turns it into a multiply and a shift, once a run.
-    const int32_t chiff_input_per_level_q30 = chiff_input_q30 / kChiffDrawValueMax;
+    const int32_t chiff_driven_slew_input_scaled_q26 = chiff_driven_slew_input_q26 / kChiffDrawValueMax;
     // The chiff's rms times 2.121, as a level: the per-input figure
     // times the input. Dividing by 2^15.5 would be a 64-bit division, so
     // multiply by the same constant and shift 31 instead (46341^2 is 2^31 to
@@ -1204,7 +1204,7 @@ void Envelope::RenderStage(
     // product is what the CAPPED branch -- the worst case, and the one the
     // reserve has to be right for -- needs anyway.
     const int32_t chiff_amplitude_q30 = static_cast<int32_t>(
-      (static_cast<int64_t>(input_q30)
+      (static_cast<int64_t>(chiff_slew_input_q30)
        * (chiff_amplitude_gain_q31_sqrt * kOne_q31_sqrt)) >> 31);
     // THE CLIP THRESHOLD IS ALSO HOW FAR THE MEAN IS HELD FROM EACH RAIL, so
     // a clipped chiff always fits and no peak or bias can reach a rail.
@@ -1221,7 +1221,7 @@ void Envelope::RenderStage(
     //   - WHAT THE RESERVE SHOULD BE IS OPEN: larger trades attack level for
     //     rail headroom, and the trade is uncharacterised.
     const int32_t chiff_clip_threshold_q30 = std::min<int32_t>(
-      input_q30, chiff_amplitude_q30 << kChiffClipAmplitudesShift);
+      chiff_slew_input_q30, chiff_amplitude_q30 << kChiffClipAmplitudesShift);
     // The loop runs the state scaled down, so its clip point is too.
     const int32_t chiff_clip_threshold_q26 = chiff_clip_threshold_q30 >> (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits);
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
@@ -1501,10 +1501,10 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   value_without_bias_q1_30_ = ScaleRatio(value_without_bias_q1_30_, num, den);
   target_q1_30_ = ScaleRatio(target_q1_30_, num, den);
   stage_start_q1_30_ = ScaleRatio(stage_start_q1_30_, num, den);
-  // chiff_input_fraction_q30_ is DIMENSIONLESS -- a fraction of the full input
+  // chiff_slew_input_fraction_q30_ is DIMENSIONLESS -- a fraction of the full input
   // -- so it does not scale with the levels. The full input does, being half
   // the note's allowed range.
-  chiff_input_full_q30_ = ScaleRatio(chiff_input_full_q30_, num, den);
+  chiff_slew_input_max_q30_ = ScaleRatio(chiff_slew_input_max_q30_, num, den);
   // min(floor, 0) * s == min(floor * s, 0) for a non-negative s, so the offset
   // scales directly and the floor it came from need not be kept.
   value_floor_q1_30_ = ScaleRatio(value_floor_q1_30_, num, den);
