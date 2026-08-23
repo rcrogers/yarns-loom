@@ -124,15 +124,13 @@ class Envelope {
  private:
   ADSR* adsr_;
 
-  // Q30 in int32_t; the top integer bit is headroom for the slew delta
-  // (target - value spans up to 2^31 - 1, still within int32).
+  // The integer bit is headroom for the slew delta, which spans up to 2^31 - 1.
   int32_t stage_target_q1_30_[ENV_NUM_STAGES];
   int32_t target_q1_30_, value_without_bias_q1_30_;
 
-  // Q31 (full s32; no overshoot, slope is pre-scaled by block size).
+  // No overshoot: the slope is pre-scaled by the block size.
   int32_t bias_q31_;
 
-  // Current stage.
   EnvelopeStage stage_;
 
   // Nonzero for timed stages (attack/decay/release); doubles as the source
@@ -168,19 +166,19 @@ class Envelope {
 
   uint32_t chiff_slew_time_log2_q5_27_;
   uint32_t chiff_slew_time_at_amount_zero_q5_27_;
-  // Where the current stage began. With the stage phase (closed-form from the
-  // countdown) this anchors the nominal value -- start + (target - start) *
-  // lut_env_expo[phase] -- with no iterated level state.
-  int32_t stage_start_q1_30_;
-  // Dimensionless, so unlike the levels it does not rescale.
+  // Dimensionless, so Rescale leaves it alone.
   int32_t chiff_slew_input_fraction_q30_;
   // Half the note's ALLOWED range. A level, so it rescales with the others.
   int32_t chiff_slew_input_max_q30_;
+  int32_t chiff_slew_state_q26_;
+
+  // Where the current stage began. With the stage phase this anchors the
+  // nominal value in closed form, with no iterated level state.
+  int32_t stage_start_q1_30_;
+  int32_t nominal_value_q1_30_;
   // min(note floor, 0). USAT bounds [0, 2^30), so a note reaching below zero is
   // rendered offset by its floor. State, not a local: GCC spills it there.
   int32_t value_floor_q1_30_;
-  int32_t nominal_value_q1_30_;
-  int32_t chiff_slew_state_q26_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
