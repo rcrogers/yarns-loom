@@ -122,9 +122,10 @@ inline int32_t ClampOffset(int32_t mean, int32_t lo, int32_t hi) {
   return 0;
 }
 
-// 1.0 in Q15.5, the unit the chiff's scaled rms is carried in.
-// 1.0 in Q15.5: 2^15 * sqrt(2). __builtin_sqrt folds at compile time.
-const uint32_t kOne_q15_5 = static_cast<uint32_t>(
+// 1.0 in the _q31_sqrt format: scale 2^15.5 = sqrt(2^31), so two values
+// multiply and >> 31 to a plain product. NOT an int_frac Q format. Exact to
+// 3 ppm: 46341^2 = 2^31 + 4633.
+const uint32_t kOne_q31_sqrt = static_cast<uint32_t>(
   32768.0 * __builtin_sqrt(2.0) + 0.5);
 
 // lut_env_expo's last entry. Naming it lets ChiffAmountAtPhase_q7_25 normalise
@@ -210,10 +211,10 @@ const uint32_t kChiffDriveSpanOctaves_q5_27 = (5u << 27) / 2;  // 2.5 octaves
 // is a named constant and not a fixed choice.
 const uint32_t kChiffMaxSlewTimeOctaves = 11;
 const uint32_t kChiffMaxSlewTimeLog2_q5_27 = kChiffMaxSlewTimeOctaves << 27;
-// The clip point, and the mean's reserve, is this many of the chiff's own
-// sigma: 2 x the stored scaled rms, i.e. 2 * 3/sqrt(2). Sized so the clean end
-// clips essentially nothing while reserving no more than it must.
-const uint32_t kChiffClipRmsShift = 1;  // scaled rms << 1 == 3*sqrt(2) sigma
+// How many chiff amplitudes the clip threshold sits at. Sized so the undriven
+// end clips essentially nothing while holding the mean no further in than it
+// must.
+const uint32_t kChiffClipAmplitudesShift = 1;  // 2 amplitudes = 3*sqrt(2) sigma
 
 // A timed stage runs for kSlewTimesPerStageLog2 = 2, i.e. FOUR time constants,
 // and a one-pole covers only 1 - e^-4 = 98.17% of its span in that time. So the
@@ -316,26 +317,32 @@ static uint32_t ChiffSlewTimeFromSamples_q5_27(uint32_t samples) {
 // SlewRateFromSlewTime_q31, which a slew that has to track a target needs.
 static inline int32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27);
 
-// What one unit of 2^(-t/2) is worth, Q15.5. The 1.5 is 3/2 -- the 3 of the
-// exact form halved by its sqrt(1/4) at small rate -- and it CARRIES TWO
-// FACTORS so no call site has to.
-//   the 2.121 (3/sqrt(2)), so callers get scaled rms rather than sigma;
-//   kChiffDrawRmsPerPeak, because sigma = input * sqrt(r/(2-r)) reads `input`
-//   as the rms of what the filter chases, which is the PEAK only for a
-//   two-level input.
-// The second has TWO consumers -- the mean's reserve and the walk's threshold
-// -- and applying it at one alone moves the deadline by 0.7 octaves, which is
-// why it is folded in here rather than at either call site.
-const uint32_t kChiffScaledRmsPerRoot_q15_5 = static_cast<uint32_t>(
-  1.5 * (static_cast<double>(kChiffDrawRmsFractionOfMax_q16) / 65536.0)
-      * kOne_q15_5 + 0.5);
+// A noise signal has no amplitude. This is the rule that gives it one.
+const double kChiffAmplitudeSigmas = 3.0 / __builtin_sqrt(2.0);   // 2.121
+
+// sigma_out = input_rms * sqrt(r / (2 - r)). Split it: root = 2^(-t/2) = sqrt(r)
+// is applied per run, and this is the rest of the identity at small r. The
+// series in ChiffAmplitudeGainAtSlewTime -- 1 / sqrt(1 - r/2) -- restores it
+// exactly at all r.
+const double kChiffSigmaPerRootAtSmallRate = 1.0 / __builtin_sqrt(2.0);
+
+// The filter chases draw levels; their rms is this fraction of the largest.
+const double kChiffDrawRmsFraction =
+    static_cast<double>(kChiffDrawRmsFractionOfMax_q16) / 65536.0;
+
+// amplitude_gain = this * root * series. Both folded factors have two consumers
+// each, and applying one at a single site moves the inaudibility threshold by
+// 0.7 octaves.
+const uint32_t kChiffAmplitudeGainCoefficient_q31_sqrt = static_cast<uint32_t>(
+  kChiffAmplitudeSigmas * kChiffSigmaPerRootAtSmallRate * kChiffDrawRmsFraction
+      * kOne_q31_sqrt + 0.5);
 
 // THE RATE IS PASSED IN, not squared out of the root. The caller already has
 // 2^-t -- the loop runs on it -- and ChiffWalkInputFraction builds the INVERSE
 // of this same correction from it. Deriving r two different ways (a table read
 // here, root^2 there) let the forward and inverse series disagree in their low
 // bits for no reason.
-static uint32_t ChiffScaledRmsPerInput_q15_5(
+static uint32_t ChiffAmplitudeGainAtSlewTime_q31_sqrt(
     uint32_t slew_time_log2_q5_27, int32_t rate_q31_in) {
   // 2^(-t/2) in Q31, then into Q15.5 at kChiffScaledRmsPerRoot.
   const uint32_t root_q31 = static_cast<uint32_t>(
@@ -346,11 +353,11 @@ static uint32_t ChiffScaledRmsPerInput_q15_5(
   const uint64_t rate_sq_q31 = (rate_q31 * rate_q31) >> 31;
   const uint64_t correction_q31 =
     (1ull << 31) + (rate_q31 >> 2) + ((3ull * rate_sq_q31) >> 5);
-  const uint64_t uncorrected_q15_5 =
-    (static_cast<uint64_t>(root_q31) * kChiffScaledRmsPerRoot_q15_5) >> 31;
-  const uint32_t scaled_rms_q15_5 = static_cast<uint32_t>(
-    (uncorrected_q15_5 * correction_q31) >> 31);
-  return scaled_rms_q15_5 > kOne_q15_5 ? kOne_q15_5 : scaled_rms_q15_5;
+  const uint64_t uncorrected_q31_sqrt =
+    (static_cast<uint64_t>(root_q31) * kChiffAmplitudeGainCoefficient_q31_sqrt) >> 31;
+  const uint32_t amplitude_gain_q31_sqrt = static_cast<uint32_t>(
+    (uncorrected_q31_sqrt * correction_q31) >> 31);
+  return amplitude_gain_q31_sqrt > kOne_q31_sqrt ? kOne_q31_sqrt : amplitude_gain_q31_sqrt;
 }
 
 
@@ -549,9 +556,9 @@ const uint32_t kChiffDriveSlope_q32 = static_cast<uint32_t>(
 // What the reciprocal is worth at a slew time of zero, Q5.27. It is the WHOLE
 // stored quantity that gets inverted, not the 1.5: kChiffScaledRmsPerRoot also
 // carries kChiffDrawRmsPerPeak, and reading it as 1.5 alone costs 4.23 dB flat.
-const uint32_t kChiffLog2PerScaledRms_q5_27 = static_cast<uint32_t>(
-  -__builtin_log2(static_cast<double>(kChiffScaledRmsPerRoot_q15_5)
-                  / kOne_q15_5) * 134217728.0 + 0.5);
+const uint32_t kChiffAmplitudeGainCoefficientLog2_q5_27 = static_cast<uint32_t>(
+  -__builtin_log2(static_cast<double>(kChiffAmplitudeGainCoefficient_q31_sqrt)
+                  / kOne_q31_sqrt) * 134217728.0 + 0.5);
 
 // THE INPUT IS SOLVED FOR, NOT DIALLED. The knob promises a LEVEL, and the
 // level is the input times the filter's own response:
@@ -608,7 +615,7 @@ static int32_t ChiffWalkInputFraction_q30(
   const uint32_t corrected_q30 = static_cast<uint32_t>(
     (static_cast<uint64_t>(amount_fraction_q30) * correction_q31) >> 31);
   const uint32_t g_q5_27 =
-    (slew_time_log2_q5_27 >> 1) + kChiffLog2PerScaledRms_q5_27;
+    (slew_time_log2_q5_27 >> 1) + kChiffAmplitudeGainCoefficientLog2_q5_27;
   const uint32_t shift = (g_q5_27 >> 27) + 1;
   const uint32_t two_pow_f_q31 = static_cast<uint32_t>(SlewRateFromTimeLog2_q31(
     (1u << 27) - (g_q5_27 & kSlewTimeFraction_q5_27)));
@@ -1148,8 +1155,8 @@ void Envelope::RenderStage(
     uint32_t slew_time_q5_27 = chiff_slew_time_log2_q5_27_;
     // UNCAPPED, unlike the stage rate below: see kChiffFastestSlewTimeLog2.
     int32_t chiff_slew_rate_q31 = SlewRateFromTimeLog2_q31(slew_time_q5_27);
-    const uint32_t chiff_scaled_rms_per_input_q15_5 =
-      ChiffScaledRmsPerInput_q15_5(slew_time_q5_27, chiff_slew_rate_q31);
+    const uint32_t chiff_amplitude_gain_q31_sqrt =
+      ChiffAmplitudeGainAtSlewTime_q31_sqrt(slew_time_q5_27, chiff_slew_rate_q31);
     // NO SLEW-RATE FLOOR, and no chiff input rescale at it. Both existed
     // because ONE slew had to track the nominal level AND carry the chiff: if
     // the chiff's rate went below the stage's, the level stopped tracking. The
@@ -1196,40 +1203,30 @@ void Envelope::RenderStage(
     // than written as that min: the two differ only in rounding, and the
     // product is what the CAPPED branch -- the worst case, and the one the
     // reserve has to be right for -- needs anyway.
-    const int32_t chiff_scaled_rms_q30 = static_cast<int32_t>(
+    const int32_t chiff_amplitude_q30 = static_cast<int32_t>(
       (static_cast<int64_t>(input_q30)
-       * (chiff_scaled_rms_per_input_q15_5 * kOne_q15_5)) >> 31);
-    // THE MEAN IS HELD ONE SCALED RMS INSIDE EACH RAIL; the chiff is then
-    // added, so it has room by construction instead of being clipped.
-    //  - the clamp does NOT feed back, which is why bias may be part of it.
-    //    Steering the slew input instead waits on the integrator, which lags a
-    //    moving bias badly.
-    //  - only the OFFSET is ramped across the run. nominal is an exponential and
-    //    a linear chord over 64 samples is percent-level wrong on a 409-sample
-    //    stage -- envelope distortion, not rounding.
-    //  - EXCEPT when the chiff is wider than the rails allow (lo >= hi): the
-    //    clamp is abandoned and the mean is centred instead, so the chiff clips
-    //    both sides. A larger margin reaches that regime sooner.
-    //  - THE MARGIN IS 2.121 SIGMA, INHERITED RATHER THAN
-    //    CHOSEN: the factor applied here is one, and the 2.121 arrives folded
-    //    into what ChiffScaledRmsPerInput returns. What it SHOULD be is open --
-    //    a larger margin trades attack level for rail headroom, and the trade
-    //    has never been characterised across the setting space.
-    // THE CLIP POINT, WHICH IS ALSO THE MEAN'S RESERVE -- one number doing
-    // both jobs, so a bounded chiff always fits the headroom reserved for it
-    // and rail clipping cannot happen at any peak or bias.
-    // min() because the peak the chiff can reach is the SMALLER of two bounds:
-    // its input (the state is a convex combination of +/- input, so it can
-    // never exceed it) and its tail (3*sqrt(2) sigma). The input bound binds at
-    // fast rates and the tail bound when slow. Reserving the tail bound at fast
-    // rates would over-reserve badly, exactly where the chiff is loudest.
-    const int32_t chiff_clip_q30 = std::min<int32_t>(
-      input_q30, chiff_scaled_rms_q30 << kChiffClipRmsShift);
+       * (chiff_amplitude_gain_q31_sqrt * kOne_q31_sqrt)) >> 31);
+    // THE CLIP THRESHOLD IS ALSO HOW FAR THE MEAN IS HELD FROM EACH RAIL, so
+    // a clipped chiff always fits and no peak or bias can reach a rail.
+    //   - It is 2 amplitudes, i.e. 4.24 sigma, not 2.121.
+    //   - min() because the chiff is bounded by the SMALLER of its slew input
+    //     (the state is a convex combination of +/- it) and its own tail. The
+    //     input binds when fast, the tail when slow.
+    //   - The clamp does NOT feed back, which is why bias may be part of it.
+    //   - Only the offset is ramped across the run: nominal is an exponential,
+    //     and a linear chord over 64 samples is percent-level wrong on a
+    //     409-sample stage.
+    //   - When the chiff is wider than the rails allow (lo >= hi) the clamp is
+    //     abandoned and the mean centred, so it clips both sides.
+    //   - WHAT THE RESERVE SHOULD BE IS OPEN: larger trades attack level for
+    //     rail headroom, and the trade is uncharacterised.
+    const int32_t chiff_clip_threshold_q30 = std::min<int32_t>(
+      input_q30, chiff_amplitude_q30 << kChiffClipAmplitudesShift);
     // The loop runs the state scaled down, so its clip point is too.
-    const int32_t chiff_clip_threshold_q26 = chiff_clip_q30 >> (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits);
+    const int32_t chiff_clip_threshold_q26 = chiff_clip_threshold_q30 >> (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits);
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    const int32_t lo_q30 = chiff_clip_q30;
-    const int32_t hi_q30 = kValueMax_q30 - chiff_clip_q30;
+    const int32_t lo_q30 = chiff_clip_threshold_q30;
+    const int32_t hi_q30 = kValueMax_q30 - chiff_clip_threshold_q30;
     // Where nominal reaches by the run's end, for the offset's far endpoint.
     // Approximate (linear in rate * run_samples) -- it only sizes an offset
     // that is itself an approximation, and it never touches nominal's own path.
