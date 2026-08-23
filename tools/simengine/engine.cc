@@ -225,12 +225,12 @@ int chiff_render(
   // already inside the range.
   // The note's ceiling, computed here rather than stored: the firmware never
   // read it, so it is no longer a member.
-  meta[META_CEILING] = std::max(envelope.stage_target_q1_30_[ENV_STAGE_RELEASE],
-      std::max(envelope.stage_target_q1_30_[ENV_STAGE_ATTACK],
-               envelope.stage_target_q1_30_[ENV_STAGE_SUSTAIN])) >> 15;
-  meta[META_FLOOR] = std::min(envelope.stage_target_q1_30_[ENV_STAGE_RELEASE],
-      std::min(envelope.stage_target_q1_30_[ENV_STAGE_ATTACK],
-               envelope.stage_target_q1_30_[ENV_STAGE_SUSTAIN])) >> 15;
+  meta[META_CEILING] = std::max(envelope.note_target_q30_[ENV_STAGE_RELEASE],
+      std::max(envelope.note_target_q30_[ENV_STAGE_ATTACK],
+               envelope.note_target_q30_[ENV_STAGE_SUSTAIN])) >> 15;
+  meta[META_FLOOR] = std::min(envelope.note_target_q30_[ENV_STAGE_RELEASE],
+      std::min(envelope.note_target_q30_[ENV_STAGE_ATTACK],
+               envelope.note_target_q30_[ENV_STAGE_SUSTAIN])) >> 15;
   return written;
 }
 

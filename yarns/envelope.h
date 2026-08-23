@@ -111,13 +111,13 @@ class Envelope {
 
   inline int16_t tremolo(uint16_t strength_u16) const {
     int32_t relative_value_q15 =
-      (value_without_bias_q1_30_
-       - stage_target_q1_30_[ENV_STAGE_RELEASE]) >> (30 - 15);
+      (value_without_bias_q30_
+       - note_target_q30_[ENV_STAGE_RELEASE]) >> (30 - 15);
     return relative_value_q15 * -strength_u16 >> 16;
   }
 
   inline int16_t value_without_bias() const {
-    return value_without_bias_q1_30_ >> (30 - 15);
+    return value_without_bias_q30_ >> (30 - 15);
   }
   inline EnvelopeStage stage() const { return stage_; }
 
@@ -125,8 +125,8 @@ class Envelope {
   ADSR* adsr_;
 
   // The integer bit is headroom for the slew delta, which spans up to 2^31 - 1.
-  int32_t stage_target_q1_30_[ENV_NUM_STAGES];
-  int32_t target_q1_30_, value_without_bias_q1_30_;
+  int32_t note_target_q30_[ENV_NUM_STAGES];
+  int32_t stage_target_q30_, value_without_bias_q30_;
 
   // No overshoot: the slope is pre-scaled by the block size.
   int32_t bias_q31_;
@@ -174,11 +174,11 @@ class Envelope {
 
   // Where the current stage began. With the stage phase this anchors the
   // nominal value in closed form, with no iterated level state.
-  int32_t stage_start_q1_30_;
-  int32_t nominal_value_q1_30_;
+  int32_t stage_start_q30_;
+  int32_t nominal_value_q30_;
   // min(note floor, 0). USAT bounds [0, 2^30), so a note reaching below zero is
   // rendered offset by its floor. State, not a local: GCC spills it there.
-  int32_t value_floor_q1_30_;
+  int32_t value_floor_q30_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };
