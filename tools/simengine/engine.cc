@@ -138,13 +138,16 @@ int chiff_render(
 
   // EXCITER AMT VEL MOD, mirroring Part::VoiceNoteOn: passed on at
   // modulate_7_13's own resolution, clamped to the top of the setting range.
-  uint16_t modulated_chiff_amount_q7_6 = modulate_7_13(
+  const uint16_t modulated_chiff_amount_q7_6 = modulate_7_13(
       static_cast<uint8_t>(chiff_amount),
       static_cast<int8_t>(chiff_amount_mod_velocity),
       static_cast<uint8_t>(velocity));
-  const uint16_t kChiffAmountMax_q7_6 = 127 << 6;
-  if (modulated_chiff_amount_q7_6 > kChiffAmountMax_q7_6) {
-    modulated_chiff_amount_q7_6 = kChiffAmountMax_q7_6;
+  const uint16_t kChiffAmountFullScale_q7_6 = 127 << 6;
+  uint32_t modulated_chiff_amount_q30 = static_cast<uint32_t>(
+      (static_cast<uint64_t>(modulated_chiff_amount_q7_6) << 30)
+      / kChiffAmountFullScale_q7_6);
+  if (modulated_chiff_amount_q30 > (1u << 30)) {
+    modulated_chiff_amount_q30 = 1u << 30;
   }
 
   // THE SPAN MUST FIT int16. NoteOn forms `int16_t scale_s16 = max - min`, so a
@@ -173,7 +176,7 @@ int chiff_render(
                     static_cast<int8_t>(chiff_duration_mod_velocity),
                     static_cast<uint8_t>(velocity)) << (15 - 13)));
   envelope.NoteOn(adsr, min_target, max_target,
-                  modulated_chiff_amount_q7_6, chiff_audible_samples);
+                  modulated_chiff_amount_q30, chiff_audible_samples);
   // The NOMINAL duration, for the sim's marker. Computed once in NoteOn and a
   // sizing reference only -- nothing counts it down and nothing happens when
   // it elapses -- so reading it once here is the whole story.

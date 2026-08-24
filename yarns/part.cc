@@ -847,16 +847,18 @@ void Part::VoiceNoteOn(
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
 
-  // EXCITER AMT VEL MOD, passed on at modulate_7_13's own resolution: the
-  // envelope's axis is finer than the panel's, and narrowing here would put a
-  // velocity-modulated chiff back on the 128 positions of the knob. Clamped to
-  // the top of the setting range, which the shift used to do by truncating.
-  uint16_t chiff_amount_q7_6 = modulate_7_13(
-    voicing_.chiff_amount, voicing_.chiff_amount_mod_velocity, vel);
-  const uint16_t kChiffAmountMax_q7_6 = 127 << 6;
-  if (chiff_amount_q7_6 > kChiffAmountMax_q7_6) {
-    chiff_amount_q7_6 = kChiffAmountMax_q7_6;
-  }
+  // EXCITER AMT VEL MOD. modulate_7_13 resolves AMOUNT six bits below the knob
+  // step, and the envelope takes the fraction of full scale, so neither the
+  // panel's range nor its step count travels with it. CEIL, so a full setting
+  // reaches 1.0; the clamp is what the old shift did by truncating.
+  const uint16_t kChiffAmountFullScale_q7_6 =
+    ((1 << PackedPart::kTimbreBits) - 1) << 6;
+  const uint32_t kChiffAmountToFraction_q30 =
+    ((1u << 30) + kChiffAmountFullScale_q7_6 - 1) / kChiffAmountFullScale_q7_6;
+  uint32_t chiff_amount_q30 = modulate_7_13(
+    voicing_.chiff_amount, voicing_.chiff_amount_mod_velocity, vel)
+    * kChiffAmountToFraction_q30;
+  if (chiff_amount_q30 > (1u << 30)) chiff_amount_q30 = 1u << 30;
 
   // EXCITER DURATION is a time of its own now, read off its own table but
   // shaped like every other envelope stage, so it modulates the same way.
@@ -869,7 +871,7 @@ void Part::VoiceNoteOn(
 
   voice->NoteOn(Tune(pitch), vel, portamento,
     voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2,
-    chiff_amount_q7_6, chiff_audible_samples);
+    chiff_amount_q30, chiff_audible_samples);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {

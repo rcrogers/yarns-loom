@@ -121,7 +121,7 @@ static void RenderMs(double ms) {
     if (g_chiff_trace) {
       // The amount, not the drive: drive, slew time and input are all pure
       // functions of it, and it costs no member to expose.
-      printf("%u %u %d\n", env.chiff_amount_q7_25_,
+      printf("%u %u %d\n", env.chiff_amount_q30_,
              env.chiff_slew_time_log2_q5_27_, env.ChiffSlewInput_q30());
       continue;
     }
@@ -165,9 +165,10 @@ static int OptInt(int argc, char** argv, const char* key, int fallback) {
 int main(int argc, char** argv) {
   const char* scenario = argc > 1 ? argv[1] : "basic";
   uint8_t amount = argc > 2 ? atoi(argv[2]) : 96;
-  // The driver names AMOUNT as the panel setting; NoteOn takes the
-  // modulate_7_13 form, six bits below the knob step.
-  const uint16_t amount_q7_6 = static_cast<uint16_t>(amount) << 6;
+  // The driver names AMOUNT as the panel setting; NoteOn takes the fraction of
+  // full scale, the way Part::VoiceNoteOn forms it.
+  const uint32_t amount_q30 = static_cast<uint32_t>(
+    (static_cast<uint64_t>(amount) << 30) / 127);
   uint8_t duration = argc > 3 ? atoi(argv[3]) : 67;
   // CHIFF DURATION names a time on its own table; NoteOn takes the increment,
   // not the setting. Converted once here because the two are both integers and
@@ -238,30 +239,30 @@ int main(int argc, char** argv) {
 
   if (strcmp(scenario, "basic") == 0) {
     // gate, then release to the end
-    env.NoteOn(adsr, 0, max_target, amount_q7_6, chiff_audible_samples);
+    env.NoteOn(adsr, 0, max_target, amount_q30, chiff_audible_samples);
     RenderMs(gatems);
     env.NoteOff();
     RenderMs(OptInt(argc, argv, "tail", relms > 1000 ? relms + 200 : 1000));
   } else if (strcmp(scenario, "early_release") == 0) {
     // release 60ms into the attack
-    env.NoteOn(adsr, 0, 16383, amount_q7_6, chiff_audible_samples);
+    env.NoteOn(adsr, 0, 16383, amount_q30, chiff_audible_samples);
     RenderMs(60);
     env.NoteOff();
     RenderMs(1000);
   } else if (strcmp(scenario, "retrigger") == 0) {
     // note, release, retrigger mid-release
-    env.NoteOn(adsr, 0, 16383, amount_q7_6, chiff_audible_samples);
+    env.NoteOn(adsr, 0, 16383, amount_q30, chiff_audible_samples);
     RenderMs(500);
     env.NoteOff();
     RenderMs(100);
-    env.NoteOn(adsr, 0, 16383, amount_q7_6, chiff_audible_samples);
+    env.NoteOn(adsr, 0, 16383, amount_q30, chiff_audible_samples);
     RenderMs(1500);
   } else if (strcmp(scenario, "chiff_then_off") == 0) {
     // A chiff note, then a note with AMOUNT 0 on the same envelope. The only
     // path on which chiff state -- the walked slew time above all -- can enter
     // a note that has no chiff. Every other case either has a chiff throughout
     // or has none at all, so nothing else can catch state carried across.
-    env.NoteOn(adsr, 0, 16383, amount_q7_6, chiff_audible_samples);
+    env.NoteOn(adsr, 0, 16383, amount_q30, chiff_audible_samples);
     RenderMs(300);
     env.NoteOff();
     RenderMs(100);
@@ -269,7 +270,7 @@ int main(int argc, char** argv) {
     RenderMs(1500);
   } else if (strcmp(scenario, "inverted") == 0) {
     // Numerically inverted range (CV DAC / negative timbre): min > max
-    env.NoteOn(adsr, 16383, 0, amount_q7_6, chiff_audible_samples);
+    env.NoteOn(adsr, 16383, 0, amount_q30, chiff_audible_samples);
     RenderMs(2000);
     env.NoteOff();
     RenderMs(1000);
@@ -279,13 +280,13 @@ int main(int argc, char** argv) {
     adsr.attack_u32 = IncFromSamples(200 * 45);
     adsr.decay_u32 = IncFromSamples(200 * 45);
     adsr.release_u32 = IncFromSamples(100 * 45);
-    env.NoteOn(adsr, 0, 16383, amount_q7_6, chiff_audible_samples);
+    env.NoteOn(adsr, 0, 16383, amount_q30, chiff_audible_samples);
     RenderMs(7000);
     env.NoteOff();
     RenderMs(400);
   } else if (strcmp(scenario, "held") == 0) {
     // long hold: chiff through attack into sustain
-    env.NoteOn(adsr, 0, 16383, amount_q7_6, chiff_audible_samples);
+    env.NoteOn(adsr, 0, 16383, amount_q30, chiff_audible_samples);
     RenderMs(9000);
     env.NoteOff();
     RenderMs(600);

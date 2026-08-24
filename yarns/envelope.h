@@ -77,7 +77,7 @@ class Envelope {
   void NoteOn(
     ADSR& adsr,
     int32_t min_target_s16, int32_t max_target_s16,
-    uint16_t chiff_amount_q7_6, uint32_t chiff_audible_samples
+    uint32_t chiff_amount_q30, uint32_t chiff_audible_samples
   );
   void Trigger(EnvelopeStage stage);
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
@@ -145,8 +145,8 @@ class Envelope {
 
   // DURATION is a time-based modulation of AMOUNT: the whole decay is this one
   // quantity falling to zero.
-  uint32_t chiff_amount_initial_q7_25_;
-  uint32_t chiff_amount_q7_25_;
+  uint32_t chiff_amount_initial_q30_;
+  uint32_t chiff_amount_q30_;
   uint32_t chiff_phase_q32_;
   uint32_t chiff_phase_step_q32_;
 
