@@ -31,8 +31,8 @@
 // trust: `step` moves 1-3%, the shape columns far more.
 //
 // JUDGE THE ONSET, NOT THE POOL. Pooled over a chiff's whole life every one of
-// these flattens out, which is how an earlier round concluded there was no
-// character axis at all.
+// these flattens out, which is how an earlier round concluded the knob changed
+// nothing.
 const { execSync } = require('child_process');
 
 const AMOUNTS = [0, 8, 16, 24, 32, 48, 64, 80, 96, 112, 127];

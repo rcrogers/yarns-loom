@@ -312,10 +312,10 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   }
 }
 
-// THE CHIFF'S SLEW TIME NEVER PASSES THE END OF ITS AXIS. The walk's map
-// returns at or under the end, and the per-run writeback re-clamps to it, so
-// nothing should ever exceed it. Read from the engine, both fields, so this
-// cannot drift from whatever the engine believes the end to be.
+// THE CHIFF'S SLEW TIME NEVER PASSES ITS SLOWEST. The slew-time map returns at
+// or under the slew time at amount zero, and the per-run writeback re-clamps to
+// it. Read from the engine, both fields, so this cannot drift from whatever the
+// engine believes the slowest to be.
 {
   let worst = -1, worstAt = '';
   for (const amount of [1, 24, 64, 96, 127]) {
@@ -325,12 +325,12 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
       for (const row of rows) {
         const f = row.trim().split(/\s+/).map(Number);
         if (f.length < 3) continue;
-        const over = f[0] - f[2];          // slew time minus the axis end
+        const over = f[0] - f[2];          // slew time minus the slowest
         if (over > worst) { worst = over; worstAt = 'amount '+amount+' dur '+duration; }
       }
     }
   }
-  check('chiff slew time stays inside its axis', worst <= 0,
+  check('chiff slew time stays at or under its slowest', worst <= 0,
         'worst overshoot '+worst+' q5.27 at '+worstAt);
 }
 

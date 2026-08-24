@@ -144,7 +144,7 @@ const uint32_t kChiffAmountFull_q30 = 1u << kChiffAmountFractionalBits;
 
 // Same slew, same clip threshold, more signal at it -- and the clip saturates
 // the slew, so the output squares off and its amplitude rises at once. Below
-// this the drive is 1. Half the axis, so the span above it is a shift.
+// this the drive is 1. Half of full AMOUNT, so the span above it is a shift.
 const uint32_t kChiffAmountForDriveBegin_q30 = kChiffAmountFull_q30 >> 1;
 const uint32_t kChiffDriveSpanShift = kChiffAmountFractionalBits - 1;
 // Where the slew time reaches its fast end. Independent of where drive begins.

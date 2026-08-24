@@ -3,10 +3,11 @@
 // / loudness they would have if used as a starting point."
 //
 // The chiff's state is exactly three numbers: DRIVE (how hard it is clipped),
-// SLEW TIME (its filter), and INPUT (its loudness). So for every amount B below
-// A there must be an instant where A's triple equals B's ONSET triple.
+// SLEW TIME (its slew), and INPUT (what the slew chases). So for every amount B
+// below A there must be an instant where A's triple equals B's ONSET triple.
 //
-// ANCHOR ON THE AXIS THAT DISTINGUISHES THEM, then report the other two:
+// ANCHOR ON WHICHEVER OF THE THREE THE KNOB MOVES THERE, then report the other
+// two:
 //   B above the hinge -- the knob moves only the DRIVE there, so anchor on it
 //   B below the hinge -- the knob moves only the RATE there, so anchor on the
 //                        slew time
