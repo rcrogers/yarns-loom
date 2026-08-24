@@ -437,13 +437,6 @@ static uint32_t ChiffAmountAtPhase_q30(
     (static_cast<uint64_t>(initial_q30) * amount_fraction_u16) >> 16);
 }
 
-// The coefficient in octaves, negated, so the reciprocal can be built by
-// addition. The whole coefficient is inverted: it carries the sigma multiple
-// AND kChiffDrawRmsFractionOfMax.
-const uint32_t kChiffAmplitudeGainCoefficientLog2_q5_27 = static_cast<uint32_t>(
-  -__builtin_log2(static_cast<double>(kChiffAmplitudeGainCoefficient_q31_sqrt)
-                  / kOne_q31_sqrt) * 134217728.0 + 0.5);
-
 // The input is solved backwards from the amplitude-proportional-to-amount law.
 // The output must be proportional to AMOUNT, and the slew reaches only a
 // fraction of what it chases:
@@ -476,6 +469,12 @@ static int32_t ChiffSlewInputFractionAtAmount_q30(
   //     floor(g) and f its fraction, 2^g is 2^(n+1) * 2^(f-1), read at
   //     (1 - f).
   //   - The max() below is the gain's own clamp read backwards.
+  // The coefficient in octaves, negated, so the reciprocal is built by
+  // addition. The WHOLE coefficient is inverted: it carries the sigma multiple
+  // and kChiffDrawRmsFractionOfMax alike.
+  const uint32_t kChiffAmplitudeGainCoefficientLog2_q5_27 = static_cast<uint32_t>(
+    -__builtin_log2(static_cast<double>(kChiffAmplitudeGainCoefficient_q31_sqrt)
+                    / kOne_q31_sqrt) * 134217728.0 + 0.5);
   const uint32_t g_q5_27 =
     (slew_time_log2_q5_27 >> 1) + kChiffAmplitudeGainCoefficientLog2_q5_27;
   const uint32_t shift = (g_q5_27 >> 27) + 1;
