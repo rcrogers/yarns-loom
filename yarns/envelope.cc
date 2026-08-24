@@ -444,7 +444,6 @@ static int32_t ChiffSlewInputFractionAtAmount_q30(
   //   - 2^(+t/2) exceeds Q30, so it is built from one table read: with n =
   //     floor(g) and f its fraction, 2^g is 2^(n+1) * 2^(f-1), read at
   //     (1 - f).
-  //   - The max() below is the gain's own clamp read backwards.
   // The coefficient in octaves, negated, so the reciprocal is built by
   // addition. The WHOLE coefficient is inverted: it carries the sigma multiple
   // and kChiffDrawRmsFractionOfMax alike.
@@ -463,6 +462,8 @@ static int32_t ChiffSlewInputFractionAtAmount_q30(
   const uint32_t ceiling_q30 = shift >= 31 ? 0u : ((1u << 30) >> shift);
   if (scaled_q30 >= ceiling_q30) return 1 << 30;
   const uint32_t slew_input_fraction_q30 = scaled_q30 << shift;
+  // The gain's own min(1, ...) read backwards: under its clamp the solve asks
+  // for less input than the amount, and the amount is the answer.
   return static_cast<int32_t>(
     slew_input_fraction_q30 > amount_q30 ? slew_input_fraction_q30 : amount_q30);
 }
@@ -671,7 +672,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // time constants per stage, 2^shift = N/k. Same log2 approximation as
   // ChiffSlewTimeFromSamples_q5_27.
   uint8_t leading_zeros = __builtin_clz(stage_phase_increment_u32_);
-  // Local, not state: stage_slew_rate_q31_ below is its only reader.
   uint32_t stage_slew_time_log2_q5_27;
   if (leading_zeros >= 30) {
     // Increment <= 3: N >= ~2^30.5, whose shift saturates the cap anyway.
@@ -694,6 +694,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   }
   // The stage's rate changes only here, so this is where it is derived: it
   // costs an exp2 table interpolation, for a quantity that moves once a stage.
+  // The slew time it comes from is a local, this being its only reader.
   stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27);
   // A release only speeds the decay up. CHIFF DURATION owns the schedule; the
   // release adds one deadline, so the chiff dies with the note that makes it.
@@ -836,8 +837,8 @@ void Envelope::RenderStage(
 
   {
     // Bias is a terminal add: neither slew carries it, so the envelope's
-    // trajectory is the same whatever the bias does, and the clamp below acts
-    // on the sum alone. The battery pins the independence.
+    // trajectory is the same whatever the bias does. The battery pins the
+    // independence.
     const int32_t bias_q30 = bias_q31 >> 1;
     // Per-run copies: the loop decays the rate every sample, and the slew time
     // is what persists across runs.
@@ -961,8 +962,7 @@ void Envelope::RenderStage(
     // maximum for a suffix to name. The adjusted target plus a full-scale
     // bias passes INT32_MAX. Every use subtracts the nominal delta first, and
     // that is in range, so the wrap cancels.
-    // Unsigned makes the wrap defined; the two places that reinterpret it as
-    // signed cast back below.
+    // Unsigned makes the wrap defined.
     uint32_t target_with_all_bias = TargetWithAllBias(
       nominal_value_q30, bias_q30, mean_min_q30, mean_max_q30);
     const uint32_t target_with_all_bias_end = TargetWithAllBias(
