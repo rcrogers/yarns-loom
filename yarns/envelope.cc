@@ -323,15 +323,6 @@ static uint32_t ChiffSlewTimeAtAmount_q5_27(
     >> 16);
 }
 
-// Initial x the curve, which is fixed for
-// every chiff.
-//   - The curve is lut_env_expo, the envelope's own stage curve, and it has to
-//     be: amplitude goes as 20log10(amount), so constant dB per second wants
-//     the amount itself to decay exponentially: AMOUNT's top half spans a few
-//     dB and its bottom few units span tens.
-//   - It lands on exactly zero, which is what makes the chiff converge: a
-//     slew reaches zero only if what it chases does.
-
 // Q7.25. Closed form,
 // because the amplitude-proportional-to-amount law makes it one:
 //
@@ -395,6 +386,13 @@ static uint32_t ChiffInaudiblePhase_u16(
   return phase_u16 ? phase_u16 : 1;
 }
 
+// The initial amount times the curve, which is fixed for every chiff.
+//   - The curve is lut_env_expo, the envelope's own stage curve, and it has to
+//     be: amplitude goes as 20log10(amount), so constant dB per second wants
+//     the amount itself to decay exponentially: AMOUNT's top half spans a few
+//     dB and its bottom few units span tens.
+//   - It lands on exactly zero, which is what makes the chiff converge: a
+//     slew reaches zero only if what it chases does.
 static uint32_t ChiffAmountAtPhase_q30(
     uint32_t initial_q30, uint32_t phase_q32) {
   const uint32_t index = phase_q32 >> 24;

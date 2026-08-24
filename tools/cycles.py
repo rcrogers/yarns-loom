@@ -28,10 +28,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                     'cycles_baseline.txt')
 
-RENDER_STAGE = '_ZN5yarns8Envelope11RenderStageEPsjll'
-HAND_OFF = '_ZN5yarns8Envelope18HandOffToNextStageEPsjll'
-NOTE_ON = '_ZN5yarns8Envelope6NoteOnERNS_4ADSREllhh'
-TRIGGER = '_ZN5yarns8Envelope7TriggerENS_13EnvelopeStageE'
+# Mangled names carry the parameter types, so a signature change renames the
+# symbol and the lookup rots. Match the prefix that ends at the parameter list
+# and insist it is unique.
+RENDER_STAGE = '_ZN5yarns8Envelope11RenderStageE'
+HAND_OFF = '_ZN5yarns8Envelope18HandOffToNextStageE'
+NOTE_ON = '_ZN5yarns8Envelope6NoteOnE'
+TRIGGER = '_ZN5yarns8Envelope7TriggerE'
 
 # TWELVE ENVELOPES RENDER PER BLOCK: four CVOutput::envelope_ plus four audio
 # voices x (gain, timbre). Same figure kMaxChiffEnvelopes is sized from.
@@ -61,6 +64,20 @@ DRAWS_PER_WORD = 32 // DRAW_BITS
 CHUNKS_PER_BLOCK = BLOCK_SAMPLES // DRAWS_PER_WORD
 
 functions = pathcost.parse(dis_path)
+
+
+def resolve(prefix):
+  matches = [name for name in functions if name.startswith(prefix)]
+  if len(matches) != 1:
+    sys.exit('cycles: %s matched %d symbols, not one -- the signature moved'
+             % (prefix, len(matches)))
+  return matches[0]
+
+
+RENDER_STAGE = resolve(RENDER_STAGE)
+HAND_OFF = resolve(HAND_OFF)
+NOTE_ON = resolve(NOTE_ON)
+TRIGGER = resolve(TRIGGER)
 if RENDER_STAGE not in functions:
   print('  RenderStage not found in the disassembly')
   sys.exit(1)
