@@ -88,8 +88,6 @@ namespace {
   uint32_t next_chiff_seed = 0xCAFEBABE;
 }  // namespace
 
-// The DAC range in Q30: 32767 << 15, and (2^30 - 1) >> 15 is 32767 exactly.
-const int32_t kValueMax_q30 = (1 << 30) - 1;
 
 // The output sample is the s16 range, which USAT #15 states directly.
 const int kSampleBits = 15;
@@ -145,55 +143,12 @@ const uint32_t kSlewTimeFraction_q5_27 = (1u << 27) - 1;
 const uint32_t kChiffAmountFractionalBits = 30;
 const uint32_t kChiffAmountFull_q30 = 1u << kChiffAmountFractionalBits;
 
-// Same slew, same clip threshold, more signal at it -- and the clip saturates
-// the slew, so the output squares off and its amplitude rises at once. Below
-// this the drive is 1. Half of full AMOUNT, so the span above it is a shift.
-const uint32_t kChiffAmountForDriveBegin_q30 = kChiffAmountFull_q30 >> 1;
-// Where the slew time reaches its fast end. Independent of where drive begins.
-const uint32_t kChiffAmountForMinSlewTime_q30 = static_cast<uint32_t>(
-  kChiffAmountFull_q30 * (110.0 / 127.0) + 0.5);
 // The chiff's slew state is carried in Q26, not Q30, so the driven input has
 // four bits of headroom. Costs nothing: the output add takes a shifted operand
 // either way.
 const uint32_t kChiffLevelFractionalBits = 30;
 const uint32_t kChiffSlewStateFractionalBits = 26;
-const uint32_t kChiffMaxDriveOctaves =
-    kChiffLevelFractionalBits - kChiffSlewStateFractionalBits;
-// Octaves of drive from kChiffAmountForDriveBegin to full AMOUNT.
-//   - Calibrated by ear, short of the kChiffMaxDriveOctaves that pins
-//     the state on the clip at every level, so the top of the knob approaches
-//     a square asymptotically.
-//   - The suffix is kChiffMaxDriveOctaves: past that the driven input leaves
-//     Q30.
-//   - Carried at the amount's own fractional bits. The drive spans half of
-//     full AMOUNT, so the amount past the start times this IS the Q5.27
-//     exponent in the product's high word -- one umull, no shift.
-const uint32_t kChiffDriveSpanOctaves_q2_30 = static_cast<uint32_t>(
-  2.5 * (1u << kChiffAmountFractionalBits));
-// The largest slew time the chiff may reach, which it does at amount zero.
-//   - Without it that end is duration-derived, so DURATION moves every cutoff
-//     below kChiffAmountForMinSlewTime, and at long durations the input rails
-//     and amplitude stops tracking AMOUNT.
-//   - A min, not an assignment: the chiff must outlast its own slew's time
-//     constant to reach amplitude.
-//   - It costs the sub-audio slew rates at the bottom of AMOUNT.
-const uint32_t kChiffMaxSlewTimeLog2_q5_27 = 11u << 27;  // 11 octaves
-// How many chiff amplitudes the clip threshold sits at. Sized so the undriven
-// end passes essentially unclipped, at the smallest hold on the mean that
-// allows it.
-const uint32_t kChiffClipAmplitudesShift = 1;  // 2 amplitudes = 3*sqrt(2) sigma
-
-// A timed stage runs four time constants, and a slew covers 1 - e^-4 =
-// 98.17% of its span in that time, so the slew aims past its target by the
-// reciprocal and lands ON it as the countdown expires.
-//   - The adjusted target passes the stage target by 1.9% of the span, so
-//     the slew input sits outside the note's range, unclamped.
-//   - lut_env_expo then reads straight: normalized to 1.0, it already
-//     describes the true slew once the target carries the 1/(1 - e^-4).
-const uint32_t kStageTargetOvershoot_u16 = static_cast<uint32_t>(
-  65536.0 / (1.0 - __builtin_exp(-4.0)) + 0.5);
-
-// Capped at kMaxSlewRate.
+// Capped.
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 
 void Envelope::Init(int16_t zero_value_s16) {
@@ -298,10 +253,6 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 //     kChiffAmplitudeSigmas lower again.
 //   - Written as the dB figure and converted here, not transcribed as digits.
 //     __builtin_pow folds at compile time, so it costs no code and no libm.
-const double kChiffInaudibleDbFs = -48.2;
-const uint32_t kChiffInaudibleAmplitude_q30 = static_cast<uint32_t>(
-  static_cast<double>(1u << 30)
-    * __builtin_pow(10.0, kChiffInaudibleDbFs / 20.0) + 0.5);
 
 // The knob's own maps, taking a Q7.25 amount where the knob indexes an integer
 // -- a decaying chiff wears the timbre each amount it passes through has as an
@@ -314,6 +265,10 @@ static uint32_t ChiffSlewTimeAtAmount_q5_27(
   // 1/128 octave off zero is rate 0.9946, and rate 1.0 is a setting the chiff
   // uses, so its rate is derived uncapped.
   const uint32_t kChiffMinSlewTimeLog2_q5_27 = (1u << 27) / 128;
+  // Where the slew time reaches its fast end. Independent of where the drive
+  // begins.
+  const uint32_t kChiffAmountForMinSlewTime_q30 = static_cast<uint32_t>(
+    kChiffAmountFull_q30 * (110.0 / 127.0) + 0.5);
   if (slew_time_at_amount_zero_q5_27 <= kChiffMinSlewTimeLog2_q5_27) {
     return slew_time_at_amount_zero_q5_27;
   }
@@ -372,6 +327,10 @@ static uint32_t ChiffSlewTimeAtAmount_q5_27(
 static uint32_t ChiffInaudibleAmount_q30(
     uint32_t start_q30, int32_t slew_input_max_q30) {
   if (slew_input_max_q30 <= 0) return start_q30;
+  const double kChiffInaudibleDbFs = -48.2;
+  const uint32_t kChiffInaudibleAmplitude_q30 = static_cast<uint32_t>(
+    static_cast<double>(1u << 30)
+      * __builtin_pow(10.0, kChiffInaudibleDbFs / 20.0) + 0.5);
   const uint64_t scaled =
     static_cast<uint64_t>(kChiffInaudibleAmplitude_q30) << kChiffAmountFractionalBits;
   const uint32_t amount_q30 = DivU64ByU32(
@@ -491,6 +450,24 @@ static int32_t ChiffSlewInputFractionAtAmount_q30(
 }
 
 static int32_t ChiffDriveAtAmount_q4_26(uint32_t amount_q30) {
+  // Same slew, same clip threshold, more signal at it -- and the clip
+  // saturates the slew, so the output squares off and its amplitude rises at
+  // once. Below this the drive is 1. Half of full AMOUNT, so the span above it
+  // is a shift.
+  const uint32_t kChiffAmountForDriveBegin_q30 = kChiffAmountFull_q30 >> 1;
+  const uint32_t kChiffMaxDriveOctaves =
+      kChiffLevelFractionalBits - kChiffSlewStateFractionalBits;
+  // Octaves of drive from the start above to full AMOUNT.
+  //   - Calibrated by ear, short of the kChiffMaxDriveOctaves that pins the
+  //     state on the clip at every level, so the top of the knob approaches a
+  //     square asymptotically.
+  //   - The suffix is kChiffMaxDriveOctaves: past that the driven input leaves
+  //     Q30.
+  //   - Carried at the amount's own fractional bits. The drive spans half of
+  //     full AMOUNT, so the amount past the start times this IS the Q5.27
+  //     exponent in the product's high word -- one umull, no shift.
+  const uint32_t kChiffDriveSpanOctaves_q2_30 = static_cast<uint32_t>(
+    2.5 * (1u << kChiffAmountFractionalBits));
   uint32_t drive_octaves_q5_27 = 0;
   if (amount_q30 > kChiffAmountForDriveBegin_q30) {
     drive_octaves_q5_27 = MulU32(
@@ -550,6 +527,15 @@ void Envelope::NoteOn(
         chiff_slew_input_fraction_q30_ = 0;
         break;
       }
+      // The largest slew time the chiff may reach, which it does at amount
+      // zero.
+      //   - Without it that end is duration-derived, so DURATION moves every
+      //     cutoff ChiffSlewTimeAtAmount places, and at long durations the
+      //     input rails and amplitude stops tracking AMOUNT.
+      //   - A min, not an assignment: the chiff must outlast its own slew's
+      //     time constant to reach amplitude.
+      //   - It costs the sub-audio slew rates at the bottom of AMOUNT.
+      const uint32_t kChiffMaxSlewTimeLog2_q5_27 = 11u << 27;  // 11 octaves
       chiff_slew_time_at_amount_zero_q5_27_ = std::min(
         ChiffSlewTimeFromSamples_q5_27(chiff_audible_samples),
         kChiffMaxSlewTimeLog2_q5_27);
@@ -593,10 +579,9 @@ static inline uint32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
 //   - 4 samples is the shortest stage that exists: modulate_7_13 clamps to
 //     [0, 8191], so the increment table bottoms out at UINT32_MAX/4.
 //   - The cap lives on the rate, not on the exp2 it is read from.
-const int32_t kMaxSlewRate_q31 = static_cast<int32_t>(
-  (1.0 - __builtin_exp(-1.0)) * 2147483648.0 + 0.5);
-
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27) {
+  const int32_t kMaxSlewRate_q31 = static_cast<int32_t>(
+    (1.0 - __builtin_exp(-1.0)) * 2147483648.0 + 0.5);
   const int32_t rate_q31 = static_cast<int32_t>(
     SlewRateFromTimeLog2_q31(slew_time_log2_q5_27));
   return rate_q31 > kMaxSlewRate_q31 ? kMaxSlewRate_q31 : rate_q31;
@@ -813,6 +798,12 @@ void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
+  // The DAC range in Q30: 32767 << 15, and (2^30 - 1) >> 15 is 32767 exactly.
+  const int32_t kValueMax_q30 = (1 << 30) - 1;
+  // How many chiff amplitudes the clip threshold sits at. Sized so the
+  // undriven end passes essentially unclipped, at the smallest hold on the
+  // mean that allows it.
+  const uint32_t kChiffClipAmplitudesShift = 1;  // 2 amplitudes, 3*sqrt(2) sigma
   int32_t value_without_bias_q30 = value_without_bias_q30_;
   int32_t nominal_value_q30 = nominal_value_q30_;
   int32_t chiff_slew_state_q26 = chiff_slew_state_q26_;
@@ -885,6 +876,15 @@ void Envelope::RenderStage(
         chiff_slew_time_q5_27, chiff_slew_rate_q31);
     // What nominal chases: past the target by 1/(1 - e^-4), so it arrives ON
     // the target as the countdown expires. Holds chase the target itself.
+    // A timed stage runs four time constants, and a slew covers 1 - e^-4 =
+    // 98.17% of its span in that time, so the slew aims past its target by the
+    // reciprocal and lands ON it as the countdown expires.
+    //   - The adjusted target passes the stage target by 1.9% of the span, so
+    //     the slew input sits outside the note's range, unclamped.
+    //   - lut_env_expo then reads straight: normalized to 1.0, it already
+    //     describes the true slew once the target carries the 1/(1 - e^-4).
+    const uint32_t kStageTargetOvershoot_u16 = static_cast<uint32_t>(
+      65536.0 / (1.0 - __builtin_exp(-4.0)) + 0.5);
     int32_t stage_adjusted_target_q1_30 = stage_target_q30;
     if (timed) {
       stage_adjusted_target_q1_30 = stage_start_q30_ + static_cast<int32_t>(
