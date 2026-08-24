@@ -813,6 +813,44 @@ void Envelope::HandOffToNextStage(
     *sample_buffer++ = static_cast<int16_t>(sample);                          \
   } while (0)
 
+// Advances the chiff's phase, amount and slew input by one run, and hands back
+// what the loop runs on. All three move together: pinning the input costs the
+// pass-through invariant (up to 18 dB of error) and the chiff settles above
+// zero.
+Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples) {
+  ChiffRunDecay decay;
+  decay.slew_time_step_q5_27 = 0;
+  decay.drive_q4_26 = 1 << kChiffSlewStateFractionalBits;  // 1.0
+  if (!chiff_amount_initial_q30_) return decay;
+  // Saturate on the high word and on the phase left, not on a 64-bit compare:
+  // one umull answers whether the product fits.
+  const uint32_t chiff_phase_remaining_q32 = 0xFFFFFFFFu - chiff_phase_q32_;
+  const uint64_t advanced =
+    static_cast<uint64_t>(chiff_phase_step_q32_) * run_samples;
+  const uint32_t advanced_q32 = static_cast<uint32_t>(advanced);
+  const uint32_t chiff_phase_end_q32 =
+    (advanced >> 32) == 0 && advanced_q32 < chiff_phase_remaining_q32
+      ? chiff_phase_q32_ + advanced_q32 : 0xFFFFFFFFu;
+  // This run's start is last run's end for both the amount and the slew time,
+  // so only the END is derived here and carried forward.
+  const uint32_t chiff_amount_q30 = chiff_amount_q30_;
+  chiff_amount_q30_ =
+    ChiffAmountAtPhase_q30(chiff_amount_initial_q30_, chiff_phase_end_q32);
+  const uint32_t chiff_slew_time_end_q5_27 = ChiffSlewTimeAtAmount_q5_27(
+    chiff_amount_q30_, chiff_slew_time_at_amount_zero_q5_27_);
+  decay.slew_time_step_q5_27 = run_samples
+    ? (chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) / run_samples : 0;
+  decay.drive_q4_26 = ChiffDriveAtAmount_q4_26(chiff_amount_q30);
+  // Against this run's START slew time: the writeback to the end is at the
+  // loop's tail, so the slew time and amount here are a consistent pair.
+  chiff_slew_input_fraction_q30_ = ChiffSlewInputFractionAtAmount_q30(
+    chiff_amount_q30, chiff_slew_time_log2_q5_27_,
+    static_cast<int32_t>(
+      SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_)));
+  chiff_phase_q32_ = chiff_phase_end_q32;
+  return decay;
+}
+
 void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
@@ -846,42 +884,9 @@ void Envelope::RenderStage(
     //     earns it: per-run resolution holds the slew time fixed on a chiff
     //     that lives one block, and the duration inherits the attack's
     //     velocity modulation, so that is not a corner case.
-    uint32_t chiff_slew_time_step_q5_27 = 0;
-    int32_t chiff_slew_rate_decay_q32 = 0;
-    int32_t chiff_drive_q4_26 = 1 << kChiffSlewStateFractionalBits;  // 1.0
-    // The decay, advanced once per run; the loop's per-sample rate decay
-    // carries the chirp between the run's start and end amounts. All three
-    // axes move together: pinning the input costs the pass-through invariant
-    // (up to 18 dB of error) and the chiff settles above zero.
-    if (chiff_amount_initial_q30_) {
-      // Saturate on the high word and on the phase left, not on a 64-bit
-      // compare: one umull answers whether the product fits.
-      const uint32_t chiff_phase_remaining_q32 = 0xFFFFFFFFu - chiff_phase_q32_;
-      const uint64_t advanced =
-        static_cast<uint64_t>(chiff_phase_step_q32_) * run_samples;
-      const uint32_t advanced_q32 = static_cast<uint32_t>(advanced);
-      const uint32_t chiff_phase_end_q32 =
-        (advanced >> 32) == 0 && advanced_q32 < chiff_phase_remaining_q32
-          ? chiff_phase_q32_ + advanced_q32 : 0xFFFFFFFFu;
-      // This run's start is last run's end for both the amount and the slew
-      // time, so only the END is derived here and carried forward.
-      const uint32_t chiff_amount_q30 = chiff_amount_q30_;
-      chiff_amount_q30_ =
-        ChiffAmountAtPhase_q30(chiff_amount_initial_q30_, chiff_phase_end_q32);
-      const uint32_t chiff_slew_time_end_q5_27 = ChiffSlewTimeAtAmount_q5_27(
-        chiff_amount_q30_, chiff_slew_time_at_amount_zero_q5_27_);
-      chiff_slew_time_step_q5_27 = run_samples
-        ? (chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) / run_samples : 0;
-      chiff_slew_rate_decay_q32 = ChiffSlewRateDecayFromTimeStep_q32(chiff_slew_time_step_q5_27);
-      chiff_drive_q4_26 = ChiffDriveAtAmount_q4_26(chiff_amount_q30);
-      // Against this run's START slew time: the writeback to the end is at the
-      // loop's tail, so the slew time and amount here are a consistent pair.
-      chiff_slew_input_fraction_q30_ = ChiffSlewInputFractionAtAmount_q30(
-        chiff_amount_q30, chiff_slew_time_log2_q5_27_,
-        static_cast<int32_t>(
-          SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_)));
-      chiff_phase_q32_ = chiff_phase_end_q32;
-    }
+    const ChiffRunDecay chiff_decay = AdvanceChiffDecay(run_samples);
+    const int32_t chiff_slew_rate_decay_q32 =
+      ChiffSlewRateDecayFromTimeStep_q32(chiff_decay.slew_time_step_q5_27);
 
     // Derived, not stored: the rate and the slew time are one quantity, held
     // in one accumulator.
@@ -915,7 +920,7 @@ void Envelope::RenderStage(
     // What the slew chases. Q26 carries the drive's division, so this stays
     // inside int32 at full drive.
     const int32_t chiff_driven_slew_input_q4_26 = static_cast<int32_t>(
-      (static_cast<int64_t>(chiff_slew_input_q30) * chiff_drive_q4_26) >> 30);
+      (static_cast<int64_t>(chiff_slew_input_q30) * chiff_decay.drive_q4_26) >> 30);
     // One level's worth, so a draw read as an odd multiple multiplies straight
     // into what the slew chases. Dividing once a run keeps the extreme level
     // EQUAL to the input, so |chiff| <= input holds exactly
@@ -1073,7 +1078,7 @@ void Envelope::RenderStage(
       // The end-of-run slew time becomes the next run's start. Needs no bound:
       // the step is a truncating divide, so this lands at or under the end it
       // was derived from. The battery watches the invariant.
-      chiff_slew_time_log2_q5_27_ += chiff_slew_time_step_q5_27 * run_samples;
+      chiff_slew_time_log2_q5_27_ += chiff_decay.slew_time_step_q5_27 * run_samples;
     }
 
     nominal_value_q30 = stage_adjusted_target_q1_30 - nominal_delta_q1_30;

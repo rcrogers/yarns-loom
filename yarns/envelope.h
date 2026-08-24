@@ -94,6 +94,13 @@ class Envelope {
 
   void Rescale(int32_t numerator, int32_t denominator);
 
+  // What one run does to the chiff's decay, and what the render loop needs
+  // back from it.
+  struct ChiffRunDecay {
+    uint32_t slew_time_step_q5_27;   // per sample
+    int32_t drive_q4_26;             // at the amount the run STARTS from
+  };
+
   // Steps the bias directly, bypassing RenderSamples' per-block slew, so an
   // instantaneous jump (a pitch-driven timbre step at NoteOn) is not smoothed
   // into an audible glide. Continuous LFO motion still goes through the slew.
@@ -113,6 +120,7 @@ class Envelope {
 
  private:
   int32_t ChiffSlewInput_q30() const;
+  ChiffRunDecay AdvanceChiffDecay(uint32_t run_samples);
 
   ADSR* adsr_;
 
