@@ -950,8 +950,8 @@ void Envelope::RenderStage(
     const int32_t bias_end_q30 = static_cast<int32_t>(
       static_cast<uint32_t>(bias_q30)
       + static_cast<uint32_t>(bias_slope_q30) * run_samples);
-    // 30 fractional bits, and NO Q SUFFIX: it is a modular accumulator, so no
-    // permitted maximum is true of it. The adjusted target plus a full-scale
+    // 30 fractional bits, and no Q suffix: it wraps by design, so there is no
+    // maximum for a suffix to name. The adjusted target plus a full-scale
     // bias passes INT32_MAX. Every use subtracts the nominal delta first, and
     // that is in range, so the wrap cancels.
     // Unsigned makes the wrap defined; the two places that reinterpret it as
