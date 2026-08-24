@@ -136,12 +136,6 @@ const uint32_t kSlewTimesPerStageLog2_q5_27 = 2u << 27;
 // well-defined. 2^27 samples is ~50 minutes at 45 kHz, already absurd.
 const uint32_t kMaxRepresentableSlewTimeLog2_q5_27 = 27u << 27;
 
-// The chiff's fastest slew time, nearly zero on purpose: at rate 1.0 a
-// slew's output is its input, so the fast end is genuinely unslewed.
-// 1/128 octave off zero is rate 0.9946, and rate 1.0 is a setting the chiff
-// uses, so its rate is derived uncapped.
-const uint32_t kChiffMinSlewTimeLog2_q5_27 = (1u << 27) / 128;
-
 // The fractional part of a Q5.27 slew time, i.e. everything below one octave.
 const uint32_t kSlewTimeFraction_q5_27 = (1u << 27) - 1;
 
@@ -315,6 +309,11 @@ const uint32_t kChiffInaudibleAmplitude_q30 = static_cast<uint32_t>(
 // Returns at or under slew_time_at_amount_zero.
 static uint32_t ChiffSlewTimeAtAmount_q5_27(
     uint32_t amount_q30, uint32_t slew_time_at_amount_zero_q5_27) {
+  // The chiff's fastest slew time, nearly zero on purpose: at rate 1.0 a
+  // slew's output is its input, so the fast end is genuinely unslewed.
+  // 1/128 octave off zero is rate 0.9946, and rate 1.0 is a setting the chiff
+  // uses, so its rate is derived uncapped.
+  const uint32_t kChiffMinSlewTimeLog2_q5_27 = (1u << 27) / 128;
   if (slew_time_at_amount_zero_q5_27 <= kChiffMinSlewTimeLog2_q5_27) {
     return slew_time_at_amount_zero_q5_27;
   }
@@ -879,7 +878,6 @@ void Envelope::RenderStage(
     // Derived, not stored: the rate and the slew time are one quantity, held
     // in one accumulator.
     uint32_t chiff_slew_time_q5_27 = chiff_slew_time_log2_q5_27_;
-    // Uncapped: see kChiffMinSlewTimeLog2_q5_27.
     int32_t chiff_slew_rate_q31 = static_cast<int32_t>(
       SlewRateFromTimeLog2_q31(chiff_slew_time_q5_27));
     const uint32_t chiff_amplitude_gain_q31_sqrt =
