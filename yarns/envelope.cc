@@ -100,11 +100,10 @@ const int kOutputSaturateBits = 15;
 // How far the mean must move so the chiff's amplitude fits between it and the
 // rails; 0 when it already does.
 //
-// Q29 because the mean is nominal + bias and passes INT32_MAX at a full-range
-// note with a railed bias -- halving both first is what the stage's own bias
-// slope does, and the half LSB it costs is on a DC offset. The answer can pass
-// INT32_MAX as well, so it is formed unsigned: it is only ever added into the
-// modular accumulator.
+// Q29 because the mean is nominal + bias, which passes INT32_MAX at a
+// full-range note with a railed bias. The half LSB that costs lands on a DC
+// offset. The answer can pass INT32_MAX too, so it is formed unsigned: it is
+// only ever added into the modular accumulator.
 inline uint32_t OffsetForChiffAmplitude(
     int32_t mean_q29, int32_t min_q29, int32_t max_q29) {
   if (mean_q29 < min_q29) {
@@ -139,8 +138,8 @@ const uint32_t kMaxRepresentableSlewTimeLog2_q5_27 = 27u << 27;
 
 // The chiff's fastest slew time, nearly zero on purpose: at rate 1.0 a
 // slew's output is its input, so the fast end is genuinely unslewed.
-// 1/128 octave off zero is rate 0.9946.
-//   - kMaxSlewRate does not bound this: rate 1.0 is a setting the chiff uses.
+// 1/128 octave off zero is rate 0.9946, and rate 1.0 is a setting the chiff
+// uses, so its rate is derived uncapped.
 const uint32_t kChiffMinSlewTimeLog2_q5_27 = (1u << 27) / 128;
 
 // The fractional part of a Q5.27 slew time, i.e. everything below one octave.
@@ -201,7 +200,7 @@ const uint32_t kChiffClipAmplitudesShift = 1;  // 2 amplitudes = 3*sqrt(2) sigma
 const uint32_t kStageTargetOvershoot_u16 = static_cast<uint32_t>(
   65536.0 / (1.0 - __builtin_exp(-4.0)) + 0.5);
 
-// Capped at kMaxSlewRate. The stage slews use it.
+// Capped at kMaxSlewRate.
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 
 void Envelope::Init(int16_t zero_value_s16) {
@@ -600,7 +599,7 @@ static inline uint32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
 //     4-sample stage covers 1 - e^-4 like the rest.
 //   - 4 samples is the shortest stage that exists: modulate_7_13 clamps to
 //     [0, 8191], so the increment table bottoms out at UINT32_MAX/4.
-//   - The cap lives here; SlewRateFromTimeLog2_q31 is a general 2^-x.
+//   - The cap lives on the rate, not on the exp2 it is read from.
 const int32_t kMaxSlewRate_q31 = static_cast<int32_t>(
   (1.0 - __builtin_exp(-1.0)) * 2147483648.0 + 0.5);
 
@@ -1180,8 +1179,8 @@ static int32_t ScaleRatio(int32_t value, uint32_t numerator, uint32_t denominato
                    : static_cast<int32_t>(quotient);
 }
 
-// Rescale every level by numerator/denominator (non-negative, from
-// WarpTimbre). Cold path, so exact per-field division is fine. Slew times are
+// Rescale every level by numerator/denominator, both non-negative. Cold
+// path, so exact per-field division is fine. Slew times are
 // rates, so they are scale-invariant.
 void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   if (denominator <= 0) return; // Degenerate scale; leave levels unchanged
