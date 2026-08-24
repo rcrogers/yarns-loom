@@ -156,7 +156,6 @@ const uint32_t kChiffAmountFull_q30 = 1u << kChiffAmountFractionalBits;
 // the slew, so the output squares off and its amplitude rises at once. Below
 // this the drive is 1. Half of full AMOUNT, so the span above it is a shift.
 const uint32_t kChiffAmountForDriveBegin_q30 = kChiffAmountFull_q30 >> 1;
-const uint32_t kChiffDriveSpanShift = kChiffAmountFractionalBits - 1;
 // Where the slew time reaches its fast end. Independent of where drive begins.
 const uint32_t kChiffAmountForMinSlewTime_q30 = static_cast<uint32_t>(
   kChiffAmountFull_q30 * (110.0 / 127.0) + 0.5);
@@ -167,13 +166,17 @@ const uint32_t kChiffLevelFractionalBits = 30;
 const uint32_t kChiffSlewStateFractionalBits = 26;
 const uint32_t kChiffMaxDriveOctaves =
     kChiffLevelFractionalBits - kChiffSlewStateFractionalBits;
-// Octaves of drive from kChiffAmountForDriveBegin to full AMOUNT, Q5.27.
+// Octaves of drive from kChiffAmountForDriveBegin to full AMOUNT.
 //   - Calibrated by ear, short of the kChiffMaxDriveOctaves that pins
 //     the state on the clip at every level, so the top of the knob approaches
 //     a square asymptotically.
-//   - Must stay under kChiffMaxDriveOctaves, where the driven input
-//     leaves Q30.
-const uint32_t kChiffDriveSpanOctaves_q5_27 = (5u << 27) / 2;  // 2.5 octaves
+//   - The suffix is kChiffMaxDriveOctaves: past that the driven input leaves
+//     Q30.
+//   - Carried at the amount's own fractional bits. The drive spans half of
+//     full AMOUNT, so the amount past the start times this IS the Q5.27
+//     exponent in the product's high word -- one umull, no shift.
+const uint32_t kChiffDriveSpanOctaves_q2_30 = static_cast<uint32_t>(
+  2.5 * (1u << kChiffAmountFractionalBits));
 // The largest slew time the chiff may reach, which it does at amount zero.
 //   - Without it that end is duration-derived, so DURATION moves every cutoff
 //     below kChiffAmountForMinSlewTime, and at long durations the input rails
@@ -498,9 +501,8 @@ static int32_t ChiffSlewInputFractionAtAmount_q30(
 static int32_t ChiffDriveAtAmount_q4_26(uint32_t amount_q30) {
   uint32_t drive_octaves_q5_27 = 0;
   if (amount_q30 > kChiffAmountForDriveBegin_q30) {
-    drive_octaves_q5_27 = static_cast<uint32_t>(
-      (static_cast<uint64_t>(amount_q30 - kChiffAmountForDriveBegin_q30)
-       * kChiffDriveSpanOctaves_q5_27) >> kChiffDriveSpanShift);
+    drive_octaves_q5_27 = MulU32(
+      amount_q30 - kChiffAmountForDriveBegin_q30, kChiffDriveSpanOctaves_q2_30);
   }
   // Exponent measured down from the ceiling, so Q26 carries the division.
   return static_cast<int32_t>(SlewRateFromTimeLog2_q31(
