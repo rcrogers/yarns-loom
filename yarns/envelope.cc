@@ -65,10 +65,10 @@ namespace {
   // n magnitudes, i.e. sqrt(85)/15 = 0.6146 at four bits, which is -4.23 dB.
   // DERIVED from the draw width, so widening a draw moves both figures.
   const uint32_t kChiffNumDrawMagnitudes = 1u << (kChiffDrawBits - 1);
-  const uint32_t kChiffDrawRmsFractionOfMax_q16 = static_cast<uint32_t>(
-    65536.0 * __builtin_sqrt(
+  const double kChiffDrawRmsFractionOfMax =
+    __builtin_sqrt(
       (4.0 * kChiffNumDrawMagnitudes * kChiffNumDrawMagnitudes - 1.0) / 3.0)
-      / (2.0 * kChiffNumDrawMagnitudes - 1.0) + 0.5);
+      / (2.0 * kChiffNumDrawMagnitudes - 1.0);
   typedef char kChiffDrawsMustFillWholeWords[
       (kAudioBlockSize % kChiffDrawsPerWord == 0) ? 1 : -1];
 
@@ -183,8 +183,7 @@ const uint32_t kChiffDriveSpanOctaves_q2_30 = static_cast<uint32_t>(
 //   - A min, not an assignment: the chiff must outlast its own slew's time
 //     constant to reach amplitude.
 //   - It costs the sub-audio slew rates at the bottom of AMOUNT.
-const uint32_t kChiffMaxSlewTimeOctaves = 11;
-const uint32_t kChiffMaxSlewTimeLog2_q5_27 = kChiffMaxSlewTimeOctaves << 27;
+const uint32_t kChiffMaxSlewTimeLog2_q5_27 = 11u << 27;  // 11 octaves
 // How many chiff amplitudes the clip threshold sits at. Sized so the undriven
 // end passes essentially unclipped, at the smallest hold on the mean that
 // allows it.
@@ -274,13 +273,9 @@ const double kChiffAmplitudeSigmas = 3.0 / __builtin_sqrt(2.0);   // 2.121
 // exactly at all r.
 const double kChiffSigmaPerRootAtSmallRate = 1.0 / __builtin_sqrt(2.0);
 
-// The slew chases draw levels; their rms is this fraction of the largest.
-const double kChiffDrawRmsFraction =
-    static_cast<double>(kChiffDrawRmsFractionOfMax_q16) / 65536.0;
-
 // amplitude_gain = this * root * series.
 const uint32_t kChiffAmplitudeGainCoefficient_q31_sqrt = static_cast<uint32_t>(
-  kChiffAmplitudeSigmas * kChiffSigmaPerRootAtSmallRate * kChiffDrawRmsFraction
+  kChiffAmplitudeSigmas * kChiffSigmaPerRootAtSmallRate * kChiffDrawRmsFractionOfMax
       * kOne_q31_sqrt + 0.5);
 
 // The rate is a parameter, so the forward and inverse series read one value
