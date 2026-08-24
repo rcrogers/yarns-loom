@@ -248,7 +248,8 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
   // Buffer is fully overwritten by both branches below — skip zero-init.
   int16_t samples[kAudioBlockSize];
   if (is_envelope()) {
-    envelope_.RenderSamples(samples, envelope_bias_ << 16);
+    envelope_.RenderSamples(
+      samples, static_cast<int32_t>(static_cast<uint32_t>(envelope_bias_) << 16));
     // Q15 (0..32767) → Q16 (0..65534): both int16s in each 32-bit word
     // are < 0x8000, so packing two per iteration via uint32 shift is
     // exact (no cross-half carry). Halves the loop count.

@@ -110,14 +110,14 @@ static void RenderMs(double ms) {
   size_t n = (size_t)(ms * 45.0);
   for (size_t i = 0; i < n; i += kAudioBlockSize) {
     int16_t buffer[kAudioBlockSize];
-    int32_t bias_target_q31 = g_tremolo
-        ? static_cast<int32_t>(env.tremolo(g_tremolo)) << 16 : 0;
+    uint32_t bias_target_q31 = g_tremolo
+        ? static_cast<uint32_t>(env.tremolo(g_tremolo)) << 16 : 0;
     if (g_bias_lfo) {
       const bool high = ((g_block_counter / g_bias_lfo_blocks) & 1) == 0;
-      bias_target_q31 += (high ? g_bias_lfo : -g_bias_lfo) << 16;
+      bias_target_q31 += static_cast<uint32_t>(high ? g_bias_lfo : -g_bias_lfo) << 16;
     }
     ++g_block_counter;
-    env.RenderSamples(buffer, bias_target_q31);
+    env.RenderSamples(buffer, static_cast<int32_t>(bias_target_q31));
     if (g_chiff_trace) {
       // The amount, not the drive: drive, slew time and input are all pure
       // functions of it, and it costs no member to expose.

@@ -268,10 +268,12 @@ void Oscillator::Render(int16_t* audio_mix) {
   int16_t* timbre_samples = &timbre_gain[0];
   int16_t* gain_samples = &timbre_gain[kAudioBlockSize];
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
-  timbre_envelope_.RenderSamples(timbre_samples, timbre_bias << 16);
+  timbre_envelope_.RenderSamples(
+    timbre_samples, static_cast<int32_t>(static_cast<uint32_t>(timbre_bias) << 16));
 
   int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
-  gain_envelope_.RenderSamples(gain_samples, gain_bias << 16);
+  gain_envelope_.RenderSamples(
+    gain_samples, static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16));
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);

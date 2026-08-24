@@ -8,4 +8,21 @@ cd "$(dirname "$0")"
 python3 ../portable_envelope.py ../.. envelope_host.cc
 # battery.js runs analyze.js once per seed and fails on any seed. A statistical
 # limit checked against one realization is checked against luck.
-clang++ -std=c++11 -O1 -w -DTEST -I shim -I ../.. envelope_host.cc ../../yarns/resources.cc driver.cc -o test && node battery.js
+clang++ -std=c++11 -O1 -w -DTEST -I shim -I ../.. envelope_host.cc ../../yarns/resources.cc driver.cc -o test || exit 1
+# UNDEFINED BEHAVIOUR IS NOT VISIBLE IN THE OUTPUT. A signed overflow renders
+# whatever the compiler felt like that day, and every check here would still
+# pass. This build traps it instead. The cases are the ones that reach the
+# extremes: a full-range note with the bias at a rail, and full tremolo.
+clang++ -std=c++11 -O1 -w -DTEST -fsanitize=signed-integer-overflow,shift \
+  -fno-sanitize-recover=all -I shim -I ../.. \
+  envelope_host.cc ../../yarns/resources.cc driver.cc -o test_ubsan || exit 1
+for case in \
+  "basic 127 90 attack_setting=127 range=32767 bias_lfo=32767" \
+  "basic 127 90 attack_setting=40 range=32767 bias_lfo=32767 bias_lfo_blocks=1" \
+  "basic 127 127 attack_setting=8 range=32767 bias_lfo=32767 peak=100 sustain=100" \
+  "basic 96 49 attack_setting=40 range=32767 tremolo=65535" \
+  "basic 127 33 attack_setting=16"; do
+  ./test_ubsan $case > /dev/null || { echo "UBSan FAILED: $case"; exit 1; }
+done
+echo "UBSan clean"
+node battery.js

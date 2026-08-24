@@ -99,10 +99,20 @@ const int kOutputSaturateBits = 15;
 
 // How far the mean must move so the chiff's amplitude fits between it and the
 // rails; 0 when it already does.
-inline int32_t OffsetForChiffAmplitude(
-    int32_t mean_q1_30, int32_t min_q30, int32_t max_q30) {
-  if (mean_q1_30 < min_q30) return min_q30 - mean_q1_30;
-  if (mean_q1_30 > max_q30) return max_q30 - mean_q1_30;
+//
+// Q29 because the mean is nominal + bias and passes INT32_MAX at a full-range
+// note with a railed bias -- halving both first is what the stage's own bias
+// slope does, and the half LSB it costs is on a DC offset. The answer can pass
+// INT32_MAX as well, so it is formed unsigned: it is only ever added into the
+// modular accumulator.
+inline uint32_t OffsetForChiffAmplitude(
+    int32_t mean_q29, int32_t min_q29, int32_t max_q29) {
+  if (mean_q29 < min_q29) {
+    return (static_cast<uint32_t>(min_q29) - static_cast<uint32_t>(mean_q29)) << 1;
+  }
+  if (mean_q29 > max_q29) {
+    return (static_cast<uint32_t>(max_q29) - static_cast<uint32_t>(mean_q29)) << 1;
+  }
   return 0;
 }
 
@@ -797,7 +807,7 @@ void Envelope::HandOffToNextStage(
      * of this sum is in int32 range. */                                        \
     int32_t sample = static_cast<int32_t>(target_with_all_bias                          \
       - static_cast<uint32_t>(nominal_delta_q1_30)                                  \
-      + static_cast<uint32_t>(chiff_slew_state_q26 << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))             \
+      + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))          \
       >> kSampleBits;                                                           \
     const int32_t kSampleMax = (1 << kOutputSaturateBits) - 1;                \
     if (sample < 0) sample = 0;                                               \
@@ -935,8 +945,9 @@ void Envelope::RenderStage(
       }
       nominal_value_end_q30 += static_cast<int32_t>(step);
     }
-    const int32_t bias_end_q30 =
-      bias_q30 + bias_slope_q30 * static_cast<int32_t>(run_samples);
+    const int32_t bias_end_q30 = static_cast<int32_t>(
+      static_cast<uint32_t>(bias_q30)
+      + static_cast<uint32_t>(bias_slope_q30) * run_samples);
     // 30 fractional bits, and NO Q SUFFIX: it is a modular accumulator, so no
     // permitted maximum is true of it. The adjusted target plus a full-scale
     // bias passes INT32_MAX. Every use subtracts the nominal delta first, and
@@ -945,13 +956,16 @@ void Envelope::RenderStage(
     // signed cast back below.
     uint32_t target_with_all_bias, target_with_all_bias_end;
     if (mean_min_q30 < mean_max_q30) {
-      target_with_all_bias = static_cast<uint32_t>(
-        OffsetForChiffAmplitude(nominal_value_q30 + bias_q30,
-                                mean_min_q30, mean_max_q30) + bias_q30);
-      target_with_all_bias_end = static_cast<uint32_t>(
-        OffsetForChiffAmplitude(nominal_value_end_q30 + bias_end_q30,
-                                mean_min_q30, mean_max_q30)
-        + bias_end_q30);
+      const int32_t mean_min_q29 = mean_min_q30 >> 1;
+      const int32_t mean_max_q29 = mean_max_q30 >> 1;
+      target_with_all_bias =
+        OffsetForChiffAmplitude((nominal_value_q30 >> 1) + (bias_q30 >> 1),
+                                mean_min_q29, mean_max_q29)
+        + static_cast<uint32_t>(bias_q30);
+      target_with_all_bias_end =
+        OffsetForChiffAmplitude((nominal_value_end_q30 >> 1) + (bias_end_q30 >> 1),
+                                mean_min_q29, mean_max_q29)
+        + static_cast<uint32_t>(bias_end_q30);
     } else {
       // Chiff wider than the rails: centre it and let the output saturate.
       target_with_all_bias = static_cast<uint32_t>((kValueMax_q30 >> 1) - nominal_value_q30);
@@ -1073,7 +1087,8 @@ void Envelope::RenderStage(
     // Nominal plus chiff, carrying NO bias, and bounded before anyone reads
     // it: value_without_bias() returns int16_t and tremolo() multiplies in
     // int32, so both wrap out of range.
-    value_without_bias_q30 = nominal_value_q30 + (chiff_slew_state_q26
+    value_without_bias_q30 = nominal_value_q30 + static_cast<int32_t>(
+      static_cast<uint32_t>(chiff_slew_state_q26)
       << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits));
     if (value_without_bias_q30 < value_floor_q30_) {
       value_without_bias_q30 = value_floor_q30_;
@@ -1082,7 +1097,8 @@ void Envelope::RenderStage(
     if (value_without_bias_q30 > value_top_q30) {
       value_without_bias_q30 = value_top_q30;
     }
-    bias_q31 += bias_slope_q31 * static_cast<int32_t>(run_samples);
+    bias_q31 = static_cast<int32_t>(static_cast<uint32_t>(bias_q31)
+      + static_cast<uint32_t>(bias_slope_q31) * run_samples);
   }
 
   block_samples_left -= run_samples;
