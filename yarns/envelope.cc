@@ -95,6 +95,9 @@ const int kSampleBits = 15;
 // [0, INT16_MAX]. Named so the asm can take it as an immediate.
 const int kOutputSaturateBits = 15;
 
+// The DAC range in Q30: 32767 << 15, and (2^30 - 1) >> 15 is 32767 exactly.
+const int32_t kValueMax_q30 = (1 << 30) - 1;
+
 // How far the mean must move so the chiff's amplitude fits between it and the
 // rails; 0 when it already does.
 //
@@ -253,6 +256,21 @@ static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 //     kChiffAmplitudeSigmas lower again.
 //   - Written as the dB figure and converted here, not transcribed as digits.
 //     __builtin_pow folds at compile time, so it costs no code and no libm.
+
+// One endpoint of the ramp the render adds to every sample: the mean's rail
+// correction, plus the bias it was measured with. The run wants it at its start
+// and at its end, and differences the two.
+static uint32_t TargetWithAllBias(
+    int32_t nominal_q30, int32_t bias_q30,
+    int32_t mean_min_q30, int32_t mean_max_q30) {
+  if (mean_min_q30 >= mean_max_q30) {
+    // Chiff wider than the rails: centre it and let the output saturate.
+    return static_cast<uint32_t>((kValueMax_q30 >> 1) - nominal_q30);
+  }
+  return OffsetForChiffAmplitude((nominal_q30 >> 1) + (bias_q30 >> 1),
+                                 mean_min_q30 >> 1, mean_max_q30 >> 1)
+    + static_cast<uint32_t>(bias_q30);
+}
 
 // The knob's own maps, taking a Q7.25 amount where the knob indexes an integer
 // -- a decaying chiff wears the timbre each amount it passes through has as an
@@ -798,8 +816,6 @@ void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
-  // The DAC range in Q30: 32767 << 15, and (2^30 - 1) >> 15 is 32767 exactly.
-  const int32_t kValueMax_q30 = (1 << 30) - 1;
   // How many chiff amplitudes the clip threshold sits at. Sized so the
   // undriven end passes essentially unclipped, at the smallest hold on the
   // mean that allows it.
@@ -947,24 +963,10 @@ void Envelope::RenderStage(
     // that is in range, so the wrap cancels.
     // Unsigned makes the wrap defined; the two places that reinterpret it as
     // signed cast back below.
-    uint32_t target_with_all_bias, target_with_all_bias_end;
-    if (mean_min_q30 < mean_max_q30) {
-      const int32_t mean_min_q29 = mean_min_q30 >> 1;
-      const int32_t mean_max_q29 = mean_max_q30 >> 1;
-      target_with_all_bias =
-        OffsetForChiffAmplitude((nominal_value_q30 >> 1) + (bias_q30 >> 1),
-                                mean_min_q29, mean_max_q29)
-        + static_cast<uint32_t>(bias_q30);
-      target_with_all_bias_end =
-        OffsetForChiffAmplitude((nominal_value_end_q30 >> 1) + (bias_end_q30 >> 1),
-                                mean_min_q29, mean_max_q29)
-        + static_cast<uint32_t>(bias_end_q30);
-    } else {
-      // Chiff wider than the rails: centre it and let the output saturate.
-      target_with_all_bias = static_cast<uint32_t>((kValueMax_q30 >> 1) - nominal_value_q30);
-      target_with_all_bias_end =
-        static_cast<uint32_t>((kValueMax_q30 >> 1) - nominal_value_end_q30);
-    }
+    uint32_t target_with_all_bias = TargetWithAllBias(
+      nominal_value_q30, bias_q30, mean_min_q30, mean_max_q30);
+    const uint32_t target_with_all_bias_end = TargetWithAllBias(
+      nominal_value_end_q30, bias_end_q30, mean_min_q30, mean_max_q30);
     // The difference is small and signed; the wrap in the subtraction is what
     // makes reinterpreting it as int32 give the true delta.
     const int32_t target_with_all_bias_slope = run_samples
