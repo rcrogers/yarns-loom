@@ -323,16 +323,15 @@ static uint32_t ChiffSlewTimeAtAmount_q5_27(
     >> 16);
 }
 
-// Q7.25. Closed form,
-// because the amplitude-proportional-to-amount law makes it one:
+// Closed form, because the chiff's amplitude IS slew_input_max * amount:
 //
 //   slew_input_max * amount >= kChiffInaudibleAmplitude
 //
 //   - One 64/32 divide, and it evaluates none of the maps whose calibration
 //     the threshold depends on.
-//   - PREDICTED: where the slew input rails, the real output is below what the
-//     the law says, so the chiff goes inaudible earlier than this. The symptom
-//     DURATION reading short at the bottom of AMOUNT.
+//   - PREDICTED: where the slew input caps, the amplitude is under
+//     slew_input_max * amount, so the chiff goes inaudible earlier than this.
+//     The symptom is DURATION reading short at the bottom of AMOUNT.
 static uint32_t ChiffInaudibleAmount_q30(
     uint32_t start_q30, int32_t slew_input_max_q30) {
   if (slew_input_max_q30 <= 0) return start_q30;
@@ -411,18 +410,18 @@ static uint32_t ChiffAmountAtPhase_q30(
     (static_cast<uint64_t>(initial_q30) * amount_fraction_u16) >> 16);
 }
 
-// The input is solved backwards from the amplitude-proportional-to-amount law.
-// The output must be proportional to AMOUNT, and the slew reaches only a
-// fraction of what it chases:
+// THE GAIN CANCELS HERE, which is what leaves the chiff's amplitude equal to
+// slew_input_max * amount. The slew reaches only amplitude_gain of what it
+// chases, so the input is solved by dividing that back out:
 //
 //   fraction = min(1, amount / amplitude_gain)
 //
 //   - Below kChiffAmountForDriveBegin two effects cut the output: the input
-//     shrinks, and a slower slew reaches less of it. Dividing by the gain
-//     removes the second, leaving the output proportional to the first.
+//     shrinks, and a slower slew reaches less of it. This removes the second.
 //   - At and above kChiffAmountForMinSlewTime it is exactly a no-op: the gain
-//     clamps at 1.0 and this collapses to amount / max.
-//   - Where the min binds, the bottom of AMOUNT falls below the law.
+//     clamps at 1.0 and this collapses to the amount itself.
+//   - Where the min binds, the amplitude falls under slew_input_max * amount
+//     and the bottom of AMOUNT goes with it.
 static int32_t ChiffSlewInputFractionAtAmount_q30(
     uint32_t amount_q30, uint32_t slew_time_log2_q5_27, int32_t rate_q31) {
   // (1 - r/4 - r^2/32): the forward correction inverted to two terms.
