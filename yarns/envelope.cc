@@ -730,25 +730,25 @@ void Envelope::HandOffToNextStage(
 // raw 0..kChiffDrawValueMax field. `bit_offset` is a string because `ubfx`
 // needs an immediate.
 #define YARNS_CHIFF_ASM_SAMPLE(bit_offset) \
-  "  smull ip, lr, %[rate], %[decay]\n"       /* (rate*decay), lr = hi     */ \
-  "  sub   %[rate], %[rate], lr\n"            /* rate -= (rate*decay)>>32  */ \
-  "  ubfx  ip, %[draws], #" bit_offset ", %[drawbits]\n" /* one draw, low end */ \
-  "  ldr   lr, [%[levels], ip, lsl #2]\n"     /* what the slew chases      */ \
-  "  sub   lr, lr, %[chiff]\n"                /* delta                     */ \
-  "  smull ip, lr, lr, %[rate]\n"                                             \
-  "  add   %[chiff], %[chiff], lr, lsl #1\n"  /* chiff += (product>>32)*2  */ \
-  "  cmp   %[chiff], %[clip]\n"               /* saturating slew: the      */ \
-  "  it    gt\n"                              /*   clipped value feeds     */ \
-  "  movgt %[chiff], %[clip]\n"               /*   back, so the state      */ \
-  "  cmn   %[chiff], %[clip]\n"               /*   holds only what it      */ \
-  "  it    lt\n"                              /*   is allowed to show      */ \
-  "  rsblt %[chiff], %[clip], #0\n"                                           \
-  "  smull ip, lr, %[delta], %[srate]\n"        /* delta to the adj. target  */ \
-  "  sub   %[delta], %[delta], lr, lsl #1\n"      /*   at the STAGE's rate     */ \
-  "  add   %[comb], %[comb], %[cslope]\n"     /* bias + mean + adj. target */ \
-  "  sub   ip, %[comb], %[delta]\n"             /* the mean                  */ \
-  "  add   ip, ip, %[chiff], lsl %[stshift]\n" /* + the chiff, unscaled    */ \
-  "  usat  ip, %[satbits], ip, asr %[sbits]\n" /* saturate and shift, 1 op */ \
+  "  smull ip, lr, %[chiff_rate], %[rate_decay]\n"        /* (rate*decay), lr = hi     */ \
+  "  sub   %[chiff_rate], %[chiff_rate], lr\n"            /* rate -= that >> 32        */ \
+  "  ubfx  ip, %[draws], #" bit_offset ", %[draw_bits]\n" /* one draw, low end         */ \
+  "  ldr   lr, [%[levels], ip, lsl #2]\n"                 /* what the slew chases      */ \
+  "  sub   lr, lr, %[chiff]\n"                            /* delta                     */ \
+  "  smull ip, lr, lr, %[chiff_rate]\n"                                                   \
+  "  add   %[chiff], %[chiff], lr, lsl #1\n"              /* chiff += (that>>32)*2     */ \
+  "  cmp   %[chiff], %[clip]\n"                           /* saturating slew: the      */ \
+  "  it    gt\n"                                          /*   clipped value feeds     */ \
+  "  movgt %[chiff], %[clip]\n"                           /*   back, so the state      */ \
+  "  cmn   %[chiff], %[clip]\n"                           /*   holds only what it      */ \
+  "  it    lt\n"                                          /*   is allowed to show      */ \
+  "  rsblt %[chiff], %[clip], #0\n"                                                       \
+  "  smull ip, lr, %[delta], %[stage_rate]\n"             /* delta to the adj. target  */ \
+  "  sub   %[delta], %[delta], lr, lsl #1\n"              /*   at the STAGE's rate     */ \
+  "  add   %[target], %[target], %[target_slope]\n"       /* bias + mean + adj. target */ \
+  "  sub   ip, %[target], %[delta]\n"                     /* the mean                  */ \
+  "  add   ip, ip, %[chiff], lsl %[state_shift]\n"        /* + the chiff, unscaled     */ \
+  "  usat  ip, %[sat_bits], ip, asr %[sample_bits]\n"     /* saturate and shift, 1 op  */ \
   "  strh  ip, [%[buf]], #2\n"
 // Every constant above is an "i" operand, not a digit in a string, so a
 // rename reaches the asm. "i" substitutes the literal and costs no register,
@@ -757,16 +757,23 @@ void Envelope::HandOffToNextStage(
 // The operands both asm blocks share, written once and expanded by each: the
 // QEMU differential proves asm == C, not asm == asm.
 #define YARNS_CHIFF_ASM_STATE                                                 \
-  [chiff] "+r"(chiff_slew_state_q26), [delta] "+r"(nominal_delta_q1_30),                 \
-  [rate] "+r"(chiff_slew_rate_q31), [comb] "+r"(target_with_all_bias),                      \
-  [buf] "+r"(sample_buffer), [draws] "+r"(draws)
+  [chiff] "+r"(chiff_slew_state_q26),                                         \
+  [delta] "+r"(nominal_delta_q1_30),                                          \
+  [chiff_rate] "+r"(chiff_slew_rate_q31),                                     \
+  [target] "+r"(target_with_all_bias),                                        \
+  [buf] "+r"(sample_buffer),                                                  \
+  [draws] "+r"(draws)
 #define YARNS_CHIFF_ASM_INPUTS                                                \
-  [decay] "r"(chiff_slew_rate_decay_q32), [levels] "r"(chiff_levels_q4_26),            \
-  [clip] "r"(chiff_clip_threshold_q26), [srate] "r"(stage_slew_rate_q31),             \
-  [cslope] "r"(target_with_all_bias_slope),                                           \
-  [drawbits] "i"(kChiffDrawBits),                                             \
-  [stshift] "i"((kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)), [sbits] "i"(kSampleBits),                  \
-  [satbits] "i"(kOutputSaturateBits)
+  [rate_decay] "r"(chiff_slew_rate_decay_q32),                                \
+  [levels] "r"(chiff_levels_q4_26),                                           \
+  [clip] "r"(chiff_clip_threshold_q26),                                       \
+  [stage_rate] "r"(stage_slew_rate_q31),                                      \
+  [target_slope] "r"(target_with_all_bias_slope),                             \
+  [draw_bits] "i"(kChiffDrawBits),                                            \
+  [state_shift] "i"(                                                          \
+    kChiffLevelFractionalBits - kChiffSlewStateFractionalBits),               \
+  [sample_bits] "i"(kSampleBits),                                             \
+  [sat_bits] "i"(kOutputSaturateBits)
 
 #define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
   do {                                                                        \
@@ -1062,7 +1069,7 @@ void Envelope::RenderStage(
       "  beq   2f\n"
       "1:\n"
       YARNS_CHIFF_ASM_SAMPLE("0")
-      "  lsr   %[draws], %[draws], %[drawbits]\n"  // consumed low end first
+      "  lsr   %[draws], %[draws], %[draw_bits]\n"  // consumed low end first
       "  cmp   %[buf], %[end]\n"
       "  bne   1b\n"
       "2:\n"
