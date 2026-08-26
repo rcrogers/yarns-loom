@@ -334,6 +334,41 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
         'worst overshoot '+worst+' q5.27 at '+worstAt);
 }
 
+// AND IT MOVES. The slew time darkens across the note: the per-sample rate
+// decay carries it from the amount the run starts at to the amount it ends at,
+// and the writeback advances it by step * run_samples. Freezing the step leaves
+// the slew time at its onset value for the whole note.
+//
+// This exists because MUTATION TESTING found nothing else catches that.
+// Battery, anomaly and rescale are all blind to `slew_time_step = 0`, and the
+// check above passes on it -- a constant is trivially at or under the slowest.
+// The per-sample decay costs ~5 cycles a sample, about 4% of the CPU, and it
+// was the only feature in the render loop with no check standing behind it.
+{
+  let worstRatio = Infinity, worstAt = '';
+  // Amounts where the onset slew time is well short of the slowest, so there is
+  // room to darken, and durations long enough to spend it.
+  for (const amount of [64, 96, 127]) {
+    for (const duration of [40, 67, 90]) {
+      const rows = H.run('basic '+amount+' '+duration+' slew_trace=1 seed='+SEED)
+        .toString().trim().split('\n')
+        .map(r => r.trim().split(/\s+/).map(Number)).filter(f => f.length >= 3);
+      if (rows.length < 4) continue;
+      const first = rows[0][0], last = rows[rows.length - 1][0], slowest = rows[0][2];
+      // How much of the room between onset and the slowest it actually covered.
+      const room = slowest - first;
+      const moved = last - first;
+      const ratio = room > 0 ? moved / room : 1;
+      if (ratio < worstRatio) {
+        worstRatio = ratio;
+        worstAt = 'amount '+amount+' dur '+duration;
+      }
+    }
+  }
+  check('chiff slew time darkens across the note', worstRatio > 0.5,
+        'least covered '+(100 * worstRatio).toFixed(1)+'% of its room at '+worstAt);
+}
+
 // THE VERDICT, AT THE END, AND IT EXITS NONZERO. It used to sit two thirds of
 // the way up, so 22 checks below it printed FAIL after the word "ALL PASS" and
 // left the status 0. Mutation-verified.
