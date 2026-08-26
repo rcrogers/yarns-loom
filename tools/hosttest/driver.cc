@@ -10,6 +10,9 @@
 #include "yarns/drivers/dac.h"
 #include "stmlib/stmlib.h"
 #include "stmlib/utils/dsp.h"
+// The panel's own conversions, so the driver asks the envelope the question
+// Part::VoiceNoteOn asks it, not a third one of its own.
+#include "tools/panel_chain.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -184,14 +187,13 @@ int main(int argc, char** argv) {
   uint8_t amount = argc > 2 ? atoi(argv[2]) : 96;
   // The driver names AMOUNT as the panel setting; NoteOn takes the fraction of
   // full scale, the way Part::VoiceNoteOn forms it.
-  const uint32_t amount_q30 = static_cast<uint32_t>(
-    (static_cast<uint64_t>(amount) << 30) / 127);
+  const uint32_t amount_q30 = PanelChiffAmount_q30(amount, 0, 0);
   uint8_t duration = argc > 3 ? atoi(argv[3]) : 67;
   // CHIFF DURATION names a time on its own table; NoteOn takes the increment,
   // not the setting. Converted once here because the two are both integers and
   // passing the wrong one converts silently.
-  const uint32_t chiff_audible_samples = ChiffAudibleSamples(Interpolate88(
-    lut_chiff_phase_increments, static_cast<uint16_t>(duration) << (15 - 7)));
+  const uint32_t chiff_audible_samples =
+    PanelChiffAudibleSamples(duration, 0, 0);
   // KEY=VALUE flag so it never lands in the positional attack_ms slot.
   g_hash_mode = OptInt(argc, argv, "hash", 0) != 0;
   g_tremolo = static_cast<uint16_t>(OptInt(argc, argv, "tremolo", 0));

@@ -38,7 +38,8 @@ different *code paths* within it, and that is the whole point of the table.
 | `hosttest` UBSan build | signed overflow and bad shifts, which render *something* and pass every other check | anything it does not execute |
 | `hosttest/anomaly.js` | 140 cases against a recorded baseline, tolerant of small movement | whether the baseline was right |
 | `hosttest/arrival.js` | every timed stage lands on its target, over 128 settings x attack/decay/release | anything the chiff adds on top |
-| `make cv` | the CV OUTPUT PATH: one Voice::NoteOn reaches four envelopes with the same note, and the aux CV pack does not carry across halves | Part::VoiceNoteOn, which is still ui.h-bound |
+| `make cv` | the CV OUTPUT PATH: one Voice::NoteOn reaches four envelopes with the same note, and the aux CV pack does not carry across halves | anything above Part::VoiceNoteOn |
+| `cvtest/panel.js` | the REAL Part::VoiceNoteOn against `tools/panel_chain.h`, the one copy every off-target consumer runs | whether part.cc itself is right |
 | `chiff_checks/simparity.js` | the published page renders identically to the native build | whether either is right |
 | `make cycles` | worst-case cost via the longest path through the CFG, loops weighted by their trip count | anything the linker pulls in — watch `flash free` |
 | `hosttest/blockrate.js` | a dBFS level on the tremolo bias's once-a-block breaks | whether that level is audible to you |
@@ -48,13 +49,15 @@ different *code paths* within it, and that is the whole point of the table.
 qemu in the background the moment it could be relevant; its only cost is
 latency.
 
-**Nothing here covers the display.** The CV output path is covered from
-`Voice::NoteOn` down by `make cv`, which host-compiles `yarns/voice.cc` and
-`yarns/oscillator.cc` against a DAC that records instead of writing. What is
-still uncovered is `Part::VoiceNoteOn` itself -- `part.cc` includes `ui.h`,
-which includes the encoder driver and its GPIO reads, so it has no host build;
-`simengine/engine.cc` mirrors that chain rather than running it. Three defects
-in this gap shipped and were caught only by flashing.
+**Nothing here covers the display.** The note-on chain is covered: `make cv`
+host-compiles `voice.cc` and `oscillator.cc` against a DAC that records instead
+of writing, and links `part.cc` too, so `cvtest/panel.js` runs the real
+`Part::VoiceNoteOn` and holds `tools/panel_chain.h` -- the one copy the sim and
+the host driver both use -- to it. What the sim cannot do is LINK part.cc: the
+page carries its engine inline and that TU wants the arpeggiator, the looper,
+the just-intonation processor, the MIDI handler and `multi`. Of the three
+defects that shipped in this gap and were caught only by flashing, the display
+one is the remainder.
 
 ## Reading the chiff, not its output
 

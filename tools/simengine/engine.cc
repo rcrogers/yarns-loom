@@ -20,6 +20,9 @@
 // Same translation unit as the envelope so its PRNG can be seeded
 // for reproducible renders (the sim's re-roll button).
 #include "envelope_portable.cc"
+// Part::VoiceNoteOn's parameter chain, in one file, pinned to the firmware's
+// by tools/cvtest/panel.js.
+#include "tools/panel_chain.h"
 
 #include <emscripten/emscripten.h>
 #include <algorithm>
@@ -29,43 +32,6 @@ using namespace yarns;
 using namespace stmlib;
 
 namespace {
-
-// Part::VoiceNoteOn, verbatim in structure. Velocity modulation is included
-// because peak level is NOT a setting -- it falls out of AMPLITUDE MOD
-// VELOCITY and the note's velocity.
-void BuildAdsr(ADSR* adsr,
-               int attack_setting, int decay_setting,
-               int sustain_setting, int release_setting,
-               int amplitude_mod_velocity, int velocity,
-               int env_mod_attack, int env_mod_decay,
-               int env_mod_sustain, int env_mod_release) {
-  uint8_t vel = static_cast<uint8_t>(velocity);
-  uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
-  int32_t damping_22 = -amplitude_mod_velocity * vel_concave_up;
-  if (amplitude_mod_velocity >= 0) {
-    damping_22 += amplitude_mod_velocity << 16;
-  }
-  // Mirrors part.cc: floor the peak so a zero peak never collapses the attack
-  // stage (see the comment there for the AMPLITUDE MOD VELOCITY -64 corner).
-  const int32_t kMinPeak_u16 = 1;
-  adsr->peak_u16 =
-      std::max(kMinPeak_u16, UINT16_MAX - (damping_22 >> (22 - 16)));
-  adsr->sustain_u16 = modulate_7_13(
-      static_cast<uint8_t>(sustain_setting),
-      static_cast<int8_t>(env_mod_sustain), vel) << (16 - 13);
-  adsr->attack_u32 = Interpolate88(
-      lut_envelope_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(attack_setting),
-                    static_cast<int8_t>(env_mod_attack), vel) << (15 - 13));
-  adsr->decay_u32 = Interpolate88(
-      lut_envelope_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(decay_setting),
-                    static_cast<int8_t>(env_mod_decay), vel) << (15 - 13));
-  adsr->release_u32 = Interpolate88(
-      lut_envelope_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(release_setting),
-                    static_cast<int8_t>(env_mod_release), vel) << (15 - 13));
-}
 
 Envelope envelope;
 ADSR adsr;
@@ -130,25 +96,21 @@ int chiff_render(
     int tremolo, int bias_lfo, int bias_lfo_blocks,
     unsigned int seed,
     int16_t* out, int max_samples, int32_t* meta) {
-  BuildAdsr(&adsr, attack_setting, decay_setting, sustain_setting,
-            release_setting, amplitude_mod_velocity, velocity,
-            env_mod_attack, env_mod_decay, env_mod_sustain, env_mod_release);
+  PanelAdsr(&adsr, attack_setting, decay_setting, sustain_setting,
+                  release_setting, amplitude_mod_velocity, velocity,
+                  env_mod_attack, env_mod_decay, env_mod_sustain,
+                  env_mod_release);
 
   next_chiff_seed = seed ? seed : 0xCAFEBABEu;
 
-  // EXCITER AMT VEL MOD, mirroring Part::VoiceNoteOn: passed on at
-  // modulate_7_13's own resolution, clamped to the top of the setting range.
+  // EXCITER AMT VEL MOD. The q7_6 form is for the meta block's readout; the
+  // fraction the envelope takes comes from the mirror.
   const uint16_t modulated_chiff_amount_q7_6 = modulate_7_13(
       static_cast<uint8_t>(chiff_amount),
       static_cast<int8_t>(chiff_amount_mod_velocity),
       static_cast<uint8_t>(velocity));
-  const uint16_t kChiffAmountFullScale_q7_6 = 127 << 6;
-  uint32_t modulated_chiff_amount_q30 = static_cast<uint32_t>(
-      (static_cast<uint64_t>(modulated_chiff_amount_q7_6) << 30)
-      / kChiffAmountFullScale_q7_6);
-  if (modulated_chiff_amount_q30 > (1u << 30)) {
-    modulated_chiff_amount_q30 = 1u << 30;
-  }
+  const uint32_t modulated_chiff_amount_q30 = PanelChiffAmount_q30(
+      chiff_amount, chiff_amount_mod_velocity, velocity);
 
   // THE SPAN MUST FIT int16. NoteOn forms `int16_t scale_s16 = max - min`, so a
   // span outside [-32768, 32767] wraps and then min_target_q31 + scale * peak
@@ -167,14 +129,8 @@ int chiff_render(
   // takes its stride off that. Overriding afterwards gave the page a different
   // stream from the native harness, which is exactly what simparity exists to
   // catch.
-  // CHIFF DURATION names a time on its own table; NoteOn takes the increment,
-  // not the setting. Converted once, because both are integers and passing the
-  // wrong one converts silently.
-  const uint32_t chiff_audible_samples = ChiffAudibleSamples(Interpolate88(
-      lut_chiff_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(chiff_duration),
-                    static_cast<int8_t>(chiff_duration_mod_velocity),
-                    static_cast<uint8_t>(velocity)) << (15 - 13)));
+  const uint32_t chiff_audible_samples = PanelChiffAudibleSamples(
+      chiff_duration, chiff_duration_mod_velocity, velocity);
   envelope.NoteOn(adsr, min_target, max_target,
                   modulated_chiff_amount_q30, chiff_audible_samples);
   // The NOMINAL duration, for the sim's marker. Computed once in NoteOn and a
