@@ -1,8 +1,8 @@
 # Chiff tooling
 
 The chiff is the noise burst `yarns/envelope.cc` adds to an envelope's attack.
-It is a one-pole filter driven by a PRNG, whose slew time, drive and input are
-all read off a decaying AMOUNT. EXCITER AMOUNT and EXCITER DURATION dial it.
+It is a slew driven by a PRNG, whose slew time, drive and input are all read
+off a decaying AMOUNT. EXCITER AMOUNT and EXCITER DURATION dial it.
 
 Everything here exists because the chiff is a *stochastic* process inside a
 realtime integer DSP path: you cannot eyeball it, and most obvious measurements
@@ -13,9 +13,10 @@ of it are wrong in ways that look right.
 The root `Makefile` documents its own targets. In short:
 
     make sim        rebuild + re-inline the sim engine (always rebuilds)
-    make host       host C-reference battery (44 checks x 8 seeds)
+    make host       host C reference: UBSan, then golden, battery, anomaly
     make qemu       differential: render-loop asm == C reference, 10 scenarios
-    make check      host + qemu + simparity + peakfloor + xvmod + strictmode + decay
+    make check      host + qemu + simparity + peakfloor + xvmod + strictmode
+                    + blockedge + blockrate + decay
     make firmware   flashable .syx
     make cycles     what the envelope costs per block
 
@@ -32,10 +33,13 @@ different *code paths* within it, and that is the whole point of the table.
 | tool | proves | cannot see |
 |---|---|---|
 | `make qemu` | the shipped ARM asm matches the C reference, bit for bit | anything above the render loop |
-| `hosttest/golden.js` | the output is unchanged, sample for sample, over 13 cases | whether a *change* is correct |
-| `make host` | 44 invariants over 8 seeds: DAC range, bias independence, monotonicity, stage handoff, clamp-with-chiff | anything perceptual |
+| `hosttest/golden.js` | the output is unchanged, sample for sample, over 14 cases | whether a *change* is correct |
+| `make host` | 45 invariants over 8 seeds: DAC range, bias independence, monotonicity, stage handoff, clamp-with-chiff | anything perceptual |
+| `hosttest` UBSan build | signed overflow and bad shifts, which render *something* and pass every other check | anything it does not execute |
+| `hosttest/anomaly.js` | 140 cases against a recorded baseline, tolerant of small movement | whether the baseline was right |
 | `chiff_checks/simparity.js` | the published page renders identically to the native build | whether either is right |
-| `make cycles` | worst-case cost via the longest path through the CFG | anything the linker pulls in — watch `flash free` |
+| `make cycles` | worst-case cost via the longest path through the CFG, loops weighted by their trip count | anything the linker pulls in — watch `flash free` |
+| `hosttest/blockrate.js` | a dBFS level on the tremolo bias's once-a-block breaks | whether that level is audible to you |
 | hardware | the display, the CV outputs, and how it sounds | — |
 
 **Everything except `make qemu` runs the C twin, not the shipped asm.** Run
@@ -119,6 +123,35 @@ that defines the timbre. Two scripts disagreed by 50% on one build over this.
 library code that no check notices, because the image stays bit-identical. Use
 `DivU64ByU32` and grep the disassembly for `__aeabi_uldivmod` after any change
 that divides. It has been reintroduced three times.
+
+**A cost model that weights by ADDRESS RANGE prices the wrong code.**
+`cycles.py` zeroed its head-and-tail sample loops by the address span between a
+back edge's target and its source. GCC scatters a loop's blocks, so that span
+swept up whatever landed between them -- and a `bl` in the per-run setup, moved
+inside one, priced at zero. It read 169 cycles for a path costing 927, and
+reported the per-run path as a quarter of its real size for as long as the tool
+has existed. Weight by the CFG's natural loop, one range per block.
+
+**A loop the tool cuts is a loop it prices once.** `longest_path` cuts back
+edges, which is right for finding a path and wrong for costing one. A sixteen
+iteration table build in the per-run path priced as one iteration, turning a 38
+cycle win into a reported 143. Anything with a trip count needs a weight, and
+the trip count has to come from the source, not a guess.
+
+**Isolate the artifact, not the signal it rides on.** Three measurements of the
+tremolo bias's block-rate breaks were wrong before one was right. A sustained
+note has no breaks at all, because the bias target does not move between blocks.
+A slow attack has tiny ones. High-passing the OUTPUT reads the envelope's own
+attack transient as the artifact, because a fast attack has more energy above
+300 Hz than the artifact does. Only differencing against a tremolo-free run
+isolates the bias -- which is sound only because the envelope is
+bias-independent, and the battery pins that at 0.
+
+**Operand order in an asm block allocates registers.** Reflowing
+`YARNS_CHIFF_ASM_STATE` one operand per line moved `[delta]` past
+`[chiff_rate]`, and GCC emitted the same instructions in different registers:
+same size, different binary. A rename of operand tags is only provably neutral
+if the order is left alone.
 
 **Scalar stats have repeatedly missed what a person sees.** Render an image and
 look, or ask. When someone says they cannot see the effect you measured, the
