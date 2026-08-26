@@ -113,6 +113,9 @@ class Ui {
   
   void Init();
   void Poll();
+  // One detent, scaled by the run it belongs to. Reads the clock, so it is
+  // called once per detent, and its own state is what carries between them.
+  int32_t AcceleratedEncoderIncrement(int32_t increment);
   void PollSwitch(const UiSwitch ui_switch, uint32_t& press_time, bool& long_press_event_sent);
   void PollFast() {
     display_.RefreshFast();

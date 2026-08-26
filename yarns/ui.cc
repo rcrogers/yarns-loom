@@ -215,6 +215,44 @@ void Ui::Init() {
   refresh_was_automatic_ = true;
 }
 
+// Encoder increment, accelerated by a sustained fast turn in one direction.
+// Only the encoder accelerates; relative CC arrives via
+// Multi::UpdateController and is applied a detent at a time. Skipped in
+// calibration adjustment because the handler already multiplies by 32 and
+// fine control is wanted.
+int32_t Ui::AcceleratedEncoderIncrement(int32_t increment) {
+  const uint32_t now = system_clock.milliseconds();
+  const uint32_t dt = now - encoder_last_increment_ms_;
+  const int8_t sign = increment > 0 ? 1 : -1;
+
+  if (encoder_last_increment_sign_ != sign) {
+    // A reversal is a change of intent rather than jitter, so the total ends
+    // outright. Otherwise correcting an overshoot flies back past the target
+    // at the speed that caused it. Also covers the first detent of all,
+    // where there is no previous one to measure against.
+    encoder_fast_run_ = 0;
+  } else {
+    int32_t delta = static_cast<int32_t>(kEncoderMaxSpeedSteps) -
+        static_cast<int32_t>(dt >> kEncoderSpeedBucketBits);
+    if (delta < 0) delta *= kEncoderDecaySteepness;
+    int32_t total = encoder_fast_run_ + delta;
+    if (total < 0) total = 0;
+    if (total > kEncoderRunMax) total = kEncoderRunMax;
+    encoder_fast_run_ = total;
+  }
+
+  int32_t accel_shift = 0;
+  if (mode_ != UI_MODE_CALIBRATION_ADJUST_LEVEL) {
+    accel_shift = encoder_fast_run_ / kEncoderRunPerDoubling;
+    if (accel_shift > kEncoderAccelMaxShift) {
+      accel_shift = kEncoderAccelMaxShift;
+    }
+  }
+  encoder_last_increment_ms_ = now;
+  encoder_last_increment_sign_ = sign;
+  return increment << accel_shift;
+}
+
 void Ui::Poll() {
   encoder_.Debounce();
   
@@ -235,43 +273,9 @@ void Ui::Poll() {
     }
   }
   
-  // Encoder increment, accelerated by a sustained fast turn in one direction.
-  // Only the encoder accelerates; relative CC arrives via
-  // Multi::UpdateController and is applied a detent at a time. Skipped in
-  // calibration adjustment because the handler already multiplies by 32 and
-  // fine control is wanted.
   int32_t increment = encoder_.increment();
   if (increment != 0) {
-    const uint32_t now = system_clock.milliseconds();
-    const uint32_t dt = now - encoder_last_increment_ms_;
-    const int8_t sign = increment > 0 ? 1 : -1;
-
-    if (encoder_last_increment_sign_ != sign) {
-      // A reversal is a change of intent rather than jitter, so the total ends
-      // outright. Otherwise correcting an overshoot flies back past the target
-      // at the speed that caused it. Also covers the first detent of all,
-      // where there is no previous one to measure against.
-      encoder_fast_run_ = 0;
-    } else {
-      int32_t delta = static_cast<int32_t>(kEncoderMaxSpeedSteps) -
-          static_cast<int32_t>(dt >> kEncoderSpeedBucketBits);
-      if (delta < 0) delta *= kEncoderDecaySteepness;
-      int32_t total = encoder_fast_run_ + delta;
-      if (total < 0) total = 0;
-      if (total > kEncoderRunMax) total = kEncoderRunMax;
-      encoder_fast_run_ = total;
-    }
-
-    int32_t accel_shift = 0;
-    if (mode_ != UI_MODE_CALIBRATION_ADJUST_LEVEL) {
-      accel_shift = encoder_fast_run_ / kEncoderRunPerDoubling;
-      if (accel_shift > kEncoderAccelMaxShift) {
-        accel_shift = kEncoderAccelMaxShift;
-      }
-    }
-    encoder_last_increment_ms_ = now;
-    encoder_last_increment_sign_ = sign;
-    queue_.AddEvent(CONTROL_ENCODER, 0, increment << accel_shift);
+    queue_.AddEvent(CONTROL_ENCODER, 0, AcceleratedEncoderIncrement(increment));
   }
 
   // Switch press and long press.
