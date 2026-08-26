@@ -29,6 +29,8 @@ echo "UBSan clean"
 # refactor that the battery would report as a statistic drifting.
 node golden.js || exit 1
 node battery.js || exit 1
+# Envelope::Rescale has one caller in the firmware and had no test at all.
+node rescale.js || exit 1
 # One behavioural number per case, tolerant of small movement, against its own
 # recorded baseline. Green here and red in golden means a deliberate change;
 # red here means the shape moved.

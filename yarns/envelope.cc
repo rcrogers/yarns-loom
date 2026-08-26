@@ -1205,6 +1205,12 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   uint32_t den = static_cast<uint32_t>(denominator);
   bias_q31_ = ScaleRatio(bias_q31_, num, den);
   value_without_bias_q30_ = ScaleRatio(value_without_bias_q30_, num, den);
+  // WHAT THE RENDER ACTUALLY CONTINUES FROM. Scaling the exposed value alone
+  // moves what tremolo() reads for one block and nothing else: the next run
+  // recomputes it from these two, so a held note carried on at the old scale
+  // and glided to the new target instead of keeping its timbre.
+  nominal_value_q30_ = ScaleRatio(nominal_value_q30_, num, den);
+  chiff_slew_state_q26_ = ScaleRatio(chiff_slew_state_q26_, num, den);
   stage_target_q30_ = ScaleRatio(stage_target_q30_, num, den);
   stage_start_q30_ = ScaleRatio(stage_start_q30_, num, den);
   chiff_slew_input_max_q30_ = ScaleRatio(chiff_slew_input_max_q30_, num, den);

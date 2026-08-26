@@ -103,6 +103,12 @@ static int g_chiff_state_trace = 0;
 // statistics of the output. Level and centroid cannot tell a clipped quiet
 // signal from an unclipped loud one; this can.
 static int g_chiff_trace = 0;
+// Envelope::Rescale, which Oscillator::set_shape calls on a HELD note so its
+// timbre survives a shape change. Nothing else in the suite reaches it: it has
+// one caller in the firmware and had no test at all, which is how it went years
+// without scaling the value the render continues from.
+static int g_rescale_num = 0;
+static int g_rescale_block = 0;
 static int32_t g_value_min = INT32_MAX;
 static int32_t g_value_max = INT32_MIN;
 
@@ -115,6 +121,9 @@ static void RenderMs(double ms) {
     if (g_bias_lfo) {
       const bool high = ((g_block_counter / g_bias_lfo_blocks) & 1) == 0;
       bias_target_q31 += static_cast<uint32_t>(high ? g_bias_lfo : -g_bias_lfo) << 16;
+    }
+    if (g_rescale_num && g_block_counter == g_rescale_block) {
+      env.Rescale(g_rescale_num, 1);
     }
     ++g_block_counter;
     env.RenderSamples(buffer, static_cast<int32_t>(bias_target_q31));
@@ -184,6 +193,8 @@ int main(int argc, char** argv) {
   g_slew_trace = OptInt(argc, argv, "slew_trace", 0);
   g_chiff_state_trace = OptInt(argc, argv, "chiff_state_trace", 0);
   g_chiff_trace = OptInt(argc, argv, "chiff_trace", 0);
+  g_rescale_num = OptInt(argc, argv, "rescale", 0);
+  g_rescale_block = OptInt(argc, argv, "rescale_block", 40);
   g_bias_lfo_blocks = OptInt(argc, argv, "bias_lfo_blocks", 8);
 
   int peak_pct = OptInt(argc, argv, "peak", 100);
