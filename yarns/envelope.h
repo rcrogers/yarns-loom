@@ -104,7 +104,16 @@ class Envelope {
   // Steps the bias directly, bypassing RenderSamples' per-block slew, so an
   // instantaneous jump (a pitch-driven timbre step at NoteOn) is not smoothed
   // into an audible glide. Continuous LFO motion still goes through the slew.
-  inline void AdjustBias(int32_t delta_q31) { bias_q31_ += delta_q31; }
+  inline void AdjustBias(int32_t delta_q31) {
+    // Saturating: the bias spans the whole int32 range, so a step onto one
+    // already near a rail wraps, and the wrap is undefined. In range this is a
+    // plain add.
+    const int64_t stepped =
+      static_cast<int64_t>(bias_q31_) + static_cast<int64_t>(delta_q31);
+    bias_q31_ = stepped > INT32_MAX ? INT32_MAX
+              : stepped < INT32_MIN ? INT32_MIN
+              : static_cast<int32_t>(stepped);
+  }
 
   inline int16_t tremolo(uint16_t strength_u16) const {
     int32_t relative_value_q15 =

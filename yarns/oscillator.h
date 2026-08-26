@@ -197,8 +197,13 @@ class Oscillator {
     // instead of lagging up to one block behind the next Refresh.
     phase_increment_ = ComputePhaseIncrement(pitch_);
     int16_t new_warped_bias = WarpTimbre(raw_timbre_bias_, shape_);
+    // Two int16 warped biases differ by up to +/-65534, and shifting that by 16
+    // leaves int32 -- twice over for the sign. The bias is an int16-scale
+    // quantity everywhere else it is written, so the step is one too.
+    int32_t warped_step = new_warped_bias - old_warped_bias;
+    CONSTRAIN(warped_step, INT16_MIN, INT16_MAX);
     timbre_envelope_.AdjustBias(
-        static_cast<int32_t>(new_warped_bias - old_warped_bias) << 16);
+        static_cast<int32_t>(static_cast<uint32_t>(warped_step) << 16));
 
     // The envelope's warped target is frozen at the destination pitch
     // (steady-state correct). It can't track the glide cheaply, so the bias

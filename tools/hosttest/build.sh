@@ -21,7 +21,9 @@ for case in \
   "basic 127 90 attack_setting=40 range=32767 bias_lfo=32767 bias_lfo_blocks=1" \
   "basic 127 127 attack_setting=8 range=32767 bias_lfo=32767 peak=100 sustain=100" \
   "basic 96 49 attack_setting=40 range=32767 tremolo=65535" \
-  "basic 127 33 attack_setting=16"; do
+  "basic 127 33 attack_setting=16" \
+  "basic 0 64 attack_setting=40 gate=900 tremolo=48000 bias_lfo=32767 adjust_bias=2000000000" \
+  "basic 0 64 attack_setting=60 gate=900 rescale=3"; do
   ./test_ubsan $case > /dev/null || { echo "UBSan FAILED: $case"; exit 1; }
 done
 echo "UBSan clean"

@@ -36,5 +36,34 @@ for (const factor of [2, 3]) {
         `ratio ${laterRatio.toFixed(3)} eight blocks later`);
   void before;
 }
+// AdjustBias steps the bias without the per-block slew, so a pitch-driven
+// timbre change is not glided. Same shape of gap as Rescale: one caller, no
+// test, so UBSan never executed the addition.
+{
+  const step = 1 << 24;
+  const plain = H.runNumbers(`${base} adjust_bias_block=${AT_BLOCK}`);
+  const bumped = H.runNumbers(`${base} adjust_bias_block=${AT_BLOCK} adjust_bias=${step}`);
+  // Read the FIRST sample of the block the step lands in. RenderSamples ramps
+  // the bias toward its target every block, and this scenario's target is 0, so
+  // the step is pulled back out across that same block -- by the next one it is
+  // gone. In the firmware the target moves with it, because AdjustBias is
+  // called at NoteOn alongside the new warped timbre.
+  const at0 = AT_BLOCK * BLOCK;
+  const moved = bumped[at0] - plain[at0];
+  // Not exact: the first sample already carries one step of the ramp pulling
+  // the bias back toward the target, which is 2^17 in Q30 here, or 4 at the
+  // output. Within a ramp step is the assertion.
+  const want = step >> 16;
+  check('AdjustBias steps the output', Math.abs(moved - want) <= want * 0.03,
+        `moved ${moved}, want ~${want}`);
+  // NOT CHECKED HERE: that the addition saturates rather than wrapping. It
+  // cannot be. The mean's rail correction pulls a saturated bias back toward
+  // the rail limit exactly as it pulls a wrapped one, and the DAC clamp sits
+  // under both -- MEASURED, a saturating step onto a high bias renders a mean
+  // of 1303 against a steady 16127, which is indistinguishable from the wrap.
+  // The undefinedness is the whole defect, so UBSan is the guard: build.sh runs
+  // `adjust_bias=2000000000` on a railed bias through it.
+}
+
 console.log(failures ? `\n${failures} failure(s)` : '\nALL PASS');
 process.exit(failures ? 1 : 0);
