@@ -41,6 +41,9 @@ check: host qemu
 	node tools/chiff_checks/simparity.js chiff_sim.html
 	node tools/chiff_checks/peakfloor.js
 	node tools/chiff_checks/xvmod.js
+# The envelope has no per-block artifact of its own. Run at tremolo 0, which is
+# where that is the only thing being asked; blockedge.js says why.
+	node tools/hosttest/blockedge.js 0 0
 	node tools/chiff_checks/strictmode.js
 # decay.js is BACK IN THE GATE (2026-08-08). It left when 8e1764dd fixed its
 # statistic to see slow content and its old 6 dB / 15 dB limits then rejected
