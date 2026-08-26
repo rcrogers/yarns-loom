@@ -248,6 +248,37 @@ class Graph(object):
         on_stack.pop()
     return sorted(found)
 
+  def loop_body(self, source, target):
+    """The BLOCKS a back edge (source -> target) encloses: the natural loop.
+
+    Walk predecessors back from the latch, seeded with the header, so the walk
+    stops at the header and never leaves through the loop exit.
+
+    NOT the address span from target to source. GCC scatters a loop's blocks,
+    so that span sweeps up unrelated code which merely landed between them --
+    and a caller weighting the span then charges that code the loop's trip
+    count, or with factor 0 charges it nothing. That is how a `bl` in the
+    per-run setup once priced at zero: it had been moved inside the address
+    range of a head/tail loop it has nothing to do with.
+    """
+    predecessors = {}
+    for leader in self.blocks:
+      for successor in self.edges[leader]:
+        predecessors.setdefault(successor, []).append(leader)
+    body, stack = set([target]), [source]
+    while stack:
+      leader = stack.pop()
+      if leader in body:
+        continue
+      body.add(leader)
+      stack.extend(predecessors.get(leader, ()))
+    return body
+
+  def block_weights(self, leaders, factor):
+    """One weight range per block, so a scattered loop weights only itself."""
+    return [(self.blocks[leader][0][0], self.blocks[leader][-1][0], factor)
+            for leader in leaders]
+
   def loop_region(self, containing=None):
     """The tightest loop as (low address, high address).
 

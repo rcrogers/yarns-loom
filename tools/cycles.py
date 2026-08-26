@@ -98,22 +98,45 @@ lines = functions[RENDER_STAGE]
 graph_for_loops = pathcost.Graph(lines)
 candidates = []
 for source, target in graph_for_loops.back_edges():
-  low = min(source, target)
-  high = max(address for address, _ in graph_for_loops.blocks[source])
-  body = [t for a, t in lines if low <= a <= high]
-  saturates = sum(1 for t in body if 'usat' in t)
-  if saturates and any(re.search(r'\bstrh', t) for t in body):
-    candidates.append((saturates, -(high - low), low, high))
+  body_blocks = graph_for_loops.loop_body(source, target)
+  # RenderStage tail-calls ITSELF for the rest of the block, and GCC compiles
+  # that as a back edge over the prologue. It emits samples, so it looks like a
+  # sample loop -- but its body is the whole function, and treating it as one
+  # charged the entire per-run path nothing: 59 cycles for a path that costs
+  # 511. Its header is where the prologue falls through to, which no loop
+  # inside a run is, because the run's setup comes first. A LOOP_SAMPLES that
+  # stops matching the unroll factor is how this would show up if it ever
+  # stopped being true.
+  if target == graph_for_loops.entry or \
+      target in graph_for_loops.edges[graph_for_loops.entry]:
+    continue
+  body = [instruction for leader in body_blocks
+          for instruction in graph_for_loops.blocks[leader]]
+  saturates = sum(1 for _, text in body if 'usat' in text)
+  if saturates and any(re.search(r'\bstrh', text) for _, text in body):
+    candidates.append((saturates, body_blocks, source, target))
 if not candidates:
   print('  could not identify the sample loop (no usat+strh backward branch)')
   sys.exit(1)
-_, _, loop_start, loop_end = max(candidates)
-LOOP_SAMPLES = max(saturates for saturates, _, _, _ in candidates)
+# The HOT loop is innermost: no other candidate sits inside it. Counting over
+# the CFG body rather than an address span means an OUTER loop now counts the
+# saturates of every loop it contains, so "most saturates" alone would pick the
+# outermost one.
+innermost = [candidate for candidate in candidates
+             if not any(other[1] < candidate[1] for other in candidates)]
+loop_saturates, loop_blocks, loop_source, loop_target = max(
+    innermost, key=lambda candidate: candidate[0])
+loop_edge = (loop_source, loop_target)
+loop_start = min(address for leader in loop_blocks
+                 for address, _ in graph_for_loops.blocks[leader])
+loop_end = max(address for leader in loop_blocks
+               for address, _ in graph_for_loops.blocks[leader])
+LOOP_SAMPLES = loop_saturates
 # Anything else that emits samples is the head/tail path: it renders nothing in
 # the common case (a full block, starting on a word boundary), so it is priced
 # but not charged per block.
-tail_regions = [(low, high) for _, _, low, high in candidates
-                if (low, high) != (loop_start, loop_end)]
+tail_edges = [(source, target) for _, _, source, target in candidates
+              if (source, target) != loop_edge]
 
 
 def loop_cost(text, is_branch):
@@ -161,9 +184,16 @@ if chunk_region:
       weights=[(sample_region[0], sample_region[1], 0)])
 # Per run: the whole function with everything that renders samples charged
 # nowhere, since those are counted per sample above.
-rendering = [(low, high, 0) for low, high in
-             [sample_region] + tail_regions + ([chunk_region] if chunk_region
-                                               else [])]
+# BY BLOCK, NOT BY ADDRESS SPAN. A loop's blocks are scattered by the compiler,
+# and a span from the back edge's target to its source sweeps up whatever landed
+# between them. Zeroing that span once priced a `bl` in the per-run setup at
+# nothing, because GCC had moved it inside a head/tail loop's address range --
+# reporting 169 cycles for a path that costs 511.
+rendering = []
+for source, target in [loop_edge] + tail_edges:
+  rendering += graph.block_weights(graph.loop_body(source, target), 0)
+if chunk_region:
+  rendering.append((chunk_region[0], chunk_region[1], 0))
 run_cycles = pathcost.longest_path(graph, call_cost, weights=rendering)
 # A stage transition, which re-enters RenderStage for the rest of the block.
 handoff_call_cost, _ = pathcost.call_cost_function(
