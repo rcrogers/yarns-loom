@@ -814,6 +814,28 @@ void Envelope::HandOffToNextStage(
 // what the loop runs on. All three move together: pinning the input costs the
 // pass-through invariant (up to 18 dB of error) and the chiff settles above
 // zero.
+// How far the chiff may swing before the clip bites, and equally how far the
+// mean is held from each rail. min() because the chiff is bounded by the
+// smaller of its slew input (the state is a convex combination of +/- it) and
+// its own tail: the input binds when fast, the tail when slow.
+//   - The amplitude is the gain times the input. Multiplying by kOne_q31_sqrt
+//     and shifting 31 is the divide by 2^15.5, in 32-bit ops, within 0.031 dB
+//     of the exact form -- and the threshold inherits that.
+//   - Computed from the run-start slew time while the rate decays within the
+//     run, so it runs generous, which is safe.
+static int32_t ChiffClipThreshold_q30(
+    int32_t chiff_slew_input_q30, uint32_t chiff_amplitude_gain_q31_sqrt) {
+  // How many chiff amplitudes the threshold sits at. Sized so the undriven end
+  // passes essentially unclipped, at the smallest hold on the mean that allows
+  // it.
+  const uint32_t kChiffClipAmplitudesShift = 1;  // 2 amplitudes, 3*sqrt(2) sigma
+  const int32_t chiff_amplitude_q30 = static_cast<int32_t>(
+    (static_cast<int64_t>(chiff_slew_input_q30)
+     * (chiff_amplitude_gain_q31_sqrt * kOne_q31_sqrt)) >> 31);
+  return std::min<int32_t>(
+    chiff_slew_input_q30, chiff_amplitude_q30 << kChiffClipAmplitudesShift);
+}
+
 Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples) {
   ChiffRunDecay decay;
   decay.slew_time_step_q5_27 = 0;
@@ -852,10 +874,6 @@ void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31
 ) {
-  // How many chiff amplitudes the clip threshold sits at. Sized so the
-  // undriven end passes essentially unclipped, at the smallest hold on the
-  // mean that allows it.
-  const uint32_t kChiffClipAmplitudesShift = 1;  // 2 amplitudes, 3*sqrt(2) sigma
   int32_t value_without_bias_q30 = value_without_bias_q30_;
   int32_t nominal_value_q30 = nominal_value_q30_;
   int32_t chiff_slew_state_q26 = chiff_slew_state_q26_;
@@ -924,21 +942,10 @@ void Envelope::RenderStage(
     // and the clip binds where it says. A constant divisor: one multiply.
     const int32_t chiff_driven_slew_input_scaled_q1_26 =
       chiff_driven_slew_input_q4_26 / kChiffDrawValueMax;
-    // Multiplying by kOne_q31_sqrt and shifting 31 is the divide by 2^15.5,
-    // in 32-bit ops.
-    //   - Within 0.031 dB of the exact form; the clip threshold inherits that.
-    //   - Computed from the run-start slew time while the rate decays within
-    //     the run, so it runs generous, which is safe.
-    const int32_t chiff_amplitude_q30 = static_cast<int32_t>(
-      (static_cast<int64_t>(chiff_slew_input_q30)
-       * (chiff_amplitude_gain_q31_sqrt * kOne_q31_sqrt)) >> 31);
-    // min() because the chiff is bounded by the smaller of its slew input (the
-    // state is a convex combination of +/- it) and its own tail: the input
-    // binds when fast, the tail when slow.
-    //   - Wider than the rails allow (min >= max): the clamp is abandoned and
-    //     the mean centred, so the chiff clips both sides.
-    const int32_t chiff_clip_threshold_q30 = std::min<int32_t>(
-      chiff_slew_input_q30, chiff_amplitude_q30 << kChiffClipAmplitudesShift);
+    // Wider than the rails allow (min >= max): the clamp is abandoned and the
+    // mean centred, so the chiff clips both sides.
+    const int32_t chiff_clip_threshold_q30 = ChiffClipThreshold_q30(
+      chiff_slew_input_q30, chiff_amplitude_gain_q31_sqrt);
     const int32_t chiff_clip_threshold_q26 = chiff_clip_threshold_q30
       >> (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits);
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
