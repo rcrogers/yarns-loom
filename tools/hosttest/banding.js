@@ -8,6 +8,23 @@
 // how long the value sticks but that sticking DISRUPTS THE NOISE PATTERN,
 // which shows up as vertical stripes in the spectrogram.
 //
+// IT DOES NOT DISCRIMINATE. MEASURED 2026-08-26 against a control built by
+// hosttest/build_banding_control.sh, which strips BOTH rail protections -- the
+// mean's rail correction and the saturating clip on the slew state:
+//
+//   real firmware   1257 banded of 329360 live columns   0.382%
+//   no protections  1257 banded of 345695 live columns   0.364%
+//
+// The control is genuinely different: 9.61% of its samples sit on a rail against
+// the real build's 7.28%, and the outputs hash differently. It contacts the
+// rails a third more often and bands very slightly LESS.
+//
+// So this is the fourth automatic banding metric to fail, and the first to fail
+// against a control instead of being abandoned for want of one. DO NOT GATE ON
+// IT and do not read a change in the percentage as a change in rail behaviour.
+// It stays because the spectrogram machinery is sound and answers other
+// questions; the column-dip count is what does not work.
+//
 // A band is a time column whose broadband energy sits well below its
 // neighbours -- the definition the earlier bandstat work converged on.
 //

@@ -5,3 +5,6 @@ test_before
 probe
 test_ubsan
 test_ubsan.dSYM/
+envelope_banding_control.cc
+test_banding_control
+test_banding_control.dSYM/
