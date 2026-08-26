@@ -26,6 +26,21 @@
 
 namespace yarns {
 
+// One timed stage's setting -> phase increment. Only 128 stage lengths exist,
+// which is why milliseconds cannot express what the module does.
+inline uint32_t PanelStageIncrement(int setting, int mod, int velocity) {
+  return Interpolate88(
+      lut_envelope_phase_increments,
+      modulate_7_13(static_cast<uint8_t>(setting), static_cast<int8_t>(mod),
+                    static_cast<uint8_t>(velocity)) << (15 - 13));
+}
+
+inline uint16_t PanelSustain_u16(int setting, int mod, int velocity) {
+  return static_cast<uint16_t>(
+      modulate_7_13(static_cast<uint8_t>(setting), static_cast<int8_t>(mod),
+                    static_cast<uint8_t>(velocity)) << (16 - 13));
+}
+
 // Velocity modulation is included because the peak is NOT a setting -- it falls
 // out of AMPLITUDE MOD VELOCITY and the note's velocity.
 inline void PanelAdsr(
@@ -46,21 +61,10 @@ inline void PanelAdsr(
   const int32_t kMinPeak_u16 = 1;
   adsr->peak_u16 = static_cast<uint16_t>(
       std::max(kMinPeak_u16, UINT16_MAX - (damping_22 >> (22 - 16))));
-  adsr->sustain_u16 = static_cast<uint16_t>(modulate_7_13(
-      static_cast<uint8_t>(sustain_setting),
-      static_cast<int8_t>(env_mod_sustain), vel) << (16 - 13));
-  adsr->attack_u32 = Interpolate88(
-      lut_envelope_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(attack_setting),
-                    static_cast<int8_t>(env_mod_attack), vel) << (15 - 13));
-  adsr->decay_u32 = Interpolate88(
-      lut_envelope_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(decay_setting),
-                    static_cast<int8_t>(env_mod_decay), vel) << (15 - 13));
-  adsr->release_u32 = Interpolate88(
-      lut_envelope_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(release_setting),
-                    static_cast<int8_t>(env_mod_release), vel) << (15 - 13));
+  adsr->sustain_u16 = PanelSustain_u16(sustain_setting, env_mod_sustain, vel);
+  adsr->attack_u32 = PanelStageIncrement(attack_setting, env_mod_attack, vel);
+  adsr->decay_u32 = PanelStageIncrement(decay_setting, env_mod_decay, vel);
+  adsr->release_u32 = PanelStageIncrement(release_setting, env_mod_release, vel);
 }
 
 // EXCITER AMOUNT: modulate_7_13 resolves it six bits below the knob step, and

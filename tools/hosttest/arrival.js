@@ -43,15 +43,14 @@ const MAX_SHORTFALL = LANDING_SHORTFALL / 2;
 // deepest the adjusted target goes, so the correction cannot reach.
 const FLOOR = Math.ceil(RANGE * (SUSTAIN_PCT / 100) * LANDING_SHORTFALL * 10 / 100) * 100;
 
-const peak_u16 = Math.floor(65535 * PEAK_PCT / 100);
-const sustain_u16 = Math.floor(65535 * SUSTAIN_PCT / 100);
-const scale = RANGE - FLOOR;
-// Envelope::NoteOn's own arithmetic, in the s15 domain the driver prints.
-const target = {
-  attack: FLOOR + ((scale * peak_u16) >>> 16),
-  decay: FLOOR + ((scale * sustain_u16) >>> 16),
-  release: FLOOR,
-};
+// Asked, not re-derived: `report=1` renders a note and prints the targets
+// Envelope::NoteOn computed, in the s15 domain the samples come out in.
+const target = (() => {
+  const out = H.run(`basic 0 64 peak=${PEAK_PCT} sustain=${SUSTAIN_PCT} ` +
+                    `range=${RANGE} floor=${FLOOR} report=1 2>&1`);
+  const read = (name) => +new RegExp(`${name} (-?\\d+)`).exec(out)[1];
+  return { attack: read('peak'), decay: read('sustain'), release: read('floor') };
+})();
 
 let failures = 0;
 const worst = { attack: null, decay: null, release: null };

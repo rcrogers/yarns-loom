@@ -205,19 +205,14 @@ int chiff_frame_hz() { return kFrameHz; }
 // velocity modulation. Independent of the attack.
 EMSCRIPTEN_KEEPALIVE
 int chiff_duration_samples(int setting, int mod_velocity, int velocity) {
-  return static_cast<int32_t>(ChiffAudibleSamples(Interpolate88(
-      lut_chiff_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(setting),
-                    static_cast<int8_t>(mod_velocity),
-                    static_cast<uint8_t>(velocity)) << (15 - 13))));
+  return static_cast<int32_t>(
+      PanelChiffAudibleSamples(setting, mod_velocity, velocity));
 }
 
 // ENV stage setting -> stage length in samples, via the real LUT chain.
 EMSCRIPTEN_KEEPALIVE
 int chiff_stage_samples(int setting) {
-  uint32_t increment = Interpolate88(
-      lut_envelope_phase_increments,
-      modulate_7_13(static_cast<uint8_t>(setting), 0, 0) << (15 - 13));
+  uint32_t increment = PanelStageIncrement(setting, 0, 0);
   return increment ? static_cast<int32_t>(UINT32_MAX / increment) : 0;
 }
 

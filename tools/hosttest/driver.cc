@@ -35,18 +35,6 @@ static uint32_t IncFromSamples(uint32_t samples) {
   return samples ? (UINT32_MAX / samples) : 0;
 }
 
-// Front-panel ENV ATTACK/DECAY/RELEASE setting (0..127) -> phase increment,
-// via the exact chain Part::VoiceNoteOn uses. Milliseconds cannot express what
-// the module actually does: the setting picks a LUT entry, and only 128 stage
-// lengths exist.
-static uint32_t IncFromSetting(int setting) {
-  return stmlib::Interpolate88(
-      lut_envelope_phase_increments,
-      stmlib::modulate_7_13(static_cast<uint8_t>(setting), 0, 0) << (15 - 13));
-}
-static uint16_t SustainFromSetting(int setting) {
-  return stmlib::modulate_7_13(static_cast<uint8_t>(setting), 0, 0) << (16 - 13);
-}
 
 // Stream each rendered sample as one line -- no full-take buffer, so the same
 // driver fits the QEMU M3 machine's small RAM. Byte-identical output to the
@@ -234,21 +222,29 @@ int main(int argc, char** argv) {
   int dec_set = OptInt(argc, argv, "decay_setting", -1);
   int rel_set = OptInt(argc, argv, "release_setting", -1);
   int sus_set = OptInt(argc, argv, "sustain_setting", -1);
-  if (atk_set >= 0) adsr.attack_u32 = IncFromSetting(atk_set);
-  if (dec_set >= 0) adsr.decay_u32 = IncFromSetting(dec_set);
-  if (rel_set >= 0) adsr.release_u32 = IncFromSetting(rel_set);
-  if (sus_set >= 0) adsr.sustain_u16 = SustainFromSetting(sus_set);
+  if (atk_set >= 0) adsr.attack_u32 = PanelStageIncrement(atk_set, 0, 0);
+  if (dec_set >= 0) adsr.decay_u32 = PanelStageIncrement(dec_set, 0, 0);
+  if (rel_set >= 0) adsr.release_u32 = PanelStageIncrement(rel_set, 0, 0);
+  if (sus_set >= 0) adsr.sustain_u16 = PanelSustain_u16(sus_set, 0, 0);
   if (OptInt(argc, argv, "report", 0)) {
     uint32_t attack_smp = adsr.attack_u32 ? UINT32_MAX / adsr.attack_u32 : 0;
+    // A note, so the targets come from Envelope::NoteOn rather than from a
+    // second copy of its arithmetic in whatever is reading this.
+    env.Init(0);
+    env.NoteOn(adsr, min_target, max_target, amount_q30, chiff_audible_samples);
     // The ratio to the attack is a reading convenience. The two are
     // independent: nothing below the duration table depends on the attack.
     fprintf(stderr,
       "rate %u Hz, attack %u smp, chiff %u smp (%.3fx attack), "
-      "decay %u smp, release %u smp\n",
+      "decay %u smp, release %u smp, "
+      "peak %d, sustain %d, floor %d\n",
       kFrameHz, attack_smp, chiff_audible_samples,
       attack_smp ? double(chiff_audible_samples) / attack_smp : 0.0,
       adsr.decay_u32 ? UINT32_MAX / adsr.decay_u32 : 0,
-      adsr.release_u32 ? UINT32_MAX / adsr.release_u32 : 0);
+      adsr.release_u32 ? UINT32_MAX / adsr.release_u32 : 0,
+      env.note_target_q30_[ENV_STAGE_ATTACK] >> 15,
+      env.note_target_q30_[ENV_STAGE_SUSTAIN] >> 15,
+      env.note_target_q30_[ENV_STAGE_RELEASE] >> 15);
     return 0;
   }
 

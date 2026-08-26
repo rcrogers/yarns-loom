@@ -12,6 +12,7 @@
 #define private public
 #include "yarns/voice.h"
 #include "tools/cvtest/dac_stub.h"
+#include "tools/panel_chain.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -39,13 +40,6 @@ int OptInt(int argc, char** argv, const char* key, int fallback) {
     if (!strncmp(argv[i], key, n) && argv[i][n] == '=') return atoi(argv[i] + n + 1);
   }
   return fallback;
-}
-
-// Part::VoiceNoteOn's own chain, for the parameters this path carries. The
-// stage settings go through the same modulate_7_13 -> table read.
-uint32_t IncrementFromSetting(int setting) {
-  return Interpolate88(lut_envelope_phase_increments,
-                       modulate_7_13(static_cast<uint8_t>(setting), 0, 0) << (15 - 13));
 }
 
 void Wire() {
@@ -93,17 +87,16 @@ int main(int argc, char** argv) {
 
   adsr.peak_u16 = UINT16_MAX;
   adsr.sustain_u16 = static_cast<uint16_t>(65535L * 60 / 100);
-  adsr.attack_u32 = IncrementFromSetting(attack_setting);
-  adsr.decay_u32 = IncrementFromSetting(decay_setting);
-  adsr.release_u32 = IncrementFromSetting(release_setting);
+  adsr.attack_u32 = PanelStageIncrement(attack_setting, 0, 0);
+  adsr.decay_u32 = PanelStageIncrement(decay_setting, 0, 0);
+  adsr.release_u32 = PanelStageIncrement(release_setting, 0, 0);
 
   // The two the CV path is here to carry. Part::VoiceNoteOn forms the amount as
   // a fraction of full scale and the duration as an absolute sample count off
   // its own table -- both wider than a byte, which is the whole point.
-  const uint32_t chiff_amount_q30 =
-      static_cast<uint32_t>((static_cast<uint64_t>(amount) << 30) / 127);
-  const uint32_t chiff_audible_samples = ChiffAudibleSamples(Interpolate88(
-      lut_chiff_phase_increments, static_cast<uint16_t>(duration) << (15 - 7)));
+  const uint32_t chiff_amount_q30 = PanelChiffAmount_q30(amount, 0, 0);
+  const uint32_t chiff_audible_samples =
+      PanelChiffAudibleSamples(duration, 0, 0);
 
   voice.NoteOn(60 << 7, static_cast<uint8_t>(velocity), 0, 0, true,
                adsr, static_cast<int16_t>(timbre),
