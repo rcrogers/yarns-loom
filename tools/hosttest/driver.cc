@@ -275,7 +275,7 @@ int main(int argc, char** argv) {
     env.NoteOff();
     RenderMs(1000);
   } else if (strcmp(scenario, "latehang") == 0) {
-    // Early release near the dark end of a long window: 100ms release at 7s
+    // Early release near the dark end of a long duration: 100ms release at 7s
     // into an 8s chiff. Must fall with the release, not hang.
     adsr.attack_u32 = IncFromSamples(200 * 45);
     adsr.decay_u32 = IncFromSamples(200 * 45);

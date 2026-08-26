@@ -23,7 +23,7 @@ const VECTORS = path.join(HERE, 'golden_vectors.json');
 const UPDATE = process.argv.includes('--update');
 
 // Chosen to cover the paths that have actually broken: a chiff that outlives
-// its stage, a window shorter than a block, the compressed release, hold
+// its stage, a duration shorter than a block, the compressed release, hold
 // stages, inverted ranges, and both ends of the amount range.
 //
 // 'chiff then off' covers the one path none of the others reach: chiff state
@@ -34,15 +34,15 @@ const CASES = [
   ['default-ish',             'basic 96 90 attack_setting=40'],
   ['chiff off',               'basic 0 90 attack_setting=40'],
   ['amount 1 (floor case)',   'basic 1 90 attack_setting=40'],
-  ['window under one block',  'basic 127 0 attack_setting=40'],
-  ['longest window',          'basic 127 127 attack_setting=40'],
+  ['duration under one block','basic 127 0 attack_setting=40'],
+  ['longest duration',       'basic 127 127 attack_setting=40'],
   ['fastest attack',          'basic 127 50 attack_setting=0'],
   ['slowest attack',          'basic 127 50 attack_setting=127'],
   ['early release',           'early_release 96 127'],
   ['retrigger',               'retrigger 96 90'],
   ['chiff then off',          'chiff_then_off 96 90'],
   ['inverted range',          'inverted 96 90'],
-  ['late-window release',     'latehang 96 127'],
+  ['late-duration release',  'latehang 96 127'],
   ['held into sustain',       'held 96 127'],
 ];
 const COMMON = 'decay_setting=64 release_setting=64 sustain_setting=70 ' +

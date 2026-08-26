@@ -25,4 +25,11 @@ for case in \
   ./test_ubsan $case > /dev/null || { echo "UBSan FAILED: $case"; exit 1; }
 done
 echo "UBSan clean"
-node battery.js
+# GOLDEN FIRST. It is the bit-exactness pin, and "sample 4211 moved" localises a
+# refactor that the battery would report as a statistic drifting.
+node golden.js || exit 1
+node battery.js || exit 1
+# One behavioural number per case, tolerant of small movement, against its own
+# recorded baseline. Green here and red in golden means a deliberate change;
+# red here means the shape moved.
+node anomaly.js

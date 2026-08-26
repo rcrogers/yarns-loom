@@ -106,7 +106,7 @@ function bandCount(cols) {
 }
 
 // Banding does not show equally at every setting. It needs the chiff to reach
-// its DARK end while still audible -- a long window on a HELD note -- and it
+// its DARK end while still audible -- a long duration on a HELD note -- and it
 // shows near a rail, which low sustain (release floor-riding) provokes. A grid
 // of short gates cannot see it at all, which is how the first pass here
 // reported zero everywhere.

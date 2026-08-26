@@ -21,15 +21,15 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   check('amt0 attack monotone', steps===0, steps+' down-steps');
   check('amt0 no noise', noiseWin(s,1300,1900)<1, noiseWin(s,1300,1900).toFixed(2));
 }
-// 2. basic chiff: noise at onset, gone by ~window end, mean near the nominal value. The
-// window is an absolute time now, off its own table: dur 49 is ~588ms, near
+// 2. basic chiff: noise at onset, gone by ~the duration's end, mean near the nominal value. The
+// duration is an absolute time, off its own table: dur 49 is ~588ms, near
 // enough the ~580ms these fixed measurement windows were drawn around.
 { const s=run('basic 96 49 attack=249'), d=run('basic 0 49 attack=249');
   const n0=noiseWin(s,0,100), n1=noiseWin(s,300,500), n2=noiseWin(s,700,1100);
   check('onset noise present', n0>50, n0.toFixed(1));
-  check('noise fades by window end', n2<n0/50, n2.toFixed(2)+' vs onset '+n0.toFixed(1));
+  check('noise fades by the duration end', n2<n0/50, n2.toFixed(2)+' vs onset '+n0.toFixed(1));
   const bias=(meanWin(s,700,1100)-meanWin(d,700,1100))/FS_OUT*100;
-  check('post-window mean == nominal', Math.abs(bias)<1, bias.toFixed(2)+'%');
+  check('post-chiff mean == nominal', Math.abs(bias)<1, bias.toFixed(2)+'%');
   const biasLoud=(meanWin(s,100,300)-meanWin(d,100,300))/FS_OUT*100;
   check('loud-phase dip bounded', biasLoud>-40 && biasLoud<5, biasLoud.toFixed(1)+'%');
   let mx=0; for(const v of s) if(v>mx)mx=v;
@@ -70,7 +70,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   check('retrigger transient in family with chiff motion', mx<=worstNormal*1.1,
     'retrigger step '+mx+' vs worst step elsewhere '+worstNormal);
 }
-// 5. held note: sustain has motion while window lives (dur 127 = 8s)
+// 5. held note: sustain has motion while the chiff lives (dur 127 = 8s)
 { const s=run('held 96 93');
   const nSus=noiseWin(s,2000,3000), nLate=noiseWin(s,8200,8900);
   check('sustain has noise (8s chiff)', nSus>5, nSus.toFixed(1));
@@ -88,7 +88,7 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   check('inverted chiff onset noise', n0>50, n0.toFixed(1));
   check('inverted noise fades', n2<n0/50, n2.toFixed(2));
   const bias=(meanWin(s,700,1100)-meanWin(d,700,1100))/FS_OUT*100;
-  check('inverted post-window mean == nominal', Math.abs(bias)<1, bias.toFixed(2)+'%');
+  check('inverted post-chiff mean == nominal', Math.abs(bias)<1, bias.toFixed(2)+'%');
   // Pinning check wants a slow (default) attack so 100-1000ms is still the
   // rising attack -- a short attack would reach a flat sustain there and this
   // measures dwell, not attack rate.
@@ -96,20 +96,20 @@ function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(det
   let flat=0,run_=0; for(let i=45*100;i<45*1000;i++){ if(sp[i]===sp[i-1]){run_++;flat=Math.max(flat,run_);} else run_=0; }
   check('inverted chiff no pinning plateaus', flat<500, 'longest flat '+flat);
 }
-// 7. Late-window early release must not hang (restructure regression trap)
+// 7. Late-duration early release must not hang (restructure regression trap)
 { const s=run('latehang 96 93');
   const relStart=s[7000*45-1], relEnd=s[Math.min(7100*45, s.length-1)];
   check('latehang release falls', relEnd < relStart*0.15,
     (relStart/FS_OUT*100).toFixed(1)+'% -> '+(relEnd/FS_OUT*100).toFixed(1)+'%');
 }
-// 8. No kink at window end (dur 49 -> ~588ms, as in 2; the long attack is
+// 8. No kink at the duration's end (dur 49 -> ~588ms, as in 2; the long attack is
 // there so the kink would sit on a rising envelope, not a settled one)
 { const s=run('basic 96 49 attack=249'), d=run('basic 0 49 attack=249');
   let worst=0;
   for(let w=590;w<730;w+=10){ let m=0,n=0;
     for(let i=w*45;i<(w+10)*45;i++){m+=s[i]-d[i];n++;}
     worst=Math.max(worst,Math.abs(m/n)); }
-  check('no kink at window end', worst<FS_OUT*0.01, 'worst gap '+(worst/FS_OUT*100).toFixed(2)+'%');
+  check('no kink at the duration end', worst<FS_OUT*0.01, 'worst gap '+(worst/FS_OUT*100).toFixed(2)+'%');
 }
 // 9. amount continuity ladder: 0 -> 1 step must not exceed later steps
 { const ladder=[0,1,2,4,8].map(a=>{

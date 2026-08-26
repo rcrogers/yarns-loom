@@ -587,7 +587,7 @@
    2842
   ]
  },
- "window under one block": {
+ "duration under one block": {
   "n": 36096,
   "sha": "30b7ac282a22660c",
   "probe": [
@@ -734,7 +734,7 @@
    2850
   ]
  },
- "longest window": {
+ "longest duration": {
   "n": 36096,
   "sha": "3d8a2f16a88f3c73",
   "probe": [
@@ -2619,7 +2619,7 @@
    16382
   ]
  },
- "late-window release": {
+ "late-duration release": {
   "n": 333056,
   "sha": "ce1deaea795e384b",
   "probe": [

@@ -33,15 +33,15 @@ function runNumbers(args, opts) {
   return run(args, opts).trim().split('\n').map(Number);
 }
 
-// The chiff window in samples, straight from the driver's own report.
+// The chiff's duration in samples, straight from the driver's own report.
 //
 // report=1 prints to STDERR and returns early, so fold stderr in: capturing it
 // via stdio returns stdout, which is null. Two of the three copies of this
 // function shipped with that bug, which is why there is now one.
-function chiffWindowSamples(args) {
+function chiffDurationSamples(args) {
   const out = run(`${args} report=1 2>&1`);
   const m = /chiff (\d+) smp/.exec(out);
-  if (!m) throw new Error(`no chiff window in report for: ${args}\n${out}`);
+  if (!m) throw new Error(`no chiff duration in report for: ${args}\n${out}`);
   return +m[1];
 }
 
@@ -58,5 +58,5 @@ function frameHz() {
 }
 
 module.exports = {
-  DIR, TEST, run, runNumbers, requireBuilt, chiffWindowSamples, frameHz,
+  DIR, TEST, run, runNumbers, requireBuilt, chiffDurationSamples, frameHz,
 };

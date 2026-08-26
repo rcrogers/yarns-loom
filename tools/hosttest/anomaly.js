@@ -3,7 +3,7 @@
 // Why this exists: the stage-phase-wrap bug was found only because the user
 // happened to name attack=16 / duration=33. Nothing swept the grid.
 //
-// THE DETECTOR. Once the chiff window closes the burst is inert -- depth is
+// THE DETECTOR. Once the chiff's duration is up the burst is inert -- depth is
 // zeroed and the aims collapse to the stage target -- so from then on the
 // output is the plain classic slew. It must therefore converge onto the SAME
 // settings rendered at amount 0. A persistent gap means the chiff left the
@@ -11,8 +11,8 @@
 //
 // This is design-independent, which earlier attempts were not: the chiff's
 // loud onset and its near-rail sag are both intended and both large, so any
-// detector keyed on deviation DURING the window flags correct behaviour. It is
-// also robust to the noise in a short-window mean estimate, which sinks
+// detector keyed on deviation DURING the chiff flags correct behaviour. It is
+// also robust to the noise in a short-chiff mean estimate, which sinks
 // per-block step detectors at high amounts.
 //
 // The comparison is DIRECTIONAL. The gap's ideal value is zero -- the chiff
@@ -73,12 +73,12 @@ const PEAK_PCT = 75;
 // battery's worst legitimate case is ~22 samples; 64 (one block) is clear of
 // that and still far below an audible flat spot.
 const MAX_RAIL_DWELL = 64;
-// Let the classic slew settle after the window closes before comparing.
+// Let the classic slew settle after the chiff's duration is up before comparing.
 const SETTLE_BLOCKS = 10;
 
 // The note's range, i.e. chiff_top_ - chiff_floor_ with these driver args.
 // Normalising by the CLASSIC TRACE's max instead would divide by a tiny number
-// for long attacks (which barely rise inside the render window) and inflate
+// for long attacks (which barely rise inside the rendered span) and inflate
 // benign gaps into false positives.
 const NOTE_RANGE = 32767;
 
@@ -88,8 +88,8 @@ const DURATIONS = [0, 5, 10, 20, 21, 33, 50, 68, 80, 90, 100, 110, 120, 127];
 // ASK THE ENGINE, do not parse a table. The chiff's length is orthogonal to
 // the attack -- CHIFF DURATION and velocity are its only inputs -- so no attack
 // is passed here.
-function windowSamples(duration) {
-  return require('./harness').chiffWindowSamples(`report 96 ${duration}`);
+function durationSamples(duration) {
+  return require('./harness').chiffDurationSamples(`report 96 ${duration}`);
 }
 
 function run(attack, duration, amount) {
@@ -125,7 +125,7 @@ for (const attack of ATTACKS) {
       excursions.push({ attack, duration, dwell: longest, rail: top });
     }
 
-    const from = windowSamples(duration) + SETTLE_BLOCKS * BLOCK;
+    const from = durationSamples(duration) + SETTLE_BLOCKS * BLOCK;
     const end = Math.min(classic.length, chiff.length);
     let worst = 0, worstAt = 0;
     for (let i = from; i + BLOCK <= end; i += BLOCK) {
@@ -141,7 +141,7 @@ for (const attack of ATTACKS) {
 const key = r => `a${r.attack}d${r.duration}`;
 
 console.log(`swept ${results.length} setting combinations at amount ${AMOUNT} (${BINARY})`);
-console.log('metric: after the chiff window closes the burst is inert, so the');
+console.log('metric: once the chiff duration is up the burst is inert, so the');
 console.log('        output must converge onto the amount-0 render; this is the');
 console.log('        residual gap, as a fraction of the note range\n');
 

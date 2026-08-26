@@ -1,5 +1,5 @@
 // Sweep the CHIFF DURATION setting 0..127 and report per-duration chiff
-// metrics. Every metric is sampled inside the setting's OWN window: the length
+// metrics. Every metric is sampled inside the setting's OWN duration: the length
 // spans three orders of magnitude across the sweep, so a fixed span would
 // measure the onset at one end and silence at the other.
 const { execSync } = require('child_process');
@@ -7,8 +7,8 @@ const H = require('./harness');
 
 // ASK THE ENGINE, do not parse a table: one derivation of the length, and it
 // is the firmware's.
-function windowSamples(dur) {
-  return H.chiffWindowSamples(`report ${amount} ${dur} ${opts}`);
+function durationSamples(dur) {
+  return H.chiffDurationSamples(`report ${amount} ${dur} ${opts}`);
 }
 
 // argv: amount, then any KEY=VALUE driver overrides (attack/decay/release/
@@ -39,8 +39,8 @@ console.log('dur  samples   onsetNoise   winNoise   totalStep   winMean   postMe
 const rows = [];
 for (let d = 0; d <= 127; d++) {
   const s = run(d);
-  const w = windowSamples(d);
-  // Onset = first 64 samples (one audio block); window = the whole burst.
+  const w = durationSamples(d);
+  // Onset = first 64 samples (one audio block); duration = the whole burst.
   const onset = noise(s, 1, Math.min(64, w));
   const win = noise(s, 1, w);
   // Total absolute motion injected by the burst -- the energy-like measure.

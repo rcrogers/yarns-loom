@@ -8,7 +8,7 @@
 #
 #   make            rebuild the sim, then verify (host + qemu + parity)
 #   make sim        rebuild + re-inline the sim engine (always)
-#   make host       host C-reference battery
+#   make host       host C reference: UBSan, golden, battery, anomaly
 #   make qemu       differential: render-loop asm == C reference, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
@@ -56,6 +56,7 @@ firmware:
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh make -f yarns/makefile syx
 
 # The render loop runs 12 times per sample, so one instruction there is ~0.7%
-# of the whole CPU. Needs a current build/yarns/yarns.elf, i.e. `make firmware`.
-cycles:
+# of the whole CPU. Builds first: cycles.sh reads build/yarns/yarns.elf, and a
+# STALE elf answers confidently about a build that is not the tree.
+cycles: firmware
 	sh tools/cycles.sh
