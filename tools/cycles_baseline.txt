@@ -1,10 +1,10 @@
-loop_instructions 181
+loop_instructions 165
 loop_samples 8
-loop_cycles 247
+loop_cycles 239
 loop_spills 0
-function_instructions 666
+function_instructions 602
 chunk_cycles 0
-run_cycles 927
+run_cycles 953
 handoff_cycles 232
 note_on_cycles 796
-block_cycles 2903
+block_cycles 2865

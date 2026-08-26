@@ -192,6 +192,19 @@ if chunk_region:
 rendering = []
 for source, target in [loop_edge] + tail_edges:
   rendering += graph.block_weights(graph.loop_body(source, target), 0)
+# A loop in the per-run path that emits no samples still RUNS its trip count,
+# and longest_path cuts back edges, so left alone it is priced once. The one
+# here builds the sixteen levels the render loop reads, so its trips come from
+# the draw width.
+DRAW_LEVELS = 1 << DRAW_BITS
+sample_loops = {(loop_edge[0], loop_edge[1])} | set(tail_edges)
+for source, target in graph.back_edges():
+  if (source, target) in sample_loops:
+    continue
+  if target == graph.entry or target in graph.edges[graph.entry]:
+    continue
+  rendering += graph.block_weights(
+      graph.loop_body(source, target), DRAW_LEVELS)
 if chunk_region:
   rendering.append((chunk_region[0], chunk_region[1], 0))
 run_cycles = pathcost.longest_path(graph, call_cost, weights=rendering)

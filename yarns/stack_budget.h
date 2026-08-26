@@ -50,17 +50,20 @@ const size_t kCVOutputRenderArray = kAudioBlockSize * sizeof(int16_t);
 //   CVOutput::RenderSamples      152 - 128 =  24
 //   Oscillator::Render           272 - 256 =  16
 //   Envelope::RenderSamples                =  16
-//   Envelope::RenderStage                  = 248  <- spill slots, see below
+//   Envelope::RenderStage                  = 216  <- see below
 //   Envelope::AdvanceChiffDecay            =  48
 //
 // RenderStage dominates because its per-run setup holds the eleven values the
-// render loop needs live at once; 88 of its instructions are stack traffic.
+// render loop needs live at once, and spills doing it. Its 216 includes the
+// sixteen-entry level table the render loop reads, which is 64 of them --
+// building that table freed the register the slew input used to hold, and the
+// spill slots that went with it more than paid for the array.
 // RenderStage tail-calls HandOffToNextStage with b.w and re-enters ITSELF as a
 // loop, so the stage machinery does not nest and this counts once.
 //
 // The figure this replaced allowed 256 B for "~6 frames at 20-40 B each". One
 // frame on this path is 248.
-const size_t kMeasuredFraming = 24 + 16 + 16 + 248 + 48;
+const size_t kMeasuredFraming = 24 + 16 + 16 + 216 + 48;
 
 // Above CVOutput::RenderSamples: the audio ISR's context save and the callers
 // in yarns.cc, which are not on a .su path this header can cite. Unchanged

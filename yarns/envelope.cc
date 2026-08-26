@@ -733,9 +733,7 @@ void Envelope::HandOffToNextStage(
   "  smull ip, lr, %[rate], %[decay]\n"       /* (rate*decay), lr = hi     */ \
   "  sub   %[rate], %[rate], lr\n"            /* rate -= (rate*decay)>>32  */ \
   "  ubfx  ip, %[draws], #" bit_offset ", %[drawbits]\n" /* one draw, low end */ \
-  "  add   ip, ip, ip\n"                      /* level = 2*draw - 15, i.e. */ \
-  "  sub   ip, ip, %[drawmax]\n"              /*   an odd multiple, signed */ \
-  "  mul   lr, ip, %[qinput]\n"               /* what the slew chases      */ \
+  "  ldr   lr, [%[levels], ip, lsl #2]\n"     /* what the slew chases      */ \
   "  sub   lr, lr, %[chiff]\n"                /* delta                     */ \
   "  smull ip, lr, lr, %[rate]\n"                                             \
   "  add   %[chiff], %[chiff], lr, lsl #1\n"  /* chiff += (product>>32)*2  */ \
@@ -763,10 +761,10 @@ void Envelope::HandOffToNextStage(
   [rate] "+r"(chiff_slew_rate_q31), [comb] "+r"(target_with_all_bias),                      \
   [buf] "+r"(sample_buffer), [draws] "+r"(draws)
 #define YARNS_CHIFF_ASM_INPUTS                                                \
-  [decay] "r"(chiff_slew_rate_decay_q32), [qinput] "r"(chiff_driven_slew_input_scaled_q1_26),            \
+  [decay] "r"(chiff_slew_rate_decay_q32), [levels] "r"(chiff_levels_q4_26),            \
   [clip] "r"(chiff_clip_threshold_q26), [srate] "r"(stage_slew_rate_q31),             \
   [cslope] "r"(target_with_all_bias_slope),                                           \
-  [drawbits] "i"(kChiffDrawBits), [drawmax] "i"(kChiffDrawValueMax),               \
+  [drawbits] "i"(kChiffDrawBits),                                             \
   [stshift] "i"((kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)), [sbits] "i"(kSampleBits),                  \
   [satbits] "i"(kOutputSaturateBits)
 
@@ -778,8 +776,7 @@ void Envelope::HandOffToNextStage(
      * term. Two instructions saved per slew step. The dropped bit is a half  \
      * LSB per sample, and the error is bounded by the last step: at a       \
      * slew's fixed point the step is zero. */                                \
-    int32_t delta_q26 = (2 * (draw) - kChiffDrawValueMax)                          \
-      * chiff_driven_slew_input_scaled_q1_26 - chiff_slew_state_q26;                          \
+    int32_t delta_q26 = chiff_levels_q4_26[(draw)] - chiff_slew_state_q26;      \
     chiff_slew_state_q26 += 2 * static_cast<int32_t>(                              \
       (static_cast<int64_t>(delta_q26) * chiff_slew_rate_q31) >> 32);               \
     /* The clipped value feeds back: a saturating slew, not a waveshaped      \
@@ -936,12 +933,22 @@ void Envelope::RenderStage(
     // inside int32 at full drive.
     const int32_t chiff_driven_slew_input_q4_26 = static_cast<int32_t>(
       (static_cast<int64_t>(chiff_slew_input_q30) * chiff_decay.drive_q4_26) >> 30);
-    // One level's worth, so a draw read as an odd multiple multiplies straight
-    // into what the slew chases. Dividing once a run keeps the extreme level
-    // EQUAL to the input, so |chiff| <= input holds exactly
-    // and the clip binds where it says. A constant divisor: one multiply.
-    const int32_t chiff_driven_slew_input_scaled_q1_26 =
-      chiff_driven_slew_input_q4_26 / kChiffDrawValueMax;
+    // EVERY LEVEL THE SLEW CAN CHASE, once per run. There are only sixteen,
+    // and the input is fixed for the run, so the loop reads the product it
+    // needs instead of forming it: ubfx and a load, where it was ubfx, two
+    // adds and a multiply. It costs no register either -- the table's pointer
+    // takes the one the input used to hold.
+    //   - Dividing by kChiffDrawValueMax here keeps the extreme level EQUAL to
+    //     the input, so |chiff| <= input holds exactly and the clip binds
+    //     where it says. A constant divisor: one multiply.
+    int32_t chiff_levels_q4_26[1 << kChiffDrawBits];
+    {
+      const int32_t one_level_q1_26 =
+        chiff_driven_slew_input_q4_26 / kChiffDrawValueMax;
+      for (int32_t draw = 0; draw <= kChiffDrawValueMax; ++draw) {
+        chiff_levels_q4_26[draw] = (2 * draw - kChiffDrawValueMax) * one_level_q1_26;
+      }
+    }
     // Wider than the rails allow (min >= max): the clamp is abandoned and the
     // mean centred, so the chiff clips both sides.
     const int32_t chiff_clip_threshold_q30 = ChiffClipThreshold_q30(
