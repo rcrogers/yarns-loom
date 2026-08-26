@@ -15,7 +15,7 @@
 //          This is what the asymptotic prototype's release-end bug looked like
 //          (33 dB in 100 ms) and it was also found by eye, not by a check.
 //
-// Blocks scale with the NOMINAL window, so a smooth exponential decay spends
+// Blocks scale with the NOMINAL duration, so a smooth exponential decay spends
 // roughly the same dB per block at every setting and one threshold serves all.
 // Only blocks above the inaudibility floor count: below it nothing is audible,
 // so wiggles there are not defects.
@@ -26,7 +26,7 @@
 // THE SWEEP MATTERS AS MUCH AS THE METRIC. The notch only shows where the
 // chiff is still loud at the moment the level reaches a rail, which means
 // EXCITER DURATION must be swept, not just ENV ATTACK: at duration 64 the
-// window ends with the attack, so the level hits the peak just as the
+// duration ends with the attack, so the level hits the peak just as the
 // excursion reaches the floor and the notch hides under it. The first version
 // of this check swept attack alone at duration 64 and reported ALL PASS on a
 // defect the user could see. Sweeping the gate matters for the same reason --
@@ -49,21 +49,23 @@ const INAUDIBLE_DB = -78;
 // ("perf is adequate, basic chiff quality is good"), which is the precondition
 // the old limits never had -- they were set against input-from-amount, whose
 // knob bottom is ~25 dB quieter and which therefore has no loud sub-audio
-// region at all. Both builds that DO have one -- this and marked, the character
+// region at all. Both builds that DO have one -- this and marked, the sound
 // the user chose -- failed the old limits, and marked failed them harder.
 //
 // READ THIS AS A REGRESSION GUARD, NOT A SMOOTHNESS ORACLE. It is calibrated
 // to today's measured spread (45 settings: notch max 11.4, mean 3.1; cliff max
 // 18.0, mean 9.4) plus ~22% margin, so it catches a DEPARTURE from the
-// character that was signed off. It does not certify smoothness in the
+// sound that was signed off. It does not certify smoothness in the
 // abstract, and it cannot: see the two mechanisms below, both characterised
 // and neither a defect.
 //
 // THE NOTCH is the input-cap band. Where the cap binds, the level follows the
-// bare filter response instead of the level law, and at a 2-5 Hz corner the
+// slew's own response instead of slew_input_max * amount, and at a 2-5 Hz corner
 // per-block excursion swings wildly because the block is a few percent of one
-// cycle. Scaling the block with the window was TRIED: it cuts failures 14 -> 11
-// but SKIPS 7 settings outright (a 44 s window gives a 2.2 s block, longer than
+// the per-block excursion swings wildly because the block is a few percent of
+// one cycle. Scaling the block with the duration was TRIED: it cuts failures
+// 14 -> 11 but SKIPS 7 settings outright (a 44 s duration gives a 2.2 s block,
+// longer than
 // the audible part), so it trades failures for blindness. The right fix is a
 // block that scales with the SLEW TIME, which needs per-block slew data this
 // check is not given -- a redesign, not a recalibration.
@@ -93,10 +95,10 @@ const ATTACKS = [24, 40, 64, 96, 127];
 // the median separates the two cleanly.
 const SEEDS = [0xCAFEBABE, 0x1234ABCD, 0x0BADF00D, 0x51CE7A11, 0x2B7E1516];
 const median = a => a.slice().sort((x, y) => x - y)[a.length >> 1];
-// Duration 64 = window equals the attack; above it the window outlasts the
+// Duration 64 = the chiff equals the attack; above it the chiff outlasts the
 // attack, which is what exposes a rail-driven notch. 90 is the sim's default.
 const DURATIONS = [64, 90, 110];
-// Gate as a fraction of the WINDOW: a long note, one whose release lands while
+// Gate as a fraction of the DURATION: a long note, one whose release lands while
 // the chiff is still running, and a SHORT note against a long chiff. That last
 // one matters on its own: it is where the release compresses the chiff's
 // deadline hardest, and the first version of this sweep stopped at 0.7x and so
@@ -128,8 +130,8 @@ loadPage(pagePath).then(page => {
       amplitudeModVelocity: 0, velocity: 100, amountModVelocity: 0,
       amount, chiffDuration, gateMs: 1000, seed: SEEDS[0],
     });
-    const windowMs = probe.windowN / FS * 1000;
-    const gateMs = Math.max(5, Math.min(20000, windowMs * gateFraction));
+    const durationMs = probe.windowN / FS * 1000;
+    const gateMs = Math.max(5, Math.min(20000, durationMs * gateFraction));
     const notches = [], cliffs = [];
     let peakDb = -999, audibleMax = 0, lastCurve = null, lastSmooth = null;
     for (const seed of SEEDS) {
@@ -141,7 +143,7 @@ loadPage(pagePath).then(page => {
     const wet = page.render(p);
     const dry = page.render(Object.assign({}, p, { amount: 0 })).out;
     const n = Math.min(wet.out.length, dry.length);
-    const blockMs = Math.max(1, Math.min(20, windowMs / 20));
+    const blockMs = Math.max(1, Math.min(20, durationMs / 20));
     const BLOCK = Math.max(16, Math.round(blockMs * FS / 1000));
 
     // HIGH-PASS THE RESIDUAL FIRST, and this is load-bearing. The chiff ends by
@@ -167,7 +169,7 @@ loadPage(pagePath).then(page => {
     }
     // RMS ABOUT ZERO. `resid` has just been HIGH-PASSED, so it is zero-mean by
     // construction and subtracting a block mean can only remove signal -- and
-    // it removes most of it exactly where the chiff's filter is slowest, which
+    // it removes most of it exactly where the chiff's slew is slowest, which
     // is the stretch this check exists to judge. Subtracting the mean was also
     // what forced the block to be large; with it gone the block only has to
     // hold enough samples to average.
@@ -213,7 +215,7 @@ loadPage(pagePath).then(page => {
     }  // seeds
     const notchMed = median(notches), cliffMed = median(cliffs);
     const label = `attack ${String(attack).padStart(3)} dur ${chiffDuration} ` +
-      `gate ${gateFraction}x  window ${windowMs.toFixed(1).padStart(8)} ms`;
+      `gate ${gateFraction}x  duration ${durationMs.toFixed(1).padStart(8)} ms`;
     if (audibleMax < MIN_BLOCKS) {
       skips++;
       console.log(`SKIP ${label}  only ${audibleMax} audible blocks`);
@@ -227,14 +229,14 @@ loadPage(pagePath).then(page => {
       `notch ${notchMed.toFixed(1).padStart(5)} dB  ` +
       `cliff ${cliffMed.toFixed(1).padStart(5)} dB   (median of ${SEEDS.length})`);
     if (gateFraction === GATE_FRACTIONS[0] && DURATIONS.indexOf(chiffDuration) === 1) {
-      curves.push({ attack, curve: lastCurve, smooth: lastSmooth, windowMs });
+      curves.push({ attack, curve: lastCurve, smooth: lastSmooth, durationMs });
     }
   }
 
-  // ---- image: one dB-vs-time trace per attack setting, time in % of window
+  // ---- image: one dB-vs-time trace per attack setting, time in % of duration
   // so the settings are comparable on one axis.
   const W = 1200, H = 620, PAD_L = 64, PAD_B = 34, PAD_T = 14, PAD_R = 12;
-  const DB_TOP = 0, DB_BOT = -100, X_MAX = 300;   // % of window
+  const DB_TOP = 0, DB_BOT = -100, X_MAX = 300;   // % of duration
   const px = Buffer.alloc(W * H * 3, 22);
   const put = (x, y, c) => {
     if (x < 0 || y < 0 || x >= W || y >= H) return;
@@ -262,7 +264,7 @@ loadPage(pagePath).then(page => {
     const col = COLORS[s % COLORS.length];
     let prev = null;
     c.curve.forEach((pt, i) => {
-      const x = xOf(pt.t / c.windowMs * 100), y = yOf(c.smooth[i]);
+      const x = xOf(pt.t / c.durationMs * 100), y = yOf(c.smooth[i]);
       if (prev) {
         const steps = Math.max(Math.abs(x - prev[0]), Math.abs(y - prev[1]), 1);
         for (let k = 0; k <= steps; k++) {
@@ -278,7 +280,7 @@ loadPage(pagePath).then(page => {
   fs.writeFileSync('/tmp/_decay.ppm',
     Buffer.concat([Buffer.from(`P6\n${W} ${H}\n255\n`), px]));
   execSync(`sips -s format png /tmp/_decay.ppm --out ${out} >/dev/null 2>&1`);
-  console.log(`\nwrote ${out}  x: 0..${X_MAX}% of the nominal window, ` +
+  console.log(`\nwrote ${out}  x: 0..${X_MAX}% of the nominal duration, ` +
     `y: ${DB_TOP}..${DB_BOT} dBFS, line at ${INAUDIBLE_DB} (inaudible)`);
   console.log(`  swatches top to bottom: ${curves.map(c => 'attack ' + c.attack).join(', ')}` +
     ` (duration ${DURATIONS[1]}, long gate)`);

@@ -41,7 +41,7 @@ cannot disagree — there is one implementation.
   than a decay could). Both had been found by eye, never by a check — a notch
   is legal at every individual level, so `residual.js`, which reports levels,
   cannot see it. **Sweeping EXCITER DURATION is what makes it work:** at
-  duration 64 the window ends with the attack, so a rail-driven notch hides
+  duration 64 the chiff ends with the attack, so a rail-driven notch hides
   under the noise floor; the first version of this check swept ENV ATTACK alone
   and reported ALL PASS on a defect that was plainly visible in the sim.
   THE RESIDUAL IS HIGH-PASSED (20 Hz) BEFORE MEASURING, and that is

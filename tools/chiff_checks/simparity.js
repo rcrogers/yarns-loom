@@ -98,9 +98,9 @@ const CASES = [
     attack: 40, decay: 64, sustain: 70, release: 64, amount: 96, chiffDuration: 90 },
   { name: 'chiff off (amt 0)',
     attack: 40, decay: 64, sustain: 70, release: 64, amount: 0, chiffDuration: 90 },
-  { name: 'long window (dur 120)',
+  { name: 'long duration (dur 120)',
     attack: 40, decay: 64, sustain: 70, release: 64, amount: 127, chiffDuration: 120 },
-  { name: 'short window (dur 5)',
+  { name: 'short duration (dur 5)',
     attack: 20, decay: 50, sustain: 90, release: 40, amount: 64, chiffDuration: 5 },
   // BIAS AND A NEGATIVE RANGE. Without these, the bias arithmetic and the
   // negative-range path are never compared against the firmware at all -- the

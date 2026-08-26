@@ -8,7 +8,7 @@
 //           what is actually audible as chiff.
 //   TOTAL   RMS about zero, which is sqrt(offset^2 + wander^2). Printed
 //           because NEITHER of the other two is the excursion on its own: a
-//           slow filter puts nearly all its energy in OFFSET, so reading
+//           slow slew puts nearly all its energy in OFFSET, so reading
 //           WANDER alone reports a chiff that is plainly there as gone. That
 //           mistake, made with a std in place of an RMS, produced a 30 dB
 //           error at the slowest setting measured and sent a whole session
@@ -21,8 +21,8 @@
 //
 // Levels are ABSOLUTE (dB relative to full scale), not normalized to the
 // onset, so "inaudible" is a fixed threshold rather than a relative one. The
-// time axis spans the whole note, not the chiff window, because the window is
-// an implementation detail that a proposed design removes.
+// time axis spans the whole note, not the chiff's duration: the note is what a
+// player hears, and the chiff stopping inside it is the thing being judged.
 //
 // CAVEAT: OFFSET is only trustworthy once WANDER has fallen well below it. A
 // 20 ms block cannot average out a wander slower than itself, so while the two
@@ -72,10 +72,10 @@ loadPage().then(page => {
   const n = Math.min(...wets.map((w) => w.length), ...drys.map((d) => d.length));
 
   const dbfs = v => v > 0 ? 20 * Math.log10(v / FULL) : -999;
-  const BLOCK = Math.round(0.02 * FS);   // 20 ms, independent of the window
+  const BLOCK = Math.round(0.02 * FS);   // 20 ms, independent of the duration
 
   console.log(`AMOUNT ${amount}  ENV ATTACK ${attack}  EXCITER DURATION ${chiffDuration}`);
-  console.log(`window ${(W / FS * 1000).toFixed(0)} ms, gate ${gateMs} ms, ` +
+  console.log(`duration ${(W / FS * 1000).toFixed(0)} ms, gate ${gateMs} ms, ` +
               `full scale ${FULL}\n`);
   console.log(`pooled over ${SEEDS} seeds; RANGE is the spread of total across them\n`);
   console.log('    t(ms)   offset(LSB)  offset(dBFS)  wander(dBFS)   total(dBFS)  range(dB)   note');
@@ -103,7 +103,7 @@ loadPage().then(page => {
       if (totalDb < totalLo) totalLo = totalDb;
       if (totalDb > totalHi) totalHi = totalDb;
     }
-    const note = nearEdge ? '<- window edge' : nearGate ? '<- gate off' : '';
+    const note = nearEdge ? '<- chiff end' : nearGate ? '<- gate off' : '';
     console.log(`  ${t.toFixed(0).padStart(6)}  ${(meanSum / SEEDS).toFixed(1).padStart(11)}  ` +
                 `${dbfs(meanSum / SEEDS).toFixed(1).padStart(12)}  ` +
                 `${dbfs(sdSum / SEEDS).toFixed(1).padStart(12)}  ` +

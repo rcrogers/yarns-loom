@@ -34,7 +34,7 @@ loadPage().then(page => {
   console.log(`note range ${noteRange} of ${page.PEAK} full scale;` +
     ` attack setting ${KNOBS.attack} = ${probe.attackSamples} smp`);
   console.log('peak-to-peak per 250ms slice, % of note range (SEE CAVEAT)');
-  console.log('dur  window(smp)  ' + header);
+  console.log('dur  duration(smp)  ' + header);
 
   for (const chiffDuration of DURATIONS) {
     const res = page.render(Object.assign({}, KNOBS, { chiffDuration }));
