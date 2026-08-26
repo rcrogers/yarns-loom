@@ -1,0 +1,3 @@
+cvtest
+cvtest_asan
+*.dSYM

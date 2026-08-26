@@ -155,6 +155,9 @@ const uint32_t kChiffSlewStateFractionalBits = 26;
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 
 void Envelope::Init(int16_t zero_value_s16) {
+  // What NoteOff tests. Statics start null; a re-Init on a layout change must
+  // land back there.
+  adsr_ = NULL;
   stage_phase_increment_u32_ = 0;
   stage_samples_left_ = 0;
   stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(0);
@@ -187,6 +190,11 @@ void Envelope::Init(int16_t zero_value_s16) {
 }
 
 void Envelope::NoteOff() {
+  // Voice::NoteOn forces a release before every triggered note, the first
+  // after boot included, and until that note there is no ADSR to read a
+  // release increment from. Trigger's switch reads it before it can decide
+  // there is nothing to do.
+  if (!adsr_) return;
   Trigger(ENV_STAGE_RELEASE);
 }
 

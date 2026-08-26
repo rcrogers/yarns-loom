@@ -9,12 +9,13 @@
 #   make            rebuild the sim, then verify (host + qemu + parity)
 #   make sim        rebuild + re-inline the sim engine (always)
 #   make host       host C reference: UBSan, golden, battery, anomaly
+#   make cv         host CV output path: Voice::NoteOn -> CVOutput -> DAC
 #   make qemu       differential: render-loop asm == C reference, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
 #   make cycles     what the envelope costs per block, against the baseline
 
-.PHONY: all sim host qemu check firmware cycles
+.PHONY: all sim host cv qemu check firmware cycles
 
 # Rebuild the sim, then run the full verification.
 all: sim check
@@ -32,12 +33,17 @@ sim:
 host:
 	sh tools/hosttest/build.sh
 
+# The CV OUTPUT PATH -- Voice::NoteOn through CVOutput to the DAC -- which the
+# envelope harness starts past and the sim stops short of.
+cv:
+	sh tools/cvtest/build.sh
+
 qemu:
 	sh tools/qemutest/verify.sh
 
 # Verify the tree is in sync WITHOUT rebuilding, so a stale committed sim shows
 # up as a simparity failure rather than being silently refreshed.
-check: host qemu
+check: host cv qemu
 	node tools/chiff_checks/simparity.js chiff_sim.html
 	node tools/chiff_checks/peakfloor.js
 	node tools/chiff_checks/xvmod.js
