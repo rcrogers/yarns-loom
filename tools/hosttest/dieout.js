@@ -1,7 +1,8 @@
 // DOES THE CHIFF DIE WHEN DURATION SAYS IT SHOULD? (L3.)
 //
 // Die-out is when the chiff term's level falls below the engine's own
-// audibility line, as a multiple of the nominal duration. 1.00 is the law.
+// audibility line, as a multiple of the nominal duration. 1.00 means it dies
+// exactly when DURATION says it will, which is what makes the setting read true.
 //
 // DO NOT ASK "WHEN DID A RUN LAST EXCEED THE LINE". That is a max statistic on
 // a noise process: it is biased late by construction, and worst exactly where
@@ -19,14 +20,19 @@
 // over 8 seeds put AMOUNT 3 at 1.46 where a span scaled to the setting puts
 // it at 0.66.
 //
-// THE GATE IS A CEILING ON THE ANSWER. Trigger() speeds the walk to finish by
+// THE GATE IS A CEILING ON THE ANSWER. Trigger() speeds the decay to finish by
 // the end of the RELEASE STAGE, so a ratio measured under a gate of Nx the
 // duration cannot exceed ~N. Cells that reach the gate are marked, not printed.
 const H = require('./harness');
 const FS = H.frameHz(), BLOCK = 64;
-// The engine holds the SCALED rms (2.121 sigma) to kChiffInaudibleLevel, so the
-// sigma at that point is 2.121x lower. Compare like with like.
-const LINE = 32767 * Math.pow(10, -48.2 / 20) / 2.121;
+// The engine holds the chiff's AMPLITUDE to kChiffInaudibleDbFs, and that
+// amplitude is kChiffAmplitudeSigmas of the noise's sigma -- so the sigma at
+// that point is 2.121x lower. Compare like with like.
+//   - Both figures are the firmware's, copied. envelope.cc is the source: they
+//     are kChiffInaudibleDbFs and kChiffAmplitudeSigmas = 3/sqrt(2).
+const INAUDIBLE_DBFS = -48.2;
+const AMPLITUDE_SIGMAS = 3 / Math.SQRT2;
+const LINE = 32767 * Math.pow(10, INAUDIBLE_DBFS / 20) / AMPLITUDE_SIGMAS;
 const TAIL_DB = 10;                   // how far below the line the tail column asks for
 const SMOOTH_FRACTION = 0.05;         // averaging half-width, as a fraction of the duration
 const ATK = 40;
