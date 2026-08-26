@@ -40,16 +40,17 @@ different *code paths* within it, and that is the whole point of the table.
 | `hosttest/arrival.js` | every timed stage lands on its target, over 128 settings x attack/decay/release | anything the chiff adds on top |
 | `make cv` | the CV OUTPUT PATH: one Voice::NoteOn reaches four envelopes with the same note, and the aux CV pack does not carry across halves | anything above Part::VoiceNoteOn |
 | `cvtest/panel.js` | the REAL Part::VoiceNoteOn against `tools/panel_chain.h`, the one copy every off-target consumer runs | whether part.cc itself is right |
+| `make ui` | the DISPLAY: the real driver's GPIO decoded back into the segment word at each character, over the frame swap, the prefix flash and a scroll | brightness, and the encoder and switch drivers |
 | `chiff_checks/simparity.js` | the published page renders identically to the native build | whether either is right |
 | `make cycles` | worst-case cost via the longest path through the CFG, loops weighted by their trip count | anything the linker pulls in — watch `flash free` |
 | `hosttest/blockrate.js` | a dBFS level on the tremolo bias's once-a-block breaks | whether that level is audible to you |
-| hardware | the display, the CV outputs, and how it sounds | — |
+| hardware | brightness, the encoder and switches, and how it sounds | — |
 
 **Everything except `make qemu` runs the C twin, not the shipped asm.** Run
 qemu in the background the moment it could be relevant; its only cost is
 latency.
 
-**Nothing here covers the display.** The note-on chain is covered: `make cv`
+The note-on chain is covered: `make cv`
 host-compiles `voice.cc` and `oscillator.cc` against a DAC that records instead
 of writing, and links `part.cc` too, so `cvtest/panel.js` runs the real
 `Part::VoiceNoteOn` and holds `tools/panel_chain.h` -- the one copy the sim and
@@ -57,7 +58,12 @@ the host driver both use -- to it. What the sim cannot do is LINK part.cc: the
 page carries its engine inline and that TU wants the arpeggiator, the looper,
 the just-intonation processor, the MIDI handler and `multi`. Of the three
 defects that shipped in this gap and were caught only by flashing, the display
-one is the remainder.
+one is now covered too: `make ui` host-compiles `drivers/display.cc` against a
+GPIO stub that decodes the four pins it bit-bangs, and fails on both defects
+`1a956a45` found by reading -- the self-recursing `SetBlinkFrames` segfaults,
+and dropping RefreshFast's `displayed_buffer_ == short_buffer_` guard blanks
+the prefix flash and the scroll. What is left with no host build is the
+encoder and switch drivers.
 
 ## Reading the chiff, not its output
 
