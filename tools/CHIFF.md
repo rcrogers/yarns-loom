@@ -37,6 +37,7 @@ different *code paths* within it, and that is the whole point of the table.
 | `make host` | 45 invariants over 8 seeds: DAC range, bias independence, monotonicity, stage handoff, clamp-with-chiff | anything perceptual |
 | `hosttest` UBSan build | signed overflow and bad shifts, which render *something* and pass every other check | anything it does not execute |
 | `hosttest/anomaly.js` | 140 cases against a recorded baseline, tolerant of small movement | whether the baseline was right |
+| `hosttest/arrival.js` | every timed stage lands on its target, over 128 settings x attack/decay/release | anything the chiff adds on top |
 | `chiff_checks/simparity.js` | the published page renders identically to the native build | whether either is right |
 | `make cycles` | worst-case cost via the longest path through the CFG, loops weighted by their trip count | anything the linker pulls in — watch `flash free` |
 | `hosttest/blockrate.js` | a dBFS level on the tremolo bias's once-a-block breaks | whether that level is audible to you |

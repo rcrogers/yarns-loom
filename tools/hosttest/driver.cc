@@ -217,6 +217,12 @@ int main(int argc, char** argv) {
   int relms = OptInt(argc, argv, "release", 400);
   int gatems = OptInt(argc, argv, "gate", 2000);
   int max_target = OptInt(argc, argv, "range", 16383);
+  // The note's LOWER end. Zero everywhere else, which puts the release's target
+  // on the DAC floor: a timed stage's adjusted target sits past the stage
+  // target, so at zero it sits under the floor and the mean's rail correction
+  // ramps the output back up over the run. Nominal still lands there; the
+  // output does not read it.
+  int min_target = OptInt(argc, argv, "floor", 0);
   adsr.attack_u32 = IncFromSamples(atkms * 45);
   adsr.decay_u32 = IncFromSamples(decms * 45);
   adsr.release_u32 = IncFromSamples(relms * 45);
@@ -260,7 +266,7 @@ int main(int argc, char** argv) {
 
   if (strcmp(scenario, "basic") == 0) {
     // gate, then release to the end
-    env.NoteOn(adsr, 0, max_target, amount_q30, chiff_audible_samples);
+    env.NoteOn(adsr, min_target, max_target, amount_q30, chiff_audible_samples);
     RenderMs(gatems);
     env.NoteOff();
     RenderMs(OptInt(argc, argv, "tail", relms > 1000 ? relms + 200 : 1000));
