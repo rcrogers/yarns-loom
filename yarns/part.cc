@@ -41,7 +41,6 @@
 #include "yarns/resources.h"
 #include "yarns/voice.h"
 #include "yarns/multi.h"
-#include "yarns/ui.h"
 
 namespace yarns {
   
