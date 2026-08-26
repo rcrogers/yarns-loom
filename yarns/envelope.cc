@@ -633,8 +633,8 @@ void Envelope::Trigger(EnvelopeStage stage) {
     uint32_t stage_phase_u32 = stage_samples_left_
       ? 0u - stage_samples_left_ * stage_phase_increment_u32_
       : UINT32_MAX;
-    // No landing fraction: the slew aims past the target, so lut_env_expo's
-    // own normalization already describes where the value is.
+    // No landing fraction: the adjusted target passes the stage target, so
+    // lut_env_expo's own normalization already describes where the value is.
     uint32_t expo_u16 = Interpolate824(lut_env_expo, stage_phase_u32);
     stage_start_q30_ += static_cast<int32_t>(
       (static_cast<int64_t>(stage_target_q30_ - stage_start_q30_) * expo_u16) >> 16);
@@ -915,15 +915,12 @@ void Envelope::RenderStage(
     const uint32_t chiff_amplitude_gain_q31_sqrt =
       ChiffAmplitudeGainAtSlewTime_q31_sqrt(
         chiff_slew_time_q5_27, chiff_slew_rate_q31);
-    // What nominal chases: past the target by 1/(1 - e^-4), so it arrives ON
-    // the target as the countdown expires. Holds chase the target itself.
-    // A timed stage runs four time constants, and a slew covers 1 - e^-4 =
-    // 98.17% of its span in that time, so the slew aims past its target by the
-    // reciprocal and lands ON it as the countdown expires.
-    //   - The adjusted target passes the stage target by 1.9% of the span, so
-    //     the slew input sits outside the note's range, unclamped.
-    //   - lut_env_expo then reads straight: normalized to 1.0, it already
-    //     describes the true slew once the target carries the 1/(1 - e^-4).
+    // What nominal chases. A timed stage runs four time constants and a slew
+    // covers 1 - e^-4 of its span in that time, so the adjusted target carries
+    // the reciprocal and nominal lands ON the stage target as the countdown
+    // expires. Holds chase the stage target itself.
+    //   - It passes the stage target, so the slew input sits outside the
+    //     note's range, unclamped. arrival.js is what holds the landing.
     const uint32_t kStageTargetOvershoot_u16 = static_cast<uint32_t>(
       65536.0 / (1.0 - __builtin_exp(-4.0)) + 0.5);
     int32_t stage_adjusted_target_q1_30 = stage_target_q30;

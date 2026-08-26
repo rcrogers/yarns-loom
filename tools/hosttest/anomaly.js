@@ -4,9 +4,9 @@
 // happened to name attack=16 / duration=33. Nothing swept the grid.
 //
 // THE DETECTOR. Once the chiff's duration is up the burst is inert -- depth is
-// zeroed and the aims collapse to the stage target -- so from then on the
-// output is the plain classic slew. It must therefore converge onto the SAME
-// settings rendered at amount 0. A persistent gap means the chiff left the
+// zeroed and the adjusted targets collapse to the stage target -- so from then
+// on the output is the plain classic slew. It must therefore converge onto the
+// SAME settings rendered at amount 0. A persistent gap means the chiff left the
 // value somewhere it had no business leaving it.
 //
 // This is design-independent, which earlier attempts were not: the chiff's
