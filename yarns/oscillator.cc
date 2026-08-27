@@ -156,7 +156,13 @@ int16_t Oscillator::WarpTimbre(
 
   // Sync modulator tracks pitch
   if (shape >= OSC_SHAPE_SYNC_SINE && shape <= OSC_SHAPE_SYNC_SAW) {
-    int32_t modulator_pitch = pitch + (timbre >> 3);
+    // TIMBRE sweeps the slave symmetrically about the master: unison at the
+    // control's centre, this far either side of it.
+    const int32_t kSyncSlaveOctaves = 2;
+    // Full scale of the timbre Refresh is handed, as a shift.
+    const uint8_t kTimbreScaleBits = 15;
+    int32_t modulator_pitch = pitch - kSyncSlaveOctaves * kOctave +
+        ((timbre * (2 * kSyncSlaveOctaves * kOctave)) >> kTimbreScaleBits);
     CONSTRAIN(modulator_pitch, 0, kHighestNote - 1);
     return ComputePhaseIncrement(modulator_pitch) >> (32 - 15);
   }
