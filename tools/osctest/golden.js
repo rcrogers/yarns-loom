@@ -15,6 +15,10 @@
 // So the driver hands the shape functions a timbre buffer DIRECTLY rather than
 // going through Envelope::RenderSamples. What is pinned is the shape's
 // arithmetic, with nothing else moving underneath it.
+//
+// Its first recording caught Oscillator::Init leaving modulator_phase_ and
+// pd_square_ unreset, which made the CZ pulse shapes' output depend on the run
+// before them. Fixed in the driver, then in Init.
 'use strict';
 const { execSync } = require('child_process');
 const fs = require('fs');

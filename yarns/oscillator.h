@@ -138,6 +138,12 @@ class Oscillator {
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
+    // Every accumulator the render carries between blocks, not just the
+    // carrier's: the modulator's phase and the phase-distortion square's
+    // integrator survived Init and a re-Init inherited the old note's.
+    modulator_phase_ = 0;
+    pd_square_.integrator = 0;
+    pd_square_.polarity = false;
     high_ = false;
     next_sample_ = 0;
     prev_transfer_raw_ = 0;

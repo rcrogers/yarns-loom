@@ -50,9 +50,6 @@ uint32_t HashShape(int shape, bool dump) {
   for (size_t p = 0; p < sizeof(kPitches) / sizeof(kPitches[0]); ++p) {
     osc.Init(kScale);
     osc.set_shape(static_cast<OscillatorShape>(shape));
-    // Init leaves the modulator's phase alone, so a run would otherwise
-    // inherit the previous one's.
-    osc.modulator_phase_ = 0;
     osc.Refresh(static_cast<int16_t>(kPitches[p]), 0, 0);
     for (int b = 0; b < kBlocks; ++b) {
       int16_t timbre_gain[2 * kAudioBlockSize];
