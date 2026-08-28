@@ -41,6 +41,7 @@ different *code paths* within it, and that is the whole point of the table.
 | `make cv` | the CV OUTPUT PATH: one Voice::NoteOn reaches four envelopes with the same note, and the aux CV pack does not carry across halves | anything above Part::VoiceNoteOn |
 | `cvtest/panel.js` | the REAL Part::VoiceNoteOn against `tools/panel_chain.h`, the one copy every off-target consumer runs | whether part.cc itself is right |
 | `make ui` | the DISPLAY: the real driver's GPIO decoded back into the segment word at each character, over the frame swap, the prefix flash and a scroll | brightness, and the encoder and switch drivers |
+| `make osc` | all 42 OSCILLATOR SHAPES, sample for sample, driven with a controlled timbre buffer rather than through the envelope | whether the recorded output is the RIGHT output |
 | `chiff_checks/simparity.js` | the published page renders identically to the native build | whether either is right |
 | `make cycles` | worst-case cost via the longest path through the CFG, loops weighted by their trip count | anything the linker pulls in — watch `flash free` |
 | `hosttest/blockrate.js` | a dBFS level on the tremolo bias's once-a-block breaks | whether that level is audible to you |

@@ -11,12 +11,13 @@
 #   make host       host C reference: UBSan, golden, battery, anomaly
 #   make cv         host CV output path: Voice::NoteOn -> CVOutput -> DAC
 #   make ui         host display: the real driver, its GPIO decoded
+#   make osc        host oscillator: all 42 shapes, sample for sample
 #   make qemu       differential: render-loop asm == C reference, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
 #   make cycles     what the envelope costs per block, against the baseline
 
-.PHONY: all sim host cv ui qemu check firmware cycles
+.PHONY: all sim host cv ui osc qemu check firmware cycles
 
 # Rebuild the sim, then run the full verification.
 all: sim check
@@ -43,12 +44,16 @@ cv:
 ui:
 	sh tools/uitest/build.sh
 
+# Every OSCILLATOR SHAPE, sample for sample.
+osc:
+	sh tools/osctest/build.sh
+
 qemu:
 	sh tools/qemutest/verify.sh
 
 # Verify the tree is in sync WITHOUT rebuilding, so a stale committed sim shows
 # up as a simparity failure rather than being silently refreshed.
-check: host cv ui qemu
+check: host cv ui osc qemu
 	node tools/chiff_checks/simparity.js chiff_sim.html
 	node tools/chiff_checks/peakfloor.js
 	node tools/chiff_checks/xvmod.js
