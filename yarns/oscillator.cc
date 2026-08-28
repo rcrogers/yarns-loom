@@ -43,6 +43,9 @@ static const size_t kNumZones = 15;
 
 static const uint16_t kPitchTableStart = 116 * 128;
 static const uint16_t kOctave = 12 * 128;
+// The audio sample's peak: the magnitude the transfer gain is derived
+// against, and the width the fold knee is scaled in.
+static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
 static const uint32_t kTransferPeakPhase = 1u << (32 - 2);
@@ -190,7 +193,7 @@ int16_t Oscillator::WarpTimbre(
     }
     uint32_t max_folds = 0x80000000u / ComputePhaseIncrement(pitch) / crest_factor;
     if (max_folds > 0x80000u) return timbre;
-    int32_t knee = static_cast<int32_t>(max_folds << (15 - kTransferMaxGainBits));
+    int32_t knee = static_cast<int32_t>(max_folds << (kSamplePeakBits - kTransferMaxGainBits));
     if (knee <= 0) return 0;
     return timbre - (timbre * timbre / (knee + timbre));
   }
@@ -546,7 +549,6 @@ void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_m
 }
 
 
-static const int kSampleBits = 15; // int16_t peak ≈ 2^15
 
 
 // Transfer waveshaping: input sample is amplified and used as phase for a
@@ -567,7 +569,7 @@ inline uint32_t amplify_for_transfer(
   //   2^15 * min_gain * 2^4 = 2^30 - bias
   //   min_gain = (2^30 - bias) >> 19
   int32_t min_gain =
-      (kTransferPeakPhase - bias) >> (kSampleBits + kTransferMaxGainBits);
+      (kTransferPeakPhase - bias) >> (kSamplePeakBits + kTransferMaxGainBits);
 
   int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
 

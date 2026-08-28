@@ -89,14 +89,18 @@ namespace {
 }  // namespace
 
 
-// The output sample is the s16 range, which USAT #15 states directly.
-const int kSampleBits = 15;
-// USAT's width: an unsigned saturate to 15 bits is the C reference's clamp to
-// [0, INT16_MAX]. Named so the asm can take it as an immediate.
+// The envelope value's own format. Everything below follows from it.
+const int kValueBits = 30;
+// What the output sample carries. USAT's width, so the asm takes it as an
+// immediate.
 const int kOutputSaturateBits = 15;
+// The shift from the value to the sample is the difference, not a second
+// figure: state them independently and they can disagree, which loses either
+// the top of the range or the saturation itself.
+const int kSampleBits = kValueBits - kOutputSaturateBits;
 
-// The DAC range in Q30: 32767 << 15, and (2^30 - 1) >> 15 is 32767 exactly.
-const int32_t kValueMax_q30 = (1 << 30) - 1;
+// The DAC range in Q30. (2^30 - 1) >> kSampleBits is 32767 exactly.
+const int32_t kValueMax_q30 = (1 << kValueBits) - 1;
 
 // How far the mean must move so the chiff's amplitude fits between it and the
 // rails; 0 when it already does.
