@@ -1,8 +1,8 @@
 // Host driver for the OSCILLATOR SHAPES. Renders each shape's own function
 // with a CONTROLLED timbre and gain buffer, not through Envelope::RenderSamples
 // -- so what is pinned is the shape's arithmetic and nothing else. That is the
-// point: the timbre bus is 15 bits today, and widening it means rescaling ten
-// sites that read the per-sample timbre with ten different meanings (a
+// point: the per-sample timbre is 15 bits today, and widening it means ten
+// rescaled sites, each reading that value as a different quantity (a
 // multiplier, a cutoff, a phase increment, a zone index). Feeding the buffer
 // directly is what makes "same audio from the equivalent wider value" a
 // checkable claim.
@@ -33,7 +33,7 @@ const uint16_t kScale = 32767;
 const int kPitches[] = { 36 << 7, 60 << 7, 96 << 7 };
 const int kBlocks = 8;
 
-// Full-scale timbre in the CURRENT bus width. A wider bus renders the same
+// Full-scale timbre at the CURRENT width. A wider one must render the same
 // audio from the proportionally larger value, which is what the check asserts.
 int g_timbre_max = 32767;
 int g_gain = 32767;

@@ -5,11 +5,11 @@
 // envelope; cvtest drives Voice and Part but only shape 0. So the 42 shapes,
 // which are the most audible code in the module, had no check at all.
 //
-// WHAT IT IS FOR. The per-sample timbre bus is 15 bits, and widening it to 16
-// means rescaling ten sites that read that value with ten different meanings --
+// WHAT IT IS FOR. The per-sample timbre value is 15 bits, and widening it to 16
+// means rescaling ten sites that read it with ten different meanings --
 // a multiplier, a cutoff, a phase increment, a zone index, a 7/8 scaler with a
 // 0x0fff bias. Each is a blind edit without this. With it the claim is
-// checkable: feed the proportionally larger value on the wider bus and every
+// checkable: feed the proportionally larger value at the wider width and every
 // shape must render byte-identical audio.
 //
 // So the driver hands the shape functions a timbre buffer DIRECTLY rather than
@@ -28,8 +28,8 @@ const DIR = __dirname;
 const BIN = path.join(DIR, 'osctest');
 const VECTORS = path.join(DIR, 'golden_shapes.json');
 const UPDATE = process.argv.includes('--update');
-// Full scale of the timbre bus. When the bus widens this moves with it, and
-// the hashes must not.
+// Full scale of the per-sample timbre. If that width ever changes this moves
+// with it, and the hashes must not.
 const TIMBRE_MAX = 32767;
 
 if (!fs.existsSync(BIN)) {
