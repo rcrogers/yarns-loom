@@ -8,14 +8,14 @@ cd "$(dirname "$0")"
 python3 ../portable_envelope.py ../.. envelope_host.cc
 # battery.js runs analyze.js once per seed and fails on any seed. A statistical
 # limit checked against one realization is checked against luck.
-clang++ -std=c++11 -O1 -w -DTEST -I shim -I ../.. envelope_host.cc ../../yarns/resources.cc driver.cc -o test || exit 1
+clang++ -std=c++11 -O1 -w -DTEST -I shim -I ../.. envelope_host.cc ../../yarns/resources.cc ../../yarns/utils.cc driver.cc -o test || exit 1
 # UNDEFINED BEHAVIOUR IS NOT VISIBLE IN THE OUTPUT. A signed overflow renders
 # whatever the compiler felt like that day, and every check here would still
 # pass. This build traps it instead. The cases are the ones that reach the
 # extremes: a full-range note with the bias at a rail, and full tremolo.
 clang++ -std=c++11 -O1 -w -DTEST -fsanitize=signed-integer-overflow,shift \
   -fno-sanitize-recover=all -I shim -I ../.. \
-  envelope_host.cc ../../yarns/resources.cc driver.cc -o test_ubsan || exit 1
+  envelope_host.cc ../../yarns/resources.cc ../../yarns/utils.cc driver.cc -o test_ubsan || exit 1
 for case in \
   "basic 127 90 attack_setting=127 range=32767 bias_lfo=32767" \
   "basic 127 90 attack_setting=40 range=32767 bias_lfo=32767 bias_lfo_blocks=1" \

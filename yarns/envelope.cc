@@ -32,6 +32,7 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/drivers/dac.h"
+#include "yarns/utils.h"
 
 namespace yarns {
 
@@ -259,8 +260,6 @@ static uint32_t ChiffAmplitudeGainAtSlewTime_q31_sqrt(
     (uncorrected_q31_sqrt * correction_q31) >> 31);
   return amplitude_gain_q31_sqrt > kOne_q31_sqrt ? kOne_q31_sqrt : amplitude_gain_q31_sqrt;
 }
-
-static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
 // A fraction of full scale. The decay's speed is set so the amount reaches it exactly at the
 // nominal duration, which is what makes DURATION read true.
@@ -1152,41 +1151,6 @@ void Envelope::RenderStage(
 #undef YARNS_CHIFF_ASM_STATE
 #undef YARNS_CHIFF_ASM_INPUTS
 
-// Exact unsigned 64/32 division, valid when the quotient fits 32 bits
-// (hi < divisor). Hacker's Delight "divlu".
-//
-// Every 64-bit divide in this file comes here. GCC 4.8 emits __aeabi_uldivmod
-// for the plain form -- ~1.4 kB of library code that no check in the suite
-// can see.
-static uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor) {
-  const uint32_t b = 1u << 16;
-  int shift = __builtin_clz(divisor);
-  divisor <<= shift;
-  uint32_t divisor_hi = divisor >> 16;
-  uint32_t divisor_lo = divisor & 0xFFFF;
-  uint32_t num_hi = (hi << shift) | (shift == 0 ? 0 : (lo >> (32 - shift)));
-  uint32_t num_lo = lo << shift;
-  uint32_t num_lo_hi = num_lo >> 16;
-  uint32_t num_lo_lo = num_lo & 0xFFFF;
-
-  uint32_t q1 = num_hi / divisor_hi;
-  uint32_t rhat = num_hi - q1 * divisor_hi;
-  while (q1 >= b || q1 * divisor_lo > b * rhat + num_lo_hi) {
-    --q1;
-    rhat += divisor_hi;
-    if (rhat >= b) break;
-  }
-
-  uint32_t num_mid = num_hi * b + num_lo_hi - q1 * divisor;
-  uint32_t q0 = num_mid / divisor_hi;
-  rhat = num_mid - q0 * divisor_hi;
-  while (q0 >= b || q0 * divisor_lo > b * rhat + num_lo_lo) {
-    --q0;
-    rhat += divisor_hi;
-    if (rhat >= b) break;
-  }
-  return q1 * b + q0;
-}
 
 // Scale by numerator/denominator in 32-bit hardware ops only: a umull forms
 // the 64-bit product, DivU64ByU32 divides, the result saturates into int32.

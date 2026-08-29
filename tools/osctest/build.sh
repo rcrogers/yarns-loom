@@ -7,5 +7,5 @@
 cd "$(dirname "$0")"
 clang++ -std=c++11 -O1 -w -DTEST -I ../hosttest/shim -I ../.. \
   driver.cc ../../yarns/oscillator.cc ../../yarns/envelope.cc \
-  ../../yarns/resources.cc ../warptest/rng_stub.cc -o osctest || exit 1
+  ../../yarns/resources.cc ../../yarns/utils.cc ../warptest/rng_stub.cc -o osctest || exit 1
 node golden.js || exit 1

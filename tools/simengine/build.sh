@@ -15,7 +15,7 @@ docker run --rm -v "$ROOT:/src" -w /src/tools/simengine \
   emscripten/emsdk:latest \
   em++ -O2 -std=c++11 -w -DTEST \
     -I ../hosttest/shim -I /src \
-    engine.cc /src/yarns/resources.cc \
+    engine.cc /src/yarns/resources.cc /src/yarns/utils.cc \
     -o chiff_engine.js \
     -s WASM=0 \
     -s SINGLE_FILE=1 \

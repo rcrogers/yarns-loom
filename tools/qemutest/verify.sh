@@ -39,7 +39,7 @@ NEG_RANGE=-16383
 echo "== building host C reference (clang) =="
 ( cd ../hosttest && python3 ../portable_envelope.py ../.. envelope_host.cc &&
   clang++ -std=c++11 -O1 -w -DTEST -I shim -I ../.. \
-    envelope_host.cc ../../yarns/resources.cc driver.cc -o test )
+    envelope_host.cc ../../yarns/resources.cc ../../yarns/utils.cc driver.cc -o test )
 
 echo "== building ARM asm ELF + running every scenario under QEMU =="
 # One docker call: build the ELF once, then run each scenario. $s expands in the

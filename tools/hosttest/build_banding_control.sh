@@ -48,6 +48,6 @@ open(path, 'w').write(src)
 print('patched: rail correction and slew clip removed')
 PYEOF
 clang++ -std=c++11 -O1 -w -DTEST -I shim -I ../.. \
-  envelope_banding_control.cc ../../yarns/resources.cc driver.cc \
+  envelope_banding_control.cc ../../yarns/resources.cc ../../yarns/utils.cc driver.cc \
   -o test_banding_control
 echo "built $(pwd)/test_banding_control"

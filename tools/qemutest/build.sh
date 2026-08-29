@@ -20,8 +20,9 @@ CXXFLAGS="$ARCH -O2 -DTEST -ffunction-sections -fdata-sections \
 
 $GXX $CXXFLAGS -c "$ROOT/yarns/envelope.cc"  -o envelope.o
 $GXX $CXXFLAGS -c "$ROOT/yarns/resources.cc" -o resources.o
+$GXX $CXXFLAGS -c "$ROOT/yarns/utils.cc"     -o utils.o
 $GXX $CXXFLAGS -c ../hosttest/driver.cc      -o driver.o
 $GCC $ARCH -O2 -std=gnu99 -c startup.c -o startup.o
 
 $GXX $ARCH --specs=nano.specs -nostartfiles -T lm3s6965.ld -Wl,--gc-sections \
-  envelope.o resources.o driver.o startup.o -o test.elf
+  envelope.o resources.o utils.o driver.o startup.o -o test.elf
