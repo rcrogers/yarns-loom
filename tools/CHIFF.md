@@ -24,6 +24,9 @@ The root `Makefile` documents its own targets. In short:
 rebuild the sim, so a stale committed page shows up as a simparity failure
 instead of being silently refreshed.
 
+**HISTORY IS IN GIT, AND STAYS THERE.** This file says what each tool proves
+and what it cannot see. Finished work is a SHA and one line.
+
 ## What proves what
 
 There is one implementation. `chiff_sim.html` inlines a compiled
