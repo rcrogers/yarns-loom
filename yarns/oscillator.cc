@@ -34,6 +34,7 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
+#include "yarns/utils.h"
 
 namespace yarns {
 
@@ -45,6 +46,9 @@ static const uint16_t kPitchTableStart = 116 * 128;
 static const uint16_t kOctave = 12 * 128;
 // The audio sample's peak: the magnitude the transfer gain is derived
 // against, and the width the fold knee is scaled in.
+// SYNC's modulator frequency, as a multiple of the carrier's: _q3_12, so up
+// to 8x. The span TIMBRE asks for is 2.67 octaves, or 6.35x.
+static const int kSyncRatioFractionalBits = 12;
 static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
@@ -161,7 +165,18 @@ int16_t Oscillator::WarpTimbre(
   if (shape >= OSC_SHAPE_SYNC_SINE && shape <= OSC_SHAPE_SYNC_SAW) {
     int32_t modulator_pitch = pitch + (timbre >> 3);
     CONSTRAIN(modulator_pitch, 0, kHighestNote - 1);
-    return ComputePhaseIncrement(modulator_pitch) >> (32 - 15);
+    // How many times the master's frequency, rather than the frequency itself.
+    // A frequency has to cover the whole audible range in fifteen bits, so its
+    // steps are worth 1/32768 of the top of that range wherever the note sits
+    // -- at a low note that is a third of a semitone. A multiple only has to
+    // cover this shape's own span, so one step is worth the same fraction of a
+    // semitone at every pitch.
+    const uint64_t scaled =
+        static_cast<uint64_t>(ComputePhaseIncrement(modulator_pitch))
+            << kSyncRatioFractionalBits;
+    return static_cast<int16_t>(DivU64ByU32(
+        static_cast<uint32_t>(scaled >> 32), static_cast<uint32_t>(scaled),
+        ComputePhaseIncrement(pitch)));
   }
 
   if (
@@ -350,12 +365,19 @@ void Oscillator::Render(int16_t* audio_mix) {
 #define SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE \
   uint32_t modulator_phase_increment = timbre << (32 - 15);
 
+// SYNC's timbre is a multiple of the carrier's frequency, so the modulator's
+// increment is the carrier's scaled by it.
+#define SET_MODULATOR_PHASE_INCREMENT_FROM_RATIO \
+  uint32_t modulator_phase_increment = static_cast<uint32_t>( \
+      (static_cast<uint64_t>(phase_increment) * \
+       static_cast<uint32_t>(timbre)) >> kSyncRatioFractionalBits);
+
 #define SYNC(discontinuity_code, edges_code, extra_transition_code) \
   bool sync_reset = false; \
   bool self_reset = false; \
   bool transition_during_reset = false; \
   uint32_t reset_time = 0; \
-  SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE; \
+  SET_MODULATOR_PHASE_INCREMENT_FROM_RATIO; \
   if (phase < phase_increment) { \
     sync_reset = true; \
     reset_time = FractionU32(phase, phase_increment) >> 16; \
