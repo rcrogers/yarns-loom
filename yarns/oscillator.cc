@@ -340,17 +340,43 @@ void Oscillator::Render(int16_t* audio_mix) {
   RENDER_PERIODIC(__VA_ARGS__); \
   modulator_phase_ = modulator_phase; \
 
+// HOW FAR INTO THIS SAMPLE THE EDGE FELL, in 0..65535: the phase past the edge
+// against the phase one sample covers.
+//
+// The fast form divides by the increment's HIGH HALF, which rounds to zero for
+// a modulator advancing less than 65536 phase units a sample. That is
+// reachable: a negative TIMBRE MOD ENVELOPE can collapse the sync ratio, and if
+// it does so while the follower sits within one increment of its wrap, the wrap
+// is crossed by an increment too small to survive the shift. Cortex-M3's UDIV
+// answers zero for a zero divisor, which lands a full-scale BLEP where a
+// three-fifths-of-a-sample one belongs.
+//
+// Below the threshold the division runs at FULL WIDTH instead, which is exact
+// and cannot divide by zero: the numerator is under one increment there, so the
+// shift has room, and an increment of zero takes the same arm as an edge a
+// whole sample old. FractionU32 would also serve and is what the master's reset
+// time uses, but inlining it at three sites costs 1152 bytes of flash against
+// 424, and a clz where two compares do.
+static inline uint32_t EdgeTime(
+    uint32_t phase_past_edge, uint32_t phase_increment) {
+  if (phase_increment >= (1 << 16)) {
+    return phase_past_edge / (phase_increment >> 16);
+  }
+  if (phase_past_edge >= phase_increment) return UINT16_MAX;
+  return (phase_past_edge << 16) / phase_increment;
+}
+
 #define EDGES_SAW(ph, ph_incr) \
   if (!self_reset) break; \
   self_reset = false; \
-  uint32_t t = ph / (ph_incr >> 16); \
+  uint32_t t = EdgeTime(ph, ph_incr); \
   this_sample -= ThisBlepSample(t); \
   next_sample -= NextBlepSample(t); \
 
 #define EDGES_PULSE(ph, ph_incr) \
   if (!high_) { \
     if (ph < pw) break; \
-    uint32_t t = (ph - pw) / (ph_incr >> 16); \
+    uint32_t t = EdgeTime(ph - pw, ph_incr); \
     this_sample += ThisBlepSample(t); \
     next_sample += NextBlepSample(t); \
     high_ = true; \
@@ -358,7 +384,7 @@ void Oscillator::Render(int16_t* audio_mix) {
   if (high_) { \
     if (!self_reset) break; \
     self_reset = false; \
-    uint32_t t = ph / (ph_incr >> 16); \
+    uint32_t t = EdgeTime(ph, ph_incr); \
     this_sample -= ThisBlepSample(t); \
     next_sample -= NextBlepSample(t); \
     high_ = false; \
