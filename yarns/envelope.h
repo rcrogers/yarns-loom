@@ -37,6 +37,16 @@ using namespace stmlib;
 // layout map and asserts it EQUALS this.
 const size_t kMaxChiffEnvelopes = 13;
 
+// THE RANGE EVERY SAMPLE THE RENDER WRITES FALLS IN, and the reason a consumer
+// may read one as UNSIGNED. Both stores saturate to this width off this same
+// constant -- the C one and the asm's USAT, which takes it as an immediate.
+// Stated in the header because the consumers are not in envelope.cc: timbre
+// and gain travel as int16_t only because the buffer is, never because a
+// negative one means anything, and the shapes that shift one, cast it to
+// uint32_t, or index a table with it would each break differently without this.
+const int kEnvelopeSampleBits = 15;
+const int16_t kEnvelopeSampleMax = (1 << kEnvelopeSampleBits) - 1;
+
 enum EnvelopeStage {
   ENV_STAGE_ATTACK,
   ENV_STAGE_DECAY,
@@ -80,6 +90,7 @@ class Envelope {
     uint32_t chiff_amount_q30, uint32_t chiff_audible_samples
   );
   void Trigger(EnvelopeStage stage);
+  // Every sample written is in [0, kEnvelopeSampleMax].
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,

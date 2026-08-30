@@ -364,8 +364,12 @@ void Oscillator::Render(int16_t* audio_mix) {
     high_ = false; \
   }
 
+// BOTH READ TIMBRE AS UNSIGNED, on Envelope::RenderSamples' guarantee that
+// every sample it writes is in [0, kEnvelopeSampleMax] (envelope.h). A
+// negative one would shift into the sign bit here and sign-extend to a
+// modulator hundreds of thousands of times too fast there.
 #define SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE \
-  uint32_t modulator_phase_increment = timbre << (32 - 15);
+  uint32_t modulator_phase_increment = timbre << (32 - kEnvelopeSampleBits);
 
 // SYNC's timbre is a multiple of the carrier's frequency, so the modulator's
 // increment is the carrier's scaled by it.

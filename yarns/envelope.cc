@@ -92,13 +92,12 @@ namespace {
 
 // The envelope value's own format. Everything below follows from it.
 const int kValueBits = 30;
-// What the output sample carries. USAT's width, so the asm takes it as an
-// immediate.
-const int kOutputSaturateBits = 15;
-// The shift from the value to the sample is the difference, not a second
-// figure: state them independently and they can disagree, which loses either
-// the top of the range or the saturation itself.
-const int kSampleBits = kValueBits - kOutputSaturateBits;
+// What the output sample carries is kEnvelopeSampleBits (envelope.h, where the
+// consumers can see the guarantee it gives them). The shift from the value to
+// the sample is the difference, not a second figure: state them independently
+// and they can disagree, which loses either the top of the range or the
+// saturation itself.
+const int kSampleBits = kValueBits - kEnvelopeSampleBits;
 
 // The DAC range in Q30. (2^30 - 1) >> kSampleBits is 32767 exactly.
 const int32_t kValueMax_q30 = (1 << kValueBits) - 1;
@@ -784,7 +783,7 @@ void Envelope::HandOffToNextStage(
   [state_shift] "i"(                                                          \
     kChiffLevelFractionalBits - kChiffSlewStateFractionalBits),               \
   [sample_bits] "i"(kSampleBits),                                             \
-  [sat_bits] "i"(kOutputSaturateBits)
+  [sat_bits] "i"(kEnvelopeSampleBits)
 
 #define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
   do {                                                                        \
@@ -809,7 +808,7 @@ void Envelope::HandOffToNextStage(
       (static_cast<int64_t>(nominal_delta_q1_30) * stage_slew_rate_q31) >> 32);        \
     target_with_all_bias += target_with_all_bias_slope;                                       \
     /* The asm's USAT: arithmetic shift by kSampleBits, then saturate         \
-     * unsigned to kOutputSaturateBits. The upper bound is spelled from THAT   \
+     * unsigned to kEnvelopeSampleBits. The bound is spelled from THAT         \
      * constant and not as INT16_MAX -- the two are equal today, and a twin    \
      * that agrees only by coincidence is how the pair drifts. */              \
     /* Reinterpreted as signed BEFORE the shift: the accumulator is modular,   \
@@ -819,9 +818,8 @@ void Envelope::HandOffToNextStage(
       - static_cast<uint32_t>(nominal_delta_q1_30)                                  \
       + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))          \
       >> kSampleBits;                                                           \
-    const int32_t kSampleMax = (1 << kOutputSaturateBits) - 1;                \
     if (sample < 0) sample = 0;                                               \
-    if (sample > kSampleMax) sample = kSampleMax;                             \
+    if (sample > kEnvelopeSampleMax) sample = kEnvelopeSampleMax;             \
     *sample_buffer++ = static_cast<int16_t>(sample);                          \
   } while (0)
 

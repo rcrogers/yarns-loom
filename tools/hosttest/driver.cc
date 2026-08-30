@@ -29,6 +29,10 @@ static ADSR adsr;
 // mismatch still flags any bit divergence (fall back to the default per-sample
 // dump, below, to locate it).
 static bool g_hash_mode = false;
+// COUNTED, NOT ABORTED ON: this driver also builds bare-metal for the QEMU
+// differential, where abort() drags in _exit and the link fails. main reports.
+static unsigned long g_saturation_violations = 0;
+static int g_saturation_worst = 0;
 static uint32_t g_hash = 2166136261u;  // FNV-1a offset basis
 
 static uint32_t IncFromSamples(uint32_t samples) {
@@ -126,6 +130,16 @@ static void RenderMs(double ms) {
     }
     ++g_block_counter;
     env.RenderSamples(buffer, static_cast<int32_t>(bias_target_q31));
+    // THE SATURATION CONTRACT, watched where the samples land rather than in
+    // one scenario's output -- every mode below renders through here, so a new
+    // scenario is covered without anyone remembering to. yarns/envelope.h says
+    // what reading a sample as unsigned buys its consumers.
+    for (size_t j = 0; j < kAudioBlockSize; ++j) {
+      if (buffer[j] < 0 || buffer[j] > kEnvelopeSampleMax) {
+        ++g_saturation_violations;
+        g_saturation_worst = buffer[j];
+      }
+    }
     if (g_chiff_trace) {
       // The amount, not the drive: drive, slew time and input are all pure
       // functions of it, and it costs no member to expose.
@@ -321,5 +335,10 @@ int main(int argc, char** argv) {
     printf("%d %d\n", g_value_min >> 15, g_value_max >> 15);
   }
   if (g_hash_mode) printf("%08x\n", g_hash);
+  if (g_saturation_violations) {
+    fprintf(stderr, "%lu envelope samples outside [0, %d], worst %d\n",
+            g_saturation_violations, kEnvelopeSampleMax, g_saturation_worst);
+    return 1;
+  }
   return 0;
 }
