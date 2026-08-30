@@ -486,7 +486,11 @@ void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_mix) {
       false // No extra transition
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
-    this_sample = sine(modulator_phase);
+    // ACCUMULATE, DO NOT ASSIGN: this_sample arrives holding the BLEP residual
+    // SYNC wrote a line ago, so assigning the naive wave over it drops the
+    // correction and the shape aliases. Only a shape with no discontinuity may
+    // assign.
+    next_sample += sine(modulator_phase);
   )
 }
 
@@ -511,7 +515,7 @@ void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_mix)
       false // No extra transition
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
-    this_sample = triangle(modulator_phase);
+    next_sample += triangle(modulator_phase);
   )
 }
 
