@@ -74,8 +74,10 @@ void Display::Init() {
   fading_counter_ = 0;
   fading_increment_ = 0;
   
-  blinking_ = false;
+  std::fill(&blink_frame_[0], &blink_frame_[kDisplayWidth], 0);
   brightness_ = UINT16_MAX;
+  frame_counter_ = 0;
+  prefix_transitions_ = false;
 }
 
 void Display::Scroll() {
@@ -119,6 +121,7 @@ void Display::RefreshSlow() {
       ? long_buffer_ + scrolling_step_
       : (
         // 0...24/32: show normal short buffer
+        !prefix_transitions_ ||
         blink_counter_ < ((kBlinkMask >> 1) + (kBlinkMask >> 2))
         ? short_buffer_
         : (
@@ -143,6 +146,7 @@ void Display::RefreshSlow() {
     actual_brightness_ = brightness_;
   }
   blink_counter_ = (blink_counter_ + 1) % kBlinkMask;
+  frame_counter_ = (frame_counter_ + 1) % kFrameBlinkMask;
   std::fill(&redraw_[0], &redraw_[kDisplayWidth], true); // Force redraw
 
 #else
@@ -167,14 +171,18 @@ void Display::RefreshFast() {
   }
   if (redraw_[active_position_]) {
     redraw_[active_position_] = false;
-    if (brightness_pwm_cycle_ <= actual_brightness_
-        && (!blinking_ || blink_high())) {
-      if (use_mask_) {
-        Shift14SegmentsWord(mask_[active_position_]);
-      } else {
-        Shift14SegmentsWord(chr_characters[
-          static_cast<uint8_t>(displayed_buffer_[active_position_])]);
+    if (brightness_pwm_cycle_ <= actual_brightness_) {
+      uint16_t segments = use_mask_
+          ? mask_[active_position_]
+          : chr_characters[
+              static_cast<uint8_t>(displayed_buffer_[active_position_])];
+      // The frames describe the short name, and RefreshSlow points
+      // displayed_buffer_ elsewhere for a scrolling long name and for the
+      // prefix flash -- both of which already have their own other side.
+      if (!frame_high() && displayed_buffer_ == short_buffer_) {
+        segments = blink_frame_[active_position_];
       }
+      Shift14SegmentsWord(segments);
       GPIOB->BSRR = kCharacterEnablePins[active_position_];
     } else {
       GPIOB->BRR = kCharacterEnablePins[active_position_];
@@ -183,11 +191,36 @@ void Display::RefreshFast() {
   brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
 }
 
+// A glyph's other frame, or the only one it has. Read once per Print, so the
+// short list costs less than a table with an entry for every character.
+static uint16_t OtherFrame(char c) {
+  const uint8_t code = static_cast<uint8_t>(c);
+  for (const uint16_t* p = chr_blinking_characters; p[0]; p += 2) {
+    if (p[0] == code) return p[1];
+  }
+  return chr_characters[code];
+}
+
+void Display::SetBlinkFrames() {
+  for (uint8_t i = 0; i < kDisplayWidth; ++i) {
+    blink_frame_[i] = OtherFrame(short_buffer_[i]);
+  }
+}
+
+void Display::set_blink(bool blinking) {
+  if (blinking) {
+    std::fill(&blink_frame_[0], &blink_frame_[kDisplayWidth], 0);
+  } else {
+    SetBlinkFrames();
+  }
+}
+
 void Display::Print(
   const char* short_buffer, const char* long_buffer,
   uint16_t brightness, uint16_t fade, char prefix
 ) {
   strncpy(short_buffer_, short_buffer, kDisplayWidth);
+  SetBlinkFrames();
 
 #ifdef APPLICATION
   strncpy(long_buffer_, long_buffer, kScrollBufferSize);
@@ -202,6 +235,7 @@ void Display::Print(
 
   strncpy(prefix_show_buffer_, short_buffer, kDisplayWidth);
   strncpy(prefix_blank_buffer_, short_buffer, kDisplayWidth);
+  prefix_transitions_ = false;
   if (prefix != '\0') {
     if (short_buffer_[0] == ' ') { // All buffers show prefix, no transitions
       short_buffer_[0] = prefix;
@@ -210,6 +244,7 @@ void Display::Print(
     } else { // Only one buffer shows prefix
       prefix_show_buffer_[0] = prefix;
       prefix_blank_buffer_[0] = ' ';
+      prefix_transitions_ = true;
     }
   }
 }

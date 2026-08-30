@@ -71,6 +71,10 @@ enum ModAux {
   MOD_AUX_LAST
 };
 
+// Envelopes a CVOutput carries: envelope_, reachable only on the is_envelope()
+// path. See kEnvelopesPerOscillator for how the two are counted together.
+const uint8_t kEnvelopesPerCVOutput = 1;
+
 // A role used by a CV output when it is not acting as an audio oscillator
 enum DCRole {
   DC_PITCH,
@@ -101,7 +105,8 @@ class Voice {
   void NoteOn(
     int16_t note, uint8_t velocity, uint8_t portamento,
     int8_t portamento_mod_velocity, bool trigger,
-    ADSR& adsr, int16_t timbre_envelope_target
+    ADSR& adsr, int16_t timbre_envelope_target,
+    uint32_t chiff_amount_q30, uint32_t chiff_audible_samples
   );
   void NoteOff(bool force = false);
   void ControlChange(uint8_t controller, uint8_t value);
@@ -328,8 +333,11 @@ class CVOutput {
   inline bool sounding() const {
     return envelope_.stage() != ENV_STAGE_DEAD;
   }
-  inline void NoteOn(ADSR& adsr) {
-    envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
+  inline void NoteOn(
+      ADSR& adsr, uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
+    envelope_.NoteOn(
+      adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1,
+      chiff_amount_q30, chiff_audible_samples);
   }
   inline void NoteOff(bool force = false) {
     if (!force) {
@@ -349,7 +357,7 @@ class CVOutput {
     return volts_dac_code(0) - envelope_value();
   }
   inline uint16_t envelope_value() {
-    int32_t value = (envelope_bias_ + envelope_.value()) << 1;
+    int32_t value = (envelope_bias_ + envelope_.value_without_bias()) << 1;
     CONSTRAIN(value, 0, UINT16_MAX);
     return value;
    }

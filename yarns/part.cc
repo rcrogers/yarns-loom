@@ -41,7 +41,6 @@
 #include "yarns/resources.h"
 #include "yarns/voice.h"
 #include "yarns/multi.h"
-#include "yarns/ui.h"
 
 namespace yarns {
   
@@ -111,6 +110,10 @@ void Part::Init() {
   voicing_.env_mod_decay = -32;
   voicing_.env_mod_sustain = 0;
   voicing_.env_mod_release = 32;
+  voicing_.chiff_amount = 32;
+  voicing_.chiff_duration = 65;  // ~2x the default attack, absolute
+  voicing_.chiff_amount_mod_velocity = 0;
+  voicing_.chiff_duration_mod_velocity = 0;
 
   seq_.clock_division = 20;
   seq_.gate_length = 3;
@@ -148,8 +151,12 @@ void Part::NoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
   bool sent_from_step_editor = channel & 0x80;
   
   // scale velocity to compensate for its min/max range, so that voices using
-  // velocity filtering can still have a full velocity range
+  // velocity filtering can still have a full velocity range. A note arriving
+  // at exactly min_velocity scales to zero, which MIDI reserves for note off,
+  // so the bottom of the range is held at one. With the default range this
+  // scaling is the identity and the floor never applies.
   velocity = ((velocity - midi_.min_velocity) << 7) / (midi_.max_velocity - midi_.min_velocity + 1);
+  if (!velocity) velocity = 1;
 
   if (seq_recording_) {
     if (!looped() && !sent_from_step_editor) {
@@ -814,7 +821,16 @@ void Part::VoiceNoteOn(
   }
 
   ADSR adsr;
-  adsr.peak_u16 = UINT16_MAX - (damping_22 >> (22 - 16));
+  // A zero peak lands the attack's target exactly on the release level, and the
+  // envelope's "nothing to do this stage" early-out then drops the attack
+  // outright -- losing the stage's DURATION, not just its height, so the note
+  // slews to sustain at the DECAY rate. Only AMPLITUDE MOD VELOCITY -64 at
+  // velocity 127 reaches exactly 0 (-63 bottoms out at 1023, and the positive
+  // side at 1023), so without this floor that single corner snaps to a
+  // different trajectory than velocity 126.
+  const int32_t kMinPeak_u16 = 1;
+  adsr.peak_u16 =
+    std::max(kMinPeak_u16, UINT16_MAX - (damping_22 >> (22 - 16)));
   adsr.sustain_u16 = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
   // NB: this LUT only has 128 values, so we use a 15-bit index
   adsr.attack_u32   = Interpolate88(
@@ -830,8 +846,31 @@ void Part::VoiceNoteOn(
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
 
+  // EXCITER AMT VEL MOD. modulate_7_13 resolves AMOUNT six bits below the knob
+  // step, and the envelope takes the fraction of full scale, so neither the
+  // panel's range nor its step count travels with it. CEIL, so a full setting
+  // reaches 1.0; the clamp is what the old shift did by truncating.
+  const uint16_t kChiffAmountFullScale_q7_6 =
+    ((1 << PackedPart::kTimbreBits) - 1) << 6;
+  const uint32_t kChiffAmountToFraction_q30 =
+    ((1u << 30) + kChiffAmountFullScale_q7_6 - 1) / kChiffAmountFullScale_q7_6;
+  uint32_t chiff_amount_q30 = modulate_7_13(
+    voicing_.chiff_amount, voicing_.chiff_amount_mod_velocity, vel)
+    * kChiffAmountToFraction_q30;
+  if (chiff_amount_q30 > (1u << 30)) chiff_amount_q30 = 1u << 30;
+
+  // EXCITER DURATION is a time of its own now, read off its own table but
+  // shaped like every other envelope stage, so it modulates the same way.
+  // Converted HERE, once: a note starts up to four envelopes and they all want
+  // the same duration.
+  uint32_t chiff_audible_samples = ChiffAudibleSamples(Interpolate88(
+    lut_chiff_phase_increments,
+    modulate_7_13(voicing_.chiff_duration, voicing_.chiff_duration_mod_velocity, vel) << (15 - 13)
+  ));
+
   voice->NoteOn(Tune(pitch), vel, portamento,
-    voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2);
+    voicing_.portamento_mod_velocity, trigger, adsr, timbre_14 << 2,
+    chiff_amount_q30, chiff_audible_samples);
 }
 
 void Part::VoiceNoteOff(uint8_t voice) {

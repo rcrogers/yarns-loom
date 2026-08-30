@@ -34,6 +34,7 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
+#include "yarns/utils.h"
 
 namespace yarns {
 
@@ -43,12 +44,24 @@ static const size_t kNumZones = 15;
 
 static const uint16_t kPitchTableStart = 116 * 128;
 static const uint16_t kOctave = 12 * 128;
+// The audio sample's peak: the magnitude the transfer gain is derived
+// against, and the width the fold knee is scaled in.
+// SYNC's modulator frequency, as a multiple of the carrier's: _q3_12, so up
+// to 8x. The span TIMBRE asks for is 2.67 octaves, or 6.35x.
+static const int kSyncRatioFractionalBits = 12;
+static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
 static const uint32_t kTransferPeakPhase = 1u << (32 - 2);
 // Biased variants add a DC bias (after amplification) to shift the operating
 // point on the transfer function, creating asymmetric harmonic content.
 static const uint32_t kTransferAsymmetricBias = kTransferPeakPhase / 2;  // 1/8 cycle -- max asymmetry
+// Order of the carrier and transfer curves within the transfer shape enum.
+enum TransferCurve {
+  TRANSFER_CURVE_TRI,
+  TRANSFER_CURVE_SINE,
+  TRANSFER_CURVE_EXP
+};
 
 /* static */
 Oscillator::RenderFn Oscillator::fn_table_[] = {
@@ -152,12 +165,23 @@ int16_t Oscillator::WarpTimbre(
   if (shape >= OSC_SHAPE_SYNC_SINE && shape <= OSC_SHAPE_SYNC_SAW) {
     int32_t modulator_pitch = pitch + (timbre >> 3);
     CONSTRAIN(modulator_pitch, 0, kHighestNote - 1);
-    return ComputePhaseIncrement(modulator_pitch) >> (32 - 15);
+    // How many times the master's frequency, rather than the frequency itself.
+    // A frequency has to cover the whole audible range in fifteen bits, so its
+    // steps are worth 1/32768 of the top of that range wherever the note sits
+    // -- at a low note that is a third of a semitone. A multiple only has to
+    // cover this shape's own span, so one step is worth the same fraction of a
+    // semitone at every pitch.
+    const uint64_t scaled =
+        static_cast<uint64_t>(ComputePhaseIncrement(modulator_pitch))
+            << kSyncRatioFractionalBits;
+    return static_cast<int16_t>(DivU64ByU32(
+        static_cast<uint32_t>(scaled >> 32), static_cast<uint32_t>(scaled),
+        ComputePhaseIncrement(pitch)));
   }
 
   if (
     shape == OSC_SHAPE_EXP_SINE ||
-    (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
+    (shape >= OSC_SHAPE_TRI_THRU_TRI && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
     shape >= OSC_SHAPE_FM
   ) {
     // Soft-knee compression: unity gain at low timbre, asymptotes to
@@ -165,10 +189,10 @@ int16_t Oscillator::WarpTimbre(
     // t - t^2/(knee + t) to avoid 32-bit overflow.
     //
     // Crest factor compensates for carrier/transfer steepness:
-    // sine=1, tri=2 (derivative discontinuities), expo=3 (peak slope).
+    // tri=2 (derivative discontinuities), sine=1, expo=3 (peak slope).
     // Combined factor is carrier * transfer.
     uint8_t crest_factor;
-    if (shape >= OSC_SHAPE_SINE_THRU_SINE &&
+    if (shape >= OSC_SHAPE_TRI_THRU_TRI &&
         shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
       crest_factor = transfer_crest_factor_;
     } else if (shape == OSC_SHAPE_EXP_SINE) {
@@ -178,7 +202,7 @@ int16_t Oscillator::WarpTimbre(
     }
     uint32_t max_folds = 0x80000000u / ComputePhaseIncrement(pitch) / crest_factor;
     if (max_folds > 0x80000u) return timbre;
-    int32_t knee = static_cast<int32_t>(max_folds << (15 - kTransferMaxGainBits));
+    int32_t knee = static_cast<int32_t>(max_folds << (kSamplePeakBits - kTransferMaxGainBits));
     if (knee <= 0) return 0;
     return timbre - (timbre * timbre / (knee + timbre));
   }
@@ -200,10 +224,10 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   shape_ = new_shape;
 
   transfer_crest_factor_ = 1;
-  if (new_shape >= OSC_SHAPE_SINE_THRU_SINE &&
+  if (new_shape >= OSC_SHAPE_TRI_THRU_TRI &&
       new_shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
-    static const uint8_t slope_factor[] = {1, 2, 3}; // sine, tri, expo
-    uint8_t index = new_shape - OSC_SHAPE_SINE_THRU_SINE;
+    static const uint8_t slope_factor[] = {2, 1, 3}; // tri, sine, expo
+    uint8_t index = new_shape - OSC_SHAPE_TRI_THRU_TRI;
     transfer_carrier_ = index % 3;
     transfer_function_ = index / 6;
     transfer_bias_ = (index % 6) >= 3 ? kTransferAsymmetricBias : 0;
@@ -211,8 +235,9 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
         * slope_factor[transfer_function_];
     // Halve max transfer gain when triangle is involved (carrier or transfer)
     // to compensate for its derivative discontinuities.
-    transfer_gain_shift_ = (transfer_carrier_ == 1 || transfer_function_ == 1)
-        ? 1 : 0;
+    transfer_gain_shift_ =
+        (transfer_carrier_ == TRANSFER_CURVE_TRI ||
+         transfer_function_ == TRANSFER_CURVE_TRI) ? 1 : 0;
   }
 }
 
@@ -241,39 +266,59 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
   return phase_increment;
 }
 
-// Hot-path audio render. The three 128B sample buffers below are kept as
-// stack locals (not static) because stack-local access is measurably
-// faster in this tight loop across 4 simultaneously-triggered paraphonic
-// voices. The resulting 388B frame, plus the rest of the render call
-// chain, requires a stack reservation larger than the original 512B;
-// see yarns/stack_budget.h for the cumulative-stack accounting and
-// compile-time budget check.
+// Hot-path audio render. Timbre and gain envelopes are evaluated up-front
+// into stack buffers, then the wave render reads gain per sample and
+// multiply-accumulates directly into audio_mix — folding the old
+// q15_multiply_accumulate pass into the wave loop. Saves the 128B
+// audio_samples intermediate plus the per-sample LDR/MUL/STR round-trip.
+// Stack locals (not static) are measurably faster in this tight loop
+// across 4 simultaneously-triggered paraphonic voices; see
+// yarns/stack_budget.h for the cumulative-stack accounting.
 void Oscillator::Render(int16_t* audio_mix) {
-  int16_t timbre_samples[kAudioBlockSize] = {0};
+  // Skipping zero-init: both buffers are fully overwritten by the
+  // envelope renders below.
+  // ONE ARRAY, TWO HALVES, so the render loop walks a SINGLE pointer: timbre at
+  // [p], gain at [p + kAudioBlockSize]. A fixed immediate offset costs nothing
+  // (`ldrsh r, [base, #128]`), and post-incrementing the one pointer serves
+  // both -- where two separate buffers need two pointers, and every register
+  // held here is one the shape cannot have.
+  int16_t timbre_gain[2 * kAudioBlockSize];
+  int16_t* timbre_samples = &timbre_gain[0];
+  int16_t* gain_samples = &timbre_gain[kAudioBlockSize];
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
-  timbre_envelope_.RenderSamples(timbre_samples, timbre_bias << 16);
+  timbre_envelope_.RenderSamples(
+    timbre_samples, static_cast<int32_t>(static_cast<uint32_t>(timbre_bias) << 16));
+
+  int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
+  gain_envelope_.RenderSamples(
+    gain_samples, static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16));
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
-  int16_t audio_samples[kAudioBlockSize] = {0};
-  (this->*fn)(timbre_samples, audio_samples);
-
-  int16_t gain_samples[kAudioBlockSize] = {0};
-  int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
-  gain_envelope_.RenderSamples(gain_samples, gain_bias << 16);
-
-  q15_multiply_accumulate<kAudioBlockSize>(gain_samples, audio_samples, audio_mix);
+  (this->*fn)(timbre_samples, audio_mix);
 }
 
+// TIMBRE AND GAIN ARE TWO HALVES OF ONE ARRAY, and this loop relies on it: gain
+// is read at timbre_samples[kAudioBlockSize], so ONE pointer walks both and
+// every shape gets a register back. There is deliberately NO gain_samples
+// parameter, so non-adjacent buffers cannot be handed in by mistake.
+//
+// Per-sample MAC into audio_mix: mix[i] += (this_sample * gain[i]) >> 15.
+// The product shift folds into ARM's barrel-shifted ADD operand
+// (add r, mix, prod, asr #15).
 #define RENDER_CORE(...) \
   int16_t next_sample = next_sample_; \
   for (size_t size = kAudioBlockSize; size--;) { \
-    int16_t timbre = *timbre_samples++; \
+    int16_t timbre = timbre_samples[0]; \
     int16_t this_sample = next_sample; \
     next_sample = 0; \
     __VA_ARGS__ \
-    *audio_samples++ = this_sample; \
+    int16_t gain = timbre_samples[kAudioBlockSize]; /* the other half */ \
+    ++timbre_samples; \
+    *audio_mix = static_cast<int16_t>( \
+        *audio_mix + ((static_cast<int32_t>(this_sample) * gain) >> 15)); \
+    ++audio_mix; \
   } \
   next_sample_ = next_sample; \
 
@@ -320,12 +365,19 @@ void Oscillator::Render(int16_t* audio_mix) {
 #define SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE \
   uint32_t modulator_phase_increment = timbre << (32 - 15);
 
+// SYNC's timbre is a multiple of the carrier's frequency, so the modulator's
+// increment is the carrier's scaled by it.
+#define SET_MODULATOR_PHASE_INCREMENT_FROM_RATIO \
+  uint32_t modulator_phase_increment = static_cast<uint32_t>( \
+      (static_cast<uint64_t>(phase_increment) * \
+       static_cast<uint32_t>(timbre)) >> kSyncRatioFractionalBits);
+
 #define SYNC(discontinuity_code, edges_code, extra_transition_code) \
   bool sync_reset = false; \
   bool self_reset = false; \
   bool transition_during_reset = false; \
   uint32_t reset_time = 0; \
-  SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE; \
+  SET_MODULATOR_PHASE_INCREMENT_FROM_RATIO; \
   if (phase < phase_increment) { \
     sync_reset = true; \
     reset_time = FractionU32(phase, phase_increment) >> 16; \
@@ -350,7 +402,7 @@ void Oscillator::Render(int16_t* audio_mix) {
     high_ = false; \
   } \
 
-void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(0x7fff);
   uint32_t pw = 0x80000000;
@@ -364,7 +416,7 @@ void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples) 
   svf_ = svf;
 }
 
-void Oscillator::RenderLPSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderLPSaw(int16_t* timbre_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(0x6000);
   RENDER_PERIODIC(
@@ -377,7 +429,7 @@ void Oscillator::RenderLPSaw(int16_t* timbre_samples, int16_t* audio_samples) {
   svf_ = svf;
 }
 
-void Oscillator::RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     timbre = timbre + (timbre >> 1); // 3/4
     uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo, timbre)) << 15; // 50-0%
@@ -388,7 +440,7 @@ void Oscillator::RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_sam
   )
 }
 
-void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_SAW(phase, phase_increment) }
@@ -404,7 +456,7 @@ void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_sampl
 // flats + slope of up-ramp
 //
 // ⟋|⟋| -> _/‾|_/‾| -> _|‾|_|‾|
-void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     // Prevent saw from reaching an infinitely steep rise, else we'd have to
     // clumsily transition into a BLEP of what is now a rising pulse edge
@@ -424,7 +476,7 @@ void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_sam
   )
 }
 
-void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       sine(0) - sine(modulator_phase_at_reset),
@@ -436,7 +488,7 @@ void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples)
   )
 }
 
-void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_mix) {
   uint32_t pw = 0x80000000;
   RENDER_MODULATED(
     SYNC(
@@ -449,7 +501,7 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples
   )
 }
 
-void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       triangle(0) - triangle(modulator_phase_at_reset),
@@ -461,7 +513,7 @@ void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samp
   )
 }
 
-void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       0 - (modulator_phase_at_reset >> 17),
@@ -473,7 +525,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
   )
 }
 
-// void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+// void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_mix) {
 //   RENDER_PERIODIC(
 //     this_sample = triangle(phase);
 //     this_sample = this_sample * timbre >> 15;
@@ -481,7 +533,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
 //   )
 // }
 
-// void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples) {
+// void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_mix) {
 //   RENDER_PERIODIC(
 //     this_sample = sine(phase);
 //     this_sample = this_sample * timbre >> 15;
@@ -489,7 +541,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
 //   )
 // }
 
-void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     this_sample = sine(phase);
     int16_t baseline = this_sample >> 6;
@@ -498,7 +550,7 @@ void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples)
   )
 }
 
-void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff; // Use top 7/8
     int16_t sine_sample = sine(phase);
@@ -513,7 +565,6 @@ void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_s
 }
 
 
-static const int kSampleBits = 15; // int16_t peak ≈ 2^15
 
 
 // Transfer waveshaping: input sample is amplified and used as phase for a
@@ -534,7 +585,7 @@ inline uint32_t amplify_for_transfer(
   //   2^15 * min_gain * 2^4 = 2^30 - bias
   //   min_gain = (2^30 - bias) >> 19
   int32_t min_gain =
-      (kTransferPeakPhase - bias) >> (kSampleBits + kTransferMaxGainBits);
+      (kTransferPeakPhase - bias) >> (kSamplePeakBits + kTransferMaxGainBits);
 
   int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
 
@@ -544,39 +595,56 @@ inline uint32_t amplify_for_transfer(
   return amped_sample + bias;
 }
 
-void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_samples) {
-  uint8_t carrier_index = transfer_carrier_;
-  uint8_t transfer_index = transfer_function_;
+void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_mix) {
+  const uint8_t carrier_index = transfer_carrier_;
+  const uint8_t transfer_index = transfer_function_;
   uint32_t bias = transfer_bias_;
   uint8_t gain_shift = transfer_gain_shift_;
-  // int16_t prev_raw = prev_transfer_raw_;
-  // int16_t prev_avg = prev_transfer_avg_;
-  // Cascaded boxcar (triangular window {1/4, 1/2, 1/4}) anti-aliasing:
-  // double null at Nyquist, -6dB at Nyquist/2.
-  RENDER_PERIODIC(
-    switch (carrier_index) {
-      case 0: this_sample = sine(phase); break;
-      case 1: this_sample = triangle(phase); break;
-      case 2: this_sample = expo(phase); break;
-    }
-    uint32_t transfer_phase =
-        amplify_for_transfer(this_sample, timbre >> gain_shift, bias);
-    switch (transfer_index) {
-      case 0: this_sample = sine(transfer_phase); break;
-      case 1: this_sample = triangle(transfer_phase); break;
-      case 2: this_sample = expo(transfer_phase); break;
-    }
-    // int16_t raw = this_sample;
-    // int16_t avg = (raw + prev_raw) >> 1;
-    // this_sample = (avg + prev_avg) >> 1;
-    // prev_raw = raw;
-    // prev_avg = avg;
+  // THE SHAPE IS FIXED FOR THE WHOLE BLOCK, so the choice is made HERE and the
+  // loop carries no dispatch. It used to switch twice per sample on indices set
+  // before the loop, which fragmented the body into basic blocks joined by
+  // taken branches.
+  //
+  // SINE AND EXPO ARE THE SAME CODE with a different quadrant table, so the
+  // choice between those two is a POINTER and costs nothing. Only triangle is
+  // separate code, which is why this specialises 2x2 and not 3x3 -- one loop
+  // per (carrier is triangle?, transfer is triangle?), four in all. A triangle
+  // LUT would collapse it to one loop, but 514 bytes of table to replace a
+  // shift and an xor is the wrong trade.
+  // Both indices come from `% 3` and `/ 6`, so neither can leave [0, 2].
+  const uint16_t* carrier_table =
+      carrier_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant : lut_expo_quadrant;
+  const uint16_t* transfer_table =
+      transfer_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant : lut_expo_quadrant;
+
+#define TRANSFER_LOOP(CARRIER, TRANSFER) \
+  RENDER_PERIODIC( \
+    this_sample = CARRIER; \
+    uint32_t transfer_phase = \
+        amplify_for_transfer(this_sample, timbre >> gain_shift, bias); \
+    this_sample = TRANSFER; \
   )
-  // prev_transfer_raw_ = prev_raw;
-  // prev_transfer_avg_ = prev_avg;
+
+  if (carrier_index == TRANSFER_CURVE_TRI) {
+    if (transfer_index == TRANSFER_CURVE_TRI) {
+      TRANSFER_LOOP(triangle(phase), triangle(transfer_phase))
+    } else {
+      TRANSFER_LOOP(triangle(phase),
+                    quadrant_lookup(transfer_table, transfer_phase))
+    }
+  } else {
+    if (transfer_index == TRANSFER_CURVE_TRI) {
+      TRANSFER_LOOP(quadrant_lookup(carrier_table, phase),
+                    triangle(transfer_phase))
+    } else {
+      TRANSFER_LOOP(quadrant_lookup(carrier_table, phase),
+                    quadrant_lookup(transfer_table, transfer_phase))
+    }
+  }
+#undef TRANSFER_LOOP
 }
 
-void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_mix) {
   uint8_t fm_shape = shape_ - OSC_SHAPE_FM;
   int16_t interval = lut_fm_modulator_intervals[fm_shape];
   uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
@@ -611,7 +679,7 @@ const uint32_t kPhaseResetPulse[] = {
   0x80000000,
 };
 
-void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* audio_mix) {
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
   int32_t integrator = pd_square_.integrator;
   RENDER_MODULATED(
@@ -643,7 +711,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* au
   pd_square_.integrator = integrator;
 }
 
-void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_mix) {
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
@@ -663,7 +731,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
   )
 }
 
-void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     int32_t zone_14 = pitch_ + ((32767 - timbre) >> 3);
     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
@@ -677,7 +745,7 @@ void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples
   )
 }
 
-void Oscillator::RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(pitch_ << 1);
   OscillatorShape shape = shape_;

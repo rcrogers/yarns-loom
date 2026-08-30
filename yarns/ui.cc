@@ -47,6 +47,45 @@ const uint32_t kLongPressMsec = kRefreshMsec * 2 / 3;
 const uint32_t kRefreshFreq = UINT16_MAX / kRefreshMsec;
 const uint32_t kFastFade = kRefreshFreq << 1;
 
+// Held keys blink at twice the display's rate, so the two read as different
+// things rather than as one thing slightly out of step.
+const uint16_t kHeldKeyBlinkMask = kBlinkMask >> 1;
+
+// Encoder acceleration. Speed sets how fast the multiplier climbs, not the
+// multiplier itself: a detent advances a running total by how far under the
+// slow threshold its gap was, and the total is what picks the multiplier.
+//
+// Reading gain straight off one gap, as this used to, makes a two-detent
+// nudge leap and lets ordinary timing jitter swing the step size detent to
+// detent. Ignoring speed entirely, as it did next, means a blazing twist and
+// a merely brisk one climb at the same rate. Accumulating speed does both
+// jobs: a fast turn reaches the ceiling in a few detents, a slow one never
+// does, and jitter averages out instead of landing anywhere in particular.
+//
+// The same measure that charges the total discharges it: a gap slower than
+// the threshold subtracts by how much it missed. Time therefore passes for
+// the total even when the encoder is only sampled on movement, so pausing
+// costs speed. Discharging is steeper than charging because slowing down is
+// an unambiguous request for precision, where speeding up is worth confirming
+// over a few detents.
+//
+// Together they clear the total outright at a gap of 160 ms, so any real pause
+// returns the encoder to single steps. No one constant says so.
+const uint8_t kEncoderSpeedBucketBits = 4; // 16 ms
+const uint8_t kEncoderMaxSpeedSteps = 4; // Neutral at 64 ms
+const uint8_t kEncoderDecaySteepness = 3;
+const uint8_t kEncoderRunPerDoubling = 4;
+const int32_t kEncoderAccelMaxShift = 4; // x16
+const uint8_t kEncoderRunMax =
+    kEncoderRunPerDoubling * (kEncoderAccelMaxShift + 1);
+
+// The widest settings take a MIDI value, so a sweep at full gain is 127 >>
+// kEncoderAccelMaxShift detents. What a ceiling costs in precision, for
+// whoever retunes it, at a vigorous 25 detents/s:
+//   x4   31 detents, 1.2 s
+//   x8   15 detents, 0.6 s
+//   x16   7 detents, 0.3 s -- a jump rather than a control
+
 /* static */
 const Ui::Command Ui::commands_[] = {
   { "*LOAD*", UI_MODE_LOAD_SELECT_PROGRAM, NULL },
@@ -154,6 +193,9 @@ void Ui::Init() {
   tap_tempo_resolved_ = true;
   
   start_stop_press_time_ = 0;
+  encoder_last_increment_ms_ = 0;
+  encoder_last_increment_sign_ = 0;
+  encoder_fast_run_ = 0;
   
   push_it_note_ = kC4;
   command_index_ = 0;
@@ -171,6 +213,44 @@ void Ui::Init() {
       &factory_testing_number_;
 
   refresh_was_automatic_ = true;
+}
+
+// Encoder increment, accelerated by a sustained fast turn in one direction.
+// Only the encoder accelerates; relative CC arrives via
+// Multi::UpdateController and is applied a detent at a time. Skipped in
+// calibration adjustment because the handler already multiplies by 32 and
+// fine control is wanted.
+int32_t Ui::AcceleratedEncoderIncrement(int32_t increment) {
+  const uint32_t now = system_clock.milliseconds();
+  const uint32_t dt = now - encoder_last_increment_ms_;
+  const int8_t sign = increment > 0 ? 1 : -1;
+
+  if (encoder_last_increment_sign_ != sign) {
+    // A reversal is a change of intent rather than jitter, so the total ends
+    // outright. Otherwise correcting an overshoot flies back past the target
+    // at the speed that caused it. Also covers the first detent of all,
+    // where there is no previous one to measure against.
+    encoder_fast_run_ = 0;
+  } else {
+    int32_t delta = static_cast<int32_t>(kEncoderMaxSpeedSteps) -
+        static_cast<int32_t>(dt >> kEncoderSpeedBucketBits);
+    if (delta < 0) delta *= kEncoderDecaySteepness;
+    int32_t total = encoder_fast_run_ + delta;
+    if (total < 0) total = 0;
+    if (total > kEncoderRunMax) total = kEncoderRunMax;
+    encoder_fast_run_ = total;
+  }
+
+  int32_t accel_shift = 0;
+  if (mode_ != UI_MODE_CALIBRATION_ADJUST_LEVEL) {
+    accel_shift = encoder_fast_run_ / kEncoderRunPerDoubling;
+    if (accel_shift > kEncoderAccelMaxShift) {
+      accel_shift = kEncoderAccelMaxShift;
+    }
+  }
+  encoder_last_increment_ms_ = now;
+  encoder_last_increment_sign_ = sign;
+  return increment << accel_shift;
 }
 
 void Ui::Poll() {
@@ -193,10 +273,9 @@ void Ui::Poll() {
     }
   }
   
-  // Encoder increment.
   int32_t increment = encoder_.increment();
   if (increment != 0) {
-    queue_.AddEvent(CONTROL_ENCODER, 0, increment);
+    queue_.AddEvent(CONTROL_ENCODER, 0, AcceleratedEncoderIncrement(increment));
   }
 
   // Switch press and long press.
@@ -1058,7 +1137,8 @@ void Ui::PrintLatch() {
   uint8_t note_ordinal = 0, display_pos = 0;
   uint8_t note_index = keys.stack.most_recent_note_index();
   stmlib::NoteEntry note_entry;
-  bool blink = system_clock.milliseconds() % 160 < 80;
+  bool blink = system_clock.milliseconds() % kHeldKeyBlinkMask
+      < (kHeldKeyBlinkMask >> 1);
   while (note_index) {
     if (note_ordinal >= (kNotesPerDisplayChar << 1)) break;
     display_pos = note_ordinal < kNotesPerDisplayChar ? 0 : 1;

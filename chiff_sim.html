@@ -1,0 +1,1346 @@
+<title>Exciter Envelope Simulator</title>
+<style>
+:root {
+  --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
+  --ink: #1b1d1f; --ink2: #5c5f63; --ink3: #92959a;
+  --trace: #2a78d6; --nominal: #eda100; --noise: #1baf7a; --mark: #e34948;
+  --chip: #f0efe9; --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a; --panel: #1d2126; --line: #2b3037; --grid: #232830;
+    --ink: #e8eaec; --ink2: #a2a7ad; --ink3: #6b7077;
+    --trace: #3987e5; --nominal: #c98500; --noise: #199e70; --mark: #e66767;
+    --chip: #242932; --accent: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171a; --panel: #1d2126; --line: #2b3037; --grid: #232830;
+  --ink: #e8eaec; --ink2: #a2a7ad; --ink3: #6b7077;
+  --trace: #3987e5; --nominal: #c98500; --noise: #199e70; --mark: #e66767;
+  --chip: #242932; --accent: #3987e5;
+}
+:root[data-theme="light"] {
+  --bg: #f5f4f0; --panel: #ffffff; --line: #e2e0d9; --grid: #ecebe5;
+  --ink: #1b1d1f; --ink2: #5c5f63; --ink3: #92959a;
+  --trace: #2a78d6; --nominal: #eda100; --noise: #1baf7a; --mark: #e34948;
+  --chip: #f0efe9; --accent: #2a78d6;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-variant-numeric: tabular-nums; }
+.wrap { display: flex; gap: 14px; padding: 14px; height: 100vh; overflow: hidden; }
+.rail { width: 252px; flex: none; display: flex; flex-direction: column; gap: 10px;
+        overflow-y: auto; }
+.stage { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+header { padding: 2px 2px 0; }
+header h1 { font-size: 15px; margin: 0; letter-spacing: .01em; }
+header p { margin: 2px 0 0; color: var(--ink2); font-size: 12px; }
+.group { background: var(--panel); border: 1px solid var(--line);
+         border-radius: 6px; padding: 10px 12px 12px; }
+.group h2 { font-size: 10.5px; margin: 0 0 8px; color: var(--ink3);
+            text-transform: uppercase; letter-spacing: .12em; font-weight: 600; }
+.knob { display: grid; grid-template-columns: 1fr auto; align-items: baseline;
+        gap: 2px 8px; margin-bottom: 7px; }
+.knob:last-child { margin-bottom: 0; }
+.knob label { font-size: 12px; color: var(--ink2); }
+.knob output { font-size: 12px; color: var(--ink); }
+.knob output b, .chipbox .v b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.knob output small, .chipbox .v small { color: var(--ink3); font-weight: 400; }
+.knob input[type=range] { grid-column: 1 / -1; width: 100%; margin: 0;
+  accent-color: var(--accent); height: 18px; }
+.knob input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: flex; gap: 4px; grid-column: 1 / -1; }
+.seg button { flex: 1; font: 11px system-ui; padding: 4px 0; cursor: pointer;
+  border: 1px solid var(--line); background: var(--chip); color: var(--ink2);
+  border-radius: 4px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff;
+  border-color: var(--accent); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.checks label { display: flex; gap: 7px; align-items: center; font-size: 12px;
+  color: var(--ink2); margin-bottom: 5px; cursor: pointer; }
+.checks label:last-child { margin-bottom: 0; }
+.checks input { accent-color: var(--accent); margin: 0; }
+.check1 { display: flex; gap: 7px; align-items: center; font-size: 12px;
+  color: var(--ink2); margin-top: 8px; cursor: pointer; }
+.check1 input { accent-color: var(--accent); margin: 0; }
+.check1 select { flex: 1; font: 11px system-ui; padding: 4px 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+  border-radius: 4px; }
+.check1 select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scope { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; flex: 1; display: flex; flex-direction: column; min-height: 120px; }
+.spectrum { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 10px; flex: none; height: 48vh; display: flex; flex-direction: column; }
+#cv { cursor: crosshair; }
+canvas { width: 100%; height: 100%; flex: 1; min-height: 0; display: block; }
+.legend { display: flex; gap: 16px; padding: 2px 4px 8px; font-size: 11.5px;
+  color: var(--ink2); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chipbox { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 12px; min-width: 118px; }
+.chipbox .k { font-size: 10px; color: var(--ink3); text-transform: uppercase;
+  letter-spacing: .1em; }
+.chipbox .v { font-size: 15px; margin-top: 1px; }
+.chipbox .v small { font-size: 11px; color: var(--ink2); }
+button.roll { width: 100%; padding: 6px 0; font: 12px system-ui; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--chip);
+  color: var(--ink); }
+button.roll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { font-size: 11px; color: var(--ink3); margin-top: 6px; line-height: 1.4; }
+/* .knob is a 2-column grid; without this the note is confined to column 1. */
+.knob .note { grid-column: 1 / -1; }
+@media (max-width: 760px) { .wrap { flex-direction: column; } .rail { width: 100%; } }
+</style>
+
+<div class="wrap">
+  <div class="rail">
+    <header>
+      <h1>Exciter Envelope Simulator<span id="variant" class="mono" hidden style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#b45309;color:#fff;font-size:11px;vertical-align:middle;letter-spacing:.02em"></span></h1>
+      <p class="mono" id="fwver" style="color:var(--ink3);font-size:11px;margin-top:3px"></p>
+    </header>
+
+    <div class="group"><h2>ADSR <small>(front-panel settings)</small></h2>
+      <div class="knob"><label for="atk">ENV ATTACK</label><output class="mono" id="atkV"></output>
+        <input type="range" id="atk" min="0" max="127" value="40"></div>
+      <div class="knob"><label for="dec">ENV DECAY</label><output class="mono" id="decV"></output>
+        <input type="range" id="dec" min="0" max="127" value="46"></div>
+      <div class="knob"><label for="sus">ENV SUSTAIN</label><output class="mono" id="susV"></output>
+        <input type="range" id="sus" min="0" max="127" value="70"></div>
+      <div class="knob"><label for="rel">ENV RELEASE</label><output class="mono" id="relV"></output>
+        <input type="range" id="rel" min="0" max="127" value="51"></div>
+      <div class="knob"><label for="ampmod">AMPLITUDE MOD VELOCITY</label><output class="mono" id="ampmodV"></output>
+        <input type="range" id="ampmod" min="-64" max="63" value="0"></div>
+    </div>
+
+    <div class="group"><h2>Note</h2>
+      <div class="knob"><label for="vel">Velocity</label><output class="mono" id="velV"></output>
+        <input type="range" id="vel" min="0" max="127" value="127"></div>
+      <div class="knob"><label for="gate">Gate length</label><output class="mono" id="gateV"></output>
+        <input type="range" id="gate" min="0" max="1000" value="769"></div>
+    </div>
+
+    <div class="group"><h2>Exciter <small>(front-panel settings)</small></h2>
+      <div class="knob"><label for="amt">EXCITER AMOUNT</label><output class="mono" id="amtV"></output>
+        <input type="range" id="amt" min="0" max="127" value="96"></div>
+      <div class="knob"><label for="chiffDur">EXCITER DURATION</label><output class="mono" id="chiffDurV"></output>
+        <input type="range" id="chiffDur" min="0" max="127" value="57"></div>
+      <div class="knob"><label for="durMod">EXCITER DUR VEL MOD</label><output class="mono" id="durModV"></output>
+        <input type="range" id="durMod" min="-64" max="63" value="0"></div>
+    </div>
+
+    <!-- BIAS AND THE NOTE'S RANGE. Everything above renders a 0..PEAK note
+         with bias 0, which is a blind spot: bias is added to the envelope on
+         the way out, and the whole clip path only exists when envelope + bias
+         leaves the DAC range. A negative range is the other blind spot -- a
+         negative TIMBRE MOD ENV puts the note's rails BELOW zero, and the
+         envelope is meant to subtract from the base timbre, which arrives as
+         the bias. The two are only visible together: a negative range with no
+         bias renders as a flat zero, because the output saturate takes it. -->
+    <div class="group"><h2>Bias &amp; range <small>(blind spots)</small></h2>
+      <div class="knob"><label for="biasLfo">TIMBRE-LFO BIAS <small>(independent)</small></label><output class="mono" id="biasLfoV"></output>
+        <input type="range" id="biasLfo" min="0" max="32767" value="0"></div>
+      <div class="knob"><label for="tremolo">TREMOLO <small>(scaled to the envelope)</small></label><output class="mono" id="tremoloV"></output>
+        <input type="range" id="tremolo" min="0" max="65535" value="0"></div>
+      <div class="knob"><label for="maxTarget">NOTE MAX TARGET</label><output class="mono" id="maxTargetV"></output>
+        <input type="range" id="maxTarget" min="-32767" max="32767" value="32767"></div>
+      <div class="knob"><label for="minTarget">NOTE MIN TARGET</label><output class="mono" id="minTargetV"></output>
+        <input type="range" id="minTarget" min="-32767" max="32767" value="0"></div>
+    </div>
+
+    <div class="group"><h2>Randomness</h2>
+      <button class="roll" id="reroll">Re-roll seed</button>
+      <div class="note mono" id="seedShow"></div>
+    </div>
+
+    <div class="group checks"><h2>Overlays</h2>
+      <label><input type="checkbox" id="showNominal" checked> Nominal (chiff-free) value</label>
+      <label><input type="checkbox" id="showNoise" checked> Noise band (|step|, smoothed)</label>
+      <label><input type="checkbox" id="reassign"> Sharpen transients (reassignment)</label>
+      <label><input type="checkbox" id="perceptual"> Perceptual (A-weighted, auditory bandwidths)</label>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="scope">
+      <div class="legend">
+        <span><i style="background:var(--trace)"></i>exciter envelope</span>
+        <span><i style="background:var(--nominal)"></i>nominal</span>
+        <span><i style="background:var(--noise)"></i>noise</span>
+        <span><i style="background:var(--mark)"></i>release</span>
+        <span><i style="background:var(--ink3)"></i>chiff duration (nominal)</span>
+        <span><i style="background:var(--ink)"></i>excursion died out (measured)</span>
+        <span class="mono" id="readout" style="margin-left:auto;color:var(--ink2)"></span>
+      </div>
+      <canvas id="cv"></canvas>
+    </div>
+    <div class="spectrum">
+      <div class="legend">
+        <span><i style="background:var(--noise)"></i>Noise spectrogram (time &times; log freq; residual vs mean, constant-Q, dark&rarr;bright = &minus;96&rarr;0 dB; dashed curve = resolution limit)</span>
+        <span class="mono" id="specMode" style="margin-left:auto;color:var(--ink3)">re-roll seed to compare realizations</span>
+      </div>
+      <canvas id="specCv"></canvas>
+    </div>
+    <div class="chips">
+      <div class="chipbox"><div class="k">Attack landing</div>
+        <div class="v mono" id="mLand">–</div></div>
+      <div class="chipbox"><div class="k">Release to 1%</div>
+        <div class="v mono" id="mRel">–</div></div>
+      <div class="chipbox"><div class="k">Exciter window</div>
+        <div class="v mono" id="mWin">–</div></div>
+      <div class="chipbox"><div class="k">Attack shift (nominal)</div>
+        <div class="v mono" id="mShift">–</div></div>
+      <div class="chipbox"><div class="k">Render</div>
+        <div class="v mono" id="mMs">–</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- The compiled firmware. Generated by tools/simengine/build.sh from
+     yarns/envelope.cc; do not edit here. Plain JS (asm.js), so it inlines
+     with no separate fetch and no WebAssembly CSP dependency. -->
+<script>
+var ChiffEngine=(()=>{var _scriptName=globalThis.document?.currentScript?.src;return async function(moduleArg={}){var Module=moduleArg;var ENVIRONMENT_IS_WEB=!!globalThis.window;var ENVIRONMENT_IS_WORKER=!!globalThis.WorkerGlobalScope;var ENVIRONMENT_IS_NODE=globalThis.process?.versions?.node&&globalThis.process?.type!="renderer";var programArgs=[];var thisProgram="./this.program";var quit_=(status,toThrow)=>{throw toThrow};if(typeof __filename!="undefined"){_scriptName=__filename}else{}var scriptDirectory="";var readAsync,readBinary;if(ENVIRONMENT_IS_NODE){var fs=require("node:fs");scriptDirectory=__dirname+"/";readBinary=filename=>{filename=isFileURI(filename)?new URL(filename):filename;var ret=fs.readFileSync(filename);return ret};readAsync=async(filename,binary=true)=>{filename=isFileURI(filename)?new URL(filename):filename;var ret=fs.readFileSync(filename,binary?undefined:"utf8");return ret};if(process.argv.length>1){thisProgram=process.argv[1].replace(/\\/g,"/")}programArgs=process.argv.slice(2);quit_=(status,toThrow)=>{process.exitCode=status;throw toThrow}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){try{scriptDirectory=new URL(".",_scriptName).href}catch{}{readAsync=async url=>{var response=await fetch(url,{credentials:"same-origin"});if(response.ok){return response.arrayBuffer()}throw new Error(response.status+" : "+response.url)}}}else{}var out=console.log.bind(console);var err=console.error.bind(console);var wasmBinary;var WebAssembly={Memory:function(opts){this.buffer=new ArrayBuffer(opts["initial"]*65536)},Module:function(binary){},Instance:function(module,info){this.exports=(
+// EMSCRIPTEN_START_ASM
+function instantiate(aa){function c(d){d.set=function(a,b){this[a]=b};d.get=function(a){return this[a]};return d}var e;var f=new Uint8Array(123);for(var a=25;a>=0;--a){f[48+a]=52+a;f[65+a]=a;f[97+a]=26+a}f[43]=62;f[47]=63;function l(m,n,o){var g,h,a=0,i=n,j=o.length,k=n+(j*3>>2)-(o[j-2]=="=")-(o[j-1]=="=");for(;a<j;a+=4){g=f[o.charCodeAt(a+1)];h=f[o.charCodeAt(a+2)];m[i++]=f[o.charCodeAt(a)]<<2|g>>4;if(i<k)m[i++]=g<<4|h>>2;if(i<k)m[i++]=h<<6|f[o.charCodeAt(a+3)]}return m}function p(q){l(e,1026,"CwQGCPELzQ+aE1cXBhumHjgiuyUxKZgs8y9AM4A2sznZPPM/AEMBRvdI4Uu/TpFRWVQWV8dZblwLX51hJWSiZhZpgGvhbThwhnLLdAd3Onlke4V9nn+vgbiDuIWxh6GJiotsjUaPGZHkkqiUZpYcmMuZdJsXnbKeSKDXoWCj46RgptenSKmzqhmsea3UrimwerHEsgq0S7WHtr238LgdukW7abyJvaS+u7/NwNvB5cLrw+zE6sXkxtrHzMi6yaXKjMtvzE/NLM4Fz9rPrdB80UfSENPW05jUWNUU1s7Whdc52OrYmNlE2u3ak9s33Njcd90T3q3eRd/a323g/eCM4RjiouIp46/jM+S05DTlseUt5qfmH+eV5wnoe+js6FvpyOkz6p3qBetr69DrNOyW7PbsVe2y7Q7uaO7B7hnvb+/E7xjwavC88AvxWvGn8fPxPvKI8tHyGfNf86Tz6fMs9G70r/Tv9C/1bfWq9eb1IvZc9pX2zvYG9z33c/eo99z3EPhC+HT4pvjW+Ab5Nflj+ZD5vfnp+RX6P/pp+pP6vPrk+gv7MvtY+377o/vI++z7D/wy/FT8dvyY/Lj82fz4/Bj9Nv1V/XP9kP2t/cn95f0B/hz+N/5R/mv+hf6e/rb+z/7n/v7+Fv8s/0P/Wf9v/4T/mv+u/8P/1//r//////8=");l(e,1552,"//9O/53+7f09/Y783/sx+4P61fko+Xz40Pck93n2z/Ul9Xv00vMp84Hy2fEx8Yrw5O8+75ju8+1O7arsBuxj68DqHep76droOeiY5/fmWOa45Rnle+Tc4z/joeIE4mjhzOAw4JXf+t5g3sbdLd2U3PvbY9vL2jPanNkG2W/Y2tdE16/WG9aG1fPUX9TM0zrTp9IV0oTR89Bi0NLPQs+zziTOlc0HzXnM68tey9HKRcq5yS3JosgXyI3HA8d5xu/FZsXexFXEzsNGw7/COMKywSzBpsAgwJu/F7+Tvg++i70IvYW8A7yAu/+6fbr8uXu5+7h7uPu3fLf9tn62ALaCtQS1h7QKtI2zEbOVshmynrEjsamwLrC0rzuvwa5JrtCtWK3grGis8at6qwOrjKoWqqGpK6m2qEGozadZp+Wmcab+pYulGaWmpDSkw6NRo+CicKL/oY+hH6GwoECg0p9jn/Weh54ZnqudPp3RnGWc+ZuNmyGbtppKmuCZdZkLmaGYN5jOl2WX/JaUliuWw5VclfSUjZQmlMCTWpP0ko6SKJLDkV6R+pCVkDGQzY9qjwePpI5Bjt6NfI0ajbmMV4z2i5WLNYvUinSKFIq1iVWJ9oiYiDmI24d9hx+HwYZkhgeGqoVOhfGElYQ6hN6Dg4Mog82CcoIYgr6BZIELgbGAWIAAgA==");l(e,2080,"////P7x9YiYMdGUYCf88ECEAOQuIowAInNvbBUgiYwTmmlkDMByaAv8zDQJXqaMBQllTAY1cFQFK5+QAsZS+AOvznwDZPIcA9R1zAFuaYgBg8lQANZNJAEgLQAD1ATgAcjExAF1iKwByaCYADSAiAE5sHgCrNRsA1WgYAOH1FQCfzxMAEesRAAc/EADFww4AxnINAIJGDABHOgsAEUoKAG9yCQBrsAgAegEIAGZjBwBG1AYAblIGAG3cBQD7cAUA+w4FAHS1BACHYwQAchgEAInTAwAxlAMA41kDACUkAwCN8gIAuMQCAFCaAgAJcwIAnE4CAMosAgBbDQIAHPABAN7UAQB5uwEAxqMBAKONAQDxeAEAk2UBAG9TAQBvQgEAezIBAIEjAQBuFQEAMggBAL37AAAD8AAA9eQAAIjaAACx0AAAZ8cAAJ++AABStgAAd64AAAinAAD8nwAAT5kAAPqSAAD4jAAARIcAANiBAACyfAAAzHcAACNzAAC0bgAAe2oAAHVmAACfYgAA9l4AAHlbAAAkWAAA9lQAAOxRAAAFTwAAPkwAAJZJAAAMRwAAnUQAAElCAAAOQAAA6j0AAN47AADnOQAABDgAADU2AAB4NAAAzTIAADMxAACpLwAALi4AAMIsAABkKwAAEyoAAM4oAACWJwAAaSYAAEglAABIJQ==");l(e,2608,"////P92+6CLl8Z8UXoT0DIGuigjljdsFO1gmBNp7BQNodkACg122AQFBUwHGogoB+3LUALhaqwCPu4sAihRzAOuhXwDyH1AACqNDAGN9OQAbLTEAAVAqAAmbJABI1B8Anc4bAJNmGAARgBUArgQTAGTiEACdCg8AfHENAEcNDAD91QoA/MQJAMLUCACxAAgA60QHACyeBgCxCQYAIYUFAHoOBQAFpAQASUQEAADuAwAToAMAjFkDAJgZAwB+3wIAnaoCAGZ6AgBfTgIAGCYCADIBAgBX3wEAO8ABAJujAQA6iQEA5HABAGlaAQCdRQEAWzIBAIAgAQDtDwEAhwABADPyAADd5AAAbtgAANTMAAD/wQAA3rcAAGWuAACGpQAANZ0AAGiVAAAWjgAANYcAAL6AAACoegAA7XQAAIdvAABvagAAomUAABhhAADPXAAAwlgAAO1UAABMUQAA3E0AAJpKAACERwAAlkQAAM1BAAApPwAApjwAAEM6AAD+NwAA1DUAAMYzAADQMQAA8S8AACkuAAB2LAAA1yoAAEopAADPJwAAZSYAAAslAADAIwAAhCIAAFUhAAAyIAAAHB8AABIeAAATHQAAHhwAADMbAABSGgAAehkAAKoYAADiFwAAIxcAAGsWAAC5FQAADxUAAGsUAADOEwAANhMAAKQSAACkEg==");l(e,3124,"vrr+yrAOAQ==")}function r(s,t,u){e.copyWithin(s,t,t+u)}function $(q){var v=new ArrayBuffer(16908288);var w=new Int8Array(v);var x=new Int16Array(v);var y=new Int32Array(v);var z=new Uint8Array(v);var A=new Uint16Array(v);var B=new Uint32Array(v);var C=new Float32Array(v);var D=new Float64Array(v);var E=Math.imul;var F=Math.fround;var G=Math.abs;var H=Math.clz32;var I=Math.min;var J=Math.max;var K=Math.floor;var L=Math.ceil;var M=Math.trunc;var N=Math.sqrt;var O=q.env;var P=O.emscripten_resize_heap;var Q=69296;var R=0;var S=0;
+// EMSCRIPTEN_START_FUNCS
+function ea(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,s,t,u,v,B,C,D,F){a=a|0;b=b|0;c=c|0;d=d|0;e=e|0;f=f|0;g=g|0;h=h|0;i=i|0;j=j|0;k=k|0;l=l|0;m=m|0;n=n|0;o=o|0;p=p|0;q=q|0;s=s|0;t=t|0;u=u|0;v=v|0;B=B|0;C=C|0;D=D|0;F=F|0;var G=0,I=0,J=0,K=0,L=0,M=0,N=0,O=0,P=0,R=0,T=0,U=0,V=0,W=0,X=0,Y=0,Z=0,_=0,$=0,aa=0,ba=0,da=0,ea=0;P=Q-128|0;Q=P;y[793]=0;y[794]=0;y[798]=0;y[799]=0;y[800]=0;y[801]=0;y[802]=0;y[803]=0;y[804]=0;y[805]=0;J=s<<16;I=J>>1;y[808]=I;y[790]=I;y[807]=I;y[809]=I&J>>31;J=A[776]<<15;y[795]=J>>>0>=1357468564?1357468564:J;G=i<<24>>24;i=f&255;c=E(G,i)+(c<<6&16320)<<16>>16;c=(c|0)>0?c:0;x[1621]=((c|0)>=8191?8191:c)<<3;c=A[(0-(i<<1)<<1)+1532>>1]^65535;c=65535-(((e|0)<0?0-E(c,e)|0:E(65536-c|0,e))>>6)|0;x[1620]=(c|0)<=1?1:c;c=E(i,j<<24>>24)+(d<<6&16320)<<16>>16;c=(c|0)>0?c:0;e=(c|0)>=8191?8191:c;d=e>>>4&508;c=y[d+2080>>2];f=c>>>1|0;y[813]=c&1|f+(E((y[(d+2080|0)+4>>2]>>>1|0)-f|0,e<<2&252)>>8)<<1;b=E(i,h<<24>>24)+(b<<6&16320)<<16>>16;b=(b|0)>0?b:0;d=(b|0)>=8191?8191:b;c=d>>>4&508;b=y[c+2080>>2];e=b>>>1|0;y[812]=b&1|e+(E((y[(c+2080|0)+4>>2]>>>1|0)-e|0,d<<2&252)>>8)<<1;a=E(i,g<<24>>24)+(a<<6&16320)<<16>>16;a=(a|0)>0?a:0;c=(a|0)>=8191?8191:a;b=c>>>4&508;a=y[b+2080>>2];d=a>>>1|0;y[811]=a&1|d+(E((y[(b+2080|0)+4>>2]>>>1|0)-d|0,c<<2&252)>>8)<<1;y[783]=0;y[791]=0;y[806]=0;y[788]=I;y[787]=I;y[786]=I;y[785]=I;y[784]=I;a=B?B-1640531535|0:1765160047;y[781]=a;y[796]=a|1;w[3188]=8;ca(4);a=(q-s|0)>32767?s+32767|0:q;e=(a-s|0)<-32768?s-32768|0:a;a=E(i,m<<24>>24)+(k<<6&16320)<<16>>16;a=(a|0)>0?a:0;Y=(a|0)>=8191?8191:a;a=E(Y,132105);d=a>>>0>=1073741824?1073741824:a;a=E(i,n<<24>>24)+(l<<6&16320)<<16>>16;a=(a|0)>0?a:0;c=(a|0)>=8191?8191:a;b=c>>>4&508;a=y[b+2608>>2];f=a>>>1|0;a=a&1|f+(E((y[(b+2608|0)+4>>2]>>>1|0)-f|0,c<<2&252)>>8)<<1;if(a){i=4294967295/(a>>>0)|0}else{i=-1}h=i;y[783]=3240;g=e-s<<16>>16;e=s<<16;c=E(g,A[1620])+e>>1;y[784]=c;b=A[1621];f=e>>1;y[788]=f;y[787]=f;a=g>>31;y[805]=(a^g)-a<<14;a=e+E(b,g)>>1;y[785]=a;y[786]=a;a=(a|0)<(c|0)?a:c;a=(a|0)<(f|0)?a:f;y[809]=a>>31&a;a:{b:{switch(y[792]-1|0){case 0:case 1:ca(1);break a;case 2:case 3:case 4:break b;default:break a}}f=0;ca(0);e=h?d:0;y[798]=e;if(!e){y[804]=0;break a}c:{if(h>>>0<4){break c}a=H(h);a=h<<a>>>4&134217727|(a^-1)<<27;if(a>>>0<268435457){break c}a=a-268435456|0;f=a>>>0>=1476395008?1476395008:a}y[800]=0;y[799]=e;y[803]=f;d=4294967295/(h>>>0)|0;c=65536;b=y[805];d:{if((b|0)<=0){break d}j=H(b);a=1044335<<j;g=b<<j;k=g>>>16|0;b=(a>>>0)/(k>>>0)|0;a=a-E(b,k)|0;h=g&65534;while(1){if(!(b>>>0<=65535&E(b,h)>>>0<=a<<16>>>0)){b=b-1|0;a=a+k|0;if(a>>>0<65536){continue}}break}g=(-277938176<<j)-E(b,g)|0;a=(g>>>0)/(k>>>0)|0;s=g-E(a,k)|0;while(1){if(!(a>>>0<=65535&E(a,h)>>>0<=s<<16>>>0)){a=a-1|0;s=k+s|0;if(s>>>0<65536){continue}}break}b=(b<<16)+a|0;if(b>>>0>=e>>>0){break d}c=a<<16;g=H(e);j=(g?c>>>32-g|0:0)|b>>>16<<g;h=e<<g;k=h>>>16|0;b=(j>>>0)/(k>>>0)|0;a=j-E(b,k)|0;c=c<<g>>>16|0;g=h&65535;while(1){if(!(b>>>0<=65535&E(b,g)>>>0<=(c|a<<16)>>>0)){b=b-1|0;a=a+k|0;if(a>>>0<65536){continue}}break}c=(c|j<<16)-E(b,h)|0;a=(c>>>0)/(k>>>0)|0;s=c-E(a,k)|0;while(1){if(!(a>>>0<=65535&E(a,g)>>>0<=s<<16>>>0)){a=a-1|0;s=k+s|0;if(s>>>0<65536){continue}}break}h=(b<<16)+a|0;a=256;b=0;while(1){c=a+b|0;g=c>>>1|0;c=h>>>0>(A[(c&-2)+1024>>1]^65535)>>>0;a=c?g:a;b=c?b:g;if(a-b>>>0>1){continue}break}g=A[(b<<1)+1024>>1];c=A[(a<<1)+1024>>1];if((g|0)!=(c|0)){a=g^65535;a=(a-h<<8>>>0)/(a-(c^65535)>>>0)|0;a=a>>>0>=255?255:a}else{a=0}a=a|b<<8;c=a>>>0<=1?1:a}b=ra(c,0,d,0);y[801]=(S&65535)<<16|b>>>16;a=e;if(f>>>0>=1048577){c=ra(a,0,75664,0);h=a>>>0>930016179?1073741824:(S&65535)<<16|c>>>16;d=h&4194303;c=h>>>21&2046;g=A[c+1024>>1];b=g;if(h>>>0<=1073741823){b=A[(c+1024|0)+2>>1]}c=ra(b-g|0,0,d,0);b=(g+((S&4194303)<<10|c>>>22)<<16>>>0)/65535|0;c=ra(b-(b-(h>>>14|0)>>>2|0)|0,0,f+-1048576|0,0);f=f-((S&65535)<<16|c>>>16)|0}y[802]=f;b=f>>>18&510;c=A[b+1552>>1];b=(c+(E(A[(b+1552|0)+2>>1]-c|0,f>>>3&65535)>>>16|0)&65535)<<15>>>(f>>>27)|0;c=b>>>2|0;ra(b,0,b,0);b=ra(a,0,-2147483648-((S>>>4|0)+c|0)|0,0);d=(f>>>1|0)+15736016|0;f=134217728-(d&134217727)|0;a=f>>>18&510;c=A[a+1552>>1];g=S;k=g>>>31|0;b=ra((g&2147483647)<<1|b>>>31,k,(c+(E(A[(a+1552|0)+2>>1]-c|0,f>>>3&65535)>>>16|0)&65535)<<15>>>(f>>>27)|0,0);c=(S&2147483647)<<1|b>>>31;b=d>>>27|0;a=c<<b+1;y[804]=c>>>0>=536870912>>>b>>>0?1073741824:a>>>0>e>>>0?a:e}a=o+p|0;T=(a|0)<(D|0)?a:D;if((T|0)>0){ba=(v|0)<=0?8:v;da=0-u|0;ea=t&65535;f=0;s=0;while(1){a=1;e:{if(s&1){break e}a=0;if((o|0)>(K|0)){break e}a=1;if(!y[783]){break e}ca(3);a=1}s=a;if(t){a=0-E(ea,y[790]-y[787]>>15)&-65536}else{a=0}h=P;c=y[791];N=c;if(u){a=a+(((f>>>0)/(ba>>>0)&1?da:u)<<16)|0}b=64;q=Q-80|0;Q=q;I=(a>>1)-(c>>1)>>5;J=I>>1;while(1){O=y[789];l=y[806];B=y[808];a=y[794];U=a>>>0<b>>>0?a:b;V=y[793];G=V?U:b;m=G;c=0;d=q+72|0;a=d;y[a>>2]=0;y[a+4>>2]=67108864;g=y[798];if(g){j=ra(y[801],0,m,0);a=y[800];j=S?-1:j>>>0>=(a^-1)>>>0?-1:j+a|0;a=j>>>23&510;e=A[a+1024>>1];p=y[799];a=e+(E(A[(a+1024|0)+2>>1]-e|0,j>>>16&255)>>>8|0)|0;if(a>>>0<=65534){c=(!a-a|0)+65535|0}c=ra(c,0,g,0);a=S;k=a>>>16|0;e=(a&65535)<<16|c>>>16;y[799]=e;n=y[803];if(n>>>0>=1048577){g=ra(e,k,75664,0);k=(a|0)==14190&c>>>0>3954442239|a>>>0>14190?1073741824:(S&65535)<<16|g>>>16;g=k&4194303;a=k>>>21&2046;c=A[a+1024>>1];e=c;c=ra((k>>>0<=1073741823?A[(a+1024|0)+2>>1]:c)-c|0,0,g,0);a=(((S&4194303)<<10|c>>>22)+e<<16>>>0)/65535|0;c=ra(a-(a-(k>>>14|0)>>>2|0)|0,0,n+-1048576|0,0);n=n-((S&65535)<<16|c>>>16)|0}if(m){a=(n-y[802]>>>0)/(m>>>0)|0}else{a=0}y[d>>2]=a;k=536870912;if(p>>>0>=536870913){ra(p-536870912|0,0,-1610612736,0);k=536870912-S|0}a=k>>>18&510;c=A[a+1552>>1];y[d+4>>2]=(c+(E(A[(a+1552|0)+2>>1]-c|0,k>>>3&65535)>>>16|0)&65535)<<15>>>(k>>>27)>>>1;y[800]=j;e=y[802];a=e>>>18&510;c=A[a+1552>>1];a=(c+(E(A[(a+1552|0)+2>>1]-c|0,e>>>3&65535)>>>16|0)&65535)<<15>>>(e>>>27)|0;c=a>>>2|0;ra(a,0,a,0);d=ra(-2147483648-((S>>>4|0)+c|0)|0,0,p,0);e=(e>>>1|0)+15736016|0;g=134217728-(e&134217727)|0;a=g>>>18&510;c=A[a+1552>>1];c=(c+(E(A[(a+1552|0)+2>>1]-c|0,g>>>3&65535)>>>16|0)&65535)<<15>>>(g>>>27)|0;j=S;a=j>>>31|0;c=ra((j&2147483647)<<1|d>>>31,a,c,0);d=(S&2147483647)<<1|c>>>31;c=e>>>27|0;a=d<<c+1;y[804]=d>>>0>=536870912>>>c>>>0?1073741824:a>>>0>p>>>0?a:p}L=y[802];a=L>>>18&510;c=A[a+1552>>1];p=(c+(E(A[(a+1552|0)+2>>1]-c|0,L>>>3&65535)>>>16|0)&65535)<<15>>>(L>>>27)|0;c=p;d=ra(c,0,c,0);e=S;a=e>>>31|0;d=ra((e&2147483647)<<1|d>>>31,a,3,0);e=S;a=e>>>5|0;c=c>>>2|0;d=c+((e&31)<<27|d>>>5)|0;e=c>>>0>d>>>0?a+1|0:a;a=L>>>19&510;c=A[a+1552>>1];a=ra((c+(E(A[(a+1552|0)+2>>1]-c|0,L>>>4&65535)>>>16|0)&65535)<<15>>>(L>>>28)|0,0,42724,0);c=S;k=c>>>31|0;a=ra(d|-2147483648,e,(c&2147483647)<<1|a>>>31,k);c=S;e=c>>>31|0;a=(c&2147483647)<<1|a>>>31;j=!e&a>>>0>=46341|e?46341:a;Z=y[q+72>>2];if(V){a=y[807];d=a;a=O-a|0;c=ra(a,a>>31,66759,0);O=((S&65535)<<16|c>>>16)+d|0}n=y[795];W=n>>31;a=y[804];c=a;d=a>>31;a=y[805];a=ra(c,d,a,a>>31);d=S;a=(d&1073741823)<<2|a>>>30;g=a>>31;d=y[q+76>>2];e=ra(a,g,d,d>>31);c=((S&1073741823)<<2|e>>>30)/15|0;y[q+32>>2]=c;y[q+60>>2]=E(c,15);y[q+56>>2]=E(c,13);y[q+52>>2]=E(c,11);y[q+48>>2]=E(c,9);y[q+44>>2]=E(c,7);y[q+40>>2]=E(c,5);y[q+36>>2]=E(c,3);y[q+28>>2]=0-c;y[q+24>>2]=E(c,-3);y[q+20>>2]=E(c,-5);y[q+16>>2]=E(c,-7);y[q+12>>2]=E(c,-9);y[q+8>>2]=E(c,-11);y[q+4>>2]=E(c,-13);y[q>>2]=E(c,-15);d=ra(a,g,E(j,46341),0);c=((S&1073741823)<<2|d>>>30)&-2;m=(a|0)>(c|0)?c:a;j=1073741823-m|0;a=O-B|0;e=a>>31;d=ra(n,W,a,e);g=S;c=g>>31;k=(a|0)>=0;c=ra(G,G>>31,(g&2147483647)<<1|d>>>31,c);d=S;g=(d|0)>(e|0);if(g|a>>>0<=c>>>0&(d|0)>=(e|0)|k?k&(a>>>0<c>>>0&(e|0)<=(d|0)|g):1){c=a}g=c+B|0;f:{if((j|0)>(m|0)){d=N>>1;e=d+E(G,J)|0;v=j>>1;k=m>>1;j=(B>>1)+(N>>2)|0;g:{if((k|0)>(j|0)){c=k-j<<1;break g}c=0;if((j|0)<=(v|0)){break g}c=v-j<<1}j=(g>>1)+(e>>1)|0;h:{if((j|0)<(k|0)){g=k-j<<1;break h}g=0;if((j|0)<=(v|0)){break h}g=v-j<<1}e=g+e|0;d=c+d|0;break f}e=536870911-g|0;d=536870911-B|0}i:{if(!G){k=z[3188];g=y[796];break i}_=(G<<1)+h|0;c=m>>4;R=0-c|0;M=d+O|0;$=(e-d|0)/(G|0)|0;g=y[796];k=z[3188];d=g>>>32-(k<<2)|0;j=ra(Z,0,186065279,0);m=S;e=m>>>23|0;j=(m&8388607)<<9|j>>>23;ra(j,e,j,e);e=j-(S>>>1|0)|0;aa=e>>31;while(1){j=_-h>>1;j:{if(!((k|0)!=8|j>>>0<8)){k=8;m=j>>>3|0;if(!m){g=d;break j}while(1){j=0;while(1){v=ra(a,a>>31,n,W);M=M+$|0;a=a-(((S&2147483647)<<1|v>>>31)&-2)|0;D=M-a|0;g=y[q+((d>>>(j<<2)&15)<<2)>>2]-l|0;B=g;v=g>>31;ra(e,aa,p,p>>31);p=p-S|0;g=p;v=ra(B,v,g,g>>31);g=(((S&2147483647)<<1|v>>>31)&-2)+l|0;l=(c|0)<(g|0)?c:(g|0)>(R|0)?g:R;g=(l<<4)+D>>15;g=(g|0)>0?g:0;x[h>>1]=(g|0)>=32767?32767:g;h=h+2|0;j=j+1|0;if((j|0)!=8){continue}break}d=d<<13^d;d=d>>>17^d;d=d<<5^d;m=m-1|0;if(m){continue}break}g=d;break j}X=j>>>0<k>>>0?j:k;if(X){D=(X<<1)+h|0;while(1){m=ra(a,a>>31,n,W);M=M+$|0;a=a-(((S&2147483647)<<1|m>>>31)&-2)|0;B=M-a|0;j=y[q+((d&15)<<2)>>2]-l|0;v=j;m=j>>31;ra(e,aa,p,p>>31);p=p-S|0;j=p;m=ra(v,m,j,j>>31);j=(((S&2147483647)<<1|m>>>31)&-2)+l|0;l=(c|0)<(j|0)?c:(j|0)>(R|0)?j:R;j=(l<<4)+B>>15;j=(j|0)>0?j:0;x[h>>1]=(j|0)>=32767?32767:j;d=d>>>4|0;h=h+2|0;if((D|0)!=(h|0)){continue}break}}k=k-X|0;if(k){break j}k=8;d=g<<13^g;d=d>>>17^d;g=d<<5^d;d=g}if((h|0)!=(_|0)){continue}break}}w[3188]=k;y[796]=g;y[806]=l;a=O-a|0;y[808]=a;y[802]=L+E(G,Z);d=y[809];N=E(I,G)+N|0;y[791]=N;a=a+(l<<4)|0;c=(a|0)>(d|0)?a:d;a=d+1073741823|0;y[790]=(a|0)>(c|0)?c:a;a=b-G|0;k:{if(!V){break k}c=y[794];y[794]=c-U;if((c|0)!=(U|0)){break k}ca(y[792]+1|0);b=a;continue}c=(b|0)!=(G|0);b=a;if(c){continue}break}Q=q+80|0;a=T-K|0;b=(a|0)>=64?64:a;a=b<<1;if(a){r((K<<1)+C|0,P,a)}f=f+1|0;K=b+K|0;if((T|0)>(K|0)){continue}break}}y[F+8>>2]=i;y[F+4>>2]=o;y[F>>2]=K;a=y[811];if(a){a=4294967295/(a>>>0)|0}else{a=0}y[F+12>>2]=a;a=y[812];if(a){a=4294967295/(a>>>0)|0}else{a=0}y[F+16>>2]=a;a=y[813];if(a){a=4294967295/(a>>>0)|0}else{a=0}y[F+20>>2]=a;y[F+24>>2]=A[1620];a=A[1621];y[F+32>>2]=(Y&65472)>>>6;y[F+28>>2]=a;d=y[786];c=y[784];e=(c|0)>(d|0);a=e?d:c;b=y[787];y[F+40>>2]=((a|0)<(b|0)?a:b)>>15;a=e?c:d;y[F+36>>2]=((a|0)<(b|0)?b:a)>>15;Q=P+128|0;return K|0}function oa(a){a=a|0;var b=0,c=0,d=0,e=0,f=0,g=0,h=0,i=0,j=0,k=0,l=0,m=0,n=0;l=Q-16|0;Q=l;a:{b:{c:{d:{e:{f:{g:{h:{i:{j:{if(a>>>0<=244){e=y[815];g=a>>>0<11?16:a+11&504;b=g>>>3|0;a=e>>>b|0;if(a&3){a=b+((a^-1)&1)|0;f=a<<3;c=f+3300|0;d=y[f+3308>>2];b=y[d+8>>2];k:{if((c|0)==(b|0)){m=3260,n=sa(a)&e,y[m>>2]=n;break k}y[b+12>>2]=c;y[c+8>>2]=b}a=d+8|0;y[d+4>>2]=f|3;b=d+f|0;y[b+4>>2]=y[b+4>>2]|1;break a}k=y[817];if(k>>>0>=g>>>0){break j}if(a){d=a<<b;a=2<<b;a=qa(d&(0-a|a));f=a<<3;c=f+3300|0;h=y[f+3308>>2];b=y[h+8>>2];l:{if((c|0)==(b|0)){e=sa(a)&e;y[815]=e;break l}y[b+12>>2]=c;y[c+8>>2]=b}y[h+4>>2]=g|3;c=g+h|0;d=f-g|0;y[c+4>>2]=d|1;y[f+h>>2]=d;if(k){b=(k&-8)+3300|0;f=y[820];a=1<<(k>>>3);m:{if(!(a&e)){y[815]=a|e;a=b;break m}a=y[b+8>>2]}y[b+8>>2]=f;y[a+12>>2]=f;y[f+12>>2]=b;y[f+8>>2]=a}a=h+8|0;y[820]=c;y[817]=d;break a}j=y[816];if(!j){break j}b=y[(qa(j)<<2)+3564>>2];h=(y[b+4>>2]&-8)-g|0;d=b;while(1){n:{a=y[b+16>>2];if(!a){a=y[b+20>>2];if(!a){break n}}b=(y[a+4>>2]&-8)-g|0;c=b>>>0<h>>>0;h=c?b:h;d=c?a:d;b=a;continue}break}i=y[d+24>>2];a=y[d+12>>2];if((d|0)!=(a|0)){b=y[d+8>>2];y[b+12>>2]=a;y[a+8>>2]=b;break b}b=y[d+20>>2];if(b){c=d+20|0}else{b=y[d+16>>2];if(!b){break i}c=d+16|0}while(1){f=c;a=b;c=a+20|0;b=y[a+20>>2];if(b){continue}c=a+16|0;b=y[a+16>>2];if(b){continue}break}y[f>>2]=0;break b}g=-1;if(a>>>0>4294967231){break j}b=a+11|0;g=b&-8;j=y[816];if(!j){break j}e=31;h=0-g|0;if(a>>>0<=16777204){a=H(b>>>8|0);e=((g>>>38-a&1)-(a<<1)|0)+62|0}b=y[(e<<2)+3564>>2];o:{p:{q:{if(!b){a=0;break q}a=0;d=g<<((e|0)!=31?25-(e>>>1|0)|0:0);while(1){r:{f=(y[b+4>>2]&-8)-g|0;if(f>>>0>=h>>>0){break r}c=b;h=f;if(f){break r}h=0;a=b;break p}f=y[b+20>>2];b=y[((d>>>29&4)+b|0)+16>>2];a=f?(b|0)==(f|0)?a:f:a;d=d<<1;if(b){continue}break}}if(!(a|c)){c=0;a=2<<e;a=(0-a|a)&j;if(!a){break j}a=y[(qa(a)<<2)+3564>>2]}if(!a){break o}}while(1){b=(y[a+4>>2]&-8)-g|0;d=b>>>0<h>>>0;h=d?b:h;c=d?a:c;b=y[a+16>>2];if(b){a=b}else{a=y[a+20>>2]}if(a){continue}break}}if(!c|y[817]-g>>>0<=h>>>0){break j}e=y[c+24>>2];a=y[c+12>>2];if((c|0)!=(a|0)){b=y[c+8>>2];y[b+12>>2]=a;y[a+8>>2]=b;break c}b=y[c+20>>2];if(b){d=c+20|0}else{b=y[c+16>>2];if(!b){break h}d=c+16|0}while(1){f=d;a=b;d=a+20|0;b=y[a+20>>2];if(b){continue}d=a+16|0;b=y[a+16>>2];if(b){continue}break}y[f>>2]=0;break c}a=y[817];if(a>>>0>=g>>>0){c=y[820];b=a-g|0;s:{if(b>>>0>=16){d=c+g|0;y[d+4>>2]=b|1;y[a+c>>2]=b;y[c+4>>2]=g|3;break s}y[c+4>>2]=a|3;a=a+c|0;y[a+4>>2]=y[a+4>>2]|1;b=0;d=0}y[817]=b;y[820]=d;a=c+8|0;break a}i=y[818];if(i>>>0>g>>>0){b=i-g|0;y[818]=b;c=y[821];a=c+g|0;y[821]=a;y[a+4>>2]=b|1;y[c+4>>2]=g|3;a=c+8|0;break a}a=0;j=g+47|0;if(y[933]){c=y[935]}else{y[936]=-1;y[937]=-1;y[934]=4096;y[935]=4096;y[933]=l+12&-16^1431655768;y[938]=0;y[926]=0;c=4096}h=j+c|0;f=0-c|0;b=h&f;if(b>>>0<=g>>>0){break a}d=y[925];if(d){c=y[923];e=c+b|0;if(d>>>0<e>>>0|c>>>0>=e>>>0){break a}}t:{if(!(z[3704]&4)){u:{v:{w:{x:{d=y[821];if(d){a=3708;while(1){c=y[a>>2];if(c>>>0<=d>>>0&d>>>0<c+y[a+4>>2]>>>0){break x}a=y[a+8>>2];if(a){continue}break}}d=na(0);if((d|0)==-1){break u}e=b;c=y[934];a=c-1|0;if(a&d){e=(b-d|0)+(a+d&0-c)|0}if(e>>>0<=g>>>0){break u}c=y[925];if(c){a=y[923];f=a+e|0;if(c>>>0<f>>>0|a>>>0>=f>>>0){break u}}a=na(e);if((d|0)!=(a|0)){break w}break t}e=f&h-i;d=na(e);if((d|0)==(y[a>>2]+y[a+4>>2]|0)){break v}a=d}if((a|0)==-1){break u}if(g+48>>>0<=e>>>0){d=a;break t}c=y[935];c=c+(j-e|0)&0-c;if((na(c)|0)==-1){break u}e=c+e|0;d=a;break t}if((d|0)!=-1){break t}}y[926]=y[926]|4}d=na(b);a=na(0);if((d|0)==-1|(a|0)==-1|a>>>0<=d>>>0){break e}e=a-d|0;if(e>>>0<=g+40>>>0){break e}}a=y[923]+e|0;y[923]=a;if(a>>>0>B[924]){y[924]=a}y:{f=y[821];if(f){a=3708;while(1){c=y[a>>2];b=y[a+4>>2];if((c+b|0)==(d|0)){break y}a=y[a+8>>2];if(a){continue}break}break g}a=y[819];if(!(a>>>0<=d>>>0?a:0)){y[819]=d}a=0;y[928]=e;y[927]=d;y[823]=-1;y[824]=y[933];y[930]=0;while(1){c=a<<3;b=c+3300|0;y[c+3308>>2]=b;y[c+3312>>2]=b;a=a+1|0;if((a|0)!=32){continue}break}c=e-40|0;a=-8-d&7;b=c-a|0;y[818]=b;a=a+d|0;y[821]=a;y[a+4>>2]=b|1;y[(c+d|0)+4>>2]=40;y[822]=y[937];break f}if(y[a+12>>2]&8|(d>>>0<=f>>>0|c>>>0>f>>>0)){break g}y[a+4>>2]=b+e;a=-8-f&7;c=a+f|0;y[821]=c;b=y[818]+e|0;a=b-a|0;y[818]=a;y[c+4>>2]=a|1;y[(b+f|0)+4>>2]=40;y[822]=y[937];break f}a=0;break b}a=0;break c}if(B[819]>d>>>0){y[819]=d}b=d+e|0;a=3708;z:{while(1){c=y[a>>2];if((c|0)!=(b|0)){a=y[a+8>>2];if(a){continue}break z}break}if(!(z[a+12|0]&8)){break d}}a=3708;while(1){A:{b=y[a>>2];if(b>>>0<=f>>>0){h=b+y[a+4>>2]|0;if(h>>>0>f>>>0){break A}}a=y[a+8>>2];continue}break}c=e-40|0;a=-8-d&7;b=c-a|0;y[818]=b;a=a+d|0;y[821]=a;y[a+4>>2]=b|1;y[(c+d|0)+4>>2]=40;y[822]=y[937];a=(h+(39-h&7)|0)-47|0;c=a>>>0<f+16>>>0?f:a;y[c+4>>2]=27;a=y[930];y[c+16>>2]=y[929];y[c+20>>2]=a;a=y[928];y[c+8>>2]=y[927];y[c+12>>2]=a;y[929]=c+8;y[928]=e;y[927]=d;y[930]=0;a=c+24|0;while(1){y[a+4>>2]=7;b=a+8|0;a=a+4|0;if(b>>>0<h>>>0){continue}break}if((c|0)==(f|0)){break f}y[c+4>>2]=y[c+4>>2]&-2;h=c-f|0;y[f+4>>2]=h|1;y[c>>2]=h;B:{if(h>>>0<=255){a=(h&248)+3300|0;c=y[815];b=1<<(h>>>3);C:{if(!(c&b)){y[815]=b|c;b=a;break C}b=y[a+8>>2]}y[a+8>>2]=f;y[b+12>>2]=f;d=12;c=8;break B}a=31;if(h>>>0<=16777215){a=H(h>>>8|0);a=(h>>>38-a&1|a<<1)^62}y[f+28>>2]=a;y[f+16>>2]=0;y[f+20>>2]=0;d=(a<<2)+3564|0;D:{c=y[816];b=1<<a;E:{if(!(c&b)){y[816]=b|c;y[d>>2]=f;y[f+24>>2]=d;break E}a=h<<((a|0)!=31?25-(a>>>1|0)|0:0);c=y[d>>2];while(1){b=c;if((h|0)==(y[b+4>>2]&-8)){break D}d=a>>>29|0;a=a<<1;d=(d&4)+b|0;c=y[d+16>>2];if(c){continue}break}y[d+16>>2]=f;y[f+24>>2]=b}d=8;b=f;a=b;c=12;break B}a=y[b+8>>2];y[a+12>>2]=f;y[b+8>>2]=f;y[f+8>>2]=a;a=0;d=24;c=12}y[c+f>>2]=b;y[d+f>>2]=a}a=y[818];if(a>>>0<=g>>>0){break e}b=a-g|0;y[818]=b;c=y[821];a=c+g|0;y[821]=a;y[a+4>>2]=b|1;y[c+4>>2]=g|3;a=c+8|0;break a}y[814]=48;a=0;break a}y[a>>2]=d;y[a+4>>2]=y[a+4>>2]+e;h=(-8-d&7)+d|0;y[h+4>>2]=g|3;e=c+(-8-c&7)|0;i=g+h|0;d=e-i|0;F:{if(y[821]==(e|0)){y[821]=i;a=y[818]+d|0;y[818]=a;y[i+4>>2]=a|1;break F}if(y[820]==(e|0)){y[820]=i;a=y[817]+d|0;y[817]=a;y[i+4>>2]=a|1;y[a+i>>2]=a;break F}c=y[e+4>>2];if((c&3)==1){f=c&-8;g=y[e+12>>2];G:{if(c>>>0<=255){a=y[e+8>>2];if((a|0)==(g|0)){m=3260,n=y[815]&sa(c>>>3|0),y[m>>2]=n;break G}y[a+12>>2]=g;y[g+8>>2]=a;break G}j=y[e+24>>2];H:{if((e|0)!=(g|0)){a=y[e+8>>2];y[a+12>>2]=g;y[g+8>>2]=a;break H}I:{c=y[e+20>>2];if(c){a=e+20|0}else{c=y[e+16>>2];if(!c){break I}a=e+16|0}while(1){b=a;g=c;a=c+20|0;c=y[c+20>>2];if(c){continue}a=g+16|0;c=y[g+16>>2];if(c){continue}break}y[b>>2]=0;break H}g=0}if(!j){break G}b=y[e+28>>2];a=b<<2;J:{if(y[a+3564>>2]==(e|0)){y[a+3564>>2]=g;if(g){break J}m=3264,n=y[816]&sa(b),y[m>>2]=n;break G}K:{if(y[j+16>>2]==(e|0)){y[j+16>>2]=g;break K}y[j+20>>2]=g}if(!g){break G}}y[g+24>>2]=j;a=y[e+16>>2];if(a){y[g+16>>2]=a;y[a+24>>2]=g}a=y[e+20>>2];if(!a){break G}y[g+20>>2]=a;y[a+24>>2]=g}d=d+f|0;e=e+f|0;c=y[e+4>>2]}y[e+4>>2]=c&-2;y[i+4>>2]=d|1;y[d+i>>2]=d;if(d>>>0<=255){b=(d&248)+3300|0;c=y[815];a=1<<(d>>>3);L:{if(!(c&a)){y[815]=a|c;a=b;break L}a=y[b+8>>2]}y[b+8>>2]=i;y[a+12>>2]=i;y[i+12>>2]=b;y[i+8>>2]=a;break F}g=31;if(d>>>0<=16777215){a=H(d>>>8|0);g=(d>>>38-a&1|a<<1)^62}y[i+28>>2]=g;y[i+16>>2]=0;y[i+20>>2]=0;c=(g<<2)+3564|0;M:{b=y[816];a=1<<g;N:{if(!(b&a)){y[816]=a|b;y[c>>2]=i;y[i+24>>2]=c;break N}g=d<<((g|0)!=31?25-(g>>>1|0)|0:0);a=y[c>>2];while(1){b=a;if((y[a+4>>2]&-8)==(d|0)){break M}c=g>>>29|0;g=g<<1;c=a+(c&4)|0;a=y[c+16>>2];if(a){continue}break}y[c+16>>2]=i;y[i+24>>2]=b}y[i+12>>2]=i;y[i+8>>2]=i;break F}a=y[b+8>>2];y[a+12>>2]=i;y[b+8>>2]=i;y[i+24>>2]=0;y[i+12>>2]=b;y[i+8>>2]=a}a=h+8|0;break a}O:{if(!e){break O}d=y[c+28>>2];b=d<<2;P:{if(y[b+3564>>2]==(c|0)){y[b+3564>>2]=a;if(a){break P}j=sa(d)&j;y[816]=j;break O}Q:{if(y[e+16>>2]==(c|0)){y[e+16>>2]=a;break Q}y[e+20>>2]=a}if(!a){break O}}y[a+24>>2]=e;b=y[c+16>>2];if(b){y[a+16>>2]=b;y[b+24>>2]=a}b=y[c+20>>2];if(!b){break O}y[a+20>>2]=b;y[b+24>>2]=a}R:{if(h>>>0<=15){a=g+h|0;y[c+4>>2]=a|3;a=a+c|0;y[a+4>>2]=y[a+4>>2]|1;break R}y[c+4>>2]=g|3;e=c+g|0;y[e+4>>2]=h|1;y[e+h>>2]=h;if(h>>>0<=255){b=(h&248)+3300|0;d=y[815];a=1<<(h>>>3);S:{if(!(d&a)){y[815]=a|d;a=b;break S}a=y[b+8>>2]}y[b+8>>2]=e;y[a+12>>2]=e;y[e+12>>2]=b;y[e+8>>2]=a;break R}a=31;if(h>>>0<=16777215){a=H(h>>>8|0);a=(h>>>38-a&1|a<<1)^62}y[e+28>>2]=a;y[e+16>>2]=0;y[e+20>>2]=0;d=(a<<2)+3564|0;T:{b=1<<a;U:{if(!(b&j)){y[816]=b|j;y[d>>2]=e;break U}a=h<<((a|0)!=31?25-(a>>>1|0)|0:0);b=y[d>>2];while(1){d=b;if((y[b+4>>2]&-8)==(h|0)){break T}f=a>>>29|0;a=a<<1;f=b+(f&4)|0;b=y[f+16>>2];if(b){continue}break}y[f+16>>2]=e}y[e+24>>2]=d;y[e+12>>2]=e;y[e+8>>2]=e;break R}a=y[d+8>>2];y[a+12>>2]=e;y[d+8>>2]=e;y[e+24>>2]=0;y[e+12>>2]=d;y[e+8>>2]=a}a=c+8|0;break a}V:{if(!i){break V}c=y[d+28>>2];b=c<<2;W:{if(y[b+3564>>2]==(d|0)){y[b+3564>>2]=a;if(a){break W}m=3264,n=sa(c)&j,y[m>>2]=n;break V}X:{if(y[i+16>>2]==(d|0)){y[i+16>>2]=a;break X}y[i+20>>2]=a}if(!a){break V}}y[a+24>>2]=i;b=y[d+16>>2];if(b){y[a+16>>2]=b;y[b+24>>2]=a}b=y[d+20>>2];if(!b){break V}y[a+20>>2]=b;y[b+24>>2]=a}Y:{if(h>>>0<=15){a=g+h|0;y[d+4>>2]=a|3;a=a+d|0;y[a+4>>2]=y[a+4>>2]|1;break Y}y[d+4>>2]=g|3;c=d+g|0;y[c+4>>2]=h|1;y[c+h>>2]=h;if(k){b=(k&-8)+3300|0;f=y[820];a=1<<(k>>>3);Z:{if(!(a&e)){y[815]=a|e;a=b;break Z}a=y[b+8>>2]}y[b+8>>2]=f;y[a+12>>2]=f;y[f+12>>2]=b;y[f+8>>2]=a}y[820]=c;y[817]=h}a=d+8|0}Q=l+16|0;return a|0}function pa(a){a=a|0;var b=0,c=0,d=0,e=0,f=0,g=0,h=0,i=0,j=0,k=0;a:{if(!a){break a}d=a-8|0;b=y[a-4>>2];a=b&-8;f=d+a|0;b:{if(b&1){break b}if(!(b&2)){break a}e=y[d>>2];d=d-e|0;if(d>>>0<B[819]){break a}a=a+e|0;c:{d:{e:{if(y[820]!=(d|0)){c=y[d+12>>2];if(e>>>0<=255){b=y[d+8>>2];if((b|0)!=(c|0)){break e}j=3260,k=y[815]&sa(e>>>3|0),y[j>>2]=k;break b}h=y[d+24>>2];if((c|0)!=(d|0)){b=y[d+8>>2];y[b+12>>2]=c;y[c+8>>2]=b;break c}e=y[d+20>>2];if(e){b=d+20|0}else{e=y[d+16>>2];if(!e){break d}b=d+16|0}while(1){g=b;c=e;b=c+20|0;e=y[c+20>>2];if(e){continue}b=c+16|0;e=y[c+16>>2];if(e){continue}break}y[g>>2]=0;break c}b=y[f+4>>2];if((b&3)!=3){break b}y[817]=a;y[f+4>>2]=b&-2;y[d+4>>2]=a|1;y[f>>2]=a;return}y[b+12>>2]=c;y[c+8>>2]=b;break b}c=0}if(!h){break b}e=y[d+28>>2];b=e<<2;f:{if(y[b+3564>>2]==(d|0)){y[b+3564>>2]=c;if(c){break f}j=3264,k=y[816]&sa(e),y[j>>2]=k;break b}g:{if(y[h+16>>2]==(d|0)){y[h+16>>2]=c;break g}y[h+20>>2]=c}if(!c){break b}}y[c+24>>2]=h;b=y[d+16>>2];if(b){y[c+16>>2]=b;y[b+24>>2]=c}b=y[d+20>>2];if(!b){break b}y[c+20>>2]=b;y[b+24>>2]=c}if(d>>>0>=f>>>0){break a}e=y[f+4>>2];if(!(e&1)){break a}h:{i:{j:{k:{if(!(e&2)){if((f|0)==y[821]){y[821]=d;a=y[818]+a|0;y[818]=a;y[d+4>>2]=a|1;if(y[820]!=(d|0)){break a}y[817]=0;y[820]=0;return}h=y[820];if((h|0)==(f|0)){y[820]=d;a=y[817]+a|0;y[817]=a;y[d+4>>2]=a|1;y[a+d>>2]=a;return}a=(e&-8)+a|0;c=y[f+12>>2];if(e>>>0<=255){b=y[f+8>>2];if((b|0)==(c|0)){j=3260,k=y[815]&sa(e>>>3|0),y[j>>2]=k;break i}y[b+12>>2]=c;y[c+8>>2]=b;break i}i=y[f+24>>2];if((c|0)!=(f|0)){b=y[f+8>>2];y[b+12>>2]=c;y[c+8>>2]=b;break j}e=y[f+20>>2];if(e){b=f+20|0}else{e=y[f+16>>2];if(!e){break k}b=f+16|0}while(1){g=b;c=e;b=c+20|0;e=y[c+20>>2];if(e){continue}b=c+16|0;e=y[c+16>>2];if(e){continue}break}y[g>>2]=0;break j}y[f+4>>2]=e&-2;y[d+4>>2]=a|1;y[a+d>>2]=a;break h}c=0}if(!i){break i}e=y[f+28>>2];b=e<<2;l:{if((f|0)==y[b+3564>>2]){y[b+3564>>2]=c;if(c){break l}j=3264,k=y[816]&sa(e),y[j>>2]=k;break i}m:{if((f|0)==y[i+16>>2]){y[i+16>>2]=c;break m}y[i+20>>2]=c}if(!c){break i}}y[c+24>>2]=i;b=y[f+16>>2];if(b){y[c+16>>2]=b;y[b+24>>2]=c}b=y[f+20>>2];if(!b){break i}y[c+20>>2]=b;y[b+24>>2]=c}y[d+4>>2]=a|1;y[a+d>>2]=a;if((d|0)!=(h|0)){break h}y[817]=a;return}if(a>>>0<=255){b=(a&248)+3300|0;e=y[815];a=1<<(a>>>3);n:{if(!(e&a)){y[815]=a|e;a=b;break n}a=y[b+8>>2]}y[b+8>>2]=d;y[a+12>>2]=d;y[d+12>>2]=b;y[d+8>>2]=a;return}c=31;if(a>>>0<=16777215){b=H(a>>>8|0);c=(a>>>38-b&1|b<<1)^62}y[d+28>>2]=c;y[d+16>>2]=0;y[d+20>>2]=0;b=(c<<2)+3564|0;o:{p:{g=y[816];e=1<<c;q:{if(!(g&e)){y[816]=e|g;y[b>>2]=d;c=24;break q}c=a<<((c|0)!=31?25-(c>>>1|0)|0:0);b=y[b>>2];while(1){e=b;if((y[b+4>>2]&-8)==(a|0)){break p}b=c>>>29|0;c=c<<1;g=(b&4)+e|0;b=y[g+16>>2];if(b){continue}break}y[g+16>>2]=d;b=e;c=24}e=d;g=d;a=8;break o}b=y[e+8>>2];y[b+12>>2]=d;y[e+8>>2]=d;c=8;g=0;a=24}y[c+d>>2]=b;y[d+12>>2]=e;y[a+d>>2]=g;a=y[823]-1|0;y[823]=a?a:-1}}function ca(a){var b=0,c=0,d=0,e=0,f=0,g=0,h=0,i=0,j=0,k=0,l=0;b=y[783];h=b+4|0;i=b+8|0;j=b+12|0;e=y[807];d=y[789];c=y[793];k=y[808];f=y[794];l=y[804];while(1){b=k;a:{if(!l){break a}b=d;if(!c){break a}c=f?0-E(c,f)|0:-1;g=c>>>23&510;b=A[g+1024>>1];b=b+(E(A[(g+1024|0)+2>>1]-b|0,c>>>8&65535)>>>16|0)|0;c=d-e|0;b=ra(c,c>>31,b&65535,0);b=((S&65535)<<16|b>>>16)+e|0}y[807]=b;d=y[(a<<2)+3136>>2];y[789]=d;c=h;b:{c:{switch(a|0){case 3:c=j;break b;default:y[793]=0;y[792]=a;return;case 0:break b;case 1:break c}}c=i}c=y[c>>2];y[793]=c;if((b|0)==(d|0)){a=a+1|0;e=b;d=b;continue}break}y[792]=a;d:{if(!c){break d}d=4294967295/(c>>>0)|0;y[794]=d;b=-671088640;e:{if(c>>>0<4){break e}e=H(c);c=((e<<27)-(c<<e>>>4&134217727)|0)- -134217728|0;b=0;if(c>>>0<268435457){break e}b=c-268435456|0;b=b>>>0>=3623878656?-671088640:b}e=b>>>18&510;c=A[e+1552>>1];b=(c+(E(A[(e+1552|0)+2>>1]-c|0,b>>>3&65535)>>>16|0)&65535)<<15>>>(b>>>27)|0;y[795]=b>>>0>=1357468564?1357468564:b;if(!y[798]|(a|0)!=3){break d}a=((y[800]^-1)>>>0)/(d>>>0)|0;if(a>>>0<=B[801]){break d}y[801]=a}}function ga(a,b,c){a=a|0;b=b|0;c=c|0;var d=0;a=E(b<<24>>24,c&255)+(a<<6&16320)<<16>>16;a=(a|0)>0?a:0;b=(a|0)>=8191?8191:a;c=b>>>4&508;d=y[c+2608>>2];a=d>>>1|0;a=d&1|a+(E((y[(c+2608|0)+4>>2]>>>1|0)-a|0,b<<2&252)>>8)<<1;if(!a){return-1}return 4294967295/(a>>>0)|0}function ra(a,b,c,d){var e=0,f=0,g=0,h=0,i=0,j=0;e=c>>>16|0;f=a>>>16|0;j=E(e,f);g=c&65535;h=a&65535;i=E(g,h);f=(i>>>16|0)+E(f,g)|0;e=(f&65535)+E(e,h)|0;S=(E(b,c)+j|0)+E(a,d)+(f>>>16)+(e>>>16)|0;return i&65535|e<<16}function ha(a){a=a|0;var b=0,c=0,d=0;a=a<<6&16320;a=a>>>0>=8191?8191:a;b=a>>>4&508;c=y[b+2080>>2];d=c>>>1|0;a=d+(E((y[(b+2080|0)+4>>2]>>>1|0)-d|0,a<<2&252)>>8)<<1|c&1;if(!a){return 0}return 4294967295/(a>>>0)|0}function na(a){var b=0,c=0;a=a+7|0;b=a>>>0<7?1:b;a:{c=y[782];a=c+(a&-8)|0;if(!(c>>>0>a>>>0?b+1|0:b)){if(a>>>0<=U()<<16>>>0){break a}if(P(a|0)|0){break a}}y[814]=48;return-1}y[782]=a;return c}function sa(a){var b=0;b=a&31;a=0-a&31;return(-1>>>b&-2)<<b|(-1<<a&-2)>>>a}
+function qa(a){if(a){return 31-H(a-1^a)|0}return 32}function la(a){a=a|0;a=Q-a&-16;Q=a;return a|0}function fa(){return 45e3}function ma(){return Q|0}function ka(a){a=a|0;Q=a}function ja(){return R|0}function ia(a){a=a|0;R=a}function da(){return 11}function ba(){}
+// EMSCRIPTEN_END_FUNCS
+e=z;p(q);var T=c([]);function U(){return v.byteLength>>16}function Z(_){_=_|0;var V=U()|0;var W=V+_|0;if(V<W&&W<65536&&W<=32768){var X=new ArrayBuffer(W<<16);var Y=new Int8Array(X);Y.set(w);w=new Int8Array(X);x=new Int16Array(X);y=new Int32Array(X);z=new Uint8Array(X);A=new Uint16Array(X);B=new Uint32Array(X);C=new Float32Array(X);D=new Float64Array(X);v=X;e=z}return V}return{memory:Object.create(Object.prototype,{grow:{value:Z},buffer:{get:function(){return v}}}),__wasm_call_ctors:ba,chiff_meta_count:da,chiff_render:ea,chiff_frame_hz:fa,chiff_duration_samples:ga,chiff_stage_samples:ha,__indirect_function_table:T,malloc:oa,free:pa,__get_temp_ret:ja,__set_temp_ret:ia,_emscripten_stack_restore:ka,_emscripten_stack_alloc:la,emscripten_stack_get_current:ma}}return $(aa)}
+// EMSCRIPTEN_END_ASM
+
+
+)(info)},instantiate:function(binary,info){return{then:function(ok){var module=new WebAssembly.Module(binary);ok({instance:new WebAssembly.Instance(module,info)})}}},RuntimeError:Error,isWasm2js:true};if(WebAssembly.isWasm2js){wasmBinary=[]}var ABORT=false;var isFileURI=filename=>filename.startsWith("file://");class EmscriptenEH{}class EmscriptenSjLj extends EmscriptenEH{}var runtimeInitialized=false;function getMemoryBuffer(){return wasmMemory.buffer}function updateMemoryViews(){if(HEAP8?.buffer?.resizable)return;var b=getMemoryBuffer();HEAP8=new Int8Array(b);Module["HEAP16"]=HEAP16=new Int16Array(b);HEAPU8=new Uint8Array(b);HEAPU16=new Uint16Array(b);Module["HEAP32"]=HEAP32=new Int32Array(b);HEAPU32=new Uint32Array(b);HEAPF32=new Float32Array(b);HEAPF64=new Float64Array(b)}function preRun(){var preRun=Module["preRun"];if(preRun){if(typeof preRun=="function")preRun=[preRun];onPreRuns.push(...preRun)}callRuntimeCallbacks(onPreRuns)}function initRuntime(){runtimeInitialized=true;wasmExports["__wasm_call_ctors"]()}function postRun(){var postRun=Module["postRun"];if(postRun){if(typeof postRun=="function")postRun=[postRun];onPostRuns.push(...postRun)}callRuntimeCallbacks(onPostRuns)}function abort(what){Module["onAbort"]?.(what);what=`Aborted(${what})`;err(what);ABORT=true;what+=". Build with -sASSERTIONS for more info.";var e=new WebAssembly.RuntimeError(what);throw e}var wasmBinaryFile;function findWasmBinary(file){}function getWasmBinary(file){}async function instantiateArrayBuffer(binaryFile,imports){try{var binary=await getWasmBinary(binaryFile);var instance=await WebAssembly.instantiate(binary,imports);return instance}catch(reason){err(`failed to asynchronously prepare wasm: ${reason}`);abort(reason)}}async function instantiateAsync(binary,binaryFile,imports){return instantiateArrayBuffer(binaryFile,imports)}function getWasmImports(){var imports={env:wasmImports,wasi_snapshot_preview1:wasmImports};return imports}async function createWasm(){function receiveInstance(instance){wasmExports=instance.exports;assignWasmExports(wasmExports);updateMemoryViews();return wasmExports}function receiveInstantiationResult(result){return receiveInstance(result["instance"])}var info=getWasmImports();var instantiateWasm=Module["instantiateWasm"];if(instantiateWasm){return new Promise(resolve=>{instantiateWasm(info,inst=>resolve(receiveInstance(inst)))})}wasmBinaryFile??=findWasmBinary();var result=await instantiateAsync(wasmBinary,wasmBinaryFile,info);var exports=receiveInstantiationResult(result);return exports}class ExitStatus{name="ExitStatus";constructor(status){this.message=`Program terminated with exit(${status})`;this.status=status}}var HEAP16;var HEAP32;var HEAP8;var HEAPF32;var HEAPF64;var HEAPU16;var HEAPU32;var HEAPU8;var callRuntimeCallbacks=callbacks=>{while(callbacks.length>0){callbacks.shift()(Module)}};var onPostRuns=[];var onPreRuns=[];var noExitRuntime=true;var stackRestore=val=>__emscripten_stack_restore(val);var stackSave=()=>_emscripten_stack_get_current();var getHeapMax=()=>2147483648;var alignMemory=(size,alignment)=>Math.ceil(size/alignment)*alignment;var growMemory=size=>{var oldHeapSize=wasmMemory.buffer.byteLength;var pages=(size-oldHeapSize+65535)/65536|0;try{wasmMemory.grow(pages);updateMemoryViews();return 1}catch(e){}};var _emscripten_resize_heap=requestedSize=>{var oldSize=HEAPU8.length;requestedSize>>>=0;var maxHeapSize=getHeapMax();if(requestedSize>maxHeapSize){return false}for(var cutDown=1;cutDown<=4;cutDown*=2){var overGrownHeapSize=oldSize*(1+.2/cutDown);overGrownHeapSize=Math.min(overGrownHeapSize,requestedSize+100663296);var newSize=Math.min(maxHeapSize,alignMemory(Math.max(requestedSize,overGrownHeapSize),65536));var replacement=growMemory(newSize);if(replacement){return true}}return false};var getCFunc=ident=>{var func=Module["_"+ident];return func};var writeArrayToMemory=(array,buffer)=>{HEAP8.set(array,buffer)};var lengthBytesUTF8=str=>{var len=0;for(var i=0;i<str.length;++i){var c=str.charCodeAt(i);if(c<=127){len++}else if(c<=2047){len+=2}else if(c>=55296&&c<=57343){len+=4;++i}else{len+=3}}return len};var stringToUTF8Array=(str,heap,outIdx,maxBytesToWrite)=>{if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.codePointAt(i);if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63}else{if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;i++}}heap[outIdx]=0;return outIdx-startIdx};var stringToUTF8=(str,outPtr,maxBytesToWrite)=>stringToUTF8Array(str,HEAPU8,outPtr,maxBytesToWrite);var stackAlloc=sz=>__emscripten_stack_alloc(sz);var stringToUTF8OnStack=str=>{var size=lengthBytesUTF8(str)+1;var ret=stackAlloc(size);stringToUTF8(str,ret,size);return ret};var UTF8Decoder=globalThis.TextDecoder&&new TextDecoder;var findStringEnd=(heapOrArray,idx,maxBytesToRead,ignoreNul)=>{var maxIdx=idx+maxBytesToRead;if(ignoreNul)return maxIdx;while(heapOrArray[idx]&&!(idx>=maxIdx))++idx;return idx};var UTF8ArrayToString=(heapOrArray,idx=0,maxBytesToRead,ignoreNul)=>{var endPtr=findStringEnd(heapOrArray,idx,maxBytesToRead,ignoreNul);if(endPtr-idx>16&&heapOrArray.buffer&&UTF8Decoder){return UTF8Decoder.decode(heapOrArray.subarray(idx,endPtr))}var str="";while(idx<endPtr){var u0=heapOrArray[idx++];if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heapOrArray[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heapOrArray[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2}else{u0=(u0&7)<<18|u1<<12|u2<<6|heapOrArray[idx++]&63}if(u0<65536){str+=String.fromCharCode(u0)}else{var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023)}}return str};var UTF8ToString=(ptr,maxBytesToRead,ignoreNul)=>ptr?UTF8ArrayToString(HEAPU8,ptr,maxBytesToRead,ignoreNul):"";var ccall=(ident,returnType,argTypes,args,opts)=>{var toC={string:str=>{var ret=0;if(str!==null&&str!==undefined&&str!==0){ret=stringToUTF8OnStack(str)}return ret},array:arr=>{var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return ret}};function convertReturnValue(ret){if(returnType==="string"){return UTF8ToString(ret)}if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i])}else{cArgs[i]=args[i]}}}var ret=func(...cArgs);function onDone(ret){if(stack!==0)stackRestore(stack);return convertReturnValue(ret)}ret=onDone(ret);return ret};var cwrap=(ident,returnType,argTypes,opts)=>{var numericArgs=!argTypes||argTypes.every(type=>type==="number"||type==="boolean");var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return(...args)=>ccall(ident,returnType,argTypes,args,opts)};{if(Module["noExitRuntime"])noExitRuntime=Module["noExitRuntime"];if(Module["print"])out=Module["print"];if(Module["printErr"])err=Module["printErr"];if(Module["arguments"])programArgs=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];var preInit=Module["preInit"];if(preInit){if(typeof preInit=="function")Module["preInit"]=preInit=[preInit];while(preInit.length>0){preInit.shift()()}}}Module["cwrap"]=cwrap;var _chiff_meta_count,_chiff_render,_chiff_frame_hz,_chiff_duration_samples,_chiff_stage_samples,_malloc,_free,___get_temp_ret,___set_temp_ret,__emscripten_stack_restore,__emscripten_stack_alloc,_emscripten_stack_get_current,memory,__indirect_function_table,wasmMemory;function assignWasmExports(wasmExports){_chiff_meta_count=Module["_chiff_meta_count"]=wasmExports["chiff_meta_count"];_chiff_render=Module["_chiff_render"]=wasmExports["chiff_render"];_chiff_frame_hz=Module["_chiff_frame_hz"]=wasmExports["chiff_frame_hz"];_chiff_duration_samples=Module["_chiff_duration_samples"]=wasmExports["chiff_duration_samples"];_chiff_stage_samples=Module["_chiff_stage_samples"]=wasmExports["chiff_stage_samples"];_malloc=Module["_malloc"]=wasmExports["malloc"];_free=Module["_free"]=wasmExports["free"];___get_temp_ret=wasmExports["__get_temp_ret"];___set_temp_ret=wasmExports["__set_temp_ret"];__emscripten_stack_restore=wasmExports["_emscripten_stack_restore"];__emscripten_stack_alloc=wasmExports["_emscripten_stack_alloc"];_emscripten_stack_get_current=wasmExports["emscripten_stack_get_current"];memory=wasmMemory=wasmExports["memory"];__indirect_function_table=wasmExports["__indirect_function_table"]}var wasmImports={emscripten_resize_heap:_emscripten_resize_heap};async function run(){preRun();var setStatus=Module["setStatus"];if(setStatus){setStatus("Running...");await new Promise(resolve=>setTimeout(resolve,1));setTimeout(setStatus,1,"")}if(ABORT)return;initRuntime();Module["onRuntimeInitialized"]?.();postRun()}var wasmExports;wasmExports=await createWasm();await run();
+;return Module}})();if(typeof exports==="object"&&typeof module==="object"){module.exports=ChiffEngine;module.exports.default=ChiffEngine}else if(typeof define==="function"&&define["amd"])define([],()=>ChiffEngine);
+
+</script>
+<script>
+'use strict';
+// >>> loader.js -- spliced by tools/simengine/inline_engine.py, do not edit here
+// Shared loader for the compiled firmware engine. Used by the node check
+// scripts; chiff_sim.html inlines chiff_engine.js and uses the same wrap()
+// below, so both go through one interface.
+//
+// All timing inputs are SETTINGS or samples. Milliseconds appear only in the
+// returned meta block, as output.
+'use strict';
+
+// Wraps a loaded Emscripten module into the engine API. Kept separate from the
+// node-specific require() so the browser can reuse it verbatim.
+function wrapChiffEngine(Module) {
+  const render = Module.cwrap('chiff_render', 'number',
+    Array(25).fill('number'));
+  const metaCount = Module.cwrap('chiff_meta_count', 'number', [])();
+  const frameHz = Module.cwrap('chiff_frame_hz', 'number', [])();
+  const durationSamples = Module.cwrap('chiff_duration_samples', 'number', ['number','number','number','number']);
+  const stageSamples = Module.cwrap('chiff_stage_samples', 'number', ['number']);
+
+  const META = ['totalSamples', 'gateSamples', 'chiffWindowSamples',
+                'attackSamples', 'decaySamples', 'releaseSamples',
+                'peak_u16', 'sustain_u16', 'chiffAmount',
+                'ceiling', 'floor'];
+
+  let bufPtr = 0, bufCap = 0, metaPtr = 0;
+
+  return {
+    frameHz,
+    durationSamples,
+    stageSamples,
+    // p: attack, decay, sustain, release, amplitudeModVelocity, velocity,
+    //    envModAttack/Decay/Sustain/Release, amount, chiffDuration,
+    //    amountModVelocity, durationModVelocity, gateSamples, tailSamples,
+    //    maxTarget, minTarget,
+    //    tremolo, biasLfo, biasLfoBlocks, seed
+    // minTarget/tremolo/biasLfo all default to 0, which is the bias-free
+    // ordinary 0..maxTarget note every earlier render used.
+    render(p) {
+      const gateSamples = p.gateSamples | 0;
+      const tailSamples = p.tailSamples | 0;
+      const need = gateSamples + tailSamples + 64;
+      if (need > bufCap) {
+        if (bufPtr) Module._free(bufPtr);
+        bufPtr = Module._malloc(need * 2);
+        bufCap = need;
+      }
+      if (!metaPtr) metaPtr = Module._malloc(metaCount * 4);
+
+      const n = render(
+        p.attack | 0, p.decay | 0, p.sustain | 0, p.release | 0,
+        p.amplitudeModVelocity | 0, p.velocity === undefined ? 127 : p.velocity | 0,
+        p.envModAttack | 0, p.envModDecay | 0,
+        p.envModSustain | 0, p.envModRelease | 0,
+        p.amount | 0, p.chiffDuration | 0,
+        p.amountModVelocity | 0, p.durationModVelocity | 0,
+        gateSamples, tailSamples,
+        p.maxTarget === undefined ? 32767 : p.maxTarget | 0,
+        p.minTarget | 0,
+        p.tremolo | 0, p.biasLfo | 0,
+        p.biasLfoBlocks === undefined ? 8 : p.biasLfoBlocks | 0,
+        p.seed >>> 0,
+        bufPtr, bufCap, metaPtr);
+
+      const out = Module.HEAP16.subarray(bufPtr >> 1, (bufPtr >> 1) + n).slice();
+      const meta = {};
+      for (let i = 0; i < metaCount; i++) {
+        meta[META[i]] = Module.HEAP32[(metaPtr >> 2) + i];
+      }
+      meta.msOf = samples => samples / frameHz * 1000;
+      return { out, meta };
+    },
+  };
+}
+// <<< loader.js
+
+// Firmware revision this page's inlined engine was built from. Rewritten by
+// tools/simengine/inline_engine.py at every re-inline, so a published artifact
+// self-identifies its firmware -- do not edit the value by hand.
+const FW_VERSION = 'bdf88894';
+// What makes this build different, stamped by inline_engine.py from the
+// constant in yarns/envelope.cc -- do not edit the value by hand. Empty on the
+// canonical page, which is the reference and wants no badge.
+const FW_VARIANT = '';
+
+// ---------------------------------------------------------------------------
+// This file contains NO DSP. Every sample below comes from the compiled
+// yarns/envelope.cc above, so the sim cannot drift from the firmware.
+//
+// Every control is a front-panel SETTING (0..127), exactly as the module shows
+// it. Milliseconds and sample counts are OUTPUTS, derived by the engine.
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+
+let ENGINE = null;
+let FS = 45000;                      // replaced by the engine's own kFrameHz
+const PEAK = 32767;                  // engine renders full-scale int16
+
+const fmtMs = ms => ms >= 1000 ? (ms / 1000).toFixed(2).replace(/0$/, '') + ' s'
+                               : Math.round(ms) + ' ms';
+// Gate length is how long the key is held: a performance, not a module
+// setting, so it is the one control that is legitimately a time.
+const gateMsFromSlider = v => Math.round(Math.pow(8000, v / 1000));
+
+// Settings in, samples out. Shape matches what the drawing code expects.
+function render(p) {
+  const gateSamples = Math.max(64, Math.round(p.gateMs * FS / 1000));
+  // Render only as far past the gate as the release actually needs. A fixed
+  // tail (this was hardcoded at 1s) wastes most of the x-axis when the release
+  // is short, which is exactly when the attack is short and detail matters.
+  // A timed stage spans 4 time constants, so it is ~98% done at its nominal
+  // length; a little margin covers the handoff into DEAD.
+  const tailSamples = p.tailSamples !== undefined
+    ? Math.max(64, p.tailSamples)
+    : Math.max(64, Math.round(ENGINE.stageSamples(p.release) * 1.1 + 0.01 * FS));
+  const r = ENGINE.render({
+    attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release,
+    amplitudeModVelocity: p.amplitudeModVelocity, velocity: p.velocity,
+    amount: p.amount, chiffDuration: p.chiffDuration,
+    amountModVelocity: p.amountModVelocity,
+    durationModVelocity: p.durationModVelocity,
+    gateSamples: gateSamples, tailSamples: tailSamples,
+    // The note's two rails. maxTarget defaults to PEAK and minTarget to 0 --
+    // the ordinary note -- but both are dialable, so the sim can show the
+    // ranges the firmware actually asks for: inverted (min > max) and NEGATIVE
+    // (max < 0, a negative TIMBRE MOD ENV).
+    maxTarget: p.maxTarget === undefined ? PEAK : p.maxTarget,
+    minTarget: p.minTarget || 0,
+    // Bias. Zero here renders exactly as the sim always did.
+    tremolo: p.tremolo || 0, biasLfo: p.biasLfo || 0,
+    biasLfoBlocks: p.biasLfoBlocks === undefined ? 32 : p.biasLfoBlocks,
+    seed: p.seed,
+  });
+  return {
+    out: r.out,
+    gateN: r.meta.gateSamples,
+    totalN: r.meta.totalSamples,
+    aN: Math.max(1, r.meta.attackSamples),
+    windowN: r.meta.chiffWindowSamples,
+    attackSamples: r.meta.attackSamples,
+    // The chiff's hard rails, reported by the firmware itself. Deriving these
+    // in JS put the ceiling one LSB high: scale_s16 * peak_u16 falls just
+    // short of 2^31, so the real ceiling is 32766, not INT16_MAX.
+    ceiling: r.meta.ceiling,
+    floorLevel: r.meta.floor,
+    decaySamples: r.meta.decaySamples,
+    releaseSamples: r.meta.releaseSamples,
+  };
+}
+
+function nominalValue(p, totalN, gateN) {   // chiff-free reference (amount 0)
+  // Zero the VEL MOD too: modulate_7_13(0, scale, vel) is vel*scale, so an
+  // amount of 0 alone still yields chiff whenever EXCITER AMT VEL MOD is up.
+  return render(Object.assign({}, p, { amount: 0, amountModVelocity: 0 }))
+    .out.subarray(0, totalN);
+}
+
+// ---- measurements ----
+// Time at which the chiff's excursion has died out: the RMS of
+// (chiff - nominal value) falling below kDeadDbfs of full scale.
+//
+// RMS ABOUT ZERO, NOT A PER-BLOCK STANDARD DEVIATION. The chiff term is
+// zero-mean by construction, so subtracting a block mean removes exactly the
+// low-frequency content a slow filter consists of -- and the filter is at its
+// slowest precisely where this marker is trying to read. That error made a
+// probe report a chiff 30 dB quieter than it was at the slowest setting
+// measured, and it is why the block used to have to be an eighth of the
+// window: the huge block was compensating for a statistic that should not have
+// been used. With the mean gone, the block can be small again, and the marker
+// gets back the resolution it needs -- window/8 could not resolve better than
+// +-12.5%, so it could not have detected a 2x error.
+const kDeadBlockMs = 2;
+// THE THRESHOLD IS DELIBERATELY NOT THE ENGINE'S. kChiffInaudibleLevel_q30 is
+// what the walk AIMS at; if this marker used the same number it could not
+// disagree with the engine, and for a long time it did not -- it read 1.00x at
+// every AMOUNT because it was measuring the target rather than the result.
+// A check must not share a constant with the thing it checks.
+// -50 dBFS is CALIBRATED AGAINST THE USER'S OWN READINGS at the sim (they read
+// die-out at 3000-4000 ms on a 6807 ms window, which lands here), not derived.
+const kDeadDbfs = -50;
+function excursionDeadSample(out, nominalTrace) {
+  const thr = PEAK * Math.pow(10, kDeadDbfs / 20);
+  const blk = Math.max(32, Math.round(kDeadBlockMs * FS / 1000));
+  const n = Math.min(out.length, nominalTrace.length);
+  for (let b = 0; (b + 1) * blk < n; b++) {
+    let sq = 0;
+    for (let i = b * blk; i < (b + 1) * blk; i++) {
+      const d = out[i] - nominalTrace[i]; sq += d * d;
+    }
+    if (Math.sqrt(sq / blk) < thr) return b * blk;
+  }
+  return null;
+}
+
+function measure(res, nominalTrace) {
+  const { out, gateN, aN, windowN } = res;
+  const land = out[Math.min(aN - 1, out.length - 1)] / PEAK * 100;
+  const thr = PEAK * 0.01;
+  let rel = null;
+  for (let i = gateN; i < out.length; i++) if (out[i] < thr) { rel = (i - gateN) / FS * 1000; break; }
+  let relBase = null;
+  for (let i = gateN; i < nominalTrace.length; i++) if (nominalTrace[i] < thr) { relBase = (i - gateN) / FS * 1000; break; }
+  return { land, rel, relBase, winMs: windowN / FS * 1000 };
+}
+
+// ---- drawing ----
+const cv = $('cv'), ctx = cv.getContext('2d');
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+let lastRes = null, lastNominal = null, lastLine = null, lastP = null;
+let lastDead = null;
+
+function draw() {
+  if (!ENGINE) return;
+  const p = params();
+  const t0 = performance.now();
+  const res = render(p);
+  const dia = nominalValue(p, res.totalN, res.gateN);
+  const line = dia; // the chiff perturbs about the nominal value
+  const dt = performance.now() - t0;
+  lastRes = res; lastNominal = dia; lastLine = line; lastP = p;
+  lastDead = excursionDeadSample(res.out, dia);
+  specData = null;   // sized and computed by drawSpectrogram
+
+  const m = measure(res, dia);
+  $('mLand').textContent = m.land.toFixed(1) + ' %';
+  $('mRel').innerHTML = m.rel === null ? '&gt;window'
+    : fwUnit(Math.round(m.rel * FS / 1000) + ' smp', fmtMs(m.rel));
+  $('mWin').innerHTML = fwUnit(msOfSamples(res.windowN),
+    lastDead === null ? 'not yet dead'
+      : 'dead at ' + msOfSamples(lastDead) + ' = ' +
+        (lastDead / res.windowN * 100).toFixed(0) + '%');
+  $('mShift').innerHTML = fwUnit(res.attackSamples + ' smp', msOfSamples(res.attackSamples));
+  $('mMs').textContent = dt.toFixed(0) + ' ms';
+
+  paint(null);
+}
+
+function paint(hoverX) {
+  if (!lastRes) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const { out, gateN, totalN } = lastRes;
+  const padL = 34, padB = 18, padT = 6, padR = 6;
+  const pw = W - padL - padR, ph = H - padT - padB;
+  const X = i => padL + i / (totalN - 1) * pw;
+  const Y = v => padT + (1 - v / PEAK) * ph;
+
+  // grid
+  ctx.strokeStyle = cssVar('--grid'); ctx.lineWidth = 1;
+  ctx.fillStyle = cssVar('--ink3');
+  ctx.font = '10px ui-monospace, Menlo, monospace';
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + ph * g / 4;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    ctx.fillText((100 - g * 25) + '%', 4, y + 3);
+  }
+  const totalMs = totalN / FS * 1000;
+  const step = totalMs > 4000 ? 1000 : totalMs > 1600 ? 500 : totalMs > 700 ? 200 : totalMs > 250 ? 100 : 50;
+  for (let t = 0; t <= totalMs; t += step) {
+    const x = padL + t / totalMs * pw;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
+    ctx.fillText(t >= 1000 ? (t/1000) + 's' : t + '', x + 2, H - 6);
+  }
+
+  // Chiff ceiling: the note's top rail (max stage target). The render loop
+  // clamps to this, so the trace touching it is contact, never overshoot.
+  // Drawn explicitly because the 100% gridline sits flush with the top border,
+  // which made a trace at the ceiling ambiguous to read.
+  if (lastRes.ceiling) {
+    ctx.strokeStyle = cssVar('--mark'); ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(padL, Y(lastRes.ceiling));
+    ctx.lineTo(W - padR, Y(lastRes.ceiling)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = cssVar('--mark');
+    ctx.fillText('ceiling', padL + 3, Y(lastRes.ceiling) + 10);
+    ctx.fillStyle = cssVar('--ink3');
+  }
+
+  // release marker
+  ctx.strokeStyle = cssVar('--mark'); ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(X(gateN), padT); ctx.lineTo(X(gateN), H - padB); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Chiff timing: where it is SUPPOSED to be done (the nominal duration) and
+  // where its excursion measurably HAS died out. The gap between them is the
+  // calibration -- they should coincide.
+  const vline = (smp, colour, dash) => {
+    if (smp === null || smp === undefined || smp > totalN) return;
+    ctx.strokeStyle = colour; ctx.setLineDash(dash); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(X(smp), padT); ctx.lineTo(X(smp), H - padB); ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  vline(lastRes.windowN, cssVar('--ink3'), [6, 3]);
+  vline(lastDead, cssVar('--ink'), [1, 3]);
+
+  // Clip traces to the plot rect. The 100% gridline sits exactly at PEAK, so
+  // a value AT the ceiling was drawn with half its stroke width above the
+  // line and read as an excursion past 100% that cannot actually occur.
+  ctx.save();
+  ctx.beginPath(); ctx.rect(padL, padT, pw, ph); ctx.clip();
+  const plot = (arr, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    const stride = 1;                            // exact min/max, no aliasing
+    for (let px = 0; px <= pw; px++) {           // min/max decimation per pixel
+      const i0 = Math.floor(px / pw * (totalN - 1));
+      const i1 = Math.min(totalN - 1, Math.floor((px + 1) / pw * (totalN - 1)));
+      let lo = arr[i0], hi = arr[i0];
+      for (let i = i0; i <= i1; i += stride) { const v = arr[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+      if (px === 0) ctx.moveTo(padL + px, Y(lo));
+      ctx.lineTo(padL + px, Y(hi)); ctx.lineTo(padL + px, Y(lo));
+    }
+    ctx.stroke();
+  };
+
+  if ($('showNominal').checked) plot(lastNominal, cssVar('--nominal'), 1.4);
+  plot(out, cssVar('--trace'), 1.2);
+
+  // Noise band from the bottom: smoothed mean |per-sample step|, as a
+  // fraction of full-scale peak, scaled so full telegraph (~0.5/sample at
+  // max chiff) reaches the top -- no artificial cap, so the true level
+  // (and its scaling with the Peak knob) is visible.
+  if ($('showNoise').checked) {
+    ctx.fillStyle = cssVar('--noise'); ctx.globalAlpha = 0.5;
+    const win = Math.max(1, Math.floor(FS * 0.002));
+    ctx.beginPath(); ctx.moveTo(padL, H - padB);
+    for (let px = 0; px <= pw; px++) {
+      const i = Math.max(1, Math.floor(px / pw * (totalN - 1)));
+      let s = 0, n = 0;
+      for (let j = Math.max(1, i - win); j <= i; j += Math.max(1, Math.floor(win / 16))) {
+        s += Math.abs(out[j] - out[j - 1]); n++;
+      }
+      const noise = (s / n) / PEAK;              // per-sample step, fraction of peak
+      const y = H - padB - Math.min(1, noise * 2) * ph;
+      ctx.lineTo(padL + px, y);
+    }
+    ctx.lineTo(W - padR, H - padB); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // hover crosshair
+  if (hoverX !== null && hoverX >= padL && hoverX <= W - padR) {
+    const i = Math.round((hoverX - padL) / pw * (totalN - 1));
+    ctx.strokeStyle = cssVar('--ink3'); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hoverX, padT); ctx.lineTo(hoverX, H - padB); ctx.stroke();
+    const tMs = i / FS * 1000;
+    $('readout').textContent = tMs.toFixed(1) + ' ms · exciter ' +
+      (out[i] / PEAK * 100).toFixed(1) + '% · nominal ' +
+      (lastNominal[i] / PEAK * 100).toFixed(1) + '%';
+  } else $('readout').textContent = '';
+  drawSpectrogram();
+}
+
+// ---- noise spectrogram (constant-Q filterbank: time x log frequency) ----
+// SPEC_WINDOW belongs to the single-slice spectrum below, not to the
+// spectrogram: 512 samples is an 11 ms analysis window there. The spectrogram
+// itself no longer has a window at all -- see the filterbank.
+const SPEC_WINDOW = 512;
+// MEASURED against the Gabor transform: the peak cell runs 1.35 at AMOUNT 1,
+// 28 at 32 and 113 at 96, so this puts the loudest setting at the top of the
+// ramp and AMOUNT 1 around -39 dB into it.
+const SPEC_REF = 120;
+// THE DISPLAY'S DYNAMIC RANGE. 60 dB clamped the bottom of the AMOUNT knob into
+// the floor colour; the chiff there runs 30-55 dB under the reference.
+const SPEC_RANGE_DB = 96;
+// THE BOTTOM OF THE LOG AXIS SCALES WITH THE RECORD, because resolution there
+// does. A band at f needs about f/CQ_Q of width, whose kernel is ~1/(2*pi*sigma)
+// wide in TIME -- so below a few cycles per record a row cannot be localised at
+// all and its energy smears across the whole width. Drawing such rows is drawing
+// the analysis. At this many cycles the lowest row still has usable time
+// resolution: a 1.4 s render floors at ~5.7 Hz, a 0.3 s one at ~27 Hz, and an
+// 8 s one opens down to 1 Hz where the resolution genuinely exists.
+// MEASURED, and this is what the floor is protecting against: widening the
+// bottom bands to cut their smear pulled near-DC bins in, and a 0.7 Hz
+// component of a 1.4 s record is a flat bar across the entire plot.
+const SPEC_FMIN_CYCLES = 8;
+// A PERCEPTUAL RAMP, not one hue's lightness. Lightness alone resolves maybe a
+// dozen steps; varying hue and lightness together resolves several times that,
+// which is what makes a 10 dB difference at the bottom of the knob legible.
+const SPEC_RAMP = [
+  [  4,  6, 22], [ 32, 18, 88], [ 46, 70,142], [ 34,124,136],
+  [ 68,172,104], [168,208, 76], [248,230, 62], [255,252,190],
+];
+function rampColor(t) {
+  const x = Math.max(0, Math.min(1, t)) * (SPEC_RAMP.length - 1);
+  const i = Math.min(SPEC_RAMP.length - 2, Math.floor(x)), f = x - i;
+  const a = SPEC_RAMP[i], b = SPEC_RAMP[i + 1];
+  return [Math.round(a[0] + (b[0] - a[0]) * f),
+          Math.round(a[1] + (b[1] - a[1]) * f),
+          Math.round(a[2] + (b[2] - a[2]) * f)];
+}
+const specCv = $('specCv'), specCtx = specCv.getContext('2d');
+let specData = null;   // { cells, cols, rows, tMax, fMax }
+
+// A GABOR TRANSFORM: one Gaussian bandpass per pixel row, evaluated in the
+// frequency domain.
+//
+// WHY NOT A RESONATOR. The previous version used a single complex one-pole per
+// row. A one-pole is not a bandpass: at Q = 4.7 its response at DC is only
+// 16.5 dB below its peak. The chiff spans 60+ dB across frequency, so every row
+// above the energy simply re-displayed the low end -- vertical bands running the
+// full height, no falloff toward high frequencies, and bands at 20 kHz on a
+// signal whose corner is 5 Hz. Every artifact chased before this was that leak.
+//
+// A GAUSSIAN KERNEL IS THE RIGHT SHAPE. It is its own transform, so it is
+// compact in both domains, and its skirts fall off faster than any polynomial
+// filter: at CQ_SIGMAS the rejection is ~109 dB, which is well past the signal's
+// own dynamic range. It is symmetric, so the result is ZERO PHASE and every row
+// is time-aligned without running anything backwards.
+//
+// AND IT DELETES THREE CLASSES OF BUG. There is no decimation pyramid, so no
+// per-level rate scaling, no anti-alias droop to compensate, and no tier
+// boundaries to seam. One transform, one normalisation, no fudge factors.
+// Q = 3 puts a bin at ~16 pixel rows. It also sets TIME SMEAR, because the two
+// are the same number: sigma_t = 1/(2*pi*sigma_f), so widening the bin narrows
+// the blur. MEASURED at the bottom of the axis, where it matters -- a 4-sample
+// impulse paints 556 ms at 10 Hz with Q = 4.7 and 374 ms with Q = 3. The cost is
+// paid at the top, where smear goes from 9 ms to 14 ms at 1 kHz and nothing
+// audible depends on it.
+const CQ_Q = 3.0;
+// KERNEL SUPPORT, AND IT MUST CLEAR THE DISPLAY FLOOR. Cutting the kernel is a
+// rectangular window in FREQUENCY, which rings in TIME -- so if the cut happens
+// anywhere the display can still draw, an impulse grows a tail that is pure
+// truncation. MEASURED: at 4 sigma the edge sits at -69 dB, plainly visible on a
+// -96 dB ramp, and a 4-sample chiff at DURATION 0 painted low-frequency content
+// past 600 ms when the residual is exactly zero after 100 ms. 5.5 sigma puts the
+// edge at -131 dB, under the floor with room to spare.
+const CQ_SIGMAS = 5.0;
+const CQ_MIN_BINS = 16;
+// Deposit points per display column when reassigning; see the note below.
+const CQ_REASSIGN_OVERSAMPLE = 4;
+// TIME REASSIGNMENT. The kernel's width is a resolution limit, not a sampling
+// one, so no amount of supersampling narrows it -- but the transform's PHASE
+// still carries where the energy actually came from. The local group delay is
+// Re(z_t / z), where z_t uses the window t*h(t); in the frequency domain that
+// is the derivative of the Gaussian, which is closed form. Depositing each
+// point's energy at t + delay collapses an impulse toward the instant that
+// produced it instead of smearing it over the kernel.
+
+// A FLOOR ON BANDWIDTH, SET BY THE RENDER. A band of width B cannot resolve
+// detail faster than ~1/B; asking for finer than the render supports paints the
+// analysis, not the signal. Below the crossover the bins widen, which is the
+// physical limit of a short render rather than a choice.
+const CQ_SETTLES_PER_RENDER = 6;
+
+function nextPow2(n) { let m = 1; while (m < n) m <<= 1; return m; }
+
+// In-place inverse, 1/N scaled, built from the forward transform by conjugation
+// so there is only one FFT in the page.
+function ifft(re, im, len) {
+  const n = len || re.length;
+  for (let i = 0; i < n; i++) im[i] = -im[i];
+  fft(re, im, n);
+  for (let i = 0; i < n; i++) { re[i] /= n; im[i] = -im[i] / n; }
+}
+
+// THE ROW ENGINE, AND IT IS ALSO THE WORKER. This function is stringified into
+// the worker source below, so both threads execute the SAME TEXT -- there is no
+// second implementation to drift. Everything it needs arrives in `job`; it
+// touches no page state and returns its slice of the cell grid.
+function spectrogramRows(job) {
+  const { res, totalN, FS, PEAK, COLS, ROWS, rowStart, rowEnd } = job;
+  const { CQ_Q, CQ_SIGMAS, CQ_MIN_BINS, CQ_SETTLES_PER_RENDER,
+          SPEC_FMIN_CYCLES, CQ_REASSIGN_OVERSAMPLE } = job;
+  const CQ_REASSIGN = job.reassign;
+
+  // ONE forward transform of the whole residual. Every row is a windowed slice
+  // of this spectrum, so the signal is only transformed once.
+  // PAD PAST THE KERNEL, PER ROW. A Gaussian of width sigma_f in frequency is
+  // 1/(2*pi*sigma_f) wide in TIME, so without room the transform wraps and the
+  // loud onset reappears at the right-hand edge. That width scales as 1/f, so a
+  // single padded length sized for the BOTTOM row makes every top row pay for
+  // padding it does not need -- and the top rows are the expensive ones, because
+  // their kernels span the most bins. Each row takes the shortest transform that
+  // clears its own kernel; padding never changes the result, so rows computed at
+  // different lengths agree exactly and there is no seam.
+  const bwFloor = CQ_SETTLES_PER_RENDER / (Math.PI * (totalN / FS));
+  const spectra = new Map();   // NFFT -> { XR, XI }
+  const spectrumFor = (NFFT) => {
+    let e = spectra.get(NFFT);
+    if (!e) {
+      const XR = new Float64Array(NFFT), XI = new Float64Array(NFFT);
+      for (let i = 0; i < totalN; i++) XR[i] = res[i];
+      fft(XR, XI);
+      e = { XR, XI };
+      spectra.set(NFFT, e);
+    }
+    return e;
+  };
+  const fMax = FS / 2;
+  const fMin = SPEC_FMIN_CYCLES / (totalN / FS);
+  const logMin = Math.log(fMin), logSpan = Math.log(fMax) - logMin;
+  const cells = new Float32Array((rowEnd - rowStart) * COLS);
+  const baseNFFT = nextPow2(totalN);
+  // Reused across rows; a row uses the first M entries.
+  let zr = new Float64Array(baseNFFT), zi = new Float64Array(baseNFFT);
+  let tr = new Float64Array(baseNFFT), ti = new Float64Array(baseNFFT);
+  const acc = new Float64Array(COLS), wgt = new Float64Array(COLS);
+
+  for (let row = rowStart; row < rowEnd; row++) {
+    const f = Math.exp(logMin + (1 - (row + 0.5) / ROWS) * logSpan);
+    // PERCEPTUAL MODE. Two things separate this display from hearing, and both
+    // are per-row constants.
+    //  BANDWIDTH. Ours is constant-Q; the ear is ~25-35 Hz wide below 500 Hz and
+    //  constant-Q about 9 above. At 30 Hz ours is 10 Hz against the ear's 28, so
+    //  we resolve -- and smear in time -- detail the ear never separates.
+    //  LEVEL. Brightness is flat in dBFS and hearing is not: A-weighting puts
+    //  30 Hz 41 dB down and 10 Hz 70 dB down against 1 kHz. That gap is why the
+    //  bottom of the plot blazes while the sound is unremarkable.
+    const erb = 24.7 * (0.00437 * f + 1);
+    const bw = Math.max(job.perceptual ? erb : f / CQ_Q, bwFloor);
+    let weight = 1;
+    if (job.perceptual) {
+      const f2 = f * f;
+      const ra = (12194 * 12194 * f2 * f2) /
+        ((f2 + 20.6 * 20.6) *
+         Math.sqrt((f2 + 107.7 * 107.7) * (f2 + 737.9 * 737.9)) *
+         (f2 + 12194 * 12194));
+      weight = ra * Math.pow(10, 2.00 / 20);
+    }
+    // sigma of the AMPLITUDE kernel, set so |G|^2 is -3 dB at bw/2.
+    const sigma = bw / (2 * Math.sqrt(Math.LN2));
+    // This row's kernel reach in time, and the shortest transform that clears it.
+    const reach = Math.ceil(CQ_SIGMAS * FS / (2 * Math.PI * sigma));
+    let NFFT = baseNFFT;
+    while (NFFT < totalN + 2 * reach) NFFT <<= 1;
+    const { XR, XI } = spectrumFor(NFFT);
+    const df = FS / NFFT;
+    const timeFrac = totalN / NFFT;
+    const halfBins = Math.max(1, Math.ceil(CQ_SIGMAS * sigma / df));
+    const centre = Math.round(f / df);
+    // SIZE THE TRANSFORM TO THE BINS THAT EXIST, not to the kernel's nominal
+    // width. Near the top of the axis half the kernel lies past Nyquist and was
+    // being discarded anyway, so those rows -- the expensive ones -- were paying
+    // for a transform twice the size they use. Same output, half the work.
+    const loBin = Math.max(1, centre - halfBins);
+    const hiBin = Math.min(NFFT / 2 - 1, centre + halfBins);
+    if (hiBin < loBin) { continue; }
+    // SUPERSAMPLE THE DEPOSIT GRID WHEN REASSIGNING. Zero-padding the baseband
+    // spectrum interpolates in time -- no new information, but more points to
+    // scatter. Without it each envelope sample lands in its own column and the
+    // columns outnumber the samples, so the deposits trace sparse curves
+    // through empty cells: the tendrils. They are undersampling, not the
+    // divergence they look like -- the median delay here is a third of a column.
+    let M = nextPow2(Math.max(hiBin - loBin + 1, CQ_MIN_BINS));
+    if (CQ_REASSIGN) M = Math.max(M, nextPow2(CQ_REASSIGN_OVERSAMPLE * COLS));
+    if (M > zr.length) { zr = new Float64Array(M); zi = new Float64Array(M); }
+    zr.fill(0, 0, M); zi.fill(0, 0, M);
+    // ANALYTIC: positive frequencies only, doubled. Without it every row would
+    // also see the mirror image of the band below DC.
+    // THE GAUSSIAN BY RECURRENCE, not by Math.exp per bin. On a uniform grid
+    // exp(-(d*h)^2/2) satisfies g(d+1) = g(d) * ratio(d), ratio(d+1) = ratio(d) * B
+    // with A = exp(-h^2/2) and B = exp(-h^2) -- two multiplies a bin instead of a
+    // transcendental. MEASURED: this loop ran ~2M exp calls and was 416 ms of a
+    // 491 ms transform, against 75 ms for every FFT in it.
+    // ROLL THE KERNEL OFF BELOW THE AXIS FLOOR, SMOOTHLY. A band wide enough to
+    // reach DC collects components whose period exceeds the record; those cannot
+    // be placed in time at all, so they paint the full width as a flat bar.
+    // Constant-Q never got wide enough at the bottom for this to bite; auditory
+    // bandwidths do -- ERB at 25 Hz is 27 Hz against constant-Q's 8 -- and the
+    // bar appeared at exactly the rows whose kernel crossed DC.
+    // IT HAS TO BE A TAPER, NOT A CUT. Clipping the kernel at a bin was tried
+    // and is worse: a hard edge in frequency rings in time, which is the same
+    // defect that made CQ_SIGMAS matter. This factor is Gaussian-complementary,
+    // so the product with the kernel stays smooth.
+    const hpSigma = fMin;
+    const hpLimit = 4 * hpSigma;
+    const h = df / sigma;
+    const B = Math.exp(-h * h);
+    const dLo = loBin - centre;
+    let g = Math.exp(-0.5 * (dLo * h) * (dLo * h));
+    let ratio = Math.exp(-0.5 * h * h) * Math.pow(B, dLo);
+    let norm2 = 0;
+    // M is a power of two, so the wrap is a mask -- and a mask is correct for
+    // negative d, because JS bitwise ops are two's complement.
+    const mask = M - 1;
+    if (CQ_REASSIGN && tr.length < M) { tr = new Float64Array(M); ti = new Float64Array(M); }
+    if (CQ_REASSIGN) { tr.fill(0, 0, M); ti.fill(0, 0, M); }
+    // t*h(t) has transform (i/2pi) dG/df, and dG/df = -(f-fc)/sigma^2 * G.
+    const tScale = -1 / (2 * Math.PI * sigma * sigma);
+    // TWO LOOPS, NOT ONE WITH A FLAG IN IT. This runs once per kernel bin --
+    // over a million times per frame -- and testing the mode in there cost 80%
+    // of the transform even with the branch never taken.
+    if (CQ_REASSIGN) {
+      for (let k = loBin; k <= hiBin; k++) {
+        const d = k - centre;
+        const idx = d & mask;          // centre bin lands at baseband index 0
+        const fk = k * df;
+        const gh = fk < hpLimit
+          ? g * (1 - Math.exp(-0.5 * (fk / hpSigma) * (fk / hpSigma))) : g;
+        const wr = 2 * XR[k] * gh, wi = 2 * XI[k] * gh;
+        zr[idx] = wr; zi[idx] = wi;
+        // multiply by -i * (d*df) / (2 pi sigma^2)
+        const a = tScale * (d * df);
+        tr[idx] = wi * a;              // (-i)*(wr+i*wi)*a = a*wi - i*a*wr
+        ti[idx] = -wr * a;
+        norm2 += gh * gh;
+        g *= ratio; ratio *= B;
+      }
+    } else {
+      for (let k = loBin; k <= hiBin; k++) {
+        const d = k - centre;
+        const idx = d & mask;
+        const fk = k * df;
+        const gh = fk < hpLimit
+          ? g * (1 - Math.exp(-0.5 * (fk / hpSigma) * (fk / hpSigma))) : g;
+        zr[idx] = 2 * XR[k] * gh;
+        zi[idx] = 2 * XI[k] * gh;
+        norm2 += gh * gh;
+        g *= ratio; ratio *= B;
+      }
+    }
+    ifft(zr, zi, M);
+    if (CQ_REASSIGN) ifft(tr, ti, M);
+    // WHITE NOISE READS THE SAME AT EVERY ROW. For input of per-sample sigma s,
+    // rms|z| = 2*s*sqrt(NFFT*norm2)/M, so this recovers s -- a per-Hz density,
+    // which is what makes a flat spectrum draw flat. The second factor is the
+    // display's own calibration and leaves SPEC_REF unchanged.
+    const scale = norm2 > 0
+      ? (M / (2 * Math.sqrt(NFFT * norm2))) * Math.sqrt(0.375 * 512) * weight : 0;
+
+    // The envelope has M points across the NFFT span; the plot shows totalN of
+    // it. Average when a column covers several points, interpolate when it
+    // covers less than one -- at low rows the envelope genuinely is that smooth.
+    const rowOff = (row - rowStart) * COLS;
+    const span = timeFrac * M / COLS;
+    if (CQ_REASSIGN) {
+      // Scatter each point's POWER into the column its own group delay names.
+      acc.fill(0); wgt.fill(0);
+      const usable = Math.min(M, Math.ceil(timeFrac * M));
+      const secPerSample = NFFT / (M * FS);      // one envelope step, in seconds
+      const maxDelay = CQ_SIGMAS / (2 * Math.PI * sigma);   // the kernel's reach
+      for (let i = 0; i < usable; i++) {
+        const zrr = zr[i], zii = zi[i];
+        const p = zrr * zrr + zii * zii;
+        if (p <= 0) continue;
+        // Re(z_t / z) = Re(z_t * conj(z)) / |z|^2
+        const delay = (tr[i] * zrr + ti[i] * zii) / p;
+        // NO ENERGY CAN COME FROM OUTSIDE THE KERNEL'S OWN REACH, so a delay
+        // longer than that is spurious by construction. It happens where the
+        // analytic signal passes near a zero: the denominator vanishes, the
+        // phase is undefined, and the estimate sweeps smoothly through huge
+        // values -- which is why the strays trace continuous tendrils rather
+        // than scattering. MEASURED at 300 Hz, kernel reach 15 ms: delays up to
+        // 92 ms, six times further than anything could have travelled.
+        if (delay > maxDelay || delay < -maxDelay) continue;
+        const c = ((i * secPerSample + delay) / (totalN / FS) * COLS) | 0;
+        if (c >= 0 && c < COLS) { acc[c] += p; wgt[c] += 1; }
+      }
+      for (let c = 0; c < COLS; c++)
+        cells[rowOff + c] = wgt[c] ? Math.sqrt(acc[c] / wgt[c]) * scale : 0;
+    } else if (span >= 1) {
+      for (let c = 0; c < COLS; c++) {
+        const i0 = (c * span) | 0;
+        let i1 = ((c + 1) * span) | 0;
+        if (i1 >= M) i1 = M - 1;
+        let a2 = 0, n = 0;
+        for (let i = i0; i <= i1; i++) {
+          const ar = zr[i], ai = zi[i];
+          a2 += ar * ar + ai * ai; n++;
+        }
+        cells[rowOff + c] = Math.sqrt(a2 / n) * scale;
+      }
+    } else {
+      for (let c = 0; c < COLS; c++) {
+        const a = c * span;
+        const i0 = a | 0, t = a - i0;
+        const j = i0 + 1 < M ? i0 + 1 : M - 1;
+        const r0 = zr[i0], m0 = zi[i0], r1 = zr[j], m1 = zi[j];
+        const p0 = Math.sqrt(r0 * r0 + m0 * m0), p1 = Math.sqrt(r1 * r1 + m1 * m1);
+        cells[rowOff + c] = (p0 * (1 - t) + p1 * t) * scale;
+      }
+    }
+  }
+  return cells;
+}
+
+
+// ---- dispatch: workers when the host allows them, this thread otherwise ----
+//
+// The row loop is embarrassingly parallel -- every row reads the same residual
+// and writes its own slice -- so it splits across cores with no coordination.
+// The worker source is BUILT FROM THE FUNCTIONS THEMSELVES via toString(), so a
+// worker cannot drift from the main thread: it is the same text.
+//
+// Blob workers may be refused by a host's content policy. If construction or
+// the first message throws, everything falls back to computing here, and the
+// readout says which happened -- a silent fallback would look like a mystery
+// slowdown.
+let specWorkers = null, specWorkerState = 'untried', specWorkerUrl = null;
+let specWatchdog = 0, specDrawMs = 0;
+// Give up on the pool and recompute here. Anything that leaves the workers
+// silent -- a refused blob, a script that never loaded, a thrown job -- lands
+// here, and the readout says so rather than the page just stopping.
+function specStatus(text) {
+  const el = $('specMode');
+  if (el) el.textContent = text + '  \u00b7  re-roll seed to compare realizations';
+}
+function specWorkerFailed(why) {
+  if (!specWorkers || !specWorkers.length) return;
+  for (const w of specWorkers) { try { w.terminate(); } catch (e) {} }
+  specWorkers = [];
+  specWorkerState = 'single-threaded (' + why + ')';
+  specData = null;
+  drawSpectrogram();
+}
+function specWorkerPool() {
+  if (specWorkers !== null) return specWorkers;
+  specWorkers = [];
+  try {
+    const src = [
+      'const fftTwiddles = new Map();',
+      twiddlesFor.toString(), fft.toString(), ifft.toString(),
+      nextPow2.toString(), spectrogramRows.toString(),
+      'onmessage = (e) => { const c = spectrogramRows(e.data);' +
+      ' postMessage({ id: e.data.id, cells: c }, [c.buffer]); };',
+    ].join('\n');
+    // DO NOT REVOKE THE URL. A worker fetches its script asynchronously, so
+    // revoking right after construction races that fetch: the workers exist,
+    // the count looks right, and they never answer.
+    specWorkerUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const n = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
+    for (let i = 0; i < n; i++) {
+      const w = new Worker(specWorkerUrl);
+      // A worker that fails to LOAD errors before any job is posted, so the
+      // handler has to exist from birth rather than being attached at dispatch.
+      w.onerror = () => specWorkerFailed('worker error');
+      specWorkers.push(w);
+    }
+    specWorkerState = specWorkers.length + ' workers';
+  } catch (err) {
+    specWorkers = [];
+    specWorkerState = 'single-threaded (workers refused)';
+  }
+  return specWorkers;
+}
+
+function specJob(COLS, ROWS, rowStart, rowEnd, res, totalN) {
+  return { res, totalN, FS, PEAK, COLS, ROWS, rowStart, rowEnd,
+    reassign: $('reassign').checked, perceptual: $('perceptual').checked,
+    CQ_Q, CQ_SIGMAS, CQ_MIN_BINS, CQ_SETTLES_PER_RENDER,
+    SPEC_FMIN_CYCLES, CQ_REASSIGN_OVERSAMPLE };
+}
+
+// The residual, once, in the form the row engine wants.
+function specResidual() {
+  const out = lastRes.out, line = lastLine, totalN = lastRes.totalN;
+  const res = new Float64Array(totalN);
+  for (let i = 0; i < totalN; i++) res[i] = (out[i] - line[i]) / PEAK;
+  return res;
+}
+
+function specMeta(COLS, ROWS, cells) {
+  const totalN = lastRes.totalN;
+  return { cells, cols: COLS, rows: ROWS, tMax: totalN / FS * 1000,
+    fMin: SPEC_FMIN_CYCLES / (totalN / FS), fMax: FS / 2,
+    bwFloor: CQ_SETTLES_PER_RENDER / (Math.PI * (totalN / FS)),
+    reassign: $('reassign').checked, perceptual: $('perceptual').checked,
+    workers: specWorkerState };
+}
+
+// Synchronous, always available. Used as the fallback and by the check scripts,
+// which drive computeSpectrogram directly.
+function computeSpectrogram(COLS, ROWS) {
+  if (!lastRes) return;
+  const totalN = lastRes.totalN;
+  const cells = spectrogramRows(
+    specJob(COLS, ROWS, 0, ROWS, specResidual(), totalN));
+  specData = specMeta(COLS, ROWS, cells);
+}
+
+let specToken = 0;
+// Parallel, asynchronous. Resolves false if there are no workers to use.
+function computeSpectrogramAsync(COLS, ROWS, done) {
+  const pool = specWorkerPool();
+  if (!pool.length) return false;
+  const totalN = lastRes.totalN, res = specResidual();
+  const t0 = performance.now();
+  const token = ++specToken;
+  const cells = new Float32Array(ROWS * COLS);
+  let pending = pool.length;
+  // Rows are split evenly; cost per row is uneven, but the bands interleave
+  // cheap and expensive rows enough that a static split is close to balanced.
+  pool.forEach((w, k) => {
+    const rowStart = Math.floor(k * ROWS / pool.length);
+    const rowEnd = Math.floor((k + 1) * ROWS / pool.length);
+    if (rowEnd <= rowStart) { if (--pending === 0) finish(); return; }
+    w.onmessage = (e) => {
+      if (e.data.id !== token) return;             // a superseded render
+      cells.set(e.data.cells, rowStart * COLS);
+      if (--pending === 0) finish();
+    };
+    w.onerror = () => { specWorkerState = 'single-threaded (worker error)';
+      specWorkers = []; if (--pending === 0) finish(); };
+    const job = specJob(COLS, ROWS, rowStart, rowEnd, res, totalN);
+    job.id = token;
+    w.postMessage(job);
+  });
+  function finish() {
+    if (token !== specToken) return;
+    clearTimeout(specWatchdog); specWatchdog = 0;
+    specData = specMeta(COLS, ROWS, cells);
+    specDrawMs = Math.round(performance.now() - t0);
+    done();
+  }
+  // WATCHDOG. If the pool goes quiet the page would simply stop updating, which
+  // is indistinguishable from a hang. Fall back and say why.
+  specStatus(specWorkerState + '  \u00b7  rendering\u2026');
+  clearTimeout(specWatchdog);
+  specWatchdog = setTimeout(() => {
+    if (token === specToken) specWorkerFailed('workers did not answer');
+  }, 4000);
+  return true;
+}
+
+function hslToRgb(h, s, l) {
+  s /= 100; l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+function drawSpectrogram() {
+  if (!lastRes) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = specCv.clientWidth, H = specCv.clientHeight;
+  const padL = 30, padB = 14, padT = 4, padR = 4;
+  const pw = Math.max(1, Math.round(W - padL - padR)), ph = Math.max(1, Math.round(H - padT - padB));
+  // DO NOT CLEAR BEFORE THE DATA IS READY. While a parallel render is in flight
+  // there is nothing new to draw, and clearing first would blank the canvas on
+  // every slider move -- the old frame is a better thing to show than nothing.
+  const fresh = specData && specData.cols === pw && specData.rows === ph &&
+    specData.reassign === $('reassign').checked &&
+    specData.perceptual === $('perceptual').checked;
+  if (!fresh) {
+    if (!computeSpectrogramAsync(pw, ph, drawSpectrogram)) computeSpectrogram(pw, ph);
+    if (!specData || specData.cols !== pw || specData.rows !== ph) return;
+    if (specData.reassign !== $('reassign').checked) return;
+    if (specData.perceptual !== $('perceptual').checked) return;
+  }
+  if (specCv.width !== W * dpr || specCv.height !== H * dpr) { specCv.width = W * dpr; specCv.height = H * dpr; }
+  specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  specCtx.clearRect(0, 0, W, H);
+
+  const { cells, cols, rows } = specData;
+  const tmp = document.createElement('canvas'); tmp.width = pw; tmp.height = ph;
+  const tctx = tmp.getContext('2d'); const img = tctx.createImageData(pw, ph);
+  // One cell per pixel, by construction.
+  for (let py = 0; py < ph; py++) {
+    for (let px = 0; px < pw; px++) {
+      const mag = cells[py * cols + px];
+      const db = 20 * Math.log10(mag / SPEC_REF + 1e-12);
+      const [r, g, bl] = rampColor((db + SPEC_RANGE_DB) / SPEC_RANGE_DB);
+      const idx = (py * pw + px) * 4;
+      img.data[idx] = r; img.data[idx + 1] = g; img.data[idx + 2] = bl; img.data[idx + 3] = 255;
+    }
+  }
+  tctx.putImageData(img, 0, 0);
+  specCtx.imageSmoothingEnabled = false;
+  specCtx.drawImage(tmp, padL, padT);
+  const specMeta = specData;
+  specStatus((specData.workers || '') + (specDrawMs ? '  \u00b7  ' + specDrawMs + ' ms' : ''));
+  specCtx.fillStyle = cssVar('--ink3'); specCtx.font = '9px ui-monospace, Menlo, monospace';
+  const logMinL = Math.log(specMeta.fMin), logSpanL = Math.log(specMeta.fMax) - logMinL;
+  for (const f of [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) {
+    if (f > specMeta.fMax || f < specMeta.fMin) continue;
+    const y = padT + (1 - (Math.log(f) - logMinL) / logSpanL) * ph;
+    specCtx.fillText(f >= 1000 ? (f / 1000) + 'k' : String(f), 2, y + 3);
+  }
+  // THE RESOLUTION LIMIT, DRAWN. Everything below a row's own kernel width is
+  // the analysis, not the signal -- and that has now been mistaken for signal
+  // three times: the DURATION 0 wedge, the rightward smear, and low-frequency
+  // content lingering after the chiff has stopped. This curve is what a single
+  // impulse at t=0 would paint, so any feature hugging its shape is the
+  // instrument rather than the exciter. It is per-row and it costs nothing.
+  specCtx.save();
+  specCtx.strokeStyle = cssVar('--ink3');
+  specCtx.globalAlpha = 0.45;
+  specCtx.setLineDash([3, 3]);
+  specCtx.lineWidth = 1;
+  specCtx.beginPath();
+  for (let py = 0; py <= ph; py += 2) {
+    const f = Math.exp(logMinL + (1 - py / ph) * logSpanL);
+    const erbW = 24.7 * (0.00437 * f + 1);
+    const bw = Math.max(specMeta.perceptual ? erbW : f / CQ_Q, specMeta.bwFloor);
+    const sigmaT = 1 / (2 * Math.PI * (bw / (2 * Math.sqrt(Math.LN2))));
+    const x = padL + (CQ_SIGMAS * sigmaT * 1000) / specMeta.tMax * pw;
+    const y = padT + py;
+    if (py === 0) specCtx.moveTo(x, y); else specCtx.lineTo(x, y);
+  }
+  specCtx.stroke();
+  specCtx.restore();
+
+  const step = specMeta.tMax > 2000 ? 500 : 200;
+  for (let t = 0; t <= specMeta.tMax; t += step) {
+    const x = padL + t / specMeta.tMax * pw;
+    specCtx.fillText(t >= 1000 ? (t / 1000) + 's' : t + '', x + 1, H - 4);
+  }
+}
+
+// Twiddle tables, cached per transform length. The previous form advanced the
+// twiddle by a complex multiply inside the butterfly -- four multiplies and two
+// adds of pure overhead per butterfly, on top of the four the butterfly needs,
+// and the repeated multiply accumulated rounding across a stage. The
+// spectrogram runs hundreds of transforms of a handful of sizes, so a table per
+// size is built once and reused.
+const fftTwiddles = new Map();
+function twiddlesFor(n) {
+  let t = fftTwiddles.get(n);
+  if (!t) {
+    const half = n >> 1;
+    const cos = new Float64Array(half), sin = new Float64Array(half);
+    for (let k = 0; k < half; k++) {
+      const a = -2 * Math.PI * k / n;
+      cos[k] = Math.cos(a); sin[k] = Math.sin(a);
+    }
+    t = { cos, sin };
+    fftTwiddles.set(n, t);
+  }
+  return t;
+}
+
+function fft(re, im, len) {
+  const n = len || re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr;
+                 const ti = im[i]; im[i] = im[j]; im[j] = ti; }
+  }
+  const { cos, sin } = twiddlesFor(n);
+  for (let len = 2; len <= n; len <<= 1) {
+    const half = len >> 1, step = n / len;
+    for (let i = 0; i < n; i += len) {
+      for (let k = 0, w = 0; k < half; k++, w += step) {
+        const cr = cos[w], ci = sin[w];
+        const a = i + k, b = a + half;
+        const rb = re[b], ib = im[b];
+        const tr = rb * cr - ib * ci, ti = rb * ci + ib * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti;
+        re[a] += tr; im[a] += ti;
+      }
+    }
+  }
+}
+
+function drawSpectrum() {
+  if (!lastRes) return;
+  const out = lastRes.out, totalN = lastRes.totalN;
+  let center = specSample < 0 ? Math.floor(totalN * 0.55) : specSample;
+  let start = Math.max(1, Math.min(totalN - SPEC_WINDOW - 1, center - SPEC_WINDOW / 2));
+  // residual = value minus a 64-tap moving mean (isolate the noise from the
+  // envelope trend), then Hann-windowed
+  const re = new Float64Array(SPEC_WINDOW), im = new Float64Array(SPEC_WINDOW);
+  const mw = 64;
+  for (let k = 0; k < SPEC_WINDOW; k++) {
+    let m = 0;
+    for (let j = -mw; j <= mw; j++) m += out[start + k + j] || out[start + k];
+    m /= (2 * mw + 1);
+    const hann = 0.5 - 0.5 * Math.cos(2 * Math.PI * k / (SPEC_WINDOW - 1));
+    re[k] = ((out[start + k] - m) / PEAK) * hann;
+  }
+  fft(re, im);
+  const bins = SPEC_WINDOW / 2;
+  let peak = 1e-9;
+  const mag = new Float64Array(bins);
+  for (let b = 0; b < bins; b++) { mag[b] = Math.hypot(re[b], im[b]); if (mag[b] > peak) peak = mag[b]; }
+
+  const dpr = window.devicePixelRatio || 1;
+  const W = specCv.clientWidth, H = specCv.clientHeight;
+  if (specCv.width !== W * dpr || specCv.height !== H * dpr) { specCv.width = W * dpr; specCv.height = H * dpr; }
+  specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  specCtx.clearRect(0, 0, W, H);
+  const padL = 30, padB = 14, padT = 4, padR = 4;
+  const pw = W - padL - padR, ph = H - padT - padB;
+  const nyq = FS / 2;
+  specCtx.strokeStyle = cssVar('--grid'); specCtx.fillStyle = cssVar('--ink3');
+  specCtx.font = '9px ui-monospace, Menlo, monospace'; specCtx.lineWidth = 1;
+  for (let db = 0; db >= -60; db -= 20) {
+    const y = padT + (-db / 60) * ph;
+    specCtx.beginPath(); specCtx.moveTo(padL, y); specCtx.lineTo(W - padR, y); specCtx.stroke();
+    specCtx.fillText(db + '', 2, y + 3);
+  }
+  for (let f = 0; f <= nyq; f += 5000) {
+    const x = padL + f / nyq * pw;
+    specCtx.beginPath(); specCtx.moveTo(x, padT); specCtx.lineTo(x, H - padB); specCtx.stroke();
+    specCtx.fillText((f / 1000) + 'k', x + 1, H - 4);
+  }
+  specCtx.strokeStyle = cssVar('--noise'); specCtx.lineWidth = 1.2; specCtx.beginPath();
+  for (let b = 1; b < bins; b++) {
+    const db = 20 * Math.log10(mag[b] / peak + 1e-9);
+    const x = padL + (b / bins) * pw;
+    const y = padT + Math.min(1, -db / 60) * ph;
+    if (b === 1) specCtx.moveTo(x, y); else specCtx.lineTo(x, y);
+  }
+  specCtx.stroke();
+  $('specInfo').textContent = 'window @ ' + (center / FS * 1000).toFixed(0) + ' ms'
+    + (specSample < 0 ? ' (default; hover trace to move)' : '');
+}
+
+// ---- controls: every value is a front-panel setting ----
+let seed = 0xCAFEBABE;
+function params() {
+  return {
+    attack: +$('atk').value,
+    decay: +$('dec').value,
+    sustain: +$('sus').value,
+    release: +$('rel').value,
+    amplitudeModVelocity: +$('ampmod').value,
+    velocity: +$('vel').value,
+    amount: +$('amt').value,
+    chiffDuration: +$('chiffDur').value,
+    durationModVelocity: +$('durMod').value,
+    gateMs: gateMsFromSlider(+$('gate').value),
+    biasLfo: +$('biasLfo').value,
+    tremolo: +$('tremolo').value,
+    maxTarget: +$('maxTarget').value,
+    minTarget: +$('minTarget').value,
+    seed: seed,
+  };
+}
+
+// Settings are the input; the engine tells us what they cost in samples, and
+// ms is shown purely as a readout.
+// Firmware units are AUTHORITATIVE and shown first; human units are a
+// translation, shown dimmed alongside. Never the other way round: a
+// millisecond value names lengths the module cannot produce (only 128 stage
+// lengths exist), which is how a real bug hid -- CHIFF DURATION 20 and 21 are
+// 185 and 199 samples but both round to "4 ms".
+function fwUnit(authoritative, translated) {
+  return '<b>' + authoritative + '</b>' +
+         (translated ? ' <small>= ' + translated + '</small>' : '');
+}
+const msOfSamples = n => fmtMs(n / FS * 1000);
+
+function labels() {
+  if (!ENGINE) return;
+  const stage = s => ENGINE.stageSamples(s);
+  for (const [slider, out] of [['atk','atkV'], ['dec','decV'], ['rel','relV']]) {
+    const setting = +$(slider).value;
+    const samples = stage(setting);
+    $(out).innerHTML = fwUnit(setting, samples + ' smp, ' + msOfSamples(samples));
+  }
+  // Sustain is a LEVEL setting, not a time.
+  const susSetting = +$('sus').value;
+  $('susV').innerHTML = fwUnit(susSetting,
+    ((susSetting << 6) / 8191 * 100).toFixed(0) + '% of peak');
+  // Already firmware units: a signed setting and a MIDI velocity.
+  $('ampmodV').innerHTML = fwUnit($('ampmod').value, '');
+  $('velV').innerHTML = fwUnit($('vel').value, '');
+  $('amtV').innerHTML = fwUnit($('amt').value + ' / 127', '');
+  $('durModV').innerHTML = fwUnit($('durMod').value, '');
+  const durSetting = +$('chiffDur').value;
+  const durSamples = ENGINE.durationSamples(
+    durSetting, +$('durMod').value, +$('vel').value);
+  $('chiffDurV').innerHTML = fwUnit(durSetting,
+    durSamples + ' smp, ' + msOfSamples(durSamples));
+  // Gate is a performance, not a setting, so its firmware unit is samples.
+  const gateSamples = Math.round(gateMsFromSlider(+$('gate').value) * FS / 1000);
+  $('gateV').innerHTML = fwUnit(gateSamples + ' smp', msOfSamples(gateSamples));
+  // Bias and the note's rails. Both biases are s16 amplitudes; the targets are
+  // the s16 rails handed to NoteOn, so "inverted" and "negative" are just
+  // orderings of the two rather than modes.
+  const biasLfo = +$('biasLfo').value, tremolo = +$('tremolo').value;
+  $('biasLfoV').innerHTML = fwUnit(biasLfo, biasLfo ? '+/- s16, flips every 8 blocks' : 'off');
+  $('tremoloV').innerHTML = fwUnit(tremolo, tremolo ? 'depth u16' : 'off');
+  const minTarget = +$('minTarget').value;
+  const maxTargetRaw = +$('maxTarget').value;
+  // The span is an int16 in NoteOn, so the module cannot be handed one wider
+  // than that; the engine clamps it and the readout says so rather than
+  // silently simulating something the hardware can't do.
+  const maxTarget = Math.max(minTarget - 32768,
+                             Math.min(minTarget + 32767, maxTargetRaw));
+  const shape = maxTarget < 0 || minTarget < 0 ? 'NEGATIVE range'
+              : minTarget > maxTarget ? 'inverted (min > max)' : 'ordinary';
+  $('maxTargetV').innerHTML = fwUnit(maxTarget,
+    (maxTarget !== maxTargetRaw ? 'clamped from ' + maxTargetRaw + ', span is int16; ' : '')
+    + shape);
+  $('minTargetV').innerHTML = fwUnit(minTarget, '');
+  $('seedShow').textContent = 'seed 0x' + (seed >>> 0).toString(16);
+}
+let raf = null;
+function update() {
+  if (!ENGINE) return;
+  labels();
+  if (raf) cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(draw);
+}
+['atk','dec','sus','rel','ampmod','vel','gate','amt','chiffDur','durMod',
+ 'biasLfo','tremolo','maxTarget','minTarget'].forEach(id =>
+  $(id).addEventListener('input', update));
+['showNominal','showNoise','reassign','perceptual'].forEach(id =>
+  $(id).addEventListener('change', () => paint(null)));
+$('reroll').addEventListener('click', () => {
+  seed = (Math.random() * 0xFFFFFFFF) >>> 0; update();
+});
+
+ChiffEngine().then(mod => {
+  ENGINE = wrapChiffEngine(mod);
+  FS = ENGINE.frameHz;              // the firmware's own kFrameHz
+  $('fwver').textContent = 'firmware ' + FW_VERSION
+    + (FW_VARIANT ? ' · ' + FW_VARIANT : '');
+  if (FW_VARIANT) {
+    $('variant').textContent = FW_VARIANT;
+    $('variant').hidden = false;
+    document.title = FW_VARIANT + ' — ' + document.title;
+  }
+  update();
+});
+cv.addEventListener('mousemove', e => {
+  const r = cv.getBoundingClientRect(); paint((e.clientX - r.left));
+});
+cv.addEventListener('mouseleave', () => paint(null));
+window.addEventListener('resize', () => paint(null));
+update();
+</script>

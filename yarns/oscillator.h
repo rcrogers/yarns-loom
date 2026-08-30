@@ -47,6 +47,11 @@ namespace yarns {
 
 static const uint16_t kHighestNote = 128 * 128;
 
+// Envelopes an Oscillator carries: gain_envelope_ and timbre_envelope_. The
+// layout map in multi.h counts audio voices with it, so adding an envelope
+// here moves kMaxChiffEnvelopes.
+const uint8_t kEnvelopesPerOscillator = 2;
+
 class StateVariableFilter : public SVF {
  public:
   void Init();
@@ -93,30 +98,33 @@ enum OscillatorShape {
   OSC_SHAPE_DIRAC_COMB,
   OSC_SHAPE_TANH_SINE,
   OSC_SHAPE_EXP_SINE,
-  OSC_SHAPE_SINE_THRU_SINE,
-  OSC_SHAPE_TRI_THRU_SINE,
-  OSC_SHAPE_EXP_THRU_SINE,
-  OSC_SHAPE_SINE_THRU_SINE_BIASED,
-  OSC_SHAPE_TRI_THRU_SINE_BIASED,
-  OSC_SHAPE_EXP_THRU_SINE_BIASED,
-  OSC_SHAPE_SINE_THRU_TRI,
   OSC_SHAPE_TRI_THRU_TRI,
+  OSC_SHAPE_SINE_THRU_TRI,
   OSC_SHAPE_EXP_THRU_TRI,
-  OSC_SHAPE_SINE_THRU_TRI_BIASED,
   OSC_SHAPE_TRI_THRU_TRI_BIASED,
+  OSC_SHAPE_SINE_THRU_TRI_BIASED,
   OSC_SHAPE_EXP_THRU_TRI_BIASED,
-  OSC_SHAPE_SINE_THRU_EXP,
+  OSC_SHAPE_TRI_THRU_SINE,
+  OSC_SHAPE_SINE_THRU_SINE,
+  OSC_SHAPE_EXP_THRU_SINE,
+  OSC_SHAPE_TRI_THRU_SINE_BIASED,
+  OSC_SHAPE_SINE_THRU_SINE_BIASED,
+  OSC_SHAPE_EXP_THRU_SINE_BIASED,
   OSC_SHAPE_TRI_THRU_EXP,
+  OSC_SHAPE_SINE_THRU_EXP,
   OSC_SHAPE_EXP_THRU_EXP,
-  OSC_SHAPE_SINE_THRU_EXP_BIASED,
   OSC_SHAPE_TRI_THRU_EXP_BIASED,
+  OSC_SHAPE_SINE_THRU_EXP_BIASED,
   OSC_SHAPE_EXP_THRU_EXP_BIASED,
   OSC_SHAPE_FM,
 };
 
 class Oscillator {
  public:
-  typedef void (Oscillator::*RenderFn)(int16_t* timbre_samples, int16_t* audio_samples);
+  // Wave render: multiply-accumulate each sample (* gain >> 15) into audio_mix.
+  // Saves a 128B intermediate buffer and the per-sample LDR/MUL/STR round-trip
+  // that q15_multiply_accumulate would otherwise need.
+  typedef void (Oscillator::*RenderFn)(int16_t* timbre_samples, int16_t* audio_mix);
 
   Oscillator() { }
   ~Oscillator() { }
@@ -130,6 +138,12 @@ class Oscillator {
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
+    // Every accumulator the render carries between blocks, not just the
+    // carrier's: the modulator's phase and the phase-distortion square's
+    // integrator survived Init and a re-Init inherited the old note's.
+    modulator_phase_ = 0;
+    pd_square_.integrator = 0;
+    pd_square_.polarity = false;
     high_ = false;
     next_sample_ = 0;
     prev_transfer_raw_ = 0;
@@ -150,6 +164,22 @@ class Oscillator {
     return WarpTimbre(timbre, shape_);
   }
 
+  // WHAT A SIGNED MODULATION OF TIMBRE IS WORTH, warped. A warp is an
+  // ABSOLUTE-POSITION map -- a filter cutoff, a phase increment -- so warping
+  // a signed DELTA is meaningless: it asks where the position `delta` sits,
+  // not how far `delta` moves you from where you are. Warp the DESTINATION and
+  // difference it against the warped bias instead, which is the delta the map
+  // actually implies and is signed correctly by construction.
+  int16_t WarpTimbreDelta(
+      int16_t bias, int16_t delta, OscillatorShape shape, int16_t pitch) const {
+    int32_t destination = static_cast<int32_t>(bias) + delta;
+    CONSTRAIN(destination, INT16_MIN, INT16_MAX);
+    int32_t warped = WarpTimbre(static_cast<int16_t>(destination), shape, pitch)
+      - WarpTimbre(bias, shape, pitch);
+    CONSTRAIN(warped, INT16_MIN, INT16_MAX);
+    return static_cast<int16_t>(warped);
+  }
+
   void set_shape(OscillatorShape shape);
 
   // start_pitch is the new note's pitch at onset (the portamento glide's
@@ -157,8 +187,10 @@ class Oscillator {
   // updated pitch_, so we warp explicitly against them here.
   inline void NoteOn(
       ADSR& adsr, bool drone,
-      int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre) {
-    gain_envelope_.NoteOn(adsr, drone ? scale_ >> 1 : 0, scale_ >> 1);
+      int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
+      uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
+    gain_envelope_.NoteOn(
+      adsr, drone ? scale_ >> 1 : 0, scale_ >> 1, chiff_amount_q30, chiff_audible_samples);
 
     // Snap the pitch-driven jump in timbre bias out of RenderSamples' slew so
     // warped timbre tracks the new pitch instantly; only LFO bias motion stays
@@ -171,15 +203,27 @@ class Oscillator {
     // instead of lagging up to one block behind the next Refresh.
     phase_increment_ = ComputePhaseIncrement(pitch_);
     int16_t new_warped_bias = WarpTimbre(raw_timbre_bias_, shape_);
+    // Two int16 warped biases differ by up to +/-65534, and shifting that by 16
+    // leaves int32 -- twice over for the sign. The bias is an int16-scale
+    // quantity everywhere else it is written, so the step is one too.
+    int32_t warped_step = new_warped_bias - old_warped_bias;
+    CONSTRAIN(warped_step, INT16_MIN, INT16_MAX);
     timbre_envelope_.AdjustBias(
-        static_cast<int32_t>(new_warped_bias - old_warped_bias) << 16);
+        static_cast<int32_t>(static_cast<uint32_t>(warped_step) << 16));
 
     // The envelope's warped target is frozen at the destination pitch
     // (steady-state correct). It can't track the glide cheaply, so the bias
     // above is where pitch tracking is made accurate; the envelope's transient
     // pitch dependence during a glide is accepted as-is.
-    int16_t warped_max_timbre = WarpTimbre(raw_max_timbre, shape_, target_pitch);
-    timbre_envelope_.NoteOn(adsr, 0, warped_max_timbre);
+    // AGAINST THE BIAS, not on its own: raw_max_timbre is TIMBRE MOD ENVELOPE
+    // plus its velocity term, a SIGNED offset from where the timbre control
+    // sits. Warping it alone lost the sign on 17 of the 42 shapes -- every
+    // NOISE, CZ, LP and SYNC shape, whose warps run through a cutoff table or
+    // a phase increment and cannot be negative -- so a negative setting could
+    // not modulate downward at all, and NOISE and CZ were not even monotone.
+    int16_t warped_max_timbre = WarpTimbreDelta(
+        raw_timbre_bias_, raw_max_timbre, shape_, target_pitch);
+    timbre_envelope_.NoteOn(adsr, 0, warped_max_timbre, chiff_amount_q30, chiff_audible_samples);
   }
   inline void NoteOff() {
     gain_envelope_.NoteOff();
@@ -194,25 +238,25 @@ class Oscillator {
   static RenderFn fn_table_[];
   
  private:
-  void RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderLPSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples);
-  // void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples);
-  // void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderTransfer(int16_t* timbre_samples, int16_t* audio_samples);
-  void RenderFM(int16_t* timbre_samples, int16_t* audio_samples);
+  void RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderLPPulse(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderLPSaw(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderSyncSine(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_mix);
+  // void RenderFoldSine(int16_t* timbre_samples, int16_t* audio_mix);
+  // void RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderDiracComb(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderTanhSine(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderTransfer(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderFM(int16_t* timbre_samples, int16_t* audio_mix);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   

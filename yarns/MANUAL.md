@@ -541,6 +541,25 @@ New and improved values for `VO (VOICING)` setting:
 - All curves are exponential
 - Min/max stage times: ~0.089 ms (4 samples = 4/45000 of a second) to 10 seconds
 
+#### Exciter
+The exciter adds a burst of noise to the start of each note, in the manner of a struck or plucked string.
+
+The noise has **its own decay envelope**, separate from the note's ADSR and usually much shorter. `EXCITER AMOUNT` sets how high that decay starts; `EXCITER DURATION` sets how long it takes to fall to silence. Once it has fallen, the note is left with exactly the shape its ADSR describes.
+
+- Configured per-part in `▽A (AMPLITUDE MENU)`
+- The noise rides on the note's envelope, so it reaches every [envelope destination](#modulation-destinations-for-envelope-output): oscillator gain, oscillator timbre, and the envelope aux CV
+- Two glyphs, both an `X` between a pair of bars. `X̲̅` brackets it above and below (a height, for amount); `|X|` brackets it left and right (a width, for duration). The bars blink away and return, leaving the bare `X` on alternate frames — the panel shows two characters, and the bars are part of the first one
+- Part setting `X̲̅I (EXCITER AMOUNT INIT)` sets how much noise a note starts with
+    - Zero: no noise at all, and the note is exactly its nominal ADSR shape
+    - Turning clockwise: the noise grows brighter and louder as its filter opens
+    - Past the middle of the range, the noise is also driven into clipping, becoming harsher and more square as it approaches maximum
+- Part setting `|X|I (EXCITER DURATION INIT)` sets how long the noise takes to decay
+    - An absolute length of time, from ~0.089 ms to ~20 seconds, independent of the ADSR stage times — note this reaches twice the 10 second maximum of an individual ADSR stage
+    - The decay is exponential, so most of the noise's character happens early in the note
+    - A note's release cuts the decay short: the noise is forced to finish by the end of the release stage, so a short release truncates a long exciter
+- Part settings for the bipolar modulation of each voice's exciter by that voice's note velocity:
+    - `X̲̅V (EXCITER AMOUNT MOD VEL)`, `|X|V (EXCITER DURATION MOD VEL)`
+
 #### How the envelope adapts to interruptions
 Envelope adjusts to notes that begin/end while a stage or another note is in progress:
 1. Problem: release/attack is farther from target than expected
@@ -661,13 +680,13 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `SX` Exponential sine
 - Timbre: exponentiation amount
 
-#### `-s`, `-^`, `-e` Wavefolding transfer functions
+#### `-^`, `-s`, `-e` Wavefolding transfer functions
 - Timbre: folding amount (amplification of the carrier wave into the transfer function)
 - Shapes: 18 variants, grouped under 3 distinct transfer functions
-- Carrier wave (first symbol): sine (`S`), triangle (`^`), expo (`e`)
+- Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
-- Transfer function (second symbol): sine (`s`), triangle (`^`), expo (`e`)
-- Biased variants of transfer function (`ˢ`, `ˇ`, `ə`): offset the transfer function input by a quarter cycle, producing asymmetric harmonics
+- Transfer function (second symbol): triangle (`^`), sine (`s`), expo (`e`)
+- Biased variants of transfer function (`ˇ`, `ˢ`, `ə`): offset the transfer function input by a quarter cycle, producing asymmetric harmonics
 
 #### `FM` Frequency modulation
 - Timbre: modulation index

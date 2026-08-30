@@ -38,7 +38,9 @@
 
 namespace yarns {
 
-const char* const layout_values[LAYOUT_LAST] = {
+// Unbounded and then asserted: declaring it [LAYOUT_LAST] would zero-fill a
+// missing name into a NULL the display dereferences.
+const char* const layout_values[] = {
   "1M 1 MONO PART",
   "2M 2 MONO PARTS",
   "4M 4 MONO PARTS",
@@ -56,6 +58,9 @@ const char* const layout_values[LAYOUT_LAST] = {
   "3M 3 MONO PARTS",
   "*1 PARAPHONIC + 1 MONO PART",
 };
+typedef char layout_values_needs_one_name_per_layout[
+    (sizeof(layout_values) / sizeof(layout_values[0]) == LAYOUT_LAST)
+        ? 1 : -1];
 
 const char* const control_change_mode_values[CONTROL_CHANGE_MODE_LAST] = {
   "OFF",
@@ -142,23 +147,23 @@ const char* const voicing_oscillator_shape_values[] = {
   "\x8E\x8E DIRAC COMB",
   "ST SINE TANH",
   "SX SINE EXPONENTIAL",
-  "Ss SINE THRU SINE",
-  "^s TRI THRU SINE",
-  "es EXP THRU SINE",
-  "S\xC2 BIASED SINE THRU SINE",
-  "^\xC2 BIASED TRI THRU SINE",
-  "e\xC2 BIASED EXP THRU SINE",
-  "S^ SINE THRU TRI",
   "^^ TRI THRU TRI",
+  "S^ SINE THRU TRI",
   "e^ EXP THRU TRI",
-  "S\xC3 BIASED SINE THRU TRI",
   "^\xC3 BIASED TRI THRU TRI",
+  "S\xC3 BIASED SINE THRU TRI",
   "e\xC3 BIASED EXP THRU TRI",
-  "Se SINE THRU EXP",
+  "^s TRI THRU SINE",
+  "Ss SINE THRU SINE",
+  "es EXP THRU SINE",
+  "^\xC2 BIASED TRI THRU SINE",
+  "S\xC2 BIASED SINE THRU SINE",
+  "e\xC2 BIASED EXP THRU SINE",
   "^e TRI THRU EXP",
+  "Se SINE THRU EXP",
   "ee EXP THRU EXP",
-  "S\xC4 BIASED SINE THRU EXP",
   "^\xC4 BIASED TRI THRU EXP",
+  "S\xC4 BIASED SINE THRU EXP",
   "e\xC4 BIASED EXP THRU EXP",
 };
 STATIC_ASSERT(
@@ -740,6 +745,30 @@ const Setting Settings::settings_[] = {
     SETTING_DOMAIN_PART, { PART_VOICING_PORTAMENTO_MOD_VELOCITY, 0 },
     SETTING_UNIT_INT8, -64, 63, NULL,
     33, 0xff,
+  },
+  {
+    "\xC6""I", "EXCITER AMOUNT INIT",
+    SETTING_DOMAIN_PART, { PART_VOICING_CHIFF_AMOUNT, 0 },
+    SETTING_UNIT_UINT8, 0, 127, NULL,
+    0xff, 0xff,
+  },
+  {
+    "\xC6""V", "EXCITER AMOUNT MOD VEL",
+    SETTING_DOMAIN_PART, { PART_VOICING_CHIFF_AMOUNT_MOD_VELOCITY, 0 },
+    SETTING_UNIT_INT8, -64, 63, NULL,
+    0xff, 0xff,
+  },
+  {
+    "\xC7""I", "EXCITER DURATION INIT",
+    SETTING_DOMAIN_PART, { PART_VOICING_CHIFF_DURATION, 0 },
+    SETTING_UNIT_UINT8, 0, 127, NULL,
+    0xff, 0xff,
+  },
+  {
+    "\xC7""V", "EXCITER DURATION MOD VEL",
+    SETTING_DOMAIN_PART, { PART_VOICING_CHIFF_DURATION_MOD_VELOCITY, 0 },
+    SETTING_UNIT_INT8, -64, 63, NULL,
+    0xff, 0xff,
   },
 };
 

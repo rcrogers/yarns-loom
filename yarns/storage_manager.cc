@@ -33,13 +33,8 @@
 
 namespace yarns {
 
-// Assert packed size satisfies flash constraints
-STATIC_ASSERT(kPackedSize % 4 == 0, flash_aligns_packed);
-STATIC_ASSERT(kPackedSize <= FlashStorage::MAX_DATA_SIZE, flash_fits_packed);
-
-// Uncomment and build to see current packed size
-// char (*__debug_packed)[kPackedSize] = 1;
-STATIC_ASSERT(kPackedSize == 1004, i_just_want_to_know_if_this_changes);
+// The packed size is asserted in storage_manager.h, against the page rather
+// than a number kept by hand.
 
 STATIC_ASSERT(kStreamBufferSize >= kPackedSize, buffer_fits_packed);
 STATIC_ASSERT(kStreamBufferSize >= Multi::kTaggedPayloadSize, buffer_fits_tagged);

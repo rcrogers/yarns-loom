@@ -245,11 +245,18 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
-  int16_t samples[kAudioBlockSize] = {0};
+  // Buffer is fully overwritten by both branches below — skip zero-init.
+  int16_t samples[kAudioBlockSize];
   if (is_envelope()) {
-    envelope_.RenderSamples(samples, envelope_bias_ << 16);
-    for (size_t i = 0; i < kAudioBlockSize; ++i) {
-      samples[i] <<= 1;
+    envelope_.RenderSamples(
+      samples, static_cast<int32_t>(static_cast<uint32_t>(envelope_bias_) << 16));
+    // Q15 (0..32767) → Q16 (0..65534): both int16s in each 32-bit word
+    // are < 0x8000, so packing two per iteration via uint32 shift is
+    // exact (no cross-half carry). Halves the loop count.
+    typedef uint32_t __attribute__((may_alias)) u32_alias;
+    u32_alias* p = reinterpret_cast<u32_alias*>(samples);
+    for (size_t i = 0; i < kAudioBlockSize / 2; ++i) {
+      p[i] <<= 1;
     }
     dac.BufferSamples(block, channel, samples);
   } else if (is_audio()) {
@@ -270,15 +277,22 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
 void Voice::NoteOn(
   int16_t note, uint8_t velocity, uint8_t portamento,
   int8_t portamento_mod_velocity, bool trigger,
-  ADSR& adsr, int16_t timbre_envelope_target
+  ADSR& adsr, int16_t timbre_envelope_target,
+  uint32_t chiff_amount_q30, uint32_t chiff_audible_samples
 ) {
   // Check if voice is still producing sound (gated or releasing).
   // Only check envelopes that are actually active for this voice.
   // Must check before NoteOn resets the envelope.
-  bool is_sounding_prev_note = gate_
-    || (uses_audio() && oscillator_.sounding())
-    || (aux_1_envelope() && dc_output(DC_AUX_1)->sounding())
-    || (aux_2_envelope() && dc_output(DC_AUX_2)->sounding());
+  bool is_sounding_prev_note = gate_ || (
+    uses_audio()
+    // Oscillator is voice-specific, so gives best read
+    ? oscillator_.sounding()
+    // Fall back on aux envelope (may be paraphonically shared)
+    : (
+        (aux_1_envelope() && dc_output(DC_AUX_1)->sounding()) ||
+        (aux_2_envelope() && dc_output(DC_AUX_2)->sounding())
+      )
+  );
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
@@ -309,9 +323,14 @@ void Voice::NoteOn(
   // the envelope's frozen warped target.
   if (uses_audio()) oscillator_.NoteOn(
     adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE,
-    ApplyPitchMods(note_source_), note_target_ + tuning_, timbre_envelope_target);
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
+    ApplyPitchMods(note_source_), note_target_ + tuning_, timbre_envelope_target,
+    chiff_amount_q30, chiff_audible_samples);
+  if (aux_1_envelope()) {
+    dc_output(DC_AUX_1)->NoteOn(adsr_, chiff_amount_q30, chiff_audible_samples);
+  }
+  if (aux_2_envelope()) {
+    dc_output(DC_AUX_2)->NoteOn(adsr_, chiff_amount_q30, chiff_audible_samples);
+  }
 
   if (!has_cv_output()) return;
 

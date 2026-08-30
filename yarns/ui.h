@@ -113,6 +113,9 @@ class Ui {
   
   void Init();
   void Poll();
+  // One detent, scaled by the run it belongs to. Reads the clock, so it is
+  // called once per detent, and its own state is what carries between them.
+  int32_t AcceleratedEncoderIncrement(int32_t increment);
   void PollSwitch(const UiSwitch ui_switch, uint32_t& press_time, bool& long_press_event_sent);
   void PollFast() {
     display_.RefreshFast();
@@ -265,6 +268,9 @@ class Ui {
   uint32_t tap_tempo_press_time_;
   bool encoder_long_press_event_sent_;
   uint32_t encoder_press_time_;
+  uint32_t encoder_last_increment_ms_;
+  int8_t encoder_last_increment_sign_; // -1, 0, +1; 0 = no prior increment
+  uint8_t encoder_fast_run_; // Accumulated turn speed, leaky
   
   UiMode mode_;
   UiMode previous_mode_;

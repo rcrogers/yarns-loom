@@ -44,6 +44,9 @@
 namespace yarns {
 
 const uint8_t kNumParts = 4;
+// The setting counts divisions from 1; the packed field counts from 0, which
+// is the difference between needing three bits and two.
+const uint8_t kMinClockInputDivision = 1;
 // One paraphonic part, one voice per remaining output
 const uint8_t kNumSystemVoices = kNumParaphonicVoices + (kNumCVOutputs - 1);
 const uint8_t kMaxBarDuration = 32;
@@ -91,21 +94,51 @@ struct PackedMulti {
 
   int8_t custom_pitch_table[12];
 
-  unsigned int // 7 bits to spare
+  // What is left of the byte before the byte-aligned members below.  See
+  // PackedPart::kFreeBits.
+#ifndef PACKED_MULTI_EXTRA_FREE_BITS
+#define PACKED_MULTI_EXTRA_FREE_BITS 0 // Widened by the free-bits check
+#endif
+#define PACKED_MULTI_FREE_BITS (7 + PACKED_MULTI_EXTRA_FREE_BITS)
+#if PACKED_MULTI_FREE_BITS
+  #define PACKED_MULTI_FREE_FIELD , free_bits : PACKED_MULTI_FREE_BITS
+#else
+  #define PACKED_MULTI_FREE_FIELD
+#endif
+  static const uint8_t kFreeBits = PACKED_MULTI_FREE_BITS;
+
+  // Bytes belonging to no struct yet, so they can still be given to either
+  // scope.  Sized to make the blob exactly fill the flash page -- when the
+  // kPackedSize assert in storage_manager.h fires, this is the knob it means.
+#define PACKED_MULTI_UNASSIGNED_BYTES 5
+  static const uint8_t kUnassignedBytes = PACKED_MULTI_UNASSIGNED_BYTES;
+
+  signed int
+    clock_offset : 7; // values free: 0
+
+  unsigned int
     layout : 4, // values free: 1
     clock_tempo : 8, // values free: 54
     clock_swing : 7, // values free: 28
-    clock_input_division : 3, // Breaking: can 0-index for 1 fewer bit
+    clock_input_division : 2, // 0-indexed; see kMinClockInputDivision
     clock_output_division : 5, // values free: 0
     clock_bar_duration : 6, // values free: 30
     clock_override : 1,
     remote_control_channel : 5, // values free: 15
     nudge_first_tick : 1,
-    clock_manual_start : 1;
+    clock_manual_start : 1,
+    control_change_mode : 2 // values free: 0
+    PACKED_MULTI_FREE_FIELD;
 
-  uint8_t control_change_mode; // Breaking: move to bitfield when convenient
-  int8_t clock_offset;
+#if PACKED_MULTI_UNASSIGNED_BYTES
+  uint8_t unassigned[PACKED_MULTI_UNASSIGNED_BYTES];
+#endif
 }__attribute__((packed));
+
+#undef PACKED_MULTI_UNASSIGNED_BYTES
+#undef PACKED_MULTI_FREE_FIELD
+#undef PACKED_MULTI_FREE_BITS
+#undef PACKED_MULTI_EXTRA_FREE_BITS
 
 struct MultiSettings {
   uint8_t layout;
@@ -121,7 +154,6 @@ struct MultiSettings {
   uint8_t clock_manual_start;
   uint8_t control_change_mode;
   int8_t clock_offset;
-  uint8_t padding[8];
 
   void Pack(PackedMulti& packed) {
     for (uint8_t i = 0; i < 12; i++) {
@@ -130,7 +162,8 @@ struct MultiSettings {
     packed.layout = layout;
     packed.clock_tempo = clock_tempo;
     packed.clock_swing = clock_swing;
-    packed.clock_input_division = clock_input_division;
+    packed.clock_input_division =
+        clock_input_division - kMinClockInputDivision;
     packed.clock_output_division = clock_output_division;
     packed.clock_bar_duration = clock_bar_duration;
     packed.clock_override = clock_override;
@@ -148,7 +181,8 @@ struct MultiSettings {
     layout = packed.layout;
     clock_tempo = packed.clock_tempo;
     clock_swing = packed.clock_swing;
-    clock_input_division = packed.clock_input_division;
+    clock_input_division =
+        packed.clock_input_division + kMinClockInputDivision;
     clock_output_division = packed.clock_output_division;
     clock_bar_duration = packed.clock_bar_duration;
     clock_override = packed.clock_override;
@@ -199,25 +233,169 @@ enum MultiSetting {
   MULTI_CLOCK_OFFSET,
 };
 
+// THE LAYOUTS, IN ORDER. Both the Layout enum and the CV output map below
+// are generated from this one list, so a row cannot end up at another
+// layout's index. Entries are the FULL enumerator name, so no consumer has
+// to synthesize one and no entry can collide with a value macro.
+#define YARNS_LAYOUTS(LAYOUT)                                          \
+  LAYOUT(LAYOUT_MONO)                                                  \
+  LAYOUT(LAYOUT_DUAL_MONO)                                             \
+  LAYOUT(LAYOUT_QUAD_MONO)                                             \
+  LAYOUT(LAYOUT_DUAL_POLY)                                             \
+  LAYOUT(LAYOUT_QUAD_POLY)                                             \
+  LAYOUT(LAYOUT_DUAL_POLYCHAINED)                                      \
+  LAYOUT(LAYOUT_QUAD_POLYCHAINED)                                      \
+  LAYOUT(LAYOUT_OCTAL_POLYCHAINED)                                     \
+  LAYOUT(LAYOUT_QUAD_TRIGGERS)                                         \
+  LAYOUT(LAYOUT_QUAD_VOLTAGES)                                         \
+  LAYOUT(LAYOUT_THREE_ONE)                                             \
+  LAYOUT(LAYOUT_TWO_TWO)                                               \
+  LAYOUT(LAYOUT_TWO_ONE)                                               \
+  LAYOUT(LAYOUT_PARAPHONIC_PLUS_TWO)                                   \
+  LAYOUT(LAYOUT_TRI_MONO)                                              \
+  LAYOUT(LAYOUT_PARAPHONIC_PLUS_ONE)
+
 enum Layout {
-  LAYOUT_MONO,
-  LAYOUT_DUAL_MONO,
-  LAYOUT_QUAD_MONO,
-  LAYOUT_DUAL_POLY,
-  LAYOUT_QUAD_POLY,
-  LAYOUT_DUAL_POLYCHAINED,
-  LAYOUT_QUAD_POLYCHAINED,
-  LAYOUT_OCTAL_POLYCHAINED,
-  LAYOUT_QUAD_TRIGGERS,
-  LAYOUT_QUAD_VOLTAGES,
-  LAYOUT_THREE_ONE,
-  LAYOUT_TWO_TWO,
-  LAYOUT_TWO_ONE,
-  LAYOUT_PARAPHONIC_PLUS_TWO, // Now a misnomer: has a 4th part
-  LAYOUT_TRI_MONO,
-  LAYOUT_PARAPHONIC_PLUS_ONE,
+#define YARNS_LAYOUT_ENUMERATOR(layout) layout,
+  YARNS_LAYOUTS(YARNS_LAYOUT_ENUMERATOR)
+#undef YARNS_LAYOUT_ENUMERATOR
   LAYOUT_LAST
 };
+
+// HOW EACH LAYOUT WIRES ITS CV OUTPUTS -- one row per output, exactly
+// kNumCVOutputs rows per layout. AssignVoicesToCVOutputs walks these rows,
+// and the envelope count below folds the same rows, so they cannot disagree.
+struct CVOutputMap {
+  DCRole dc_role;            // what the output emits when it is not audio
+  uint8_t first_voice;       // index into Multi::voice_
+  uint8_t num_dc_voices;     // consecutive voices supplying DC from first_voice
+  uint8_t num_audio_voices;  // consecutive voices whose oscillators it sums
+};
+
+// Both voice counts are really a mode: no voices, a single voice, or the
+// whole paraphonic block. Named so the rows read as that, not as 0/1/4.
+#define VOICES_NONE 0
+#define VOICES_MONO 1
+#define VOICES_PARA kNumParaphonicVoices
+
+// Every ROW below is one CVOutputMap, in declaration order:
+//
+//    dc_role      first_voice               num_dc_voices num_audio_voices
+//
+#define YARNS_CV_MAP_LAYOUT_MONO(ROW)                                  \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_VELOCITY, 0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_1,    0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_2,    0,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_DUAL_POLYCHAINED(ROW) YARNS_CV_MAP_LAYOUT_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_DUAL_MONO(ROW)                             \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_1,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    1,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_DUAL_POLY(ROW)                             \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_1,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_2,    1,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_QUAD_POLYCHAINED(ROW) YARNS_CV_MAP_LAYOUT_DUAL_POLY(ROW)
+#define YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)                             \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    2,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    3,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_QUAD_POLY(ROW) YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_OCTAL_POLYCHAINED(ROW) YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_THREE_ONE(ROW) YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_TWO_TWO(ROW) YARNS_CV_MAP_LAYOUT_QUAD_MONO(ROW)
+#define YARNS_CV_MAP_LAYOUT_QUAD_VOLTAGES(ROW)                         \
+  ROW(DC_AUX_1,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    1,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    2,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    3,                        VOICES_MONO,  VOICES_MONO)
+#define YARNS_CV_MAP_LAYOUT_QUAD_TRIGGERS(ROW) YARNS_CV_MAP_LAYOUT_QUAD_VOLTAGES(ROW)
+#define YARNS_CV_MAP_LAYOUT_TWO_ONE(ROW)                               \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    2,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_2,    2,                        VOICES_MONO,  VOICES_NONE)
+#define YARNS_CV_MAP_LAYOUT_TRI_MONO(ROW)                              \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    1,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_PITCH,    2,                        VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_VELOCITY, 0,                        VOICES_MONO,  VOICES_NONE)
+#define YARNS_CV_MAP_LAYOUT_PARAPHONIC_PLUS_TWO(ROW)                   \
+  /* A misnomer: this layout has a 4th part. */                        \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_PARA)\
+  ROW(DC_PITCH,    kNumParaphonicVoices,     VOICES_MONO,  VOICES_MONO)\
+  ROW(DC_AUX_1,    kNumParaphonicVoices,     VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_PITCH,    kNumParaphonicVoices + 1, VOICES_MONO,  VOICES_MONO)\
+  /* kNumParaphonicVoices + 2 is part 3's, gate-only, so it gets no row */
+#define YARNS_CV_MAP_LAYOUT_PARAPHONIC_PLUS_ONE(ROW)                   \
+  ROW(DC_PITCH,    0,                        VOICES_MONO,  VOICES_PARA)\
+  ROW(DC_PITCH,    kNumParaphonicVoices,     VOICES_MONO,  VOICES_NONE)\
+  ROW(DC_AUX_1,    0,                        VOICES_PARA,  VOICES_NONE)\
+  ROW(DC_AUX_1,    kNumParaphonicVoices,     VOICES_MONO,  VOICES_MONO)
+
+#define YARNS_CV_MAP_ROW(dc_role, first_voice, num_dc_voices, num_audio_voices) \
+  { dc_role, first_voice, num_dc_voices, num_audio_voices },
+
+// A new layout missing its YARNS_CV_MAP_<NAME> fails to expand, and too MANY
+// rows is an excess-initializer error -- but too FEW rows silently zero-fills
+// kCVOutputMap into DC_PITCH on voice 0. Catch that, naming the offender.
+#define YARNS_CV_MAP_COUNT_ONE(dc_role, first_voice, num_dc_voices, num_audio_voices) \
+  + 1
+#define YARNS_LAYOUT_ROW_COUNT_CHECK(layout)                                    \
+  typedef char layout##_needs_one_row_per_cv_output[                            \
+      ((0 YARNS_CV_MAP_##layout(YARNS_CV_MAP_COUNT_ONE)) == kNumCVOutputs)      \
+          ? 1 : -1];
+YARNS_LAYOUTS(YARNS_LAYOUT_ROW_COUNT_CHECK)
+#undef YARNS_LAYOUT_ROW_COUNT_CHECK
+
+// A CV output renders EITHER its audio voices' oscillators OR its own envelope
+// (CVOutput::RenderSamples), never both; and only an AUX role can reach the
+// envelope path at all (CVOutput::is_envelope).
+template<int kDcRole, int kNumAudioVoices>
+struct CVOutputMaxEnvelopes {
+  static const int value = kNumAudioVoices
+      ? kNumAudioVoices * kEnvelopesPerOscillator
+      : ((kDcRole == DC_AUX_1 || kDcRole == DC_AUX_2)
+          ? kEnvelopesPerCVOutput : 0);
+};
+
+#define YARNS_CV_MAP_ENVELOPES(dc_role, first_voice, num_dc_voices, num_audio_voices) \
+  + CVOutputMaxEnvelopes<dc_role, num_audio_voices>::value
+
+template<int kLayout> struct LayoutEnvelopes { static const int value = 0; };
+#define YARNS_LAYOUT_ENVELOPES(layout)                                          \
+  template<> struct LayoutEnvelopes<layout> {                          \
+    static const int value = 0 YARNS_CV_MAP_##layout(YARNS_CV_MAP_ENVELOPES);   \
+  };
+YARNS_LAYOUTS(YARNS_LAYOUT_ENVELOPES)
+#undef YARNS_LAYOUT_ENVELOPES
+
+// static const int, not enum: GCC 4.8 rejects a max over two anonymous enum
+// types under -Werror=enum-compare.
+template<int kLayout> struct MaxLayoutEnvelopes {
+  static const int max_of_preceding_layouts =
+      MaxLayoutEnvelopes<kLayout - 1>::value;
+  static const int this_layout = LayoutEnvelopes<kLayout>::value;
+  static const int value = this_layout > max_of_preceding_layouts
+      ? this_layout : max_of_preceding_layouts;
+};
+template<> struct MaxLayoutEnvelopes<0> {
+  static const int value = LayoutEnvelopes<0>::value;
+};
+
+// kMaxChiffEnvelopes (envelope.h, which cannot see its owners) states how many
+// envelopes can be live at once. EXACTLY equal to the hungriest layout's fold,
+// so the stated number cannot drift from the layout map.
+typedef char chiff_envelopes_must_equal_the_hungriest_layout[
+    (MaxLayoutEnvelopes<LAYOUT_LAST - 1>::value == kMaxChiffEnvelopes)
+        ? 1 : -1];
+
+// Defined in multi.cc, where the row order is asserted against the enum.
+extern const CVOutputMap kCVOutputMap[LAYOUT_LAST][kNumCVOutputs];
 
 class Multi {
  public:
@@ -641,7 +819,7 @@ class Multi {
 
   // Setting counts per domain.  Validated by STATIC_ASSERTs in multi.cc.
   static const uint16_t kNumTaggedMultiSettings = 12;
-  static const uint16_t kNumTaggedPartSettings = 61;
+  static const uint16_t kNumTaggedPartSettings = 65;
 
   // Complete wire layout of a tagged payload.  Not used for actual I/O
   // (we stream element-by-element to avoid a large stack allocation), but
@@ -773,11 +951,10 @@ class Multi {
       size_t data_start = SerializeTaggedSectionBegin(b, TAGGED_SECTION_LOOPER);
       PackedPart packed;
       part_[p].looper().Pack(packed);
-      TaggedLooperPrefix prefix = {
-        p,
-        static_cast<uint8_t>(packed.looper_size),
-        static_cast<uint8_t>(packed.looper_oldest_index)
-      };
+      // The prefix keeps both fields so the wire format does not move: the
+      // count is still worth stating, and the index is now always zero because
+      // Pack rotates the ring. Firmware predating that reads this correctly.
+      TaggedLooperPrefix prefix = { p, part_[p].looper().num_notes(), 0 };
       b->Write(prefix);
       for (uint8_t i = 0; i < looper::kMaxNotes; i++) {
         TaggedLooperNote note = {
@@ -860,15 +1037,27 @@ class Multi {
         if (!ReadTaggedObject(b, &prefix, section_end)) return;
         if (prefix.part_index >= kNumParts) return;
         PackedPart packed;
-        packed.looper_size = prefix.size;
-        packed.looper_oldest_index = prefix.oldest_index;
+        // Unpack expects the ring rotated to start at zero, with a velocity of
+        // zero ending it. Dumps written before that begin at oldest_index and
+        // carry their own count, so rotate on the way in. Velocity is floored
+        // because a dump predating b0db04dd can hold a zero, which would end
+        // the run early and drop the rest of the loop.
+        std::memset(
+            &packed.looper_notes[0], 0, sizeof(packed.looper_notes));
+        const uint8_t size = prefix.size > looper::kMaxNotes
+            ? looper::kMaxNotes : prefix.size;
+        const uint8_t oldest = prefix.oldest_index % looper::kMaxNotes;
         for (uint8_t i = 0; i < looper::kMaxNotes; i++) {
           TaggedLooperNote note = {};
           if (!ReadTaggedObject(b, &note, section_end)) break;
-          packed.looper_notes[i].on_pos = note.on_pos;
-          packed.looper_notes[i].off_pos = note.off_pos;
-          packed.looper_notes[i].pitch = note.pitch;
-          packed.looper_notes[i].velocity = note.velocity;
+          const uint8_t ordinal =
+              (i + looper::kMaxNotes - oldest) % looper::kMaxNotes;
+          if (ordinal >= size) continue;
+          packed.looper_notes[ordinal].on_pos = note.on_pos;
+          packed.looper_notes[ordinal].off_pos = note.off_pos;
+          packed.looper_notes[ordinal].pitch = note.pitch;
+          packed.looper_notes[ordinal].velocity =
+              note.velocity ? note.velocity : 1;
         }
         part_[prefix.part_index].mutable_looper().Unpack(packed);
         return;
