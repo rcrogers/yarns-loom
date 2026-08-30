@@ -260,7 +260,9 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
       (static_cast<int32_t>(b - a) * (ref_pitch & 0xf) >> 4);
   if (num_shifts > 0) phase_increment >>= num_shifts;
   else if (num_shifts < 0) {
-    num_shifts = std::min(__builtin_clzl(phase_increment), static_cast<int>(-num_shifts));
+    // __builtin_clz, NOT clzl: identical on target, where long is 32 bits,
+    // but clzl reads 32 too many on an LP64 host and the harnesses run there.
+    num_shifts = std::min(__builtin_clz(phase_increment), static_cast<int>(-num_shifts));
     phase_increment <<= num_shifts;
   }
   return phase_increment;
