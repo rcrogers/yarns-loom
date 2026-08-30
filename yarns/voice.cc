@@ -283,10 +283,16 @@ void Voice::NoteOn(
   // Check if voice is still producing sound (gated or releasing).
   // Only check envelopes that are actually active for this voice.
   // Must check before NoteOn resets the envelope.
-  bool is_sounding_prev_note = gate_
-    || (uses_audio() && oscillator_.sounding())
-    || (aux_1_envelope() && dc_output(DC_AUX_1)->sounding())
-    || (aux_2_envelope() && dc_output(DC_AUX_2)->sounding());
+  bool is_sounding_prev_note = gate_ || (
+    uses_audio()
+    // Oscillator is voice-specific, so gives best read
+    ? oscillator_.sounding()
+    // Fall back on aux envelope (may be paraphonically shared)
+    : (
+        (aux_1_envelope() && dc_output(DC_AUX_1)->sounding()) ||
+        (aux_2_envelope() && dc_output(DC_AUX_2)->sounding())
+      )
+  );
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
