@@ -135,6 +135,7 @@ const char* const voicing_oscillator_shape_values[] = {
   "\x88\xB3 HIGH-PASS SAW PHASE DISTORTION",
   "\x8C\xA0 PULSE LOW-PASS SVF",
   "\x88\xA0 SAW LOW-PASS SVF",
+  "SW SINE WIDTH MOD",
   "\x8CW PULSE WIDTH MOD",
   "\x88W SAW WIDTH MOD",
   "\x88\x8C SAW-PULSE MORPH",

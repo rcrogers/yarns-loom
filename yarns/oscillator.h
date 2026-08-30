@@ -86,6 +86,7 @@ enum OscillatorShape {
   OSC_SHAPE_CZ_SAW_HP,
   OSC_SHAPE_LP_PULSE,
   OSC_SHAPE_LP_SAW,
+  OSC_SHAPE_VARIABLE_SINE,
   OSC_SHAPE_VARIABLE_PULSE,
   OSC_SHAPE_VARIABLE_SAW,
   OSC_SHAPE_SAW_PULSE_MORPH,
@@ -243,6 +244,7 @@ class Oscillator {
   void RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_mix);
   void RenderLPPulse(int16_t* timbre_samples, int16_t* audio_mix);
   void RenderLPSaw(int16_t* timbre_samples, int16_t* audio_mix);
+  void RenderVariableSine(int16_t* timbre_samples, int16_t* audio_mix);
   void RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_mix);
   void RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_mix);
   void RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_mix);

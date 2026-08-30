@@ -79,6 +79,7 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderPhaseDistortionSaw,
   &Oscillator::RenderLPPulse,
   &Oscillator::RenderLPSaw,
+  &Oscillator::RenderVariableSine,
   &Oscillator::RenderVariablePulse,
   &Oscillator::RenderVariableSaw,
   &Oscillator::RenderSawPulseMorph,
@@ -348,15 +349,13 @@ void Oscillator::Render(int16_t* audio_mix) {
 // reachable: a negative TIMBRE MOD ENVELOPE can collapse the sync ratio, and if
 // it does so while the follower sits within one increment of its wrap, the wrap
 // is crossed by an increment too small to survive the shift. Cortex-M3's UDIV
-// answers zero for a zero divisor, which lands a full-scale BLEP where a
-// three-fifths-of-a-sample one belongs.
-//
-// Below the threshold the division runs at FULL WIDTH instead, which is exact
-// and cannot divide by zero: the numerator is under one increment there, so the
-// shift has room, and an increment of zero takes the same arm as an edge a
-// whole sample old. FractionU32 would also serve and is what the master's reset
-// time uses, but inlining it at three sites costs 1152 bytes of flash against
-// 424, and a clz where two compares do.
+// answers zero for a zero divisor, which lands a half-scale BLEP where none
+// belongs. Below the threshold the division runs at FULL WIDTH instead, which
+// is exact and cannot divide by zero: the numerator is under one increment
+// there, so the shift has room, and an increment of zero takes the same arm as
+// an edge a whole sample old. FractionU32 would also serve and is what the
+// master's reset time uses, but inlining it at three sites costs 1152 bytes of
+// flash and a clz where two compares do.
 static inline uint32_t EdgeTime(
     uint32_t phase_past_edge, uint32_t phase_increment) {
   if (phase_increment >= (1 << 16)) {
@@ -459,6 +458,21 @@ void Oscillator::RenderLPSaw(int16_t* timbre_samples, int16_t* audio_mix) {
     this_sample = svf.lp;
   )
   svf_ = svf;
+}
+
+// ONE CYCLE COMPRESSED INTO `width` OF THE PERIOD, then held at the value the
+// cycle ends on. A sine ends where it began, at zero, so the hold is SILENCE
+// where the saw's and the pulse's is a plateau at full scale -- which is why
+// this carrier is worth a shape and they already had theirs. Nothing is
+// discontinuous at either end, so there is no edge to BLEP and none for TIMBRE
+// to sharpen: what it sweeps is a formant over a gap.
+void Oscillator::RenderVariableSine(int16_t* timbre_samples, int16_t* audio_mix) {
+  RENDER_PERIODIC(
+    timbre = timbre + (timbre >> 1); // 3/4
+    uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
+    // A width of zero fails the compare rather than reaching the divide.
+    this_sample = (phase >> 16) < width ? sine((phase / width) << 16) : 0;
+  )
 }
 
 void Oscillator::RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_mix) {
