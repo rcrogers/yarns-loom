@@ -310,20 +310,34 @@ void Oscillator::Render(int16_t* audio_mix) {
 // Per-sample MAC into audio_mix: mix[i] += (this_sample * gain[i]) >> 15.
 // The product shift folds into ARM's barrel-shifted ADD operand
 // (add r, mix, prod, asr #15).
-#define RENDER_CORE(...) \
+// The scaffolding every shape shares: the BLEP carry, the timbre read, and the
+// single walk down the two halves. WHAT REACHES THE MIX IS THE CALLER'S, because
+// where the gain envelope is spent is not the same for every shape.
+#define RENDER_LOOP(mix_term, ...) \
   int16_t next_sample = next_sample_; \
   for (size_t size = kAudioBlockSize; size--;) { \
     int16_t timbre = timbre_samples[0]; \
     int16_t this_sample = next_sample; \
     next_sample = 0; \
     __VA_ARGS__ \
-    int16_t gain = timbre_samples[kAudioBlockSize]; /* the other half */ \
+    int32_t mixed = (mix_term); \
     ++timbre_samples; \
-    *audio_mix = static_cast<int16_t>( \
-        *audio_mix + ((static_cast<int32_t>(this_sample) * gain) >> 15)); \
+    *audio_mix = static_cast<int16_t>(*audio_mix + mixed); \
     ++audio_mix; \
   } \
   next_sample_ = next_sample; \
+
+#define RENDER_CORE(...) \
+  RENDER_LOOP( \
+    (static_cast<int32_t>(this_sample) * \
+     timbre_samples[kAudioBlockSize]) >> 15, /* the other half */ \
+    __VA_ARGS__) \
+
+// FOR A SHAPE THE ENVELOPE EXCITES rather than scales. Its body spends the gain
+// half itself, on the way INTO whatever rings, so the mix takes the sample as it
+// stands -- scaling it again here would apply the envelope twice.
+#define RENDER_CORE_NO_OUTPUT_GAIN(...) \
+  RENDER_LOOP(this_sample, __VA_ARGS__) \
 
 #define RENDER_PERIODIC(...) \
   uint32_t phase = phase_; \
