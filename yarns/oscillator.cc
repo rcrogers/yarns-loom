@@ -87,6 +87,8 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   // &Oscillator::RenderSyncTriangle,
   &Oscillator::RenderSyncPulse,
   &Oscillator::RenderSyncSaw,
+  &Oscillator::RenderWhistle,
+  &Oscillator::RenderPingLP,
   // &Oscillator::RenderFoldSine,
   // &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderDiracComb,
@@ -178,6 +180,12 @@ int16_t Oscillator::WarpTimbre(
     return static_cast<int16_t>(DivU64ByU32(
         static_cast<uint32_t>(scaled >> 32), static_cast<uint32_t>(scaled),
         ComputePhaseIncrement(pitch)));
+  }
+
+  // TIMBRE IS RESONANCE: the cutoff tracks the note, so the control tightens the
+  // ring rather than moving it.
+  if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_LP) {
+    return 0x5fff + (timbre >> 2);
   }
 
   if (
@@ -793,6 +801,42 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
     }
     this_sample = output;
   )
+}
+
+// The gain envelope is the EXCITER, spent going into the filter rather than
+// scaling what leaves it. Its own chiff rides in with it, so EXCITER AMOUNT
+// decides how much of the excitation is noise.
+void Oscillator::RenderWhistle(int16_t* timbre_samples, int16_t* audio_mix) {
+  StateVariableFilter svf = svf_;
+  svf.RenderInit(timbre_samples[0]);
+  const int16_t cutoff = SVF::CutoffFromFreq(pitch_);
+  RENDER_CORE_NO_OUTPUT_GAIN(
+    (void) timbre;
+    // Noise of its own, because a whistle sustains and the chiff decays.
+    int32_t excitation =
+        Random::GetSample() * timbre_samples[kAudioBlockSize] >> 15;
+    svf.RenderSample(excitation, cutoff);
+    this_sample = Clip16(svf.bp << 1);
+  )
+  svf_ = svf;
+}
+
+// Above ~MIDI 63 the ring needs EXCITER AMOUNT: a bare envelope is too smooth to
+// carry energy at the note, and what is left is its own contour through the
+// low-pass. MEASURED at MIDI 81, chiff off the peak sits at 27 Hz, chiff up it
+// sits at 873 Hz against a note of 880.
+void Oscillator::RenderPingLP(int16_t* timbre_samples, int16_t* audio_mix) {
+  StateVariableFilter svf = svf_;
+  svf.RenderInit(timbre_samples[0]);
+  const int16_t cutoff = SVF::CutoffFromFreq(pitch_);
+  RENDER_CORE_NO_OUTPUT_GAIN(
+    (void) timbre;
+    // Halved going in: the resonant step response overshoots the excitation, and
+    // at full scale the ring railed for 7% of the note.
+    svf.RenderSample(timbre_samples[kAudioBlockSize] >> 2, cutoff);
+    this_sample = svf.lp;
+  )
+  svf_ = svf;
 }
 
 void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_mix) {

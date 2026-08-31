@@ -143,6 +143,8 @@ const char* const voicing_oscillator_shape_values[] = {
   // "^$ TRIANGLE SYNC",
   "\x8C$ PULSE SYNC",
   "\x88$ SAW SYNC",
+  "\x8F^ WHISTLE",
+  "\x8F\xA0 PING",
   // "SF SINE FOLD",
   // "^F TRIANGLE FOLD",
   "\x8E\x8E DIRAC COMB",
