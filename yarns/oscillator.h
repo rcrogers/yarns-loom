@@ -56,6 +56,9 @@ class StateVariableFilter : public SVF {
  public:
   void Init();
   void RenderInit(int16_t resonance);
+  // For a shape whose TIMBRE is Q directly, past where a resonance can reach:
+  // DampFromResonance bottoms out at the damp LUT's last entry, Q 129.
+  void RenderInitDamp(int16_t damp_q1_14);
 
   inline void RenderSample(int32_t in, int16_t cutoff) {
     damp.Tick();

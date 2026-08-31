@@ -49,6 +49,11 @@ static const uint16_t kOctave = 12 * 128;
 // SYNC's modulator frequency, as a multiple of the carrier's: _q3_12, so up
 // to 8x. The span TIMBRE asks for is 2.67 octaves, or 6.35x.
 static const int kSyncRatioFractionalBits = 12;
+// WHISTLE and PING sweep Q over this many octaves, from the damp the widest
+// setting asks for. 2392 is the damp LUT at the resonance the shapes used to
+// start from, which is Q 6.8; six octaves of it reaches Q 440.
+static const int32_t kResonantDampMin_q1_14 = 2392;
+static const uint32_t kResonantQOctaves = 6;
 static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
@@ -130,6 +135,11 @@ void StateVariableFilter::RenderInit(int16_t resonance_q_0_15) {
   damp.ComputeSlope();
 }
 
+void StateVariableFilter::RenderInitDamp(int16_t damp_q1_14) {
+  damp.SetTarget(damp_q1_14);
+  damp.ComputeSlope();
+}
+
 void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias) {
   pitch_ = pitch;
   // if (shape_ >= OSC_SHAPE_FM) {
@@ -182,10 +192,14 @@ int16_t Oscillator::WarpTimbre(
         ComputePhaseIncrement(pitch)));
   }
 
-  // TIMBRE IS RESONANCE: the cutoff tracks the note, so the control tightens the
-  // ring rather than moving it.
+  // TIMBRE IS Q: the cutoff tracks the note, so the control tightens the ring
+  // rather than moving it. Geometric, and as damp rather than as a resonance,
+  // because a resonance stops at the damp LUT's last entry and that is Q 129.
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_LP) {
-    return 0x5fff + (timbre >> 2);
+    uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * kResonantQOctaves) << 1;
+    int32_t damp = kResonantDampMin_q1_14 * // 2^-octaves
+      Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 16;
+    return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
   }
 
   if (
@@ -808,7 +822,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
 // decides how much of the excitation is noise.
 void Oscillator::RenderWhistle(int16_t* timbre_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInit(timbre_samples[0]);
+  svf.RenderInitDamp(timbre_samples[0]);
   const int16_t cutoff = SVF::CutoffFromFreq(pitch_);
   RENDER_CORE_NO_OUTPUT_GAIN(
     (void) timbre;
@@ -827,13 +841,13 @@ void Oscillator::RenderWhistle(int16_t* timbre_samples, int16_t* audio_mix) {
 // sits at 873 Hz against a note of 880.
 void Oscillator::RenderPingLP(int16_t* timbre_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInit(timbre_samples[0]);
+  svf.RenderInitDamp(timbre_samples[0]);
   const int16_t cutoff = SVF::CutoffFromFreq(pitch_);
   RENDER_CORE_NO_OUTPUT_GAIN(
     (void) timbre;
     // Halved going in: the resonant step response overshoots the excitation, and
     // at full scale the ring railed for 7% of the note.
-    svf.RenderSample(timbre_samples[kAudioBlockSize] >> 2, cutoff);
+    svf.RenderSample(timbre_samples[kAudioBlockSize] >> 1, cutoff);
     this_sample = svf.lp;
   )
   svf_ = svf;
