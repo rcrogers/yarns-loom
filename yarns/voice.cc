@@ -266,7 +266,12 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
         zero_dac_code_
     );
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
-      audio_voices_[v]->oscillator()->Render(samples);
+      // A DEAD VOICE IS NOT SILENT BY ITSELF. Most shapes multiply by the gain
+      // envelope and so contribute nothing once it dies, but one the envelope
+      // only EXCITES keeps handing the mix whatever is still ringing -- a
+      // resonant filter, forever.
+      Oscillator* oscillator = audio_voices_[v]->oscillator();
+      if (oscillator->sounding()) oscillator->Render(samples);
     }
     dac.BufferSamples(block, channel, samples);
   } else {
