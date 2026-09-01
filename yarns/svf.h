@@ -51,15 +51,24 @@ struct SVF {
   }
 
   // cutoff: Q0.15, damp: Q1.14 (Chamberlin needs damp range 0..2.0)
+  // A LAST BIT OF DAMPING, AND OF INTEGRATION, WHEREVER THE PRODUCT WOULD
+  // TRUNCATE AWAY. Below |bp| < 16384/damp the damping term is exactly zero and
+  // the resonator is lossless -- it rings at that amplitude for ever, and the
+  // band is WIDER at low Q. The bp integrator strands a DC offset in lp the
+  // same way. Rounding alone does not do it: rounding the damping term as well
+  // leaves every setting stuck between 16 and 48.
   inline void Process(int32_t in, int16_t cutoff, int16_t damp) {
     int32_t damped_bp = bp * damp >> 14;
+    if (!damped_bp) damped_bp = (bp > 0) - (bp < 0);
     notch = in - damped_bp;
     notch = Clip16(notch);
-    lp += cutoff * bp >> 15;
+    lp += (cutoff * bp + (1 << 14)) >> 15;
     lp = Clip16(lp);
     hp = notch - lp;
     hp = Clip16(hp);
-    bp += cutoff * hp >> 15;
+    int32_t bp_step = (cutoff * hp + (1 << 14)) >> 15;
+    if (!bp_step) bp_step = (hp > 0) - (hp < 0);
+    bp += bp_step;
     bp = Clip16(bp);
   }
 
