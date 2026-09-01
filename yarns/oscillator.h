@@ -59,14 +59,23 @@ class StateVariableFilter : public SVF {
   // For a shape whose TIMBRE is Q directly, past where a resonance can reach:
   // DampFromResonance bottoms out at the damp LUT's last entry, Q 129.
   void RenderInitDamp(int16_t damp_q1_14);
+  // For a shape whose cutoff comes from the PITCH rather than from the timbre
+  // buffer: pitch_ moves once a block, and a high-Q filter stepped at the block
+  // rate puts sidebands a block rate either side of its peak.
+  void RenderInitCutoff(int16_t cutoff);
 
   inline void RenderSample(int32_t in, int16_t cutoff) {
     damp.Tick();
     Process(in, cutoff, damp.value());
   }
+  inline void RenderSample(int32_t in) {
+    cutoff.Tick();
+    RenderSample(in, cutoff.value());
+  }
 
  private:
   Interpolator<kAudioBlockSizeBits> damp;
+  Interpolator<kAudioBlockSizeBits> cutoff;
 };
 
 struct PhaseDistortionSquareModulator {

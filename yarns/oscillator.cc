@@ -128,6 +128,7 @@ STATIC_ASSERT(
 void StateVariableFilter::Init() {
   SVF::Init();
   damp.Init();
+  cutoff.Init();
 }
 
 void StateVariableFilter::RenderInit(int16_t resonance_q_0_15) {
@@ -138,6 +139,11 @@ void StateVariableFilter::RenderInit(int16_t resonance_q_0_15) {
 void StateVariableFilter::RenderInitDamp(int16_t damp_q1_14) {
   damp.SetTarget(damp_q1_14);
   damp.ComputeSlope();
+}
+
+void StateVariableFilter::RenderInitCutoff(int16_t cutoff_q_0_15) {
+  cutoff.SetTarget(cutoff_q_0_15);
+  cutoff.ComputeSlope();
 }
 
 void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias) {
@@ -823,13 +829,13 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
 void Oscillator::RenderWhistle(int16_t* timbre_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInitDamp(timbre_samples[0]);
-  const int16_t cutoff = SVF::CutoffFromFreq(pitch_);
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   RENDER_CORE_NO_OUTPUT_GAIN(
     (void) timbre;
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
         Random::GetSample() * timbre_samples[kAudioBlockSize] >> 15;
-    svf.RenderSample(excitation, cutoff);
+    svf.RenderSample(excitation);
     this_sample = Clip16(svf.bp << 1);
   )
   svf_ = svf;
@@ -842,12 +848,12 @@ void Oscillator::RenderWhistle(int16_t* timbre_samples, int16_t* audio_mix) {
 void Oscillator::RenderPingLP(int16_t* timbre_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInitDamp(timbre_samples[0]);
-  const int16_t cutoff = SVF::CutoffFromFreq(pitch_);
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   RENDER_CORE_NO_OUTPUT_GAIN(
     (void) timbre;
     // Halved going in: the resonant step response overshoots the excitation, and
     // at full scale the ring railed for 7% of the note.
-    svf.RenderSample(timbre_samples[kAudioBlockSize] >> 1, cutoff);
+    svf.RenderSample(timbre_samples[kAudioBlockSize] >> 1);
     this_sample = svf.lp;
   )
   svf_ = svf;
