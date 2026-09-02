@@ -44,6 +44,10 @@ namespace yarns {
 // four sites it costs 244 bytes more than the one copy.
 uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
+// Floor of the square root. Out of line for the same reason as the divide:
+// every caller is cold, and GCC has no integer sqrt to reach for.
+uint32_t IntegerSqrt(uint32_t x);
+
 }  // namespace yarns
 
 #endif  // YARNS_UTILS_H_

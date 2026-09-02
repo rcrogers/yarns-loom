@@ -52,8 +52,6 @@ static const int kSyncRatioFractionalBits = 12;
 // WHISTLE and PING sweep Q over this many octaves, from the damp the widest
 // setting asks for. 2392 is the damp LUT at the resonance the shapes used to
 // start from, which is Q 6.8; six octaves of it reaches Q 440.
-static const int32_t kResonantDampMin_q1_14 = 2392;
-static const uint32_t kResonantQOctaves = 6;
 static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
@@ -197,8 +195,12 @@ int16_t Oscillator::WarpTimbre(
   // rather than moving it. Geometric, and as damp rather than as a resonance,
   // because a resonance stops at the damp LUT's last entry and that is Q 129.
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_LP) {
-    uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * kResonantQOctaves) << 1;
-    int32_t damp = kResonantDampMin_q1_14 * // 2^-octaves
+    // 2392 is the damp LUT at the resonance these shapes used to start from,
+    // which is Q 6.8; six octaves of it reaches Q 440.
+    const int32_t damp_at_widest_q1_14 = 2392;
+    const uint32_t q_octaves = 6;
+    uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * q_octaves) << 1;
+    int32_t damp = damp_at_widest_q1_14 * // 2^-octaves
       Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 16;
     return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
   }
@@ -309,11 +311,13 @@ void Oscillator::Render(int16_t* audio_mix) {
   // both -- where two separate buffers need two pointers, and every register
   // held here is one the shape cannot have.
   int16_t timbre_gain[2 * kAudioBlockSize];
-  int16_t* timbre_samples = &timbre_gain[0];
+  // The shapes are handed the WHOLE array and index the gain half off it, so
+  // what they take is input_samples, not either half by itself.
+  int16_t* input_samples = &timbre_gain[0];
   int16_t* gain_samples = &timbre_gain[kAudioBlockSize];
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
   timbre_envelope_.RenderSamples(
-    timbre_samples, static_cast<int32_t>(static_cast<uint32_t>(timbre_bias) << 16));
+    input_samples, static_cast<int32_t>(static_cast<uint32_t>(timbre_bias) << 16));
 
   int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
   gain_envelope_.RenderSamples(
@@ -322,11 +326,11 @@ void Oscillator::Render(int16_t* audio_mix) {
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
-  (this->*fn)(timbre_samples, audio_mix);
+  (this->*fn)(input_samples, audio_mix);
 }
 
 // TIMBRE AND GAIN ARE TWO HALVES OF ONE ARRAY, and this loop relies on it: gain
-// is read at timbre_samples[kAudioBlockSize], so ONE pointer walks both and
+// is read at input_samples[kAudioBlockSize], so ONE pointer walks both and
 // every shape gets a register back. There is deliberately NO gain_samples
 // parameter, so non-adjacent buffers cannot be handed in by mistake.
 //
@@ -339,12 +343,12 @@ void Oscillator::Render(int16_t* audio_mix) {
 #define RENDER_LOOP(mix_term, ...) \
   int16_t next_sample = next_sample_; \
   for (size_t size = kAudioBlockSize; size--;) { \
-    int16_t timbre = timbre_samples[0]; \
+    int16_t timbre = input_samples[0]; \
     int16_t this_sample = next_sample; \
     next_sample = 0; \
     __VA_ARGS__ \
     int32_t mixed = (mix_term); \
-    ++timbre_samples; \
+    ++input_samples; \
     *audio_mix = static_cast<int16_t>(*audio_mix + mixed); \
     ++audio_mix; \
   } \
@@ -353,7 +357,7 @@ void Oscillator::Render(int16_t* audio_mix) {
 #define RENDER_CORE(...) \
   RENDER_LOOP( \
     (static_cast<int32_t>(this_sample) * \
-     timbre_samples[kAudioBlockSize]) >> 15, /* the other half */ \
+     input_samples[kAudioBlockSize]) >> 15, /* the other half */ \
     __VA_ARGS__) \
 
 // FOR A SHAPE THE ENVELOPE EXCITES rather than scales. Its body spends the gain
@@ -470,7 +474,7 @@ static inline uint32_t EdgeTime(
     high_ = false; \
   } \
 
-void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderLPPulse(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(0x7fff);
   uint32_t pw = 0x80000000;
@@ -484,7 +488,7 @@ void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_mix) {
   svf_ = svf;
 }
 
-void Oscillator::RenderLPSaw(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(0x6000);
   RENDER_PERIODIC(
@@ -503,7 +507,7 @@ void Oscillator::RenderLPSaw(int16_t* timbre_samples, int16_t* audio_mix) {
 // this carrier is worth a shape and they already had theirs. Nothing is
 // discontinuous at either end, so there is no edge to BLEP and none for TIMBRE
 // to sharpen: what it sweeps is a formant over a gap.
-void Oscillator::RenderVariableSine(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     timbre = timbre + (timbre >> 1); // 3/4
     uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
@@ -512,7 +516,7 @@ void Oscillator::RenderVariableSine(int16_t* timbre_samples, int16_t* audio_mix)
   )
 }
 
-void Oscillator::RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     timbre = timbre + (timbre >> 1); // 3/4
     uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo, timbre)) << 15; // 50-0%
@@ -523,7 +527,7 @@ void Oscillator::RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_mix
   )
 }
 
-void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_SAW(phase, phase_increment) }
@@ -539,7 +543,7 @@ void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_mix) 
 // flats + slope of up-ramp
 //
 // ⟋|⟋| -> _/‾|_/‾| -> _|‾|_|‾|
-void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     // Prevent saw from reaching an infinitely steep rise, else we'd have to
     // clumsily transition into a BLEP of what is now a rising pulse edge
@@ -559,7 +563,7 @@ void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_mix
   )
 }
 
-void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderSyncSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       sine(0) - sine(modulator_phase_at_reset),
@@ -575,7 +579,7 @@ void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_mix) {
   )
 }
 
-void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix) {
   uint32_t pw = 0x80000000;
   RENDER_MODULATED(
     SYNC(
@@ -588,7 +592,7 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_mix) {
   )
 }
 
-void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderSyncTriangle(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       triangle(0) - triangle(modulator_phase_at_reset),
@@ -600,7 +604,7 @@ void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_mix)
   )
 }
 
-void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       0 - (modulator_phase_at_reset >> 17),
@@ -612,7 +616,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_mix) {
   )
 }
 
-// void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_mix) {
+// void Oscillator::RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix) {
 //   RENDER_PERIODIC(
 //     this_sample = triangle(phase);
 //     this_sample = this_sample * timbre >> 15;
@@ -620,7 +624,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_mix) {
 //   )
 // }
 
-// void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_mix) {
+// void Oscillator::RenderFoldSine(int16_t* input_samples, int16_t* audio_mix) {
 //   RENDER_PERIODIC(
 //     this_sample = sine(phase);
 //     this_sample = this_sample * timbre >> 15;
@@ -628,7 +632,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_mix) {
 //   )
 // }
 
-void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderTanhSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     this_sample = sine(phase);
     int16_t baseline = this_sample >> 6;
@@ -637,7 +641,7 @@ void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_mix) {
   )
 }
 
-void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderExponentialSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff; // Use top 7/8
     int16_t sine_sample = sine(phase);
@@ -682,7 +686,7 @@ inline uint32_t amplify_for_transfer(
   return amped_sample + bias;
 }
 
-void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   const uint8_t carrier_index = transfer_carrier_;
   const uint8_t transfer_index = transfer_function_;
   uint32_t bias = transfer_bias_;
@@ -731,7 +735,7 @@ void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_mix) {
 #undef TRANSFER_LOOP
 }
 
-void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderFM(int16_t* input_samples, int16_t* audio_mix) {
   uint8_t fm_shape = shape_ - OSC_SHAPE_FM;
   int16_t interval = lut_fm_modulator_intervals[fm_shape];
   uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
@@ -766,7 +770,7 @@ const uint32_t kPhaseResetPulse[] = {
   0x80000000,
 };
 
-void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix) {
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
   int32_t integrator = pd_square_.integrator;
   RENDER_MODULATED(
@@ -798,7 +802,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* au
   pd_square_.integrator = integrator;
 }
 
-void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix) {
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
@@ -826,34 +830,76 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
 // peak sits at 43.9 Hz for a note of 32.7. The resonance is the only pitch this
 // shape has, so this is a real floor on it.
 static const int32_t kWhistleLowestPitch = 30 << 7;
-// The band-pass hands back an octave more level per octave of pitch, MEASURED
-// 316 at MIDI 24 against 27596 at 96, so the output is taken down by as much
-// and lifted to sit where SAW LOW-PASS SVF sits.
-static const int32_t kWhistleGainAtLowestPitch = 8;
+// THE ENVELOPE ALREADY CARRIES scale_, because NoteOn peaks it there and this
+// shape's EXCITATION is noise times that envelope. So the filter state arrives
+// scaled, and this must not scale it again -- doing so cost 6 dB at every voice
+// count. What is left here is the band-pass's own tilt with pitch, and the trim
+// that puts its noise peak where a waveform's full scale would be.
+//
+// AND THE SHARE STAYS AN nTH, not the square root of one. Independent voices do
+// sum as sqrt(n) in RMS, but their CREST grows too -- MEASURED 2.52 at one voice
+// to 4.48 at four -- so peak, which is the thing a DAC actually limits, needs
+// the share to fall as n^0.92. An nth holds the peak flat: 18390/19912/18417
+// across one, two and four voices.
+//
+// What is left for this to correct is the band-pass's own tilt, MEASURED at
+// STEADY STATE, which is the only level this shape has -- it takes seconds to
+// settle, so a short render reads its attack instead. A third of an octave of
+// level per octave of pitch.
 
 // The band-pass hands back more of the same noise the higher it sits, so the
 // output is taken down by as much. q12, so it can be above unity at the bottom.
 static int32_t WhistleOutputGain(int32_t pitch) {
+  // A third of an octave of level per octave of pitch, MEASURED at STEADY
+  // STATE -- this filter takes seconds to settle, so a short render reads its
+  // attack instead.
+  const int32_t tilt_numerator = 1;
+  const int32_t tilt_denominator = 3;
+  // What lands the LOUDEST case on the ceiling a waveform reaches, its crest
+  // being 2.52 against a saw's 1.67. It is a QUARTER of what it was before the
+  // drive law, and that is the measure of how much the old level owed to bp
+  // railing rather than to the filter: with the state off the rail the true
+  // level is four times what could be heard.
+  const int32_t noise_peak_trim_q15 = 7672;
   int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
-  octaves_q16 = octaves_q16;
+  octaves_q16 = octaves_q16 * tilt_numerator / tilt_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
-  int32_t gain = (kWhistleGainAtLowestPitch << 12) *
+  int32_t gain = noise_peak_trim_q15 *
       (Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 1) >> 15;
   int32_t whole = octaves_q16 >> 16;
   return whole >= 20 ? 0 : (gain >> whole);
 }
 
-void Oscillator::RenderWhistle(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
   svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
-  const int32_t output_gain = WhistleOutputGain(resonant_pitch);
+  // WHERE THE FILTER STATE SITS, which is not the same question as how loud the
+  // output is. bp swings as sqrt(Q) for a given drive -- MEASURED, rms rises as
+  // Q^0.52 across Q 7 to 443 -- so at high Q it rails and the state carries a
+  // few bits of signal instead of fifteen. Drive it by sqrt(damp) and make the
+  // same factor back at the output: the two are reciprocal, so the LEVEL is
+  // untouched and only the state moves, off the rail and into its range.
+  //
+  // MEASURED against the same filter in double precision, fed the same
+  // excitation: 0 dB of signal to quantisation noise when bp rails, 71 to 78 dB
+  // just under it.
+  const uint32_t damp_at_widest_q1_14 = 2392;
+  uint32_t damp_now = input_samples[0] > 0 ? input_samples[0] : 1;
+  const int32_t drive_q15 = IntegerSqrt(
+      (damp_now << 15) / damp_at_widest_q1_14 * 32768u);
+  const int32_t output_gain = drive_q15
+      ? static_cast<int32_t>(
+            (static_cast<uint32_t>(WhistleOutputGain(resonant_pitch)) << 15)
+            / drive_q15)
+      : WhistleOutputGain(resonant_pitch);
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
-        Random::GetSample() * timbre_samples[kAudioBlockSize] >> 15;
+        Random::GetSample() * input_samples[kAudioBlockSize] >> 15;
+    excitation = excitation * drive_q15 >> 15;
     svf.RenderSampleAtPitch(excitation, timbre);
-    this_sample = Clip16(svf.bp * output_gain >> 12);
+    this_sample = Clip16(svf.bp * output_gain >> 15);
   )
   svf_ = svf;
 }
@@ -862,19 +908,27 @@ void Oscillator::RenderWhistle(int16_t* timbre_samples, int16_t* audio_mix) {
 // carry energy at the note, and what is left is its own contour through the
 // low-pass. MEASURED at MIDI 81, chiff off the peak sits at 27 Hz, chiff up it
 // sits at 873 Hz against a note of 880.
-void Oscillator::RenderPingLP(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderPingLP(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Halved going in: the resonant step response overshoots the excitation, and
     // at full scale the ring railed for 7% of the note.
-    svf.RenderSampleAtPitch(timbre_samples[kAudioBlockSize] >> 1, timbre);
-    this_sample = svf.lp;
+    svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
+    // THE BAND-PASS, NOT THE LOW-PASS, because a low-pass passes DC and the
+    // exciter here HAS one: once the ring decays the output is the envelope's
+    // own level, MEASURED as a flat 8191 at every pitch and TIMBRE -- a DC
+    // offset, not a sound. The band-pass rejects it and leaves the ring, which
+    // is the whole of what this shape is for.
+    // What lands the strike under the allowance at its loudest, which is the
+    // chiff up: that excites the resonance far harder than a bare envelope.
+    const int32_t ping_gain_q12 = 2048;
+    this_sample = Clip16(svf.bp * ping_gain_q12 >> 12);
   )
   svf_ = svf;
 }
 
-void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderDiracComb(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     int32_t zone_14 = pitch_ + ((32767 - timbre) >> 3);
     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
@@ -888,7 +942,7 @@ void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_mix) {
   )
 }
 
-void Oscillator::RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_mix) {
+void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(pitch_ << 1);
   OscillatorShape shape = shape_;

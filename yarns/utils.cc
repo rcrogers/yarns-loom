@@ -40,4 +40,19 @@ uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor) {
   return q1 * b + q0;
 }
 
+uint32_t IntegerSqrt(uint32_t x) {
+  uint32_t root = 0, remainder = x, bit = 1u << 30;
+  while (bit > remainder) bit >>= 2;
+  while (bit) {
+    if (remainder >= root + bit) {
+      remainder -= root + bit;
+      root = (root >> 1) + bit;
+    } else {
+      root >>= 1;
+    }
+    bit >>= 2;
+  }
+  return root;
+}
+
 }  // namespace yarns
