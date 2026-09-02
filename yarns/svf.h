@@ -62,14 +62,17 @@ struct SVF {
     if (!damped_bp) damped_bp = (bp > 0) - (bp < 0);
     notch = in - damped_bp;
     notch = Clip16(notch);
-    lp += (cutoff * bp + (1 << 14)) >> 15;
-    lp = Clip16(lp);
-    hp = notch - lp;
-    hp = Clip16(hp);
+    // WHERE A STEP ROUNDS AWAY, LEAK TOWARD ZERO rather than fake one in the
+    // direction the integrator wanted. Faking it INJECTS a count, and the dead
+    // band is wide at a low cutoff -- |hp| < 109 at MIDI 24 -- so it fires
+    // constantly and sustains the ring instead of ending it.
+    int32_t lp_step = (cutoff * bp + (1 << 14)) >> 15;
+    if (!lp_step) lp_step = (lp < 0) - (lp > 0);
+    lp = Clip16(lp + lp_step);
+    hp = Clip16(notch - lp);
     int32_t bp_step = (cutoff * hp + (1 << 14)) >> 15;
-    if (!bp_step) bp_step = (hp > 0) - (hp < 0);
-    bp += bp_step;
-    bp = Clip16(bp);
+    if (!bp_step) bp_step = (bp < 0) - (bp > 0);
+    bp = Clip16(bp + bp_step);
   }
 
   // Conversion methods. Callers pass Q0.15 domain values, get back
