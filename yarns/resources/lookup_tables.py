@@ -841,8 +841,16 @@ f = cutoff / audio_rate
 f[f > 1 / 8.0] = 1 / 8.0
 f = 2 * numpy.sin(numpy.pi * f)
 resonance = numpy.arange(0, 257) / 260.0
-damp = numpy.minimum(2 * (1 - resonance ** 0.25),
-       numpy.minimum(2, 2 / f - f * 0.5))
+# Damping from resonance, and ONLY from resonance -- this table is indexed by
+# it. A second term used to sit here, min(2, 2/f - f/2), which is the SVF's
+# stability bound and depends on the CUTOFF: element-wise against an array
+# indexed by MIDI note, so it paired resonance i with the coefficient for note
+# i, quantities with nothing to do with each other. It also never bound --
+# 2/f - f/2 bottoms out at 2.230, so min(2, .) was 2.000 at all 257 entries
+# while 2*(1-r^0.25) never exceeds 2. Removing it leaves the table identical.
+# A bound needing both axes cannot live in a one-axis table; it belongs where
+# cutoff and damping are both in hand.
+damp = 2 * (1 - resonance ** 0.25)
 
 lookup_tables.append(
     ('svf_cutoff', f * 32767.0)
