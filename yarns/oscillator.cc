@@ -49,6 +49,9 @@ static const uint16_t kOctave = 12 * 128;
 // SYNC's modulator frequency, as a multiple of the carrier's: _q3_12, so up
 // to 8x. The span TIMBRE asks for is 2.67 octaves, or 6.35x.
 static const int kSyncRatioFractionalBits = 12;
+// How far TIMBRE sweeps WHISTLE's and PING's Q, and so how far the drive law's
+// reciprocal may go.
+static const uint32_t kWhistleQOctaves = 8;
 // WHISTLE and PING sweep Q over this many octaves, from the damp the widest
 // setting asks for. 2392 is the damp LUT at the resonance the shapes used to
 // start from, which is Q 6.8; six octaves of it reaches Q 440.
@@ -201,7 +204,7 @@ int16_t Oscillator::WarpTimbre(
     // MEASURED as 0.4 dB of change in peak-to-octave-up between Q 435 and 3482.
     // Off the rail it is realised, and the ring at middle C runs about 2 s.
     const int32_t damp_at_widest_q1_14 = 2392;
-    const uint32_t q_octaves = 8;
+    const uint32_t q_octaves = kWhistleQOctaves;
     uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * q_octaves) << 1;
     int32_t damp = damp_at_widest_q1_14 * // 2^-octaves
       Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 16;
@@ -888,7 +891,17 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // excitation: 0 dB of signal to quantisation noise when bp rails, 71 to 78 dB
   // just under it.
   const uint32_t damp_at_widest_q1_14 = 2392;
-  uint32_t damp_now = input_samples[0] > 0 ? input_samples[0] : 1;
+  // CLAMPED TO WHAT THE WARP CAN ACTUALLY ASK FOR, because the make-up below is
+  // a RECIPROCAL of this: eight octaves down from the widest is damp 9, and a
+  // floor any lower lets it reach 50x and amplify whatever is still in the
+  // filter. The timbre envelope slews, so it passes through values the warp
+  // never produces -- at the end of a note among other places.
+  const uint32_t damp_at_tightest_q1_14 =
+      damp_at_widest_q1_14 >> kWhistleQOctaves;
+  uint32_t damp_now = static_cast<uint32_t>(
+      input_samples[0] > 0 ? input_samples[0] : 0);
+  if (damp_now < damp_at_tightest_q1_14) damp_now = damp_at_tightest_q1_14;
+  if (damp_now > damp_at_widest_q1_14) damp_now = damp_at_widest_q1_14;
   const int32_t drive_q15 = IntegerSqrt(
       (damp_now << 15) / damp_at_widest_q1_14 * 32768u);
   const int32_t output_gain = drive_q15
