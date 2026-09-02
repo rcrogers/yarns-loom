@@ -821,15 +821,39 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audi
 // The gain envelope is the EXCITER, spent going into the filter rather than
 // scaling what leaves it. Its own chiff rides in with it, so EXCITER AMOUNT
 // decides how much of the excitation is noise.
+// A RESONANCE, NOT A NOTE, BELOW THIS. The cutoff coefficient is 212 here and
+// 150 an octave down, and the filter stops being one: MEASURED at MIDI 24 the
+// peak sits at 43.9 Hz for a note of 32.7. The resonance is the only pitch this
+// shape has, so this is a real floor on it.
+static const int32_t kWhistleLowestPitch = 30 << 7;
+// The band-pass hands back an octave more level per octave of pitch, MEASURED
+// 316 at MIDI 24 against 27596 at 96, so the output is taken down by as much
+// and lifted to sit where SAW LOW-PASS SVF sits.
+static const int32_t kWhistleGainAtLowestPitch = 8;
+
+// The band-pass hands back more of the same noise the higher it sits, so the
+// output is taken down by as much. q12, so it can be above unity at the bottom.
+static int32_t WhistleOutputGain(int32_t pitch) {
+  int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
+  octaves_q16 = octaves_q16;
+  if (octaves_q16 < 0) octaves_q16 = 0;
+  int32_t gain = (kWhistleGainAtLowestPitch << 12) *
+      (Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 1) >> 15;
+  int32_t whole = octaves_q16 >> 16;
+  return whole >= 20 ? 0 : (gain >> whole);
+}
+
 void Oscillator::RenderWhistle(int16_t* timbre_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
+  int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
+  const int32_t output_gain = WhistleOutputGain(resonant_pitch);
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
         Random::GetSample() * timbre_samples[kAudioBlockSize] >> 15;
     svf.RenderSampleAtPitch(excitation, timbre);
-    this_sample = Clip16(svf.bp << 1);
+    this_sample = Clip16(svf.bp * output_gain >> 12);
   )
   svf_ = svf;
 }
