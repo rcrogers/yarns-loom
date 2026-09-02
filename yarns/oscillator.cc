@@ -196,9 +196,12 @@ int16_t Oscillator::WarpTimbre(
   // because a resonance stops at the damp LUT's last entry and that is Q 129.
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_LP) {
     // 2392 is the damp LUT at the resonance these shapes used to start from,
-    // which is Q 6.8; six octaves of it reaches Q 440.
+    // which is Q 6.8; eight octaves of it reaches Q 1741. Six was as far as it
+    // was worth asking while bp sat on its rail -- the extra was not realised,
+    // MEASURED as 0.4 dB of change in peak-to-octave-up between Q 435 and 3482.
+    // Off the rail it is realised, and the ring at middle C runs about 2 s.
     const int32_t damp_at_widest_q1_14 = 2392;
-    const uint32_t q_octaves = 6;
+    const uint32_t q_octaves = 8;
     uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * q_octaves) << 1;
     int32_t damp = damp_at_widest_q1_14 * // 2^-octaves
       Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 16;
@@ -860,7 +863,7 @@ static int32_t WhistleOutputGain(int32_t pitch) {
   // drive law, and that is the measure of how much the old level owed to bp
   // railing rather than to the filter: with the state off the rail the true
   // level is four times what could be heard.
-  const int32_t noise_peak_trim_q15 = 7672;
+  const int32_t noise_peak_trim_q15 = 4005;
   int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * tilt_numerator / tilt_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
