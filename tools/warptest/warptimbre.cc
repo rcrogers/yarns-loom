@@ -24,7 +24,7 @@ static const char* kName[] = {
 
 int main() {
   Oscillator osc;
-  osc.Init(32767);
+  osc.Init(32767, 32767);
   const int16_t pitch = 60 << 7;   // middle C
   printf("%-18s %8s %8s %8s %8s   %s\n",
          "shape","warp(-32768)","warp(-16384)","warp(0)","warp(+16383)","verdict");

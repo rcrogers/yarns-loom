@@ -144,8 +144,9 @@ class Oscillator {
   Oscillator() { }
   ~Oscillator() { }
 
-  inline void Init(uint16_t scale) {
-    scale_ = scale;
+  inline void Init(uint16_t coherent_scale, uint16_t incoherent_scale) {
+    scale_ = coherent_scale;
+    incoherent_scale_ = incoherent_scale;
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
@@ -197,6 +198,13 @@ class Oscillator {
 
   void set_shape(OscillatorShape shape);
 
+  // WHICH OF THE TWO SHARES THE SHAPE SUMS AS. WHISTLE excites its filter with
+  // NOISE, so its voices are independent and add in power; every other shape is
+  // periodic and its voices add in amplitude.
+  inline uint16_t scale_for(OscillatorShape shape) const {
+    return shape == OSC_SHAPE_WHISTLE ? incoherent_scale_ : scale_;
+  }
+
   // start_pitch is the new note's pitch at onset (the portamento glide's
   // start); target_pitch is its destination. Both arrive before Refresh has
   // updated pitch_, so we warp explicitly against them here.
@@ -204,8 +212,9 @@ class Oscillator {
       ADSR& adsr, bool drone,
       int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
       uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
+    const uint16_t peak = scale_for(shape_) >> 1;
     gain_envelope_.NoteOn(
-      adsr, drone ? scale_ >> 1 : 0, scale_ >> 1, chiff_amount_q30, chiff_audible_samples);
+      adsr, drone ? peak : 0, peak, chiff_amount_q30, chiff_audible_samples);
 
     // Snap the pitch-driven jump in timbre bias out of RenderSamples' slew so
     // warped timbre tracks the new pitch instantly; only LFO bias motion stays
@@ -345,6 +354,7 @@ class Oscillator {
   int16_t prev_transfer_raw_;
   int16_t prev_transfer_avg_;
   uint16_t scale_;
+  uint16_t incoherent_scale_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);

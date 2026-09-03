@@ -37,6 +37,7 @@
 #include "yarns/interpolator.h"
 #include "yarns/synced_lfo.h"
 #include "yarns/part.h"
+#include "yarns/utils.h"
 
 namespace yarns {
 
@@ -296,11 +297,20 @@ class CVOutput {
     num_audio_voices_ = num_audio;
     zero_dac_code_ = volts_dac_code(0);
     envelope_.Init(zero_dac_code_ >> 1);
-    uint16_t scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
-    scale /= num_audio_voices_;
+    // WHAT ONE VOICE MAY SPEND, so that the voices SUMMED reach 5 Vpp. Which
+    // share that is depends on how they add, and a shape decides that:
+    //   COHERENT -- periodic, so their peaks line up sooner or later, and n of
+    //   them reach n times one. An nth each.
+    //   INDEPENDENT -- noise, which adds in POWER, so n of them reach sqrt(n)
+    //   times one. full / sqrt(n) each, which is the geometric mean of the
+    //   whole and the nth.
+    const uint16_t full_scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
+    const uint16_t coherent_scale = full_scale / num_audio_voices_;
+    const uint16_t incoherent_scale = static_cast<uint16_t>(IntegerSqrt(
+        static_cast<uint32_t>(full_scale) * coherent_scale));
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
       Voice* audio_voice = audio_voices_[i] = dc_voices_[0] + i;
-      audio_voice->oscillator()->Init(scale);
+      audio_voice->oscillator()->Init(coherent_scale, incoherent_scale);
       audio_voice->set_audio_output(this);
     }
   }

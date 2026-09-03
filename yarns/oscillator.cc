@@ -254,6 +254,11 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   int32_t new_scale = WarpTimbre(midpoint_timbre, new_shape);
   timbre_envelope_.Rescale(new_scale, old_scale);
 
+  // The gain envelope carries the voice's SHARE of the output budget, and the
+  // share moves when the shape changes which way the voices sum. Rescale it for
+  // the same reason: a held note is meant to change shape, not loudness.
+  gain_envelope_.Rescale(scale_for(new_shape), scale_for(shape_));
+
   shape_ = new_shape;
 
   transfer_crest_factor_ = 1;
@@ -837,22 +842,12 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // peak sits at 43.9 Hz for a note of 32.7. The resonance is the only pitch this
 // shape has, so this is a real floor on it.
 static const int32_t kWhistleLowestPitch = 30 << 7;
-// THE ENVELOPE ALREADY CARRIES scale_, because NoteOn peaks it there and this
-// shape's EXCITATION is noise times that envelope. So the filter state arrives
-// scaled, and this must not scale it again -- doing so cost 6 dB at every voice
-// count. What is left here is the band-pass's own tilt with pitch, and the trim
-// that puts its noise peak where a waveform's full scale would be.
-//
-// AND THE SHARE STAYS AN nTH, not the square root of one. Independent voices do
-// sum as sqrt(n) in RMS, but their CREST grows too -- MEASURED 2.52 at one voice
-// to 4.48 at four -- so peak, which is the thing a DAC actually limits, needs
-// the share to fall as n^0.92. An nth holds the peak flat: 18390/19912/18417
-// across one, two and four voices.
-//
-// What is left for this to correct is the band-pass's own tilt, MEASURED at
-// STEADY STATE, which is the only level this shape has -- it takes seconds to
-// settle, so a short render reads its attack instead. A third of an octave of
-// level per octave of pitch.
+// THE ENVELOPE ALREADY CARRIES THE VOICE'S SHARE OF THE OUTPUT BUDGET, because
+// NoteOn peaks it there and this shape's EXCITATION is noise times that
+// envelope. So the filter state arrives scaled, and this must not scale it
+// again -- doing so cost 6 dB at every voice count. What is left for the gain
+// below to correct is the band-pass's own tilt with pitch, and the trim that
+// puts the noise inside the 5 Vpp envelope.
 
 // The band-pass hands back more of the same noise the higher it sits, so the
 // output is taken down by as much. q12, so it can be above unity at the bottom.

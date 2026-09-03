@@ -48,7 +48,9 @@ uint32_t HashShape(int shape, bool dump) {
   // shapes before it took.
   stmlib::Random::Seed(0x21);
   for (size_t p = 0; p < sizeof(kPitches) / sizeof(kPitches[0]); ++p) {
-    osc.Init(kScale);
+    // One voice, so its share of the output budget is the whole of it and the
+    // two shares coincide.
+    osc.Init(kScale, kScale);
     osc.set_shape(static_cast<OscillatorShape>(shape));
     osc.Refresh(static_cast<int16_t>(kPitches[p]), 0, 0);
     for (int b = 0; b < kBlocks; ++b) {
