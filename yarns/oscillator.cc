@@ -851,18 +851,25 @@ static const int32_t kWhistleLowestPitch = 30 << 7;
 
 // The band-pass hands back more of the same noise the higher it sits, so the
 // output is taken down by as much. q12, so it can be above unity at the bottom.
+//
+// BOTH NUMBERS BELOW ARE AVERAGES OVER MINUTES, and they have to be: at the Q
+// the top of TIMBRE asks for, this output is narrowband noise whose own
+// envelope decorrelates in about Q/f seconds -- 13 s at Q 1741 and middle C.
+// A render of a few seconds reads ONE DRAW from that envelope, not a level, and
+// two such draws an octave apart differ by more than the tilt being measured.
 static int32_t WhistleOutputGain(int32_t pitch) {
-  // A third of an octave of level per octave of pitch, MEASURED at STEADY
-  // STATE -- this filter takes seconds to settle, so a short render reads its
-  // attack instead.
+  // Half an octave of level per octave of pitch. MEASURED as 2.85 dB per octave
+  // with no tilt at all; correcting by exactly half holds rms within 0.6 dB
+  // from MIDI 24 to 84, at every Q.
   const int32_t tilt_numerator = 1;
-  const int32_t tilt_denominator = 3;
-  // What lands the LOUDEST case on the ceiling a waveform reaches, its crest
-  // being 2.52 against a saw's 1.67. It is a QUARTER of what it was before the
-  // drive law, and that is the measure of how much the old level owed to bp
-  // railing rather than to the filter: with the state off the rail the true
-  // level is four times what could be heard.
-  const int32_t noise_peak_trim_q15 = 4005;
+  const int32_t tilt_denominator = 2;
+  // WHAT PUTS THE VOICES' SUM INSIDE THE 5 Vpp ENVELOPE. Noise only visits its
+  // peak, so the level that lands there is the peak divided by the crest a long
+  // listen reaches: MEASURED 3.8 to 5.3 over 500 s runs, and this trim leaves
+  // rms at a fifth of the envelope. What crosses it is then one sample in a
+  // million at the very top of the keyboard, and nothing reaches the DAC's own
+  // rail, which is a further 20% out.
+  const int32_t noise_peak_trim_q15 = 4700;
   int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * tilt_numerator / tilt_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
