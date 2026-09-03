@@ -94,7 +94,8 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderSyncPulse,
   &Oscillator::RenderSyncSaw,
   &Oscillator::RenderWhistle,
-  &Oscillator::RenderPingLP,
+  &Oscillator::RenderPing,
+  &Oscillator::RenderPing,
   // &Oscillator::RenderFoldSine,
   // &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderDiracComb,
@@ -924,22 +925,24 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
 // carry energy at the note, and what is left is its own contour through the
 // low-pass. MEASURED at MIDI 81, chiff off the peak sits at 27 Hz, chiff up it
 // sits at 873 Hz against a note of 880.
-void Oscillator::RenderPingLP(int16_t* input_samples, int16_t* audio_mix) {
+void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
+  int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
+  // THE BAND-PASS REJECTS THE EXCITER'S DC AND THE LOW-PASS PASSES IT, and both
+  // are worth having: past the ring the low-pass output IS the envelope's own
+  // level, MEASURED as a flat 8191 at every pitch and TIMBRE. Under a
+  // percussive envelope that is a thump; under a sustained one it is a standing
+  // offset, which is why the band-pass is the one to reach for by default.
+  const bool band_pass = shape_ == OSC_SHAPE_PING_BP;
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Halved going in: the resonant step response overshoots the excitation, and
     // at full scale the ring railed for 7% of the note.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
-    // THE BAND-PASS, NOT THE LOW-PASS, because a low-pass passes DC and the
-    // exciter here HAS one: once the ring decays the output is the envelope's
-    // own level, MEASURED as a flat 8191 at every pitch and TIMBRE -- a DC
-    // offset, not a sound. The band-pass rejects it and leaves the ring, which
-    // is the whole of what this shape is for.
     // What lands the strike under the allowance at its loudest, which is the
     // chiff up: that excites the resonance far harder than a bare envelope.
     const int32_t ping_gain_q12 = 2048;
-    this_sample = Clip16(svf.bp * ping_gain_q12 >> 12);
+    this_sample = Clip16((band_pass ? svf.bp : svf.lp) * ping_gain_q12 >> 12);
   )
   svf_ = svf;
 }
