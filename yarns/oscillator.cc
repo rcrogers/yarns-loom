@@ -206,6 +206,12 @@ int16_t Oscillator::WarpTimbre(
     // Off the rail it is realised, and the ring at middle C runs about 2 s.
     const int32_t damp_at_widest_q1_14 = 2392;
     const uint32_t q_octaves = kWhistleQOctaves;
+    // OFF THE BOTTOM OF THE MAP IS THE WIDEST SETTING, and it has to be said
+    // here: the cast below wraps a negative timbre into a shift of 65527, which
+    // takes the damp to ZERO, and zero damp is a resonator with no loss in it.
+    // NoteOn warps the DESTINATION, so a negative TIMBRE MOD ENVELOPE reaches
+    // it -- and the note then grows for as long as it is held.
+    if (timbre < 0) timbre = 0;
     uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * q_octaves) << 1;
     int32_t damp = damp_at_widest_q1_14 * // 2^-octaves
       Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 16;
