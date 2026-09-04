@@ -869,17 +869,21 @@ static int32_t WhistleOutputGain(int32_t pitch) {
   // from MIDI 24 to 84, at every Q.
   const int32_t tilt_numerator = 1;
   const int32_t tilt_denominator = 2;
-  // WHAT PUTS THE VOICES' SUM INSIDE THE 5 Vpp ENVELOPE. Noise only visits its
-  // peak, so the level that lands there is the peak divided by the crest a long
-  // listen reaches: MEASURED 3.8 to 5.3 over 500 s runs, and this trim leaves
-  // rms at a fifth of the envelope. What crosses it is then one sample in a
-  // million at the very top of the keyboard, and nothing reaches the DAC's own
-  // rail, which is a further 20% out.
-  const int32_t noise_peak_trim_q15 = 4700;
+  // HOW HARD THE CAP IS DRIVEN. Holding the peak is no longer this constant's
+  // job -- bp_ceiling does that, at the share -- so what is left to choose is
+  // level against how often the cap engages. Noise only visits its peak (crest
+  // MEASURED 3.8 to 5.3 over 500 s runs), and everything under the peak is
+  // level left unspent; driving into the cap is what buys it back.
+  //
+  // MEASURED at 10 Vpp, 200 s runs: rms 1.82 V at one voice for 1.5% of samples
+  // capped, 1.62 V at four voices for 20.6%, against LP SAW's 2.94 and 2.66.
+  // Four voices cap harder by construction -- the excitation takes the
+  // geometric-mean share, which is sqrt(n) above the nth the cap allows.
+  const int32_t noise_level_trim_q15 = 9400;
   int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * tilt_numerator / tilt_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
-  int32_t gain = noise_peak_trim_q15 *
+  int32_t gain = noise_level_trim_q15 *
       (Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 1) >> 15;
   int32_t whole = octaves_q16 >> 16;
   return whole >= 20 ? 0 : (gain >> whole);
@@ -918,13 +922,30 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
             (static_cast<uint32_t>(WhistleOutputGain(resonant_pitch)) << 15)
             / drive_q15)
       : WhistleOutputGain(resonant_pitch);
+  // THE PEAK IS CAPPED AT THE nTH EVEN THOUGH THE EXCITATION TAKES THE
+  // GEOMETRIC MEAN, because a peak is what the span limits and there is no
+  // room above it: n voices at the nth reach the span exactly, and 683 codes
+  // past that the DAC code wraps.
+  //
+  // CAPPED ON bp, BEFORE THE MAKE-UP, NOT ON THE OUTPUT AFTER IT. The make-up
+  // is a reciprocal and reaches 16.3x at the tightest damp, so a railed bp
+  // times it OVERFLOWS int32 -- MEASURED 1.06x INT32_MAX at the bottom of the
+  // keyboard, where the make-up is largest. Capping the state the multiply
+  // reads bounds the product by construction, and costs the same two compares
+  // the output clamp did.
+  const int32_t bp_ceiling = output_gain > 0
+      ? static_cast<int32_t>(
+            (static_cast<uint32_t>(scale_ >> 1) << 15) / output_gain)
+      : INT16_MAX;
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
         Random::GetSample() * input_samples[kAudioBlockSize] >> 15;
     excitation = excitation * drive_q15 >> 15;
     svf.RenderSampleAtPitch(excitation, timbre);
-    this_sample = Clip16(svf.bp * output_gain >> 15);
+    int32_t band_pass = svf.bp;
+    CONSTRAIN(band_pass, -bp_ceiling, bp_ceiling);
+    this_sample = band_pass * output_gain >> 15;
   )
   svf_ = svf;
 }
