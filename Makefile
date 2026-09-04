@@ -13,12 +13,13 @@
 #   make ui         host display: the real driver, its GPIO decoded
 #   make osc        host oscillator: all 42 shapes, sample for sample
 #   make mix        the summed mix stays inside the span the voices were given
+#   make warp       every shape's timbre map is monotone, including below zero
 #   make qemu       differential: render-loop asm == C reference, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
 #   make cycles     what the envelope costs per block, against the baseline
 
-.PHONY: all sim host cv ui osc mix qemu check firmware cycles
+.PHONY: all sim host cv ui osc warp mix qemu check firmware cycles
 
 # Rebuild the sim, then run the full verification.
 all: sim check
@@ -49,6 +50,11 @@ ui:
 osc:
 	sh tools/osctest/build.sh
 
+# THE WARP on its own: monotone across the whole signed timbre range. It is
+# where the parameter faults have been, so it gets its own check.
+warp:
+	sh tools/warptest/run.sh
+
 # THE MIX, against the span voice.h hands out. The contract every shape has to
 # keep and none of them declared: driver.cc says why it belongs at the DAC.
 mix:
@@ -59,7 +65,7 @@ qemu:
 
 # Verify the tree is in sync WITHOUT rebuilding, so a stale committed sim shows
 # up as a simparity failure rather than being silently refreshed.
-check: host cv ui osc mix qemu
+check: host cv ui osc warp mix qemu
 	node tools/chiff_checks/simparity.js chiff_sim.html
 	node tools/chiff_checks/peakfloor.js
 	node tools/chiff_checks/xvmod.js

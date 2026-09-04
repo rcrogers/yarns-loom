@@ -8,3 +8,9 @@ python3 ../portable_envelope.py ../.. envelope_host.cc
 clang++ -std=c++11 -O1 -w -DTEST -I ../hosttest/shim -I ../.. \
   warptimbre.cc ../../yarns/oscillator.cc ../../yarns/resources.cc ../../yarns/utils.cc \
   envelope_host.cc rng_stub.cc -o warptimbre && ./warptimbre
+# And the warp's own contract, which is what the gate runs. warpcheck.cc says
+# why the warp gets a check to itself.
+clang++ -std=c++11 -O1 -w -DTEST -I ../hosttest/shim -I ../.. \
+  warpcheck.cc ../../yarns/oscillator.cc ../../yarns/resources.cc ../../yarns/utils.cc \
+  envelope_host.cc rng_stub.cc -o warpcheck || exit 1
+./warpcheck || exit 1

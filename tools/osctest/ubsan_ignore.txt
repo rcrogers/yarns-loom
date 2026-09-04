@@ -1,0 +1,5 @@
+# stmlib is upstream and shared by every module in this repo, so its undefined
+# behaviour is not ours to change from here. Interpolate824 multiplies two
+# values whose product leaves int32 -- benign today, because it returns int16
+# and the truncation discards exactly the wrap, but still undefined.
+src:*/stmlib/*
