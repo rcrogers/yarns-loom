@@ -18,8 +18,7 @@ node golden.js || exit 1
 # divide whose divisor reaches zero. ubsan.cc says how the domain is chosen.
 clang++ -std=c++11 -O1 -g -w -DTEST \
   -fsanitize=signed-integer-overflow,shift,integer-divide-by-zero \
-  -fno-sanitize-recover=all -fsanitize-ignorelist=ubsan_ignore.txt \
-  -I ../hosttest/shim -I ../.. \
+  -fno-sanitize-recover=all  -I ../hosttest/shim -I ../.. \
   ubsan.cc ../../yarns/oscillator.cc ../../yarns/envelope.cc \
   ../../yarns/resources.cc ../../yarns/utils.cc ../warptest/rng_stub.cc \
   -o oscubsan || exit 1
