@@ -527,8 +527,19 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
 // to sharpen: what it sweeps is a formant over a gap.
 void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
-    timbre = timbre + (timbre >> 1); // 3/4
-    uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
+    // WHERE THE FORMANT SITS IS 1/width THE FUNDAMENTAL, which is what the knob
+    // is really choosing. Three quarters of the table put the top of it at 31x
+    // -- past Nyquist for any note above MIDI 78 -- and reached a third of the
+    // way down in the first sixteen steps.
+    //   SQUARED, so the onset is gentle: the bottom quarter of the knob is
+    //   still within 12% of a plain sine.
+    //   HALF THE TABLE, so the top is 8.4x, which stays under Nyquist to
+    //   MIDI 100.
+    // Below the bottom of the map is the bottom of it: a negative timbre used
+    // to wrap the index and collapse the width to zero, which is silence.
+    if (timbre < 0) timbre = 0;
+    uint16_t index = static_cast<uint16_t>(timbre * timbre >> 15);
+    uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo, index); // 100-12%
     // A width of zero fails the compare rather than reaching the divide.
     this_sample = (phase >> 16) < width ? sine((phase / width) << 16) : 0;
   )
