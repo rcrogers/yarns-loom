@@ -355,8 +355,11 @@ class CVOutput {
   }
   inline void NoteOn(
       ADSR& adsr, uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
+    // The range runs DOWNWARD -- DAC codes fall as volts rise -- and the
+    // output range is the only bound: this envelope drives one CV output on its
+    // own, so there is nothing for it to share with.
     envelope_.NoteOn(
-      adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1,
+      adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1, kEnvelopeSampleMax,
       chiff_amount_q30, chiff_audible_samples);
   }
   inline void NoteOff(bool force = false) {

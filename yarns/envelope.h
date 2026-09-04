@@ -84,9 +84,13 @@ class Envelope {
 
   void Init(int16_t zero_value_s16);
   void NoteOff();
+  // ceiling_s16 is the HIGHEST VALUE THE CALLER MAY SPEND, which is not the
+  // same as the note's peak: a chiff rides ABOVE the note and must still fit
+  // under it. Callers with no tighter bound than this type's own output range
+  // pass kEnvelopeSampleMax.
   void NoteOn(
     ADSR& adsr,
-    int32_t min_target_s16, int32_t max_target_s16,
+    int32_t min_target_s16, int32_t max_target_s16, int32_t ceiling_s16,
     uint32_t chiff_amount_q30, uint32_t chiff_audible_samples
   );
   void Trigger(EnvelopeStage stage);
@@ -193,6 +197,11 @@ class Envelope {
   // min(note floor, 0). USAT bounds [0, 2^30), so a note reaching below zero is
   // rendered offset by its floor. State, not a local: GCC spills it there.
   int32_t value_floor_q30_;
+  // What the caller said it may spend, in the targets' domain. NOT inferred
+  // from the targets: a caller's range need not start at its floor, a drone's
+  // is empty, and a CV output's runs downward because DAC codes fall as volts
+  // rise. Only the caller knows.
+  int32_t value_ceiling_q30_;
 
   DISALLOW_COPY_AND_ASSIGN(Envelope);
 };

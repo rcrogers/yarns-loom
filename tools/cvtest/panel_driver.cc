@@ -105,6 +105,9 @@ int main(int argc, char** argv) {
     reference.NoteOn(mirrored,
                      aux_output.volts_dac_code(0) >> 1,
                      aux_output.volts_dac_code(7) >> 1,
+                     // What CVOutput::NoteOn passes: one CV output, nothing to
+                     // share the range with.
+                     kEnvelopeSampleMax,
                      PanelChiffAmount_q30(setting, amount_mod, velocity),
                      PanelChiffAudibleSamples(setting, duration_mod, velocity));
 

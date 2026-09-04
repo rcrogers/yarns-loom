@@ -182,6 +182,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_slew_state_q26_ = 0;
   stage_start_q30_ = zero_value_q30;
   value_floor_q30_ = std::min<int32_t>(zero_value_q30, 0);
+  value_ceiling_q30_ = kValueMax_q30;
   std::fill(
     &note_target_q30_[0],
     &note_target_q30_[ENV_NUM_STAGES],
@@ -274,8 +275,13 @@ static uint32_t TargetWithAllBias(
     int32_t nominal_q30, int32_t bias_q30,
     int32_t mean_min_q30, int32_t mean_max_q30) {
   if (mean_min_q30 >= mean_max_q30) {
-    // Chiff wider than the rails: centre it and let the output saturate.
-    return static_cast<uint32_t>((kValueMax_q30 >> 1) - nominal_q30);
+    // Chiff as wide as the rails allow or wider: centre it BETWEEN THEM and let
+    // the output saturate. The rails are the caller's, so their midpoint is
+    // too; centring on this type's own numeric midpoint instead ignored what
+    // the caller said it may spend and put the value at 6.38 V of DAC code
+    // whatever it had asked for.
+    return static_cast<uint32_t>(
+      ((mean_min_q30 + mean_max_q30) >> 1) - nominal_q30);
   }
   return OffsetForChiffAmplitude((nominal_q30 >> 1) + (bias_q30 >> 1),
                                  mean_min_q30 >> 1, mean_max_q30 >> 1)
@@ -506,9 +512,11 @@ static int32_t ChiffDriveAtAmount_q4_26(uint32_t amount_q30) {
 
 void Envelope::NoteOn(
   ADSR& adsr,
-  int32_t min_target_s16, int32_t max_target_s16,
+  int32_t min_target_s16, int32_t max_target_s16, int32_t ceiling_s16,
   uint32_t chiff_amount_q30, uint32_t chiff_audible_samples
 ) {
+  // A target is s16 << 15, and the ceiling is one.
+  value_ceiling_q30_ = ceiling_s16 << 15;
   adsr_ = &adsr;
   int16_t scale_s16 = max_target_s16 - min_target_s16;
   int32_t min_target_q31 = min_target_s16 << 16;
@@ -757,7 +765,11 @@ void Envelope::HandOffToNextStage(
   "  sub   %[delta], %[delta], lr, lsl #1\n"              /*   at the STAGE's rate     */ \
   "  add   %[target], %[target], %[target_slope]\n"       /* bias + mean + adj. target */ \
   "  sub   ip, %[target], %[delta]\n"                     /* the mean                  */ \
-  "  add   ip, ip, %[chiff], lsl %[state_shift]\n"        /* + the chiff, unscaled     */ \
+  "  ldr   lr, %[mean_max]\n"                             /* HELD OFF THE HIGH RAIL    */ \
+  "  cmp   ip, lr\n"                                      /*   per sample, because a   */ \
+  "  it    gt\n"                                          /*   correction ramped over  */ \
+  "  movgt ip, lr\n"                                      /*   a run cannot track an   */ \
+  "  add   ip, ip, %[chiff], lsl %[state_shift]\n"        /*   exponential value       */ \
   "  usat  ip, %[sat_bits], ip, asr %[sample_bits]\n"     /* saturate and shift, 1 op  */ \
   "  strh  ip, [%[buf]], #2\n"
 // Every constant above is an "i" operand, not a digit in a string, so a
@@ -777,6 +789,9 @@ void Envelope::HandOffToNextStage(
   [rate_decay] "r"(chiff_slew_rate_decay_q32),                                \
   [levels] "r"(chiff_levels_q4_26),                                           \
   [clip] "r"(chiff_clip_threshold_q26),                                       \
+  /* In MEMORY, not a register: twelve "r" operands is what the body allocates
+   * and this is the thirteenth. The load is most of what the clamp costs. */  \
+  [mean_max] "m"(mean_max_q30),                                               \
   [stage_rate] "r"(stage_slew_rate_q31),                                      \
   [target_slope] "r"(target_with_all_bias_slope),                             \
   [draw_bits] "i"(kChiffDrawBits),                                            \
@@ -814,8 +829,10 @@ void Envelope::HandOffToNextStage(
     /* Reinterpreted as signed BEFORE the shift: the accumulator is modular,   \
      * the shift must be arithmetic to match the asm's asr, and the true value  \
      * of this sum is in int32 range. */                                        \
-    int32_t sample = static_cast<int32_t>(target_with_all_bias                          \
-      - static_cast<uint32_t>(nominal_delta_q1_30)                                  \
+    int32_t mean_q30 = static_cast<int32_t>(target_with_all_bias                     \
+      - static_cast<uint32_t>(nominal_delta_q1_30));                              \
+    if (mean_q30 > mean_max_q30) mean_q30 = mean_max_q30;                         \
+    int32_t sample = static_cast<int32_t>(static_cast<uint32_t>(mean_q30)           \
       + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))          \
       >> kSampleBits;                                                           \
     if (sample < 0) sample = 0;                                               \
@@ -966,11 +983,23 @@ void Envelope::RenderStage(
     // mean centred, so the chiff clips both sides.
     const int32_t chiff_clip_threshold_q30 = ChiffClipThreshold_q30(
       chiff_slew_input_q30, chiff_amplitude_gain_q31_sqrt);
-    const int32_t chiff_clip_threshold_q26 = chiff_clip_threshold_q30
+    // AND NO WIDER THAN THE RAILS CAN HOLD. The chiff is sized from the note's
+    // range, which a caller may set wider than what it says it may spend; past
+    // half of that there is no mean it fits either side of, and it swings the
+    // whole of it instead.
+    const int32_t chiff_clip_threshold_bounded_q30 = std::min<int32_t>(
+      chiff_clip_threshold_q30, value_ceiling_q30_ >> 1);
+    const int32_t chiff_clip_threshold_q26 = chiff_clip_threshold_bounded_q30
       >> (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits);
     const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-    const int32_t mean_min_q30 = chiff_clip_threshold_q30;
-    const int32_t mean_max_q30 = kValueMax_q30 - chiff_clip_threshold_q30;
+    // The chiff is held this far off each rail so the output saturation does
+    // not RECTIFY it. The bottom is this type's own -- the output saturates at
+    // zero whatever the caller meant by it. The top is the CALLER'S, because
+    // only the caller knows what it may spend; it passes kEnvelopeSampleMax
+    // when that is the whole output range.
+    const int32_t mean_min_q30 = chiff_clip_threshold_bounded_q30;
+    const int32_t mean_max_q30 =
+      value_ceiling_q30_ - chiff_clip_threshold_bounded_q30;
     // Where nominal reaches by the run's end, for the offset's far endpoint.
     // Approximate (linear in rate * run_samples) -- it only sizes an offset
     // that is itself an approximation; nominal's own path stays exact.
@@ -1188,6 +1217,7 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   // min(floor, 0) * s == min(floor * s, 0) for a non-negative s, so the offset
   // scales directly and the floor it came from need not be kept.
   value_floor_q30_ = ScaleRatio(value_floor_q30_, num, den);
+  value_ceiling_q30_ = ScaleRatio(value_ceiling_q30_, num, den);
   for (int i = 0; i < ENV_NUM_STAGES; ++i) {
     note_target_q30_[i] = ScaleRatio(note_target_q30_[i], num, den);
   }

@@ -131,7 +131,9 @@ int chiff_render(
   // catch.
   const uint32_t chiff_audible_samples = PanelChiffAudibleSamples(
       chiff_duration, chiff_duration_mod_velocity, velocity);
-  envelope.NoteOn(adsr, min_target, max_target,
+  // The sim drives the envelope on its own: nothing above it has a tighter
+  // bound than the output range.
+  envelope.NoteOn(adsr, min_target, max_target, kEnvelopeSampleMax,
                   modulated_chiff_amount_q30, chiff_audible_samples);
   // The NOMINAL duration, for the sim's marker. Computed once in NoteOn and a
   // sizing reference only -- nothing counts it down and nothing happens when

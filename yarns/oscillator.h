@@ -213,8 +213,13 @@ class Oscillator {
       int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
       uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
     const uint16_t peak = scale_for(shape_) >> 1;
+    // The peak IS the ceiling here: a voice may spend its share of the output
+    // span and no more, chiff included, because n voices at their share sum to
+    // exactly the span. Where velocity or AMPLITUDE MOD put the note's own peak
+    // below it, the difference is room the chiff may use.
     gain_envelope_.NoteOn(
-      adsr, drone ? peak : 0, peak, chiff_amount_q30, chiff_audible_samples);
+      adsr, drone ? peak : 0, peak, peak,
+      chiff_amount_q30, chiff_audible_samples);
 
     // Snap the pitch-driven jump in timbre bias out of RenderSamples' slew so
     // warped timbre tracks the new pitch instantly; only LFO bias motion stays
@@ -247,7 +252,10 @@ class Oscillator {
     // not modulate downward at all, and NOISE and CZ were not even monotone.
     int16_t warped_max_timbre = WarpTimbreDelta(
         raw_timbre_bias_, raw_max_timbre, shape_, target_pitch);
-    timbre_envelope_.NoteOn(adsr, 0, warped_max_timbre, chiff_amount_q30, chiff_audible_samples);
+    // No bound tighter than the output range: a warped timbre is not a level
+    // and nothing downstream sums it.
+    timbre_envelope_.NoteOn(adsr, 0, warped_max_timbre, kEnvelopeSampleMax,
+                            chiff_amount_q30, chiff_audible_samples);
   }
   inline void NoteOff() {
     gain_envelope_.NoteOff();
