@@ -519,6 +519,20 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
   svf_ = svf;
 }
 
+// THE BOTTOM OF A MAP IS ITS BOTTOM, for the shapes that have no warp to do it
+// for them. What reaches those is the raw signed timbre, and NoteOn warps the
+// DESTINATION, so a negative TIMBRE MOD ENVELOPE puts a negative value in the
+// buffer. Each of them indexes lut_env_expo, whose parameter is UNSIGNED: a
+// negative wraps to the top of the table, which is the narrowest thing the
+// shape can do at the moment the player asked for the widest.
+//
+// The warping shapes need none of this -- MEASURED, every other shape's warp
+// answers within a count of its bottom for a negative timbre, and osctest's
+// `negative` mode is what holds that.
+static inline int16_t TimbreAtOrAboveZero(int16_t timbre) {
+  return timbre < 0 ? 0 : timbre;
+}
+
 // ONE CYCLE COMPRESSED INTO `width` OF THE PERIOD, then held at the value the
 // cycle ends on. A sine ends where it began, at zero, so the hold is SILENCE
 // where the saw's and the pulse's is a plateau at full scale -- which is why
@@ -535,9 +549,7 @@ void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) 
     //   still within 12% of a plain sine.
     //   HALF THE TABLE, so the top is 8.4x, which stays under Nyquist to
     //   MIDI 100.
-    // Below the bottom of the map is the bottom of it: a negative timbre used
-    // to wrap the index and collapse the width to zero, which is silence.
-    if (timbre < 0) timbre = 0;
+    timbre = TimbreAtOrAboveZero(timbre);
     uint16_t index = static_cast<uint16_t>(timbre * timbre >> 15);
     uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo, index); // 100-12%
     // A width of zero fails the compare rather than reaching the divide.
@@ -547,6 +559,7 @@ void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) 
 
 void Oscillator::RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
+    timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1); // 3/4
     uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo, timbre)) << 15; // 50-0%
     bool self_reset = phase < phase_increment;
@@ -560,6 +573,7 @@ void Oscillator::RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_SAW(phase, phase_increment) }
+    timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1); // 3/4
     uint16_t saw_width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
     if ((phase >> 16) < saw_width) next_sample += (phase / saw_width) >> 1;
@@ -576,6 +590,7 @@ void Oscillator::RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix)
   RENDER_PERIODIC(
     // Prevent saw from reaching an infinitely steep rise, else we'd have to
     // clumsily transition into a BLEP of what is now a rising pulse edge
+    timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + (timbre >> 4); // 31/32
 
     // Exponential timbre curve, biased high

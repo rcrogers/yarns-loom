@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 using namespace yarns;
 
 namespace {
@@ -37,6 +38,18 @@ const int kBlocks = 8;
 // audio from the proportionally larger value, which is what the check asserts.
 int g_timbre_max = 32767;
 int g_gain = 32767;
+
+// When set, the timbre buffer is HELD at this value instead of ramping, so a
+// shape can be rendered at one point of its map.
+bool g_hold_timbre = false;
+int g_held_timbre = 0;
+
+// Three renders of one shape, to compare which end a negative timbre lands at.
+enum { kAtZero, kAtNegative, kAtTop, kNumCollected };
+const size_t kCollected = 3 * kBlocks * kAudioBlockSize;
+int16_t g_samples[kNumCollected][kCollected];
+size_t g_collect_index = 0;
+int g_collect_slot = -1;
 
 uint32_t Fnv(uint32_t h, int16_t v) {
   return (h ^ static_cast<uint16_t>(v)) * 16777619u;
@@ -60,18 +73,30 @@ uint32_t HashShape(int shape, bool dump) {
       for (size_t i = 0; i < kAudioBlockSize; ++i) {
         // A ramp across the whole run, so every shape sees its timbre move.
         const long step = b * kAudioBlockSize + i;
-        timbre_gain[i] = static_cast<int16_t>(
-            g_timbre_max * step / (kBlocks * kAudioBlockSize));
+        timbre_gain[i] = g_hold_timbre
+            ? static_cast<int16_t>(g_held_timbre)
+            : static_cast<int16_t>(
+                g_timbre_max * step / (kBlocks * kAudioBlockSize));
         timbre_gain[i + kAudioBlockSize] = static_cast<int16_t>(g_gain);
       }
       (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);
       for (size_t i = 0; i < kAudioBlockSize; ++i) {
         hash = Fnv(hash, mix[i]);
+        if (g_collect_slot >= 0 && g_collect_index < kCollected) {
+          g_samples[g_collect_slot][g_collect_index++] = mix[i];
+        }
         if (dump) printf("%d\n", mix[i]);
       }
     }
   }
   return hash;
+}
+
+void CollectShape(int shape, int slot) {
+  g_collect_slot = slot;
+  g_collect_index = 0;
+  HashShape(shape, false);
+  g_collect_slot = -1;
 }
 
 int OptInt(int argc, char** argv, const char* key, int fallback) {
@@ -90,7 +115,65 @@ int main(int argc, char** argv) {
   g_gain = OptInt(argc, argv, "gain", 32767);
 
   if (!strcmp(mode, "dump")) {
+    g_hold_timbre = OptInt(argc, argv, "hold", 0) != 0;
+    g_held_timbre = OptInt(argc, argv, "timbre", 0);
     HashShape(OptInt(argc, argv, "shape", 0), true);
+    return 0;
+  }
+
+  // BELOW THE BOTTOM OF THE MAP IS THE BOTTOM OF IT. The per-sample timbre is
+  // signed and reaches negative values in the field: NoteOn warps the
+  // DESTINATION, so a negative TIMBRE MOD ENVELOPE puts one in the buffer. A
+  // shape's map is an ABSOLUTE POSITION -- a width, a cutoff, a damp -- so
+  // below its bottom it must answer near its bottom. A shape that casts the
+  // value unsigned instead WRAPS to the top of its range: the narrowest or
+  // loudest thing it can do, at the moment the player asked for the least.
+  //
+  // Equality with timbre 0 is the WRONG test -- a continuous map moves a count
+  // or two there and that is correct -- and so is asking where -32768 lands: a
+  // map that simply CONTINUES below zero goes a long way without ever being
+  // wrong. What a wrap is, is a DISCONTINUITY: one count below zero, the output
+  // jumps across the range. So the probe is timbre -1, measured against the
+  // map's whole span. A continuous map barely moves; a wrapped one leaps.
+  if (!strcmp(mode, "negative")) {
+    g_hold_timbre = true;
+    int failures = 0;
+    for (int s = 0; s <= OSC_SHAPE_FM; ++s) {
+      // ONLY THE SHAPES THAT CAN ACTUALLY SEE ONE. A warp that maps or clamps
+      // negatives keeps them out of the buffer entirely, and feeding one to
+      // such a shape's render tests a value the firmware cannot produce --
+      // which reads as a failure and is not one.
+      osc.set_shape(static_cast<OscillatorShape>(s));
+      if (osc.WarpTimbre(-1, static_cast<OscillatorShape>(s), kPitches[0]) >= 0) {
+        continue;
+      }
+      g_held_timbre = 0;       CollectShape(s, kAtZero);
+      g_held_timbre = -1;      CollectShape(s, kAtNegative);
+      g_held_timbre = 32767;   CollectShape(s, kAtTop);
+      double to_negative = 0, to_top = 0;
+      for (size_t i = 0; i < kCollected; ++i) {
+        const double dn = g_samples[kAtZero][i] - g_samples[kAtNegative][i];
+        const double dt = g_samples[kAtZero][i] - g_samples[kAtTop][i];
+        to_negative += dn * dn;
+        to_top += dt * dt;
+      }
+      const double jump = to_top > 0 ? sqrt(to_negative / to_top) : 0.0;
+      // A continuous map moves by a count here; a wrapped one crosses its
+      // range. MEASURED, the three that wrapped read 1.00 and the four that do
+      // not read under 0.001, so anything above a hundredth is the wrap.
+      const double kWrapped = 0.01;
+      if (jump > kWrapped) {
+        printf("FAIL shape %2d leaps %.2f of its map one count below zero\n",
+               s, jump);
+        ++failures;
+      }
+    }
+    if (failures) {
+      printf("\n%d shape(s) read the timbre unsigned, so a negative TIMBRE MOD\n"
+             "ENVELOPE wraps them to the far end of their map.\n", failures);
+      return 1;
+    }
+    printf("PASS no shape wraps when the timbre goes below zero\n");
     return 0;
   }
   for (int s = 0; s <= OSC_SHAPE_FM; ++s) {

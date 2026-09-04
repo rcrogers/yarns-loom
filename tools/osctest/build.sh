@@ -9,3 +9,6 @@ clang++ -std=c++11 -O1 -w -DTEST -I ../hosttest/shim -I ../.. \
   driver.cc ../../yarns/oscillator.cc ../../yarns/envelope.cc \
   ../../yarns/resources.cc ../../yarns/utils.cc ../warptest/rng_stub.cc -o osctest || exit 1
 node golden.js || exit 1
+# And that no shape wraps when the timbre goes below zero, which a negative
+# TIMBRE MOD ENVELOPE reaches. driver.cc's `negative` mode says why.
+./osctest negative || exit 1
