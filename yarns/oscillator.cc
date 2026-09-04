@@ -154,11 +154,35 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
   raw_timbre_bias_ = timbre_bias;
 }
 
+// THE BOTTOM OF A MAP IS ITS BOTTOM. The per-sample timbre is SIGNED and goes
+// below zero in the field, because NoteOn warps the DESTINATION and a negative
+// TIMBRE MOD ENVELOPE puts one there; only int16 constrains it. Every map that
+// takes it is an ABSOLUTE POSITION -- a width, a cutoff, a damp -- so below the
+// bottom it must answer the bottom.
+//
+// Two ways it went wrong without this, and both are silent:
+//   - an UNSIGNED parameter (lut_env_expo's index, and CutoffFromFreq's shift)
+//     wraps a negative to the TOP of the range: the narrowest or brightest
+//     thing the shape can do, at the moment the player asked for the least.
+//   - a shift by a wrapped count is undefined, and answers zero on this target.
+//
+// A shape whose parameter is genuinely signed does not want this: TANH SINE's
+// timbre is a depth and DIRAC COMB's is a zone offset, both continuous through
+// zero. osctest's `negative` mode is what tells the two apart.
+static inline int16_t TimbreAtOrAboveZero(int16_t timbre) {
+  return timbre < 0 ? 0 : timbre;
+}
+
 int16_t Oscillator::WarpTimbre(
     int16_t timbre, OscillatorShape shape, int16_t pitch) const {
   // Limit cutoff range for filtered noise
   if (shape >= OSC_SHAPE_NOISE_NOTCH && shape <= OSC_SHAPE_NOISE_HP) {
-    int32_t cutoff_freq = 0x1000 + (timbre >> 1); // 1/8..5/8
+    // Off the bottom below timbre -8192, where 1/8 of the range has been
+    // subtracted away and the frequency goes NEGATIVE -- which CutoffFromFreq
+    // then shifts left into its table index, so the cutoff lands wherever the
+    // wrap puts it. A negative TIMBRE MOD ENVELOPE reaches it: NoteOn warps the
+    // DESTINATION, which is only constrained to int16.
+    int32_t cutoff_freq = 0x1000 + (TimbreAtOrAboveZero(timbre) >> 1); // 1/8..5/8
     return SVF::CutoffFromFreq(cutoff_freq);
   }
 
@@ -171,7 +195,13 @@ int16_t Oscillator::WarpTimbre(
 
   // Phase distortion modulator tracks pitch
   if (shape >= OSC_SHAPE_CZ_PULSE_LP && shape <= OSC_SHAPE_CZ_SAW_HP) {
-    int16_t timbre_offset = timbre - 2048;
+    // int32, because timbre - 2048 leaves int16 below timbre -30720 and wraps
+    // POSITIVE there: the modulator jumps a whole map's width the wrong way,
+    // which a negative TIMBRE MOD ENVELOPE reaches. Widening keeps the sweep
+    // monotone instead of clamping it, because this map already runs below the
+    // carrier at low timbre -- the knob's own bottom is pitch - 648 -- so
+    // continuing down is what the control means.
+    int32_t timbre_offset = timbre - 2048;
     int32_t shifted_pitch = pitch + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8);
     if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1;
     return ComputePhaseIncrement(shifted_pitch) >> (32 - 15);
@@ -223,6 +253,12 @@ int16_t Oscillator::WarpTimbre(
     (shape >= OSC_SHAPE_TRI_THRU_TRI && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
     shape >= OSC_SHAPE_FM
   ) {
+    // Below zero is the bottom of the fold, which is no fold. Two things go
+    // wrong without this: one path returns the timbre unchanged, so a negative
+    // reaches the transfer render and is shifted left there as a value its own
+    // name calls unsigned; and `knee + timbre` reaches ZERO at timbre == -knee,
+    // which is a signed divide by zero.
+    timbre = TimbreAtOrAboveZero(timbre);
     // Soft-knee compression: unity gain at low timbre, asymptotes to
     // pitch-dependent ceiling.  f(t) = knee * t / (knee + t), computed as
     // t - t^2/(knee + t) to avoid 32-bit overflow.
@@ -519,20 +555,6 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
   svf_ = svf;
 }
 
-// THE BOTTOM OF A MAP IS ITS BOTTOM, for the shapes that have no warp to do it
-// for them. What reaches those is the raw signed timbre, and NoteOn warps the
-// DESTINATION, so a negative TIMBRE MOD ENVELOPE puts a negative value in the
-// buffer. Each of them indexes lut_env_expo, whose parameter is UNSIGNED: a
-// negative wraps to the top of the table, which is the narrowest thing the
-// shape can do at the moment the player asked for the widest.
-//
-// The warping shapes need none of this -- MEASURED, every other shape's warp
-// answers within a count of its bottom for a negative timbre, and osctest's
-// `negative` mode is what holds that.
-static inline int16_t TimbreAtOrAboveZero(int16_t timbre) {
-  return timbre < 0 ? 0 : timbre;
-}
-
 // ONE CYCLE COMPRESSED INTO `width` OF THE PERIOD, then held at the value the
 // cycle ends on. A sine ends where it began, at zero, so the hold is SILENCE
 // where the saw's and the pulse's is a plateau at full scale -- which is why
@@ -565,7 +587,9 @@ void Oscillator::RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix)
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
-    this_sample = (this_sample - 0x4000) << 1;
+    // * 2 and not << 1: the value is signed and negative below 0x4000,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 0x4000) * 2;
   )
 }
 
@@ -578,7 +602,9 @@ void Oscillator::RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix) {
     uint16_t saw_width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
     if ((phase >> 16) < saw_width) next_sample += (phase / saw_width) >> 1;
     else next_sample += 0x7fff;
-    this_sample = (this_sample - 0x4000) << 1;
+    // * 2 and not << 1: the value is signed and negative below 0x4000,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 0x4000) * 2;
   )
 }
 
@@ -603,7 +629,9 @@ void Oscillator::RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix)
     if (phase < pw) next_sample += 0;
     else if (phase < pw + saw_width) next_sample += ((phase - pw) / (saw_width >> 16)) >> 1;
     else next_sample += 0x7fff;
-    this_sample = (this_sample - 0x4000) << 1;
+    // * 2 and not << 1: the value is signed and negative below 0x4000,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 0x4000) * 2;
   )
 }
 
@@ -632,7 +660,9 @@ void Oscillator::RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix) {
       !high_ && modulator_phase_at_reset >= pw
     );
     next_sample += modulator_phase < pw ? 0 : 32767;
-    this_sample = (this_sample - 16384) << 1;
+    // * 2 and not << 1: the value is signed and negative below 16384,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 16384) * 2;
   )
 }
 
@@ -656,7 +686,9 @@ void Oscillator::RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix) {
       false // No extra transition
     );
     next_sample += modulator_phase >> 17;
-    this_sample = (this_sample - 16384) << 1;
+    // * 2 and not << 1: the value is signed and negative below 16384,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 16384) * 2;
   )
 }
 
@@ -860,7 +892,13 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
     if (filter_type & 2) { // Band- or high-pass
       output = (window * carrier) >> 16;
     } else {
-      output = (window * (carrier + 32768) >> 16) - 32768;
+      // UNSIGNED, because the product is 65535 * 65535 at the corner and that
+      // overflows int32. What it does today is wrap, and the int16 store then
+      // truncates the wrap away, so the OUTPUT is right -- MEASURED identical
+      // to the same expression in 64 bits over the whole domain. But signed
+      // overflow is undefined and GCC optimises on that, so the modular
+      // arithmetic this depends on is spelled out instead of assumed.
+      output = (static_cast<uint32_t>(window) * (carrier + 32768) >> 16) - 32768;
     }
     this_sample = output;
   )
