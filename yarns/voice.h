@@ -297,14 +297,24 @@ class CVOutput {
     num_audio_voices_ = num_audio;
     zero_dac_code_ = volts_dac_code(0);
     envelope_.Init(zero_dac_code_ >> 1);
-    // WHAT ONE VOICE MAY SPEND, so that the voices SUMMED reach 5 Vpp. Which
+    // 10 Vpp, +/-5 V about the 0 V code, which is what a Eurorack audio output
+    // is expected to swing. Named as twice the 5 V span because the calibration
+    // table stops at -3 V and cannot be asked for -5 V directly.
+    //
+    // AND THAT IS ALL THE CODE THERE IS. 0 V is code 39187 with 5133 codes per
+    // volt, so -5 V is code 64852 of 65535: 683 codes, 0.13 V, before the code
+    // WRAPS and the output jumps to the opposite rail. The mix accumulator is
+    // an int16 holding that code and cannot carry an excursion past it, so
+    // nothing downstream may exceed its share of this span.
+    const uint16_t full_scale = (volts_dac_code(0) - volts_dac_code(5)) * 2;
+    // WHAT ONE VOICE MAY SPEND, so that the voices SUMMED reach the span. Which
     // share that is depends on how they add, and a shape decides that:
     //   COHERENT -- periodic, so their peaks line up sooner or later, and n of
     //   them reach n times one. An nth each.
     //   INDEPENDENT -- noise, which adds in POWER, so n of them reach sqrt(n)
     //   times one. full / sqrt(n) each, which is the geometric mean of the
-    //   whole and the nth.
-    const uint16_t full_scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
+    //   whole and the nth. A shape that takes this one must still CAP its peak
+    //   at the nth, or n of them can leave the span.
     const uint16_t coherent_scale = full_scale / num_audio_voices_;
     const uint16_t incoherent_scale = static_cast<uint16_t>(IntegerSqrt(
         static_cast<uint32_t>(full_scale) * coherent_scale));
