@@ -627,17 +627,6 @@ uint32_t ChiffAudibleSamples(uint32_t chiff_duration_increment_u32) {
       ? (UINT32_MAX / chiff_duration_increment_u32) : UINT32_MAX;
 }
 
-// decay = 1 - 2^-increment in Q32, via 2-term Taylor of 1 - 2^-x about x = 0
-// (u = x*ln2): decay ~ u - u^2/2. Exact enough since `increment` is a tiny
-// per-sample shift step. Q32 (small positive) so the ramp step is a single
-// SMMUL: rate -= (rate * decay) >> 32.
-static inline int32_t ChiffSlewRateDecayFromTimeStep_q32(uint32_t increment_q5_27) {
-  const uint32_t kLn2_q28 = static_cast<uint32_t>(
-    __builtin_log(2.0) * 268435456.0 + 0.5);
-  int64_t u_q32 = (static_cast<int64_t>(increment_q5_27) * kLn2_q28) >> 23;
-  return static_cast<int32_t>(u_q32 - ((u_q32 * u_q32) >> 33));
-}
-
 void Envelope::Trigger(EnvelopeStage stage) {
   // Anchor the new stage on where the leaving stage's nominal value reached:
   // with no chiff the value is the classic slew; a timed stage's is closed-form
@@ -748,8 +737,6 @@ void Envelope::HandOffToNextStage(
 // raw 0..kChiffDrawValueMax field. `bit_offset` is a string because `ubfx`
 // needs an immediate.
 #define YARNS_CHIFF_ASM_SAMPLE(bit_offset) \
-  "  smull ip, lr, %[chiff_rate], %[rate_decay]\n"        /* (rate*decay), lr = hi     */ \
-  "  sub   %[chiff_rate], %[chiff_rate], lr\n"            /* rate -= that >> 32        */ \
   "  ubfx  ip, %[draws], #" bit_offset ", %[draw_bits]\n" /* one draw, low end         */ \
   "  ldr   lr, [%[levels], ip, lsl #2]\n"                 /* what the slew chases      */ \
   "  sub   lr, lr, %[chiff]\n"                            /* delta                     */ \
@@ -765,10 +752,10 @@ void Envelope::HandOffToNextStage(
   "  sub   %[delta], %[delta], lr, lsl #1\n"              /*   at the STAGE's rate     */ \
   "  add   %[target], %[target], %[target_slope]\n"       /* bias + mean + adj. target */ \
   "  sub   ip, %[target], %[delta]\n"                     /* the mean                  */ \
-  "  ldr   lr, %[mean_max]\n"                             /* HELD OFF THE HIGH RAIL    */ \
-  "  cmp   ip, lr\n"                                      /*   per sample, because a   */ \
-  "  it    gt\n"                                          /*   correction ramped over  */ \
-  "  movgt ip, lr\n"                                      /*   a run cannot track an   */ \
+  "  cmp   ip, %[mean_max]\n"                             /* HELD OFF THE HIGH RAIL    */ \
+  "  it    gt\n"                                          /*   per sample, because a    */ \
+  "  movgt ip, %[mean_max]\n"                             /*   ramped correction cannot \
+                                                           *   track an exponential value */ \
   "  add   ip, ip, %[chiff], lsl %[state_shift]\n"        /*   exponential value       */ \
   "  usat  ip, %[sat_bits], ip, asr %[sample_bits]\n"     /* saturate and shift, 1 op  */ \
   "  strh  ip, [%[buf]], #2\n"
@@ -781,17 +768,14 @@ void Envelope::HandOffToNextStage(
 #define YARNS_CHIFF_ASM_STATE                                                 \
   [chiff] "+r"(chiff_slew_state_q26),                                         \
   [delta] "+r"(nominal_delta_q1_30),                                          \
-  [chiff_rate] "+r"(chiff_slew_rate_q31),                                     \
   [target] "+r"(target_with_all_bias),                                        \
   [buf] "+r"(sample_buffer),                                                  \
   [draws] "+r"(draws)
 #define YARNS_CHIFF_ASM_INPUTS                                                \
-  [rate_decay] "r"(chiff_slew_rate_decay_q32),                                \
+  [chiff_rate] "r"(chiff_slew_rate_q31),                                      \
   [levels] "r"(chiff_levels_q4_26),                                           \
   [clip] "r"(chiff_clip_threshold_q26),                                       \
-  /* In MEMORY, not a register: twelve "r" operands is what the body allocates
-   * and this is the thirteenth. The load is most of what the clamp costs. */  \
-  [mean_max] "m"(mean_max_q30),                                               \
+  [mean_max] "r"(mean_max_q30),                                               \
   [stage_rate] "r"(stage_slew_rate_q31),                                      \
   [target_slope] "r"(target_with_all_bias_slope),                             \
   [draw_bits] "i"(kChiffDrawBits),                                            \
@@ -802,8 +786,6 @@ void Envelope::HandOffToNextStage(
 
 #define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
   do {                                                                        \
-    chiff_slew_rate_q31 -= static_cast<int32_t>(                                    \
-      (static_cast<int64_t>(chiff_slew_rate_q31) * chiff_slew_rate_decay_q32) >> 32);               \
     /* (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word  \
      * term. Two instructions saved per slew step. The dropped bit is a half  \
      * LSB per sample, and the error is bounded by the last step: at a       \
@@ -923,20 +905,23 @@ void Envelope::RenderStage(
     // trajectory is the same whatever the bias does. The battery pins the
     // independence.
     const int32_t bias_q30 = bias_q31 >> 1;
-    // Per-run copies: the loop decays the rate every sample, and the slew time
-    // is what persists across runs.
-    //   - The per-sample decay costs ~5 cycles/sample (~4% of the CPU) and
-    //     earns it: per-run resolution holds the slew time fixed on a chiff
-    //     that lives one block, and the duration inherits the attack's
-    //     velocity modulation, so that is not a corner case.
+    // THE SLEW RATE IS A PER-RUN QUANTITY. It is derived below from the slew
+    // time, which advances by a whole run at the bottom of this function, so
+    // the decay is already carried across runs; the loop used to REFINE it per
+    // sample as well, which cost a smull and a register.
+    //   - The register is what the rail clamp needed, and the clamp is what
+    //     makes the correction exact. Together: 33.9% of the CPU against 36.4%
+    //     before either, so the exactness is paid for and there is change.
+    //   - What it costs is resolution, quantised to the run: MEASURED over
+    //     EXCITER x duration x attack, worst peak deviation -25.6 dB, and a
+    //     chiff living under one block is BIT-IDENTICAL -- it spans no run
+    //     boundary, so there is nothing for the refinement to have refined.
     const ChiffRunDecay chiff_decay = AdvanceChiffDecay(run_samples);
-    const int32_t chiff_slew_rate_decay_q32 =
-      ChiffSlewRateDecayFromTimeStep_q32(chiff_decay.slew_time_step_q5_27);
 
     // Derived, not stored: the rate and the slew time are one quantity, held
     // in one accumulator.
     uint32_t chiff_slew_time_q5_27 = chiff_slew_time_log2_q5_27_;
-    int32_t chiff_slew_rate_q31 = static_cast<int32_t>(
+    const int32_t chiff_slew_rate_q31 = static_cast<int32_t>(
       SlewRateFromTimeLog2_q31(chiff_slew_time_q5_27));
     const uint32_t chiff_amplitude_gain_q31_sqrt =
       ChiffAmplitudeGainAtSlewTime_q31_sqrt(
