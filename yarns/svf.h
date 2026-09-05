@@ -60,7 +60,7 @@ struct SVF {
         lp_step_remainder_q15 = bp_step_remainder_q15 = 0;
   }
 
-  // cutoff: Q0.15, damp: Q1.14 (Chamberlin needs damp range 0..2.0)
+  // Chamberlin needs the damp range 0..2, which is what its Q1.14 buys.
   // A LAST BIT OF DAMPING, AND OF INTEGRATION, WHEREVER THE PRODUCT WOULD
   // TRUNCATE AWAY. Below |bp| < 16384/damp the damping term is exactly zero and
   // the resonator is lossless -- it rings at that amplitude for ever, and the
@@ -73,15 +73,15 @@ struct SVF {
   // Carry that remainder into the next sample so each step is exact on average.
   // Faking a minimum step instead makes the filter lossy by construction: a
   // forced count per sample caps Q at 32 however small the damping asked for.
-  inline void Process(int32_t in, int16_t cutoff, int16_t damp) {
-    int32_t damped = bp * damp + damping_term_remainder_q14;
+  inline void Process(int32_t in, int16_t cutoff_q15, int16_t damp_q1_14) {
+    int32_t damped = bp * damp_q1_14 + damping_term_remainder_q14;
     damping_term_remainder_q14 = damped & ((1 << 14) - 1);
     notch = Clip16(in - (damped >> 14));
-    int32_t lp_moved = cutoff * bp + lp_step_remainder_q15;
+    int32_t lp_moved = cutoff_q15 * bp + lp_step_remainder_q15;
     lp_step_remainder_q15 = lp_moved & ((1 << 15) - 1);
     lp = Clip16(lp + (lp_moved >> 15));
     hp = Clip16(notch - lp);
-    int32_t bp_moved = cutoff * hp + bp_step_remainder_q15;
+    int32_t bp_moved = cutoff_q15 * hp + bp_step_remainder_q15;
     bp_step_remainder_q15 = bp_moved & ((1 << 15) - 1);
     bp = Clip16(bp + (bp_moved >> 15));
   }

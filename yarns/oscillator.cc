@@ -133,13 +133,13 @@ void StateVariableFilter::Init() {
   cutoff.Init();
 }
 
-void StateVariableFilter::RenderInit(int16_t resonance_q_0_15) {
-  damp.SetTarget(DampFromResonance(resonance_q_0_15));
+void StateVariableFilter::RenderInit(int16_t resonance_q15) {
+  damp.SetTarget(DampFromResonance(resonance_q15));
   damp.ComputeSlope();
 }
 
-void StateVariableFilter::RenderInitCutoff(int16_t cutoff_q_0_15) {
-  cutoff.SetTarget(cutoff_q_0_15);
+void StateVariableFilter::RenderInitCutoff(int16_t cutoff_q15) {
+  cutoff.SetTarget(cutoff_q15);
   cutoff.ComputeSlope();
 }
 
