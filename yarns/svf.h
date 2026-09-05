@@ -77,17 +77,28 @@ struct SVF {
   // Carry that remainder into the next sample so each step is exact on average.
   // Faking a minimum step instead makes the filter lossy by construction: a
   // forced count per sample caps Q at 32 however small the damping asked for.
-  inline void Process(int32_t in, int16_t cutoff_u15, int16_t damp_u1_14) {
+  // NOTCH AND HP ARE NOT STATE. Each is formed and consumed inside one call --
+  // notch feeds hp, hp feeds the band-pass step -- and neither is read on the
+  // next. They are members only because the NOISE shapes take their output from
+  // them, so kKeepNotchAndHp says whether this caller is one of those. A caller
+  // that is not stores two fewer words a sample, which is worth having in a
+  // loop that is already 37% memory traffic.
+  template<bool kKeepNotchAndHp>
+  inline void ProcessInto(int32_t in, int16_t cutoff_u15, int16_t damp_u1_14) {
     int32_t damped_q16_14 = bp * damp_u1_14 + damping_term_remainder_u14;
     damping_term_remainder_u14 = damped_q16_14 & ((1 << 14) - 1);
-    notch = Clip16(in - (damped_q16_14 >> 14));
+    const int32_t this_notch = Clip16(in - (damped_q16_14 >> 14));
     int32_t lp_moved_q15_15 = cutoff_u15 * bp + lp_step_remainder_u15;
     lp_step_remainder_u15 = lp_moved_q15_15 & ((1 << 15) - 1);
     lp = Clip16(lp + (lp_moved_q15_15 >> 15));
-    hp = Clip16(notch - lp);
-    int32_t bp_moved_q15_15 = cutoff_u15 * hp + bp_step_remainder_u15;
+    const int32_t this_hp = Clip16(this_notch - lp);
+    int32_t bp_moved_q15_15 = cutoff_u15 * this_hp + bp_step_remainder_u15;
     bp_step_remainder_u15 = bp_moved_q15_15 & ((1 << 15) - 1);
     bp = Clip16(bp + (bp_moved_q15_15 >> 15));
+    if (kKeepNotchAndHp) { notch = this_notch; hp = this_hp; }
+  }
+  inline void Process(int32_t in, int16_t cutoff_u15, int16_t damp_u1_14) {
+    ProcessInto<true>(in, cutoff_u15, damp_u1_14);
   }
 
   // Conversion methods: a u15 domain value in, a Process parameter out. The
