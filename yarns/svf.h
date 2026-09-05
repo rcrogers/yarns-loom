@@ -45,12 +45,15 @@ namespace yarns {
 
 struct SVF {
   int32_t bp, lp, notch, hp;
-  // What the shifts above would otherwise drop.
-  int32_t damp_residue, lp_residue, bp_residue;
+  // THE REMAINDER OF THE SHIFT THAT PUTS EACH WIDE PRODUCT BACK IN THE STATE'S
+  // UNITS -- what integer division by 2^14 or 2^15 leaves behind. Named for the
+  // product each one belongs to: the damping term subtracted to form notch, and
+  // the two integrator steps.
+  int32_t damping_term_remainder, lp_step_remainder, bp_step_remainder;
 
   void Init() {
     bp = lp = notch = hp = 0;
-    damp_residue = lp_residue = bp_residue = 0;
+    damping_term_remainder = lp_step_remainder = bp_step_remainder = 0;
   }
 
   // cutoff: Q0.15, damp: Q1.14 (Chamberlin needs damp range 0..2.0)
@@ -63,19 +66,19 @@ struct SVF {
   // EVERY PRODUCT HERE IS WIDER THAN THE STATE IT LANDS IN, and what the shift
   // drops is not noise -- it is the whole of the signal wherever the product is
   // smaller than one count, which is most of a quiet ring and ALL of a slow one.
-  // Carry the remainder into the next sample so each step is exact on average.
+  // Carry that remainder into the next sample so each step is exact on average.
   // Faking a minimum step instead makes the filter lossy by construction: a
   // forced count per sample caps Q at 32 however small the damping asked for.
   inline void Process(int32_t in, int16_t cutoff, int16_t damp) {
-    int32_t damped = bp * damp + damp_residue;
-    damp_residue = damped & ((1 << 14) - 1);
+    int32_t damped = bp * damp + damping_term_remainder;
+    damping_term_remainder = damped & ((1 << 14) - 1);
     notch = Clip16(in - (damped >> 14));
-    int32_t lp_moved = cutoff * bp + lp_residue;
-    lp_residue = lp_moved & ((1 << 15) - 1);
+    int32_t lp_moved = cutoff * bp + lp_step_remainder;
+    lp_step_remainder = lp_moved & ((1 << 15) - 1);
     lp = Clip16(lp + (lp_moved >> 15));
     hp = Clip16(notch - lp);
-    int32_t bp_moved = cutoff * hp + bp_residue;
-    bp_residue = bp_moved & ((1 << 15) - 1);
+    int32_t bp_moved = cutoff * hp + bp_step_remainder;
+    bp_step_remainder = bp_moved & ((1 << 15) - 1);
     bp = Clip16(bp + (bp_moved >> 15));
   }
 
