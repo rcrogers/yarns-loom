@@ -62,14 +62,17 @@ class StateVariableFilter : public SVF {
   void RenderInitCutoff(int16_t cutoff_u15);
 
   // Cutoff per sample, damping interpolated from a resonance set once a block.
+  // The NOISE shapes take their output from all four taps, so this one keeps
+  // notch and hp.
   inline void RenderSample(int32_t in, int16_t cutoff_u15) {
     damp.Tick();
-    Process(in, cutoff_u15, damp.value());
+    ProcessInto<true>(in, cutoff_u15, damp.value());
   }
   // The mirror: damping per sample, cutoff interpolated toward the pitch's.
+  // WHISTLE and PING read only bp and lp, so notch and hp need not be stored.
   inline void RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
     cutoff.Tick();
-    Process(in, cutoff.value(), damp_u1_14);
+    ProcessInto<false>(in, cutoff.value(), damp_u1_14);
   }
 
  private:
@@ -147,6 +150,10 @@ class Oscillator {
   inline void Init(uint16_t coherent_scale, uint16_t incoherent_scale) {
     scale_ = coherent_scale;
     incoherent_scale_ = incoherent_scale;
+    coherent_share_of_full_u15_ = static_cast<uint16_t>(
+        (static_cast<uint32_t>(coherent_scale >> 1) << 15) / kEnvelopeSampleMax);
+    incoherent_share_of_full_u15_ = static_cast<uint16_t>(
+        (static_cast<uint32_t>(incoherent_scale >> 1) << 15) / kEnvelopeSampleMax);
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
@@ -205,6 +212,22 @@ class Oscillator {
     return shape == OSC_SHAPE_WHISTLE ? incoherent_scale_ : scale_;
   }
 
+  // A SHAPE THE ENVELOPE EXCITES, spending the gain going INTO what rings
+  // rather than scaling what leaves it -- the shapes whose render takes
+  // RENDER_CORE_NO_OUTPUT_GAIN.
+  static inline bool envelope_excites(OscillatorShape shape) {
+    return shape == OSC_SHAPE_WHISTLE || shape == OSC_SHAPE_PING_BP ||
+        shape == OSC_SHAPE_PING_LP;
+  }
+
+  // THE VOICE'S SHARE, AS A FRACTION OF THE ENVELOPE'S OWN FULL SCALE, so an
+  // excitation shape can apply it at its OUTPUT. Precomputed because scale_ is
+  // fixed from Init: the divide would otherwise fall on every block.
+  inline uint16_t share_of_full_u15(OscillatorShape shape) const {
+    return shape == OSC_SHAPE_WHISTLE
+        ? incoherent_share_of_full_u15_ : coherent_share_of_full_u15_;
+  }
+
   // start_pitch is the new note's pitch at onset (the portamento glide's
   // start); target_pitch is its destination. Both arrive before Refresh has
   // updated pitch_, so we warp explicitly against them here.
@@ -212,7 +235,17 @@ class Oscillator {
       ADSR& adsr, bool drone,
       int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
       uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
-    const uint16_t peak = scale_for(shape_) >> 1;
+    // AN EXCITATION SHAPE'S ENVELOPE RUNS AT FULL SCALE, and its share is
+    // applied at the shape's OUTPUT instead. The share is a LEVEL, and a level
+    // only commutes with what follows it while that is linear -- spending it
+    // into a filter that clips makes the voice count decide the filter's
+    // operating point, so the state shrinks and its clip moves with n.
+    // Applied at the output it is a pure scaling again, which is where the
+    // NOISE shapes have always applied it, and it leaves this envelope looking
+    // like the timbre envelope beside it: a per-voice description of the sound,
+    // knowing nothing of how many voices there are.
+    const uint16_t peak = envelope_excites(shape_)
+        ? kEnvelopeSampleMax : (scale_for(shape_) >> 1);
     // The peak IS the ceiling here: a voice may spend its share of the output
     // span and no more, chiff included, because n voices at their share sum to
     // exactly the span. Where velocity or AMPLITUDE MOD put the note's own peak
@@ -363,6 +396,8 @@ class Oscillator {
   int16_t prev_transfer_avg_;
   uint16_t scale_;
   uint16_t incoherent_scale_;
+  uint16_t coherent_share_of_full_u15_;
+  uint16_t incoherent_share_of_full_u15_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);

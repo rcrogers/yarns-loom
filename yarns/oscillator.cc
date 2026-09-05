@@ -927,7 +927,7 @@ static const int32_t kWhistleLowestPitch = 30 << 7;
 // envelope decorrelates in about Q/f seconds -- 13 s at Q 1741 and middle C.
 // A render of a few seconds reads ONE DRAW from that envelope, not a level, and
 // two such draws an octave apart differ by more than the tilt being measured.
-static int32_t WhistleOutputGain(int32_t pitch) {
+static int32_t WhistleOutputGain(int32_t pitch, int32_t share_of_full_u15) {
   // Half an octave of level per octave of pitch. MEASURED as 2.85 dB per octave
   // with no tilt at all; correcting by exactly half holds rms within 0.6 dB
   // from MIDI 24 to 84, at every Q.
@@ -950,7 +950,11 @@ static int32_t WhistleOutputGain(int32_t pitch) {
   int32_t gain = noise_level_trim_q15 *
       (Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 1) >> 15;
   int32_t whole = octaves_q16 >> 16;
-  return whole >= 20 ? 0 : (gain >> whole);
+  // The voice's share, applied HERE rather than by the caller: WHISTLE's loop
+  // spills thirty-odd registers already, and one more value live across it
+  // MEASURED at 20 instructions and 6.7 points of CPU. Inside, only the result
+  // crosses back.
+  return whole >= 20 ? 0 : ((gain >> whole) * share_of_full_u15 >> 15);
 }
 
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
@@ -981,11 +985,17 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   if (damp_now > damp_at_widest_q1_14) damp_now = damp_at_widest_q1_14;
   const int32_t drive_q15 = IntegerSqrt(
       (damp_now << 15) / damp_at_widest_q1_14 * 32768u);
-  const int32_t output_gain = drive_q15
+  const int32_t tilted_gain =
+      WhistleOutputGain(resonant_pitch, incoherent_share_of_full_u15_);
+  int32_t output_gain = drive_q15
       ? static_cast<int32_t>(
-            (static_cast<uint32_t>(WhistleOutputGain(resonant_pitch)) << 15)
-            / drive_q15)
-      : WhistleOutputGain(resonant_pitch);
+            (static_cast<uint32_t>(tilted_gain) << 15) / drive_q15)
+      : tilted_gain;
+  // PINNED TO A REGISTER. Once the share is folded in above, GCC 4.8.3 stops
+  // hoisting this and re-materializes it inside the loop instead -- MEASURED
+  // at 20 instructions and 27 cycles a sample, on the most expensive shape
+  // there is. The empty asm makes it opaque, so it has to live in a register.
+  asm volatile("" : "+r"(output_gain));
   // THE PEAK IS CAPPED AT THE nTH EVEN THOUGH THE EXCITATION TAKES THE
   // GEOMETRIC MEAN, because a peak is what the span limits and there is no
   // room above it: n voices at the nth reach the span exactly, and 683 codes
@@ -1028,14 +1038,38 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // percussive envelope that is a thump; under a sustained one it is a standing
   // offset, which is why the band-pass is the one to reach for by default.
   const bool band_pass = shape_ == OSC_SHAPE_PING_BP;
+  // WHAT THE INPUT RANGE ALLOWS, which is the only thing a level can be set
+  // against. The gain buffer is bounded [0, scale_ >> 1] and the timbre buffer
+  // by the warp, whatever the exciter is doing: the chiff changes the SHAPE of
+  // the signal within that range, not the range. So the bound is taken over the
+  // inputs a resonator answers to -- a held level, a square at the note's own
+  // resonance, and full-range noise -- and not over exciter settings, which
+  // only sample them.
+  //
+  // MEASURED that way across pitch x TIMBRE, the worst any in-range input
+  // reaches is 0.638 of the share at gain 2048, and it sits at TIMBRE 0: the
+  // widest damp, where the band is broad enough to pass the excitation rather
+  // than ring it. 3072 puts that worst case at 0.958.
+  //
+  // BOTH OUTPUTS TAKE THE SAME GAIN. At the bound they are within a count of
+  // each other; it is only under a SUSTAINED excitation that the low-pass reads
+  // twice the band-pass, because it passes the DC the band-pass rejects. That
+  // difference is the reason to choose between the two shapes, not an error to
+  // correct with a trim.
+  const int32_t ping_gain_q12 =
+      3072 * coherent_share_of_full_u15_ >> 15;
+  // AND THE PEAK IS CAPPED AT THE VOICE'S SHARE, the way WHISTLE's is since
+  // 290782f8. The bound above says no in-range input reaches it, so the cap is
+  // not what sets the level -- it is what makes the level a PROPERTY of the
+  // render rather than a claim about which inputs happened to be tried.
+  const int32_t voice_ceiling = scale_ >> 1;
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Halved going in: the resonant step response overshoots the excitation, and
     // at full scale the ring railed for 7% of the note.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
-    // What lands the strike under the allowance at its loudest, which is the
-    // chiff up: that excites the resonance far harder than a bare envelope.
-    const int32_t ping_gain_q12 = 2048;
-    this_sample = Clip16((band_pass ? svf.bp : svf.lp) * ping_gain_q12 >> 12);
+    int32_t out = (band_pass ? svf.bp : svf.lp) * ping_gain_q12 >> 12;
+    CONSTRAIN(out, -voice_ceiling, voice_ceiling);
+    this_sample = out;
   )
   svf_ = svf;
 }
