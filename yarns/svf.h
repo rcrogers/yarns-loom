@@ -86,18 +86,19 @@ struct SVF {
     bp = Clip16(bp + (bp_moved >> 15));
   }
 
-  // Conversion methods. Callers pass Q0.15 domain values, get back
-  // parameters ready for Process.
-  static inline int16_t DampFromResonance(int16_t resonance_q_0_15) {
-    uint32_t index = resonance_q_0_15 << (32 - 15);
-    uint16_t damp_u_1_15 = Interpolate824(lut_svf_damp, index);
-    int16_t damp_q_1_14 = damp_u_1_15 >> 1;
-    return damp_q_1_14;
+  // Conversion methods: a Q15 domain value in, a Process parameter out. The
+  // table hands back one more fractional bit than damp carries, so the shift
+  // is a change of format and not a scaling.
+  static inline int16_t DampFromResonance(int16_t resonance_q15) {
+    uint32_t index = resonance_q15 << (32 - 15);
+    uint16_t damp_q1_15 = Interpolate824(lut_svf_damp, index);
+    int16_t damp_q1_14 = damp_q1_15 >> 1;
+    return damp_q1_14;
   }
-  static inline int16_t CutoffFromFreq(int16_t freq_q_0_15) {
-    uint32_t index = freq_q_0_15 << (32 - 15);
-    int16_t cutoff_q_0_15 = Interpolate824(lut_svf_cutoff, index);
-    return cutoff_q_0_15;
+  static inline int16_t CutoffFromFreq(int16_t freq_q15) {
+    uint32_t index = freq_q15 << (32 - 15);
+    int16_t cutoff_q15 = Interpolate824(lut_svf_cutoff, index);
+    return cutoff_q15;
   }
 };
 
