@@ -78,16 +78,16 @@ struct SVF {
   // Faking a minimum step instead makes the filter lossy by construction: a
   // forced count per sample caps Q at 32 however small the damping asked for.
   inline void Process(int32_t in, int16_t cutoff_u15, int16_t damp_u1_14) {
-    int32_t damped = bp * damp_u1_14 + damping_term_remainder_u14;
-    damping_term_remainder_u14 = damped & ((1 << 14) - 1);
-    notch = Clip16(in - (damped >> 14));
-    int32_t lp_moved = cutoff_u15 * bp + lp_step_remainder_u15;
-    lp_step_remainder_u15 = lp_moved & ((1 << 15) - 1);
-    lp = Clip16(lp + (lp_moved >> 15));
+    int32_t damped_q16_14 = bp * damp_u1_14 + damping_term_remainder_u14;
+    damping_term_remainder_u14 = damped_q16_14 & ((1 << 14) - 1);
+    notch = Clip16(in - (damped_q16_14 >> 14));
+    int32_t lp_moved_q15_15 = cutoff_u15 * bp + lp_step_remainder_u15;
+    lp_step_remainder_u15 = lp_moved_q15_15 & ((1 << 15) - 1);
+    lp = Clip16(lp + (lp_moved_q15_15 >> 15));
     hp = Clip16(notch - lp);
-    int32_t bp_moved = cutoff_u15 * hp + bp_step_remainder_u15;
-    bp_step_remainder_u15 = bp_moved & ((1 << 15) - 1);
-    bp = Clip16(bp + (bp_moved >> 15));
+    int32_t bp_moved_q15_15 = cutoff_u15 * hp + bp_step_remainder_u15;
+    bp_step_remainder_u15 = bp_moved_q15_15 & ((1 << 15) - 1);
+    bp = Clip16(bp + (bp_moved_q15_15 >> 15));
   }
 
   // Conversion methods: a u15 domain value in, a Process parameter out. The
