@@ -41,7 +41,7 @@ const char* const string_table[] = {
   str_dummy,
 };
 
-const uint16_t lut_env_expo[] = {
+const uint16_t lut_env_expo_u16[] = {
        0,   1035,   2054,   3057,
     4045,   5018,   5975,   6918,
     7846,   8760,   9659,  10545,
@@ -108,7 +108,7 @@ const uint16_t lut_env_expo[] = {
    65475,  65495,  65515,  65535,
    65535,
 };
-const uint16_t lut_expo2_neg[] = {
+const uint16_t lut_expo2_neg_u16[] = {
    65535,  65358,  65181,  65005,
    64829,  64654,  64479,  64305,
    64131,  63957,  63784,  63612,
@@ -175,7 +175,7 @@ const uint16_t lut_expo2_neg[] = {
    33124,  33035,  32945,  32856,
    32768,
 };
-const uint16_t lut_sine_quadrant[] = {
+const uint16_t lut_sine_quadrant_u16[] = {
        0,    402,    804,   1206,
     1608,   2010,   2412,   2814,
     3216,   3617,   4019,   4420,
@@ -242,7 +242,7 @@ const uint16_t lut_sine_quadrant[] = {
    65515,  65524,  65530,  65534,
    65535,
 };
-const uint16_t lut_expo_quadrant[] = {
+const uint16_t lut_expo_quadrant_u16[] = {
        0,    765,   1524,   2277,
     3024,   3765,   4501,   5230,
     5954,   6672,   7384,   8090,
@@ -713,7 +713,7 @@ const uint16_t lut_clock_ratio_ticks[] = {
       16,     15,     12,      9,
        8,      6,      4,      3,
 };
-const uint16_t lut_svf_cutoff[] = {
+const uint16_t lut_svf_cutoff_u15[] = {
       37,     39,     41,     44,
       47,     49,     52,     56,
       59,     62,     66,     70,
@@ -780,7 +780,7 @@ const uint16_t lut_svf_cutoff[] = {
    25078,  25078,  25078,  25078,
    25078,
 };
-const uint16_t lut_svf_damp[] = {
+const uint16_t lut_svf_damp_u1_15[] = {
    65534,  49213,  46125,  44055,
    42453,  41129,  39991,  38988,
    38086,  37266,  36512,  35812,
@@ -847,7 +847,7 @@ const uint16_t lut_svf_damp[] = {
      510,    445,    381,    317,
      253,
 };
-const uint16_t lut_svf_scale[] = {
+const uint16_t lut_svf_scale_u15[] = {
    32767,  28395,  27490,  26866,
    26373,  25958,  25596,  25273,
    24979,  24709,  24458,  24222,
@@ -917,16 +917,16 @@ const uint16_t lut_svf_scale[] = {
 
 
 const uint16_t* const lookup_table_table[] = {
-  lut_env_expo,
-  lut_expo2_neg,
-  lut_sine_quadrant,
-  lut_expo_quadrant,
+  lut_env_expo_u16,
+  lut_expo2_neg_u16,
+  lut_sine_quadrant_u16,
+  lut_expo_quadrant_u16,
   lut_arpeggiator_patterns,
   lut_consonance,
   lut_clock_ratio_ticks,
-  lut_svf_cutoff,
-  lut_svf_damp,
-  lut_svf_scale,
+  lut_svf_cutoff_u15,
+  lut_svf_damp_u1_15,
+  lut_svf_scale_u15,
 };
 
 const int16_t lut_scale_pythagorean[] = {

@@ -323,11 +323,11 @@ class Oscillator {
   }
 
   inline int16_t sine(uint32_t phase) const {
-    return quadrant_lookup(lut_sine_quadrant, phase);
+    return quadrant_lookup(lut_sine_quadrant_u16, phase);
   }
 
   inline int16_t expo(uint32_t phase) const {
-    return quadrant_lookup(lut_expo_quadrant, phase);
+    return quadrant_lookup(lut_expo_quadrant_u16, phase);
   }
 
   inline int16_t triangle(uint32_t phase) const {

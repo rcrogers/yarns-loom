@@ -61,16 +61,16 @@ extern const int8_t* const lookup_table_8_table[];
 extern const uint16_t* const char_table[];
 
 extern const char str_dummy[];
-extern const uint16_t lut_env_expo[];
-extern const uint16_t lut_expo2_neg[];
-extern const uint16_t lut_sine_quadrant[];
-extern const uint16_t lut_expo_quadrant[];
+extern const uint16_t lut_env_expo_u16[];
+extern const uint16_t lut_expo2_neg_u16[];
+extern const uint16_t lut_sine_quadrant_u16[];
+extern const uint16_t lut_expo_quadrant_u16[];
 extern const uint16_t lut_arpeggiator_patterns[];
 extern const uint16_t lut_consonance[];
 extern const uint16_t lut_clock_ratio_ticks[];
-extern const uint16_t lut_svf_cutoff[];
-extern const uint16_t lut_svf_damp[];
-extern const uint16_t lut_svf_scale[];
+extern const uint16_t lut_svf_cutoff_u15[];
+extern const uint16_t lut_svf_damp_u1_15[];
+extern const uint16_t lut_svf_scale_u15[];
 extern const int16_t lut_scale_pythagorean[];
 extern const int16_t lut_scale_1_4_eb[];
 extern const int16_t lut_scale_1_4_e[];
@@ -135,26 +135,26 @@ extern const int8_t lut_fm_index_2x_upshifts[];
 extern const uint16_t chr_characters[];
 extern const uint16_t chr_blinking_characters[];
 #define STR_DUMMY 0  // dummy
-#define LUT_ENV_EXPO 0
-#define LUT_ENV_EXPO_SIZE 257
-#define LUT_EXPO2_NEG 1
-#define LUT_EXPO2_NEG_SIZE 257
-#define LUT_SINE_QUADRANT 2
-#define LUT_SINE_QUADRANT_SIZE 257
-#define LUT_EXPO_QUADRANT 3
-#define LUT_EXPO_QUADRANT_SIZE 257
+#define LUT_ENV_EXPO_U16 0
+#define LUT_ENV_EXPO_U16_SIZE 257
+#define LUT_EXPO2_NEG_U16 1
+#define LUT_EXPO2_NEG_U16_SIZE 257
+#define LUT_SINE_QUADRANT_U16 2
+#define LUT_SINE_QUADRANT_U16_SIZE 257
+#define LUT_EXPO_QUADRANT_U16 3
+#define LUT_EXPO_QUADRANT_U16_SIZE 257
 #define LUT_ARPEGGIATOR_PATTERNS 4
 #define LUT_ARPEGGIATOR_PATTERNS_SIZE 23
 #define LUT_CONSONANCE 5
 #define LUT_CONSONANCE_SIZE 1536
 #define LUT_CLOCK_RATIO_TICKS 6
 #define LUT_CLOCK_RATIO_TICKS_SIZE 32
-#define LUT_SVF_CUTOFF 7
-#define LUT_SVF_CUTOFF_SIZE 257
-#define LUT_SVF_DAMP 8
-#define LUT_SVF_DAMP_SIZE 257
-#define LUT_SVF_SCALE 9
-#define LUT_SVF_SCALE_SIZE 257
+#define LUT_SVF_CUTOFF_U15 7
+#define LUT_SVF_CUTOFF_U15_SIZE 257
+#define LUT_SVF_DAMP_U1_15 8
+#define LUT_SVF_DAMP_U1_15_SIZE 257
+#define LUT_SVF_SCALE_U15 9
+#define LUT_SVF_SCALE_U15_SIZE 257
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12
 #define LUT_SCALE_1_4_EB 1

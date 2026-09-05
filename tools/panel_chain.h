@@ -51,7 +51,7 @@ inline void PanelAdsr(
     int env_mod_attack, int env_mod_decay,
     int env_mod_sustain, int env_mod_release) {
   uint8_t vel = static_cast<uint8_t>(velocity);
-  uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
+  uint16_t vel_concave_up = UINT16_MAX - lut_env_expo_u16[((127 - vel) << 1)];
   int32_t damping_22 = -amplitude_mod_velocity * vel_concave_up;
   if (amplitude_mod_velocity >= 0) {
     damping_22 += amplitude_mod_velocity << 16;

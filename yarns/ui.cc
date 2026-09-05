@@ -308,7 +308,7 @@ void Ui::Poll() {
   }
   // Linearize brightness
   for (uint8_t i = 0; i < kNumCVOutputs; ++i) {
-    uint8_t expo_brightness = (UINT16_MAX - lut_env_expo[UINT8_MAX - leds_brightness[i]]) >> 8;
+    uint8_t expo_brightness = (UINT16_MAX - lut_env_expo_u16[UINT8_MAX - leds_brightness[i]]) >> 8;
     leds_brightness[i] = (leds_brightness[i] >> 1) + (expo_brightness >> 1);
   }
 

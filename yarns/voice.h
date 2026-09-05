@@ -164,7 +164,7 @@ class Voice {
   inline void set_timbre_init(uint8_t n) {
     timbre_init_target_ = n << (16 - 7); }
   inline void set_timbre_mod_lfo(uint8_t n) {
-    timbre_mod_lfo_target_ = UINT16_MAX - lut_env_expo[((127 - n) << 1)];
+    timbre_mod_lfo_target_ = UINT16_MAX - lut_env_expo_u16[((127 - n) << 1)];
   }
   
   inline void set_tuning(int8_t coarse, int8_t fine) {

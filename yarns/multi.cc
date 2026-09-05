@@ -285,7 +285,7 @@ void Multi::Stop() {
 void Multi::SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos, bool force_phase) {
   if (spread >= 0) { // Detune
     uint8_t spread_8 = spread << 1;
-    uint16_t spread_expo_16 = UINT16_MAX - lut_env_expo[((127 - spread_8) << 1)];
+    uint16_t spread_expo_16 = UINT16_MAX - lut_env_expo_u16[((127 - spread_8) << 1)];
     uint32_t phase_increment = (*base_lfo)->GetPhaseIncrement();
     for (uint8_t i = 1; i < num_lfos; ++i) {
       phase_increment += ((phase_increment >> 4) * (spread_expo_16 >> 4)) >> 8;

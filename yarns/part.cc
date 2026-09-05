@@ -814,7 +814,7 @@ void Part::VoiceNoteOn(
   int32_t timbre_14 = (voicing_.timbre_mod_envelope << 7) + vel * voicing_.timbre_mod_velocity;
   CONSTRAIN(timbre_14, -1 << 13, (1 << 13) - 1)
 
-  uint16_t vel_concave_up = UINT16_MAX - lut_env_expo[((127 - vel) << 1)];
+  uint16_t vel_concave_up = UINT16_MAX - lut_env_expo_u16[((127 - vel) << 1)];
   int32_t damping_22 = -voicing_.amplitude_mod_velocity * vel_concave_up;
   if (voicing_.amplitude_mod_velocity >= 0) {
     damping_22 += voicing_.amplitude_mod_velocity << 16;

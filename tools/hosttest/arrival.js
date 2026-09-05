@@ -17,7 +17,7 @@
 // subtracted out of it. Re-measured at AMOUNT 127 / DURATION 0: for every
 // setting whose stage outlasts the burst the samples are identical to these, so
 // a live chiff reads nothing new here. What a chiff does change is the anchor --
-// Trigger takes its closed form from lut_env_expo rather than from nominal --
+// Trigger takes its closed form from lut_env_expo_u16 rather than from nominal --
 // and the battery already fails on a broken anchor.
 'use strict';
 const H = require('./harness');

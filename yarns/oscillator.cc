@@ -161,7 +161,7 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
 // bottom it must answer the bottom.
 //
 // Two ways it went wrong without this, and both are silent:
-//   - an UNSIGNED parameter (lut_env_expo's index, and CutoffFromFreq's shift)
+//   - an UNSIGNED parameter (lut_env_expo_u16's index, and CutoffFromFreq's shift)
 //     wraps a negative to the TOP of the range: the narrowest or brightest
 //     thing the shape can do, at the moment the player asked for the least.
 //   - a shift by a wrapped count is undefined, and answers zero on this target.
@@ -244,7 +244,7 @@ int16_t Oscillator::WarpTimbre(
     if (timbre < 0) timbre = 0;
     uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * q_octaves) << 1;
     int32_t damp = damp_at_widest_q1_14 * // 2^-octaves
-      Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 16;
+      Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16;
     return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
   }
 
@@ -573,7 +573,7 @@ void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) 
     //   MIDI 100.
     timbre = TimbreAtOrAboveZero(timbre);
     uint16_t index = static_cast<uint16_t>(timbre * timbre >> 15);
-    uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo, index); // 100-12%
+    uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo_u16, index); // 100-12%
     // A width of zero fails the compare rather than reaching the divide.
     this_sample = (phase >> 16) < width ? sine((phase / width) << 16) : 0;
   )
@@ -583,7 +583,7 @@ void Oscillator::RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix)
   RENDER_PERIODIC(
     timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1); // 3/4
-    uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo, timbre)) << 15; // 50-0%
+    uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo_u16, timbre)) << 15; // 50-0%
     bool self_reset = phase < phase_increment;
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
@@ -599,7 +599,7 @@ void Oscillator::RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix) {
     while (true) { EDGES_SAW(phase, phase_increment) }
     timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1); // 3/4
-    uint16_t saw_width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
+    uint16_t saw_width = UINT16_MAX - Interpolate88(lut_env_expo_u16, timbre); // 100-0%
     if ((phase >> 16) < saw_width) next_sample += (phase / saw_width) >> 1;
     else next_sample += 0x7fff;
     // * 2 and not << 1: the value is signed and negative below 0x4000,
@@ -620,7 +620,7 @@ void Oscillator::RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix)
     timbre = timbre + (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + (timbre >> 4); // 31/32
 
     // Exponential timbre curve, biased high
-    uint32_t pw = Interpolate88(lut_env_expo, timbre) << 15; // 0-50% width of each flat part
+    uint32_t pw = Interpolate88(lut_env_expo_u16, timbre) << 15; // 0-50% width of each flat part
     uint32_t saw_width = UINT32_MAX - (pw << 1); // 0-100% width of up-ramp
 
     bool self_reset = phase < phase_increment;
@@ -780,9 +780,9 @@ void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   // shift and an xor is the wrong trade.
   // Both indices come from `% 3` and `/ 6`, so neither can leave [0, 2].
   const uint16_t* carrier_table =
-      carrier_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant : lut_expo_quadrant;
+      carrier_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
   const uint16_t* transfer_table =
-      transfer_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant : lut_expo_quadrant;
+      transfer_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
 
 #define TRANSFER_LOOP(CARRIER, TRANSFER) \
   RENDER_PERIODIC( \
@@ -948,7 +948,7 @@ static int32_t WhistleOutputGain(int32_t pitch) {
   octaves_q16 = octaves_q16 * tilt_numerator / tilt_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
   int32_t gain = noise_level_trim_q15 *
-      (Interpolate88(lut_expo2_neg, octaves_q16 & 0xffff) >> 1) >> 15;
+      (Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 1) >> 15;
   int32_t whole = octaves_q16 >> 16;
   return whole >= 20 ? 0 : (gain >> whole);
 }
@@ -1058,7 +1058,7 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
   StateVariableFilter svf = svf_;
   svf.RenderInit(pitch_ << 1);
   OscillatorShape shape = shape_;
-  // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
+  // int32_t scale = Interpolate824(lut_svf_scale_u15, pitch_ << 18);
   // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;
   RENDER_CORE(
     svf.RenderSample(Random::GetSample(), timbre);

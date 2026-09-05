@@ -94,7 +94,7 @@ void Display::set_brightness(uint16_t brightness, bool linearize) {
     // Applying a brightness fraction naively to PWM results in a visual bias
     // toward over-brightness -- expo conversion biases it back toward darkness
     uint8_t darkness = UINT8_MAX - (brightness >> 8);
-    brightness_ = UINT16_MAX - lut_env_expo[(darkness >> 1) + (darkness >> 2)];
+    brightness_ = UINT16_MAX - lut_env_expo_u16[(darkness >> 1) + (darkness >> 2)];
   } else {
     brightness_ = brightness;
   }

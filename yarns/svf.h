@@ -95,13 +95,13 @@ struct SVF {
   // is a change of format and not a scaling.
   static inline int16_t DampFromResonance(int16_t resonance_u15) {
     uint32_t index = resonance_u15 << (32 - 15);
-    uint16_t damp_u1_15 = Interpolate824(lut_svf_damp, index);
+    uint16_t damp_u1_15 = Interpolate824(lut_svf_damp_u1_15, index);
     int16_t damp_u1_14 = damp_u1_15 >> 1;
     return damp_u1_14;
   }
   static inline int16_t CutoffFromFreq(int16_t freq_u15) {
     uint32_t index = freq_u15 << (32 - 15);
-    int16_t cutoff_u15 = Interpolate824(lut_svf_cutoff, index);
+    int16_t cutoff_u15 = Interpolate824(lut_svf_cutoff_u15, index);
     return cutoff_u15;
   }
 };

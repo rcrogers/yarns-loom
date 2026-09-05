@@ -215,15 +215,15 @@ handoff_cycles = pathcost.longest_path(
     pathcost.Graph(functions[HAND_OFF]), handoff_call_cost)
 # NOTEON HAS ONE SEARCH LEFT and it calls nothing, so it cannot be identified
 # by a callee the way the old pair were. It is the inverse-interpolation of
-# lut_env_expo in ChiffWalkAudiblePhase_u16 -- a bisection over the table, so
+# lut_env_expo_u16 in ChiffWalkAudiblePhase_u16 -- a bisection over the table, so
 # its trip count is ceil(log2(size)) and comes from the TABLE SIZE rather than
 # a literal in the source.
 #   The two it replaces were ChiffWalkAudibleAmount_q7_25 (twelve iterations,
 # now a closed form -- the level law made the threshold amount solvable) and
 # the old sixteen-iteration bisection of the curve itself.
-LUT_ENV_EXPO_SIZE = source_constant(
-    'yarns/resources.h', r'LUT_ENV_EXPO_SIZE\s+(\d+)')
-TABLE_SEARCH_TRIPS = int(math.ceil(math.log(LUT_ENV_EXPO_SIZE, 2)))
+LUT_ENV_EXPO_U16_SIZE = source_constant(
+    'yarns/resources.h', r'LUT_ENV_EXPO_U16_SIZE\s+(\d+)')
+TABLE_SEARCH_TRIPS = int(math.ceil(math.log(LUT_ENV_EXPO_U16_SIZE, 2)))
 note_on_graph = pathcost.Graph(functions[NOTE_ON])
 callee_names = {body[0][0]: name for name, body in functions.items()}
 search_weights = []

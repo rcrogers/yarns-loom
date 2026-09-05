@@ -169,7 +169,7 @@ void Voice::Refresh() {
     note_source_ = note_target_;
   }
   uint16_t portamento_level = portamento_exponential_shape_
-      ? Interpolate824(lut_env_expo, portamento_phase_)
+      ? Interpolate824(lut_env_expo_u16, portamento_phase_)
       : portamento_phase_ >> 16;
   int32_t note = note_source_ + \
       ((note_target_ - note_source_) * portamento_level >> 16);

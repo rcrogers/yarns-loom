@@ -126,7 +126,7 @@ inline uint32_t OffsetForChiffAmplitude(
 const uint32_t kOne_q31_sqrt = static_cast<uint32_t>(
   32768.0 * __builtin_sqrt(2.0) + 0.5);
 
-// lut_env_expo's last entry. Naming it lets ChiffAmountAtPhase_q30 normalise
+// lut_env_expo_u16's last entry. Naming it lets ChiffAmountAtPhase_q30 normalise
 // by subtraction.
 const uint32_t kEnvExpoFull_u16 = 65535;
 
@@ -321,9 +321,9 @@ static uint32_t ChiffSlewTimeAtAmount_q5_27(
   const uint32_t kCurveIndexShift = kChiffAmountFractionalBits - 8;
   const uint32_t index = scaled_amount_q30 >> kCurveIndexShift;
   const uint32_t frac = scaled_amount_q30 & ((1u << kCurveIndexShift) - 1);
-  const uint32_t lo_u16 = lut_env_expo[index];
-  const uint32_t hi_u16 = index < LUT_ENV_EXPO_SIZE - 1
-      ? lut_env_expo[index + 1] : lo_u16;
+  const uint32_t lo_u16 = lut_env_expo_u16[index];
+  const uint32_t hi_u16 = index < LUT_ENV_EXPO_U16_SIZE - 1
+      ? lut_env_expo_u16[index + 1] : lo_u16;
   const uint32_t warped_u16 = lo_u16 + static_cast<uint32_t>(
       (static_cast<uint64_t>(hi_u16 - lo_u16) * frac) >> kCurveIndexShift);
   const uint32_t warp_expo_u16 = (warped_u16 << 16) / kEnvExpoFull_u16;
@@ -331,7 +331,7 @@ static uint32_t ChiffSlewTimeAtAmount_q5_27(
   // holds the slew time near its fast end for 124 ms of a 687 ms chiff; a
   // straight line moves it at once, but adds octaves across the whole knob.
   const uint32_t warp_linear_u16 = scaled_amount_q30 >> (kChiffAmountFractionalBits - 16);
-  // lut_env_expo is above the straight line everywhere, so this only subtracts.
+  // lut_env_expo_u16 is above the straight line everywhere, so this only subtracts.
   const uint32_t warp_u16 = warp_expo_u16 - ((warp_expo_u16 - warp_linear_u16) >> 2);
   return slew_time_at_amount_zero_q5_27 - static_cast<uint32_t>(
     (static_cast<uint64_t>(
@@ -367,7 +367,7 @@ static uint32_t ChiffInaudibleAmount_q30(
 // a fraction of the decay. It is the decay speed: make
 // this phase arrive at the duration and the chiff goes inaudible there.
 //
-// Inverts lut_env_expo by searching it: 257 monotone entries, so eight
+// Inverts lut_env_expo_u16 by searching it: 257 monotone entries, so eight
 // compares land on the bracket and one interpolation finishes.
 //   - "Already inaudible at the onset" is an early return: the phase to reach
 //     the target is zero there, and the decay runs at full speed.
@@ -382,16 +382,16 @@ static uint32_t ChiffInaudiblePhase_u16(
   // guaranteed above, so the quotient fits u16.
   const uint32_t inaudible_amount_fraction_u16 = DivU64ByU32(
     target_q30 >> 16, target_q30 << 16, start_q30);
-  // lut_env_expo rises, so the remaining fraction falls: find the last index
+  // lut_env_expo_u16 rises, so the remaining fraction falls: find the last index
   // whose remaining is still >= needed.
-  uint32_t lo = 0, hi = LUT_ENV_EXPO_SIZE - 1;
+  uint32_t lo = 0, hi = LUT_ENV_EXPO_U16_SIZE - 1;
   while (hi - lo > 1) {
     const uint32_t mid = (lo + hi) >> 1;
-    if (kEnvExpoFull_u16 - lut_env_expo[mid] >= inaudible_amount_fraction_u16) lo = mid;
+    if (kEnvExpoFull_u16 - lut_env_expo_u16[mid] >= inaudible_amount_fraction_u16) lo = mid;
     else hi = mid;
   }
-  const uint32_t above = kEnvExpoFull_u16 - lut_env_expo[lo];
-  const uint32_t below = kEnvExpoFull_u16 - lut_env_expo[hi];
+  const uint32_t above = kEnvExpoFull_u16 - lut_env_expo_u16[lo];
+  const uint32_t below = kEnvExpoFull_u16 - lut_env_expo_u16[hi];
   const uint32_t span = above - below;
   const uint32_t frac_u8 = span
     ? (((above - inaudible_amount_fraction_u16) << 8) / span) : 0;
@@ -402,7 +402,7 @@ static uint32_t ChiffInaudiblePhase_u16(
 }
 
 // The initial amount times the curve, which is fixed for every chiff.
-//   - The curve is lut_env_expo, the envelope's own stage curve, and it has to
+//   - The curve is lut_env_expo_u16, the envelope's own stage curve, and it has to
 //     be: amplitude goes as 20log10(amount), so constant dB per second wants
 //     the amount itself to decay exponentially: AMOUNT's top half spans a few
 //     dB and its bottom few units span tens.
@@ -412,9 +412,9 @@ static uint32_t ChiffAmountAtPhase_q30(
     uint32_t initial_q30, uint32_t phase_q32) {
   const uint32_t index = phase_q32 >> 24;
   const uint32_t frac_u8 = (phase_q32 >> 16) & 0xFF;
-  const uint32_t lo = lut_env_expo[index];
-  const uint32_t hi = index < LUT_ENV_EXPO_SIZE - 1
-    ? lut_env_expo[index + 1] : lut_env_expo[LUT_ENV_EXPO_SIZE - 1];
+  const uint32_t lo = lut_env_expo_u16[index];
+  const uint32_t hi = index < LUT_ENV_EXPO_U16_SIZE - 1
+    ? lut_env_expo_u16[index + 1] : lut_env_expo_u16[LUT_ENV_EXPO_U16_SIZE - 1];
   const uint32_t done_u16 = lo + (((hi - lo) * frac_u8) >> 8);
   // The normalisation is a subtract. The table's last entry is
   // kEnvExpoFull, and x * 2^16 / kEnvExpoFull is exactly x for every x below
@@ -599,7 +599,7 @@ void Envelope::NoteOn(
 static inline uint32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
   uint32_t integer_part = slew_time_log2_q5_27 >> 27;
   uint32_t two_pow_neg_fraction_u16 = Interpolate824(
-    lut_expo2_neg, (slew_time_log2_q5_27 & kSlewTimeFraction_q5_27) << 5);
+    lut_expo2_neg_u16, (slew_time_log2_q5_27 & kSlewTimeFraction_q5_27) << 5);
   return (two_pow_neg_fraction_u16 << 15) >> integer_part;
 }
 
@@ -641,8 +641,8 @@ void Envelope::Trigger(EnvelopeStage stage) {
       ? 0u - stage_samples_left_ * stage_phase_increment_u32_
       : UINT32_MAX;
     // No landing fraction: the adjusted target passes the stage target, so
-    // lut_env_expo's own normalization already describes where the value is.
-    uint32_t expo_u16 = Interpolate824(lut_env_expo, stage_phase_u32);
+    // lut_env_expo_u16's own normalization already describes where the value is.
+    uint32_t expo_u16 = Interpolate824(lut_env_expo_u16, stage_phase_u32);
     stage_start_q30_ += static_cast<int32_t>(
       (static_cast<int64_t>(stage_target_q30_ - stage_start_q30_) * expo_u16) >> 16);
   } else {
