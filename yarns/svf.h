@@ -49,18 +49,22 @@ struct SVF {
   // UNITS -- what integer division by 2^14 or 2^15 leaves behind. Named for the
   // product each one belongs to: the damping term subtracted to form notch, and
   // the two integrator steps.
-  // Each is a fraction of ONE state count, so the suffix is all fractional
-  // bits: 14 where damp is Q1.14, 15 where cutoff is Q0.15.
-  int32_t damping_term_remainder_q14;
-  int32_t lp_step_remainder_q15, bp_step_remainder_q15;
+  // UNSIGNED: each is `x & ((1 << N) - 1)`, so it lands in [0, 2^N) whatever
+  // the sign of the product it came from. Each is a fraction of ONE state
+  // count, so every bit is fractional -- 14 against the damp's 14, 15 against
+  // the cutoff's 15.
+  int32_t damping_term_remainder_u14;
+  int32_t lp_step_remainder_u15, bp_step_remainder_u15;
 
   void Init() {
     bp = lp = notch = hp = 0;
-    damping_term_remainder_q14 =
-        lp_step_remainder_q15 = bp_step_remainder_q15 = 0;
+    damping_term_remainder_u14 =
+        lp_step_remainder_u15 = bp_step_remainder_u15 = 0;
   }
 
-  // Chamberlin needs the damp range 0..2, which is what its Q1.14 buys.
+  // Chamberlin needs the damp range 0..2, which is what its one integer bit
+  // buys. Neither parameter is ever negative: both come from tables built from
+  // non-negative expressions.
   // A LAST BIT OF DAMPING, AND OF INTEGRATION, WHEREVER THE PRODUCT WOULD
   // TRUNCATE AWAY. Below |bp| < 16384/damp the damping term is exactly zero and
   // the resonator is lossless -- it rings at that amplitude for ever, and the
@@ -73,32 +77,32 @@ struct SVF {
   // Carry that remainder into the next sample so each step is exact on average.
   // Faking a minimum step instead makes the filter lossy by construction: a
   // forced count per sample caps Q at 32 however small the damping asked for.
-  inline void Process(int32_t in, int16_t cutoff_q15, int16_t damp_q1_14) {
-    int32_t damped = bp * damp_q1_14 + damping_term_remainder_q14;
-    damping_term_remainder_q14 = damped & ((1 << 14) - 1);
+  inline void Process(int32_t in, int16_t cutoff_u15, int16_t damp_u1_14) {
+    int32_t damped = bp * damp_u1_14 + damping_term_remainder_u14;
+    damping_term_remainder_u14 = damped & ((1 << 14) - 1);
     notch = Clip16(in - (damped >> 14));
-    int32_t lp_moved = cutoff_q15 * bp + lp_step_remainder_q15;
-    lp_step_remainder_q15 = lp_moved & ((1 << 15) - 1);
+    int32_t lp_moved = cutoff_u15 * bp + lp_step_remainder_u15;
+    lp_step_remainder_u15 = lp_moved & ((1 << 15) - 1);
     lp = Clip16(lp + (lp_moved >> 15));
     hp = Clip16(notch - lp);
-    int32_t bp_moved = cutoff_q15 * hp + bp_step_remainder_q15;
-    bp_step_remainder_q15 = bp_moved & ((1 << 15) - 1);
+    int32_t bp_moved = cutoff_u15 * hp + bp_step_remainder_u15;
+    bp_step_remainder_u15 = bp_moved & ((1 << 15) - 1);
     bp = Clip16(bp + (bp_moved >> 15));
   }
 
-  // Conversion methods: a Q15 domain value in, a Process parameter out. The
+  // Conversion methods: a u15 domain value in, a Process parameter out. The
   // table hands back one more fractional bit than damp carries, so the shift
   // is a change of format and not a scaling.
-  static inline int16_t DampFromResonance(int16_t resonance_q15) {
-    uint32_t index = resonance_q15 << (32 - 15);
-    uint16_t damp_q1_15 = Interpolate824(lut_svf_damp, index);
-    int16_t damp_q1_14 = damp_q1_15 >> 1;
-    return damp_q1_14;
+  static inline int16_t DampFromResonance(int16_t resonance_u15) {
+    uint32_t index = resonance_u15 << (32 - 15);
+    uint16_t damp_u1_15 = Interpolate824(lut_svf_damp, index);
+    int16_t damp_u1_14 = damp_u1_15 >> 1;
+    return damp_u1_14;
   }
-  static inline int16_t CutoffFromFreq(int16_t freq_q15) {
-    uint32_t index = freq_q15 << (32 - 15);
-    int16_t cutoff_q15 = Interpolate824(lut_svf_cutoff, index);
-    return cutoff_q15;
+  static inline int16_t CutoffFromFreq(int16_t freq_u15) {
+    uint32_t index = freq_u15 << (32 - 15);
+    int16_t cutoff_u15 = Interpolate824(lut_svf_cutoff, index);
+    return cutoff_u15;
   }
 };
 

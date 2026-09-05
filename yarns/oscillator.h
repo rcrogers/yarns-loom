@@ -55,21 +55,21 @@ const uint8_t kEnvelopesPerOscillator = 2;
 class StateVariableFilter : public SVF {
  public:
   void Init();
-  void RenderInit(int16_t resonance_q15);
+  void RenderInit(int16_t resonance_u15);
   // For a shape whose cutoff comes from the PITCH rather than from the timbre
   // buffer. pitch_ moves once a block and the timbre buffer does not, so which
   // of the two needs interpolating is the other way round for such a shape.
-  void RenderInitCutoff(int16_t cutoff_q15);
+  void RenderInitCutoff(int16_t cutoff_u15);
 
   // Cutoff per sample, damping interpolated from a resonance set once a block.
-  inline void RenderSample(int32_t in, int16_t cutoff_q15) {
+  inline void RenderSample(int32_t in, int16_t cutoff_u15) {
     damp.Tick();
-    Process(in, cutoff_q15, damp.value());
+    Process(in, cutoff_u15, damp.value());
   }
   // The mirror: damping per sample, cutoff interpolated toward the pitch's.
-  inline void RenderSampleAtPitch(int32_t in, int16_t damp_q1_14) {
+  inline void RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
     cutoff.Tick();
-    Process(in, cutoff.value(), damp_q1_14);
+    Process(in, cutoff.value(), damp_u1_14);
   }
 
  private:
