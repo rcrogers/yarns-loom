@@ -14,7 +14,7 @@
 #   make osc        host oscillator: all 42 shapes, sample for sample
 #   make mix        the summed mix stays inside the span the voices were given
 #   make warp       every shape's timbre map is monotone, including below zero
-#   make qemu       differential: render-loop asm == C reference, under QEMU
+#   make qemu       differentials: envelope and oscillator asm == C, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
 #   make cycles     what the envelope costs per block, against the baseline
@@ -60,8 +60,16 @@ warp:
 mix:
 	sh tools/mixtest/build.sh
 
+# THE ASM DIFFERENTIALS. Both prove a hand-written asm path renders exactly what
+# the C it replaces does -- the one class of bug a golden cannot see, because a
+# golden pins what the code does, not that two implementations agree.
+#
+# ~20 s each, nearly all of it Docker start-up and the cross-compile. That is
+# the price of running the real target, and it is why these are separate from
+# the host checks, which are milliseconds.
 qemu:
 	sh tools/qemutest/verify.sh
+	sh tools/oscqemu/verify.sh
 
 # Verify the tree is in sync WITHOUT rebuilding, so a stale committed sim shows
 # up as a simparity failure rather than being silently refreshed.
