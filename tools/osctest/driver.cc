@@ -31,8 +31,27 @@ Oscillator osc;
 // Three pitches so a shape whose warp tracks pitch is exercised at more than
 // one, and a timbre RAMP so the per-sample path moves rather than sitting.
 const uint16_t kScale = 32767;
-const int kPitches[] = { 36 << 7, 60 << 7, 96 << 7 };
-const int kBlocks = 8;
+// THE WHOLE KEYBOARD, because a shape whose warp tracks pitch renders different
+// arithmetic at each end of it, and three pitches left most of that unpinned.
+// EVERY FOURTH SEMITONE, which crosses all fifteen bandlimited zones and both
+// ends of the keyboard. The whole run costs milliseconds, so the grid is set by
+// what is worth examining rather than by what is affordable.
+const int kPitches[] = {
+   12 << 7,  16 << 7,  20 << 7,  24 << 7,  28 << 7,  32 << 7,  36 << 7,
+   40 << 7,  44 << 7,  48 << 7,  52 << 7,  56 << 7,  60 << 7,  64 << 7,
+   68 << 7,  72 << 7,  76 << 7,  80 << 7,  84 << 7,  88 << 7,  92 << 7,
+   96 << 7, 100 << 7, 104 << 7, 108 << 7, 112 << 7, 116 << 7, 120 << 7,
+  124 << 7,
+};
+// BOTH DIRECTIONS, because the per-sample timbre feeds interpolators whose
+// slope has a sign, and a rising ramp exercises one of the two.
+// A SWEPT timbre and a HELD one are different arithmetic: the interpolators
+// carry a slope only while it moves, and a shape's steady state is what a held
+// note sounds like.
+enum TimbreSweep {
+  kRising, kFalling, kRisingFromNegative, kHeldLow, kHeldHigh, kNumSweeps
+};
+const int kBlocks = 16;
 
 // Full-scale timbre at the CURRENT width. A wider one must render the same
 // audio from the proportionally larger value, which is what the check asserts.
@@ -55,11 +74,35 @@ uint32_t Fnv(uint32_t h, int16_t v) {
   return (h ^ static_cast<uint16_t>(v)) * 16777619u;
 }
 
+// Where the timbre ramp starts and ends, per sweep. The third runs from below
+// zero, which a negative TIMBRE MOD ENVELOPE reaches and which every shape now
+// has to hold -- see the `negative` mode for the property that pins it.
+void SweepRange(int sweep, int* from, int* to) {
+  switch (sweep) {
+    case kFalling: *from = g_timbre_max; *to = 0; break;
+    case kRisingFromNegative: *from = -g_timbre_max - 1; *to = g_timbre_max; break;
+    case kHeldLow: *from = *to = g_timbre_max / 8; break;
+    case kHeldHigh: *from = *to = g_timbre_max; break;
+    default: *from = 0; *to = g_timbre_max; break;
+  }
+}
+
+// THE GAIN HALF MOVES TOO. A shape the envelope EXCITES spends this going into
+// what rings, so a decaying gain is a different render from a held one -- and
+// the excitation shapes are exactly the ones whose arithmetic is being changed.
+enum GainProfile { kGainFull, kGainDecaying, kNumGainProfiles };
+int16_t GainAt(int profile, long step, long total) {
+  if (profile == kGainFull) return static_cast<int16_t>(g_gain);
+  return static_cast<int16_t>(g_gain - g_gain * step / total);
+}
+
 uint32_t HashShape(int shape, bool dump) {
   uint32_t hash = 2166136261u;
   // Per shape, so a noise shape's hash does not depend on how many draws the
   // shapes before it took.
   stmlib::Random::Seed(0x21);
+  for (int gain_profile = 0; gain_profile < kNumGainProfiles; ++gain_profile)
+  for (int sweep = 0; sweep < kNumSweeps; ++sweep)
   for (size_t p = 0; p < sizeof(kPitches) / sizeof(kPitches[0]); ++p) {
     // One voice, so its share of the output budget is the whole of it and the
     // two shares coincide.
@@ -73,11 +116,14 @@ uint32_t HashShape(int shape, bool dump) {
       for (size_t i = 0; i < kAudioBlockSize; ++i) {
         // A ramp across the whole run, so every shape sees its timbre move.
         const long step = b * kAudioBlockSize + i;
+        int from, to;
+        SweepRange(sweep, &from, &to);
         timbre_gain[i] = g_hold_timbre
             ? static_cast<int16_t>(g_held_timbre)
             : static_cast<int16_t>(
-                g_timbre_max * step / (kBlocks * kAudioBlockSize));
-        timbre_gain[i + kAudioBlockSize] = static_cast<int16_t>(g_gain);
+                from + (to - from) * step / (kBlocks * kAudioBlockSize));
+        timbre_gain[i + kAudioBlockSize] =
+            GainAt(gain_profile, step, kBlocks * kAudioBlockSize);
       }
       (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);
       for (size_t i = 0; i < kAudioBlockSize; ++i) {
