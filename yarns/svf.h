@@ -49,11 +49,15 @@ struct SVF {
   // UNITS -- what integer division by 2^14 or 2^15 leaves behind. Named for the
   // product each one belongs to: the damping term subtracted to form notch, and
   // the two integrator steps.
-  int32_t damping_term_remainder, lp_step_remainder, bp_step_remainder;
+  // Each is a fraction of ONE state count, so the suffix is all fractional
+  // bits: 14 where damp is Q1.14, 15 where cutoff is Q0.15.
+  int32_t damping_term_remainder_q14;
+  int32_t lp_step_remainder_q15, bp_step_remainder_q15;
 
   void Init() {
     bp = lp = notch = hp = 0;
-    damping_term_remainder = lp_step_remainder = bp_step_remainder = 0;
+    damping_term_remainder_q14 =
+        lp_step_remainder_q15 = bp_step_remainder_q15 = 0;
   }
 
   // cutoff: Q0.15, damp: Q1.14 (Chamberlin needs damp range 0..2.0)
@@ -70,15 +74,15 @@ struct SVF {
   // Faking a minimum step instead makes the filter lossy by construction: a
   // forced count per sample caps Q at 32 however small the damping asked for.
   inline void Process(int32_t in, int16_t cutoff, int16_t damp) {
-    int32_t damped = bp * damp + damping_term_remainder;
-    damping_term_remainder = damped & ((1 << 14) - 1);
+    int32_t damped = bp * damp + damping_term_remainder_q14;
+    damping_term_remainder_q14 = damped & ((1 << 14) - 1);
     notch = Clip16(in - (damped >> 14));
-    int32_t lp_moved = cutoff * bp + lp_step_remainder;
-    lp_step_remainder = lp_moved & ((1 << 15) - 1);
+    int32_t lp_moved = cutoff * bp + lp_step_remainder_q15;
+    lp_step_remainder_q15 = lp_moved & ((1 << 15) - 1);
     lp = Clip16(lp + (lp_moved >> 15));
     hp = Clip16(notch - lp);
-    int32_t bp_moved = cutoff * hp + bp_step_remainder;
-    bp_step_remainder = bp_moved & ((1 << 15) - 1);
+    int32_t bp_moved = cutoff * hp + bp_step_remainder_q15;
+    bp_step_remainder_q15 = bp_moved & ((1 << 15) - 1);
     bp = Clip16(bp + (bp_moved >> 15));
   }
 
