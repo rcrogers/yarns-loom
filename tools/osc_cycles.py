@@ -309,7 +309,7 @@ for name, body in functions.items():
     rows.append((effective, effective_c4, cycles, rare_cycles,
                  instructions, spills, branches, short))
 
-if unexplained_shapes:
+if unexplained_shapes and '--metrics' not in sys.argv[2:]:
   print('  RARE WORK THIS CANNOT ATTRIBUTE TO EDGE OR WRAP MACHINERY BY SOURCE.')
   print('  Mostly shape code inside a guarded region, which carries the shape\'s')
   print('  own line -- an UPPER BOUND on how much of the cheap path is understated,')

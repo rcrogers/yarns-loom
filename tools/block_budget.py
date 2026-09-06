@@ -262,8 +262,10 @@ ATTACK = [('envelopes, %s runs + handoffs' % metrics['runs_per_block'],
           ('NoteOn burst (all %d in one block)' % ENVELOPES,
            int(metrics['note_on_cycles']), ENVELOPES)]
 
-shapes = [(name, float(hi), float(c4))
-          for name, hi, c4 in (l.split() for l in tool('osc_cycles.py', '--metrics').splitlines())]
+# Only the `name hi c4` lines; the tool prints prose around them too.
+shapes = [(parts[0], float(parts[1]), float(parts[2]))
+          for parts in (l.split() for l in tool('osc_cycles.py', '--metrics').splitlines())
+          if len(parts) == 3 and parts[0].startswith('Render')]
 worst_shape, worst_hi, worst_c4 = max(shapes, key=lambda row: row[1])
 
 print('layout %s -- the hungriest of %d' % (WORST.replace('LAYOUT_', ''), len(layouts)))
@@ -345,6 +347,12 @@ def account_for_the_whole_tree():
 
 
 account_for_the_whole_tree()
+print()
+print('  THESE TOTALS ARE LOWER BOUNDS. The cost table is a Cortex-M3 core and the')
+print('  F103 is not one: two flash wait states at 72 MHz, hidden by the prefetch')
+print('  buffer for straight-line code and not for a taken branch. The error has')
+print('  the same sign everywhere. Trust a DIFFERENCE between two builds; do not')
+print('  quote a total as a measurement. See tools/pathcost.py.')
 print()
 print('  NOT COUNTED, and it is not nothing: ui.DoEvents, midi_handler.ProcessInput')
 print('  and multi.LowPriority share the same main loop and the same 72 MHz. They')

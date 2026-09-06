@@ -21,6 +21,22 @@ import re
 # the entries a straight-line path needs that a loop body never had:
 #   udiv/sdiv   2-12 cycles depending on the operands; the worst case governs.
 #   push/pop    1 cycle plus 1 per register.
+# WHAT THESE NUMBERS ARE, AND ARE NOT.
+#
+# A static table for a Cortex-M3 core. The STM32F103 is not a bare core: at
+# 72 MHz its flash needs TWO WAIT STATES, and the prefetch buffer hides them for
+# straight-line code while a taken branch empties it. So the real cost of a
+# branch and of a load both depend on where they sit in the flash line, which
+# nothing here models.
+#
+# The error therefore has the SAME SIGN everywhere -- these are lower bounds --
+# and it does not cancel between two builds of the same code shape. That is why
+# every tool here says it is good for DELTAS: a difference between two builds is
+# trustworthy, an absolute total is not.
+#
+# NEVER QUOTE A TOTAL AS A MEASUREMENT. "The attack block is 93.6%" means "93.6%
+# by a model that cannot see wait states", and the true figure is higher by an
+# unknown factor. Only hardware settles it, and hardware is not available here.
 DIV_CYCLES = 12
 BRANCH_CYCLES = 3
 # A CONDITIONAL BRANCH THE PATH DOES NOT TAKE IS A FALL-THROUGH, and on
