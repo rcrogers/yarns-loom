@@ -13,10 +13,23 @@ import subprocess
 import sys
 
 
+# The sources the engine is compiled from. simparity.js carries the same list.
+ENGINE_SOURCES = ('yarns/envelope.cc', 'yarns/envelope.h',
+                  'yarns/resources.cc', 'tools/simengine/engine.cc')
+
+
 def firmware_version():
-    """git short SHA of HEAD, plus -dirty if the firmware/engine sources have
-    uncommitted changes. Stamped into the page so a published artifact
-    self-identifies its firmware (published snapshots have no other marker)."""
+    """git short SHA of HEAD, plus -dirty if the engine's sources are modified.
+
+    THE PARENT OF THE PAGE'S OWN COMMIT IS THE RIGHT ANSWER, not a limitation:
+    the commit that carries the page does not touch the sources, so the SHA
+    stamped here is exactly where the engine came from, and a reader can
+    `git show` it. A content digest would be unreadable and no more true.
+
+    This was stale for eighteen commits once, and the SHA was not why -- the
+    sim had not been rebuilt, and had been built dirty, and the `-dirty` said
+    so. Nothing FAILED on it. simparity.js does now.
+    """
     here = os.path.dirname(os.path.abspath(__file__))
     try:
         sha = subprocess.check_output(
@@ -25,10 +38,9 @@ def firmware_version():
         return 'unknown'
     # ':/' magic prefix = repo-root-relative, so this works from any subdir
     # (git -C here makes plain paths relative to here, which misses them).
-    tracked = [':/yarns/envelope.cc', ':/yarns/envelope.h',
-               ':/yarns/resources.cc', ':/tools/simengine/engine.cc']
     dirty = subprocess.check_output(
-        ['git', '-C', here, 'status', '--porcelain', '--'] + tracked).decode().strip()
+        ['git', '-C', here, 'status', '--porcelain', '--']
+        + [':/' + p for p in ENGINE_SOURCES]).decode().strip()
     return sha + ('-dirty' if dirty else '')
 
 

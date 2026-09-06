@@ -85,6 +85,44 @@ const check = (name, ok, detail) => {
 // while this proves the INLINED page does. That check was strictly weaker --
 // build.sh always inlines, so a fresh engine and a stale page cannot persist,
 // and every divergence that reached it reached this one too.
+// THE STAMP IS A CLAIM, AND THIS FALSIFIES IT.
+//
+// FW_VERSION says which commit the page's engine was built from. That was stale
+// by eighteen commits once, and the SHA was not the problem -- the sim had not
+// been rebuilt, and the `-dirty` suffix said so correctly. NOTHING FAILED ON IT.
+// That is the defect, and it is this check.
+//
+// Two ways the claim can be false, and both are asked here:
+//   - the sources moved since the stamp, so the page carries an older engine;
+//   - the sources are modified now and the stamp does not admit it.
+const { execSync } = require('child_process');
+const ENGINE_SOURCES = ['yarns/envelope.cc', 'yarns/envelope.h',
+                        'yarns/resources.cc', 'tools/simengine/engine.cc'];
+const stampMatch = /const FW_VERSION = '([0-9a-f]+)(-dirty)?'/.exec(html);
+const git = (args) =>
+  execSync(`git -C ${ROOT} ${args}`, { encoding: 'utf8' }).trim();
+if (!stampMatch) {
+  check('FW_VERSION names a commit', false, 'no SHA in the stamp');
+} else {
+  const [, stampSha, stampDirty] = stampMatch;
+  const dirtyNow = git(`status --porcelain -- ${ENGINE_SOURCES.join(' ')}`) !== '';
+  let moved = null;
+  try {
+    git(`diff --quiet ${stampSha}..HEAD -- ${ENGINE_SOURCES.join(' ')}`);
+    moved = false;
+  } catch (e) {
+    moved = true;   // non-zero exit: the sources differ between the two
+  }
+  check('the engine sources have not moved since the page was inlined',
+        !moved, moved ? `re-inline: they changed between ${stampSha} and HEAD`
+                      : `stamped ${stampSha}`);
+  const agrees = dirtyNow === Boolean(stampDirty);
+  check('the stamp admits whether the tree is dirty', agrees,
+        agrees ? (dirtyNow ? 'dirty, and says so' : 'clean, and says so')
+               : (dirtyNow ? 'sources modified, stamp does not say -dirty'
+                           : 'stamp says -dirty but the sources are clean'));
+}
+
 const H = require('../hosttest/harness');
 
 const GATE_MS = 400, TAIL_MS = 400;
