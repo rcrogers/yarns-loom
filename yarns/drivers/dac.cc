@@ -187,9 +187,33 @@ void Dac::Init() {
     ptr += kDacWordsPerFrame; \
   }
 
+// UNROLLED FOURFOLD, because the loop is five instructions and two of them are
+// the counter: ldrh + orr + str is 5 cycles of work behind a 4-cycle cmp/bne.
+// The stores land 16 bytes apart -- the buffer interleaves the four channels --
+// so they cannot be widened, and shrinking the overhead is what is left.
+//
+// Four is what divides: the whole block, from frame zero. BUFFER_SAMPLES itself
+// keeps the rolled form, because FillDCNoops starts at frame 1 and 63 does not.
+#define YARNS_DAC_WRITE_ONE(dac_words_exp) do { \
+  WRITE_WORDS(ptr, dac_words_exp); \
+  ptr += kDacWordsPerFrame; \
+  ++i; \
+} while (0)
+
 void Dac::BufferSamples(uint8_t block, uint8_t channel, int16_t* samples) {
-  BUFFER_SAMPLES(channel, FormatCommandWord(channel, samples[i]), 0)
+  STATIC_ASSERT(kAudioBlockSize % 4 == 0, block_must_unroll_by_four);
+  volatile uint16_t* ptr = &spi_tx_buffer_[0];
+  ptr += block ? kDacWordsPerBlock : 0;
+  ptr += channel << kDacWordsPerSampleBits;
+  for (size_t i = 0; i < kAudioBlockSize;) {
+    YARNS_DAC_WRITE_ONE(FormatCommandWord(channel, samples[i]));
+    YARNS_DAC_WRITE_ONE(FormatCommandWord(channel, samples[i]));
+    YARNS_DAC_WRITE_ONE(FormatCommandWord(channel, samples[i]));
+    YARNS_DAC_WRITE_ONE(FormatCommandWord(channel, samples[i]));
+  }
 }
+
+#undef YARNS_DAC_WRITE_ONE
 
 void Dac::BufferStaticSample(uint8_t block, uint8_t channel, int16_t sample) {
   uint32_t static_words = FormatCommandWord(channel, sample);
