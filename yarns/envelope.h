@@ -96,15 +96,39 @@ class Envelope {
   void Trigger(EnvelopeStage stage);
   // Every sample written is in [0, kEnvelopeSampleMax].
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
+  // EVERYTHING THE CHIFF CONTRIBUTES TO ONE BLOCK, derived once.
+  //
+  // NONE OF IT IS STAGE-DEPENDENT. The chiff's schedule is an absolute time off
+  // its own table (`028d10d9`), so a stage boundary landing mid-block is no
+  // reason to rebuild any of this -- and L14b says stage timing may not drive
+  // chiff timing. Derived per RUN, as it was, an attack that expires inside a
+  // block rebuilt the drive, the input fraction, the amplitude gain, the clip
+  // and all sixteen levels three times over, because the STAGE happened to end.
+  //
+  // The one thing that genuinely wanted the run boundary was the slew rate's
+  // tread, and it does not any more: the render refines the rate every sample,
+  // so it crosses a run boundary without noticing one.
+  struct ChiffBlock {
+    // The only member that moves: the render advances it a sample at a time and
+    // carries it from one run to the next.
+    int32_t slew_rate_q31;
+    uint32_t rate_retained_per_sample_q31;
+    uint32_t slew_time_step_q5_27;
+    int32_t clip_threshold_q26;
+    int32_t mean_min_q30;
+    int32_t mean_max_q30;
+    int32_t levels_q4_26[1 << 4];  // kChiffDrawBits; envelope.cc owns the name
+  };
+
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
-    int32_t bias_q31, int32_t bias_slope_q31
+    int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
   );
   // Same arg footprint as RenderStage, so the transition is a sibling call
   // with no per-transition frame.
   void HandOffToNextStage(
     int16_t* sample_buffer, size_t block_samples_left,
-    int32_t bias_q31, int32_t bias_slope_q31
+    int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
   );
 
   void Rescale(int32_t numerator, int32_t denominator);
@@ -115,6 +139,7 @@ class Envelope {
     uint32_t slew_time_step_q5_27;   // per sample
     int32_t drive_q4_26;             // at the amount the run STARTS from
   };
+
 
   // Steps the bias directly, bypassing RenderSamples' per-block slew, so an
   // instantaneous jump (a pitch-driven timbre step at NoteOn) is not smoothed
@@ -145,6 +170,8 @@ class Envelope {
  private:
   int32_t ChiffSlewInput_q30() const;
   ChiffRunDecay AdvanceChiffDecay(uint32_t run_samples);
+  void AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff);
+
 
   ADSR* adsr_;
 
