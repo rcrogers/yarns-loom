@@ -6,8 +6,11 @@
 # idea for the envelope's render loop.
 #
 #   SKIP_PROGRAMMING=true ./env/mutable-env.sh \
-#     /usr/local/arm-4.8.3/bin/arm-none-eabi-objdump -d build/yarns/yarns.elf \
+#     /usr/local/arm-4.8.3/bin/arm-none-eabi-objdump -dl build/yarns/yarns.elf \
 #     > /tmp/yarns.dis && python3 tools/osc_cycles.py /tmp/yarns.dis
+#
+# -dl, NOT -d: the edge split reads source lines. Without them the table says
+# so and falls back to charging the edge body every sample.
 #
 # THE LOOP IS FOUND BY CFG, NOT BY ADDRESS SPAN, and that distinction is the
 # whole reason this file exists. GCC lays a loop body out across several basic
@@ -22,124 +25,291 @@
 # per sample would overstate every band-limited shape. The per-sample column is
 # the sample loop minus any loop nested inside it; that nested cost is "edge",
 # paid once per period.
+#
+# THE LONGEST PATH, NOT THE SUM OF THE BLOCKS. This used to add up every
+# instruction in the loop body, so a shape was charged for both arms of every
+# if -- WHISTLE read 68.2% that way, and four voices of it plus the envelope
+# read over 100% for a build that runs. It now walks the CFG with
+# tools/pathcost.py, the same code cycles.py prices the envelope with, so the
+# two tools finally share one cost model. `sum` is still reported beside it:
+# the gap between them IS the branchiness, and it is worth seeing.
+import os
 import re
 import sys
 
 dis_path = sys.argv[1]
 
-funcs, cur = {}, None
-for line in open(dis_path, encoding='utf8', errors='replace'):
-    m = re.match(r'^[0-9a-f]+ <(.+)>:', line)
-    if m:
-        cur, funcs[cur] = m.group(1), []
-        continue
-    m = re.match(r'\s*([0-9a-f]+):\s+((?:[0-9a-f]{4} ?)+)\s*\t(.*)', line)
-    if cur and m:
-        funcs[cur].append((int(m.group(1), 16), m.group(3).strip(),
-                           len(m.group(2).replace(' ', '')) // 2))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pathcost
 
-BRANCH = re.compile(r'^(b|b\.n|b\.w|bx|blx?)\b|^b(eq|ne|cs|cc|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)(\.[nw])?\b')
-TARGET = re.compile(r'\b([0-9a-f]{4,})\b')
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def cost(text, taken_branch):
-    if re.search(r'\b(smull|umull|smlal|umlal)\b', text):
-        return 4
-    if re.search(r'\b(udiv|sdiv)\b', text):
-        return 8
-    if re.search(r'\b(ldr|str)', text):
-        return 2
-    if re.search(r'\bit[te]*\b', text):
-        return 0
-    return 3 if taken_branch else 1
+def source_int(relative_path, pattern, cast):
+  """Read a constant from the source rather than restate it here."""
+  text = open(os.path.join(ROOT, relative_path), encoding='utf8').read()
+  match = re.search(pattern, text)
+  if not match:
+    raise SystemExit('  %s: no match for %s' % (relative_path, pattern))
+  return cast(*match.groups())
+
+STORE = re.compile(r'\bstrh')
+
+SHAPE_BODIES = dict(re.findall(
+    r'void Oscillator::(\w+)\(int16_t\* \w+, int16_t\* \w+\) \{(.*?)\n\}',
+    open(os.path.join(ROOT, 'yarns/oscillator.cc'), encoding='utf8').read(),
+    re.DOTALL))
+
+# THE EDGE WORK IS NOT PAID EVERY SAMPLE, and charging it as though it were is
+# what made the band-limited shapes head this table.
+#
+# `while (true) { EDGES_SAW(...) }` breaks unless an edge fell in THIS sample.
+# EDGES_SAW clears self_reset on its first pass, so the second always breaks and
+# GCC unrolls the loop away entirely; EDGES_PULSE keeps one, because a rising
+# and a falling edge can both land in one sample. Either way the work is bounded
+# PER SAMPLE -- there is no per-period loop to report, which is why the `edge`
+# column read 0 -- and it is taken only on samples an edge falls in.
+#
+# That rate is the pitch: at kHighestNote, MIDI 128 and 13.3 kHz, a saw crosses
+# 0.295 edges a sample and a pulse 0.591. At middle C it is 0.006. So the block
+# a budget is set by pays the sample body 64 times and the edge body ~38.
+#
+# TWO EDGES A PERIOD IS ASSUMED FOR EVERY SHAPE, which over-charges the saws by
+# 2x. Deliberate: it is the pulse rate, it is the worst case, and counting call
+# sites through an inliner to do better is not worth the fragility.
+EDGE_SOURCE_LINES = (454, 486)   # EdgeTime through the end of EDGES_PULSE
+BLEP_SOURCE_LINES = (331, 345)   # This/NextBlepSample, oscillator.h
+HIGHEST_MIDI = source_int('yarns/oscillator.h', r'kHighestNote\s*=\s*(\d+) \* (\d+)',
+                          lambda a, b: int(a) * int(b) / 128.0)
+FRAME_HZ = source_int('yarns/drivers/dac.h', r'kFrameHz\s*=\s*(\d+)', int)
+BLOCK_SAMPLES = 1 << source_int('yarns/drivers/dac.h',
+                                r'kAudioBlockSizeBits\s*=\s*(\d+)', int)
+EDGES_PER_PERIOD = 2
+# THE SYNC MODULATOR RUNS FASTER THAN THE NOTE. Its increment is
+# `phase_increment * timbre >> kSyncRatioFractionalBits`, so at full timbre it
+# is a multiple of the master's, and everything guarded by ITS wrap is paid at
+# that higher rate. Read the shift out of the source rather than restate it.
+SYNC_RATIO_BITS = source_int('yarns/oscillator.cc',
+                             r'kSyncRatioFractionalBits\s*=\s*(\d+)', int)
+TIMBRE_MAX = 32767
+MAX_SYNC_RATIO = TIMBRE_MAX / float(1 << SYNC_RATIO_BITS)
+# The line PhaseWrapped is defined on: every guard inlines to it, which is how a
+# region that is paid once a PERIOD is told from one paid once a SAMPLE.
+# THE WHOLE FUNCTION'S SPAN, not the line of its `return`: GCC attributes an
+# inlined body to the SIGNATURE line, so anchoring on the statement finds
+# nothing and every region silently comes back empty.
+def _span(source_text, opener):
+  lines = source_text.split('\n')
+  for number, line in enumerate(lines, 1):
+    if opener in line:
+      for end in range(number, min(number + 12, len(lines) + 1)):
+        if lines[end - 1].startswith('}'):
+          return number, end
+  raise SystemExit('  cannot find %r; regions cannot be found without it' % opener)
 
 
-def analyse(lines):
-    addrs = [a for a, _, _ in lines]
-    text = {a: t for a, t, _ in lines}
-    size = {a: n for a, _, n in lines}
-    nxt = {a: addrs[i + 1] if i + 1 < len(addrs) else None
-           for i, a in enumerate(addrs)}
-    succ = {}
-    for a in addrs:
-        t = text[a]
-        op = t.split()[0]
-        tgt = None
-        m = TARGET.search(t.split(None, 1)[1]) if ' ' in t else None
-        if m and re.match(r'^b', op) and not op.startswith('bl'):
-            v = int(m.group(1), 16)
-            if v in text:
-                tgt = v
-        s = []
-        if tgt is not None:
-            s.append(tgt)
-        uncond = op in ('b', 'b.n', 'b.w') or op.startswith('bx') or 'pop' in t
-        if not uncond and nxt[a] is not None:
-            s.append(nxt[a])
-        succ[a] = s
-    preds = {a: [] for a in addrs}
-    for a in addrs:
-        for b in succ[a]:
-            preds[b].append(a)
+WRAP_GUARD_LINES = _span(
+    open(os.path.join(ROOT, 'yarns/oscillator.cc'), encoding='utf8').read(),
+    'static inline bool PhaseWrapped(')
+# BOTH ENDS, ALWAYS. The edge rate is the pitch, so one column is half an
+# answer: the top of the keyboard is the budget and middle C is what the
+# instrument mostly does, and a band-limited shape is a different animal at
+# each. Reported side by side so neither can be quoted alone.
+MIDDLE_C_MIDI = 60
 
-    def natural_loop(head, tail):
-        body, stack = {head}, [tail]
-        while stack:
-            n = stack.pop()
-            if n in body:
-                continue
-            body.add(n)
-            stack.extend(preds[n])
-        return body
 
-    loops = []
-    for a in addrs:
-        for b in succ[a]:
-            if b <= a:
-                loops.append((b, a, natural_loop(b, a)))
-    return loops, text, size
+def edges_per_sample(midi):
+  return 440.0 * 2 ** ((midi - 69) / 12.0) / FRAME_HZ * EDGES_PER_PERIOD
 
+
+EDGES_PER_SAMPLE = edges_per_sample(HIGHEST_MIDI)
+functions = pathcost.parse(dis_path)
+call_cost, _ = pathcost.call_cost_function(functions)
+
+# Source line per address, from `objdump -dl`. Without it the edge split cannot
+# be made and the table falls back to charging the edge body every sample, which
+# is the old behaviour -- so say so rather than report it as though it were the
+# block cost.
+line_of, _current = {}, None
+for _row in open(dis_path, encoding='utf8', errors='replace'):
+  _m = re.match(r'^(/?\S*?([\w.]+\.(?:cc|h))):(\d+)', _row.strip())
+  if _m:
+    _current = (_m.group(2), int(_m.group(3)))
+    continue
+  _m = re.match(r'^\s*([0-9a-f]+):\t', _row)
+  if _m:
+    line_of[int(_m.group(1), 16)] = _current
+HAVE_LINES = any(line_of.values())
+
+
+def reachable_from(graph, start, restrict, cut):
+  seen, stack = set(), [start]
+  while stack:
+    leader = stack.pop()
+    if leader in seen:
+      continue
+    seen.add(leader)
+    for successor in graph.edges[leader]:
+      if successor in restrict and (leader, successor) not in cut:
+        stack.append(successor)
+  return seen
+
+
+def wrap_guarded_regions(graph, restrict):
+  """The blocks each PhaseWrapped guard controls -- paid once a WRAP, not once
+  a sample.
+
+  An `if (c) { body }` leaves the body reachable down ONE side of the branch
+  only, so the body is the set difference between what the two successors
+  reach. An if/else makes both differences non-empty and is not classified
+  here rather than guessed at.
+  """
+  cut = set(graph.back_edges())
+  regions = []
+  for leader in restrict:
+    where = [line_of.get(a) for a, _ in graph.blocks[leader]]
+    if not any(w and w[0] == 'oscillator.cc'
+               and WRAP_GUARD_LINES[0] <= w[1] <= WRAP_GUARD_LINES[1]
+               for w in where):
+      continue
+    address, text = graph.blocks[leader][-1]
+    kind, target = pathcost.classify(text)
+    successors = [s for s in graph.edges[leader] if s in restrict]
+    if kind != 'branch' or len(successors) != 2:
+      continue
+    other = [s for s in successors if s != target]
+    if not other:
+      continue
+    taken = reachable_from(graph, target, restrict, cut)
+    fell = reachable_from(graph, other[0], restrict, cut)
+    for body in (fell - taken, taken - fell):
+      if body and not (fell - taken and taken - fell):
+        regions.append(body)
+  return regions
+
+
+def is_edge_address(address):
+  """Does this instruction belong to the BLEP edge machinery?"""
+  where = line_of.get(address)
+  if not where:
+    return False
+  name, line = where
+  if name == 'oscillator.cc':
+    return EDGE_SOURCE_LINES[0] <= line <= EDGE_SOURCE_LINES[1]
+  if name == 'oscillator.h':
+    return BLEP_SOURCE_LINES[0] <= line <= BLEP_SOURCE_LINES[1]
+  return False
 
 rows = []
-for name, lines in funcs.items():
-    if 'Oscillator' not in name or 'Render' not in name or not lines:
+for name, body in functions.items():
+    if 'Oscillator' not in name or 'Render' not in name or not body:
         continue
-    loops, text, size = analyse(lines)
-    sample = [L for L in loops
-              if any(re.search(r'\bstrh', text[a]) for a in L[2])]
+    graph = pathcost.Graph(body)
+    def stores(leaders):
+        return any(STORE.search(text)
+                   for leader in leaders for _, text in graph.blocks[leader])
+    sample = []
+    for source, target in graph.back_edges():
+        blocks = graph.loop_body(source, target)
+        if stores(blocks):
+            sample.append((source, target, blocks))
     if not sample:
         continue
-    head, tail, body = max(sample, key=lambda L: len(L[2]))
-    # A nested loop only counts as an EDGE path if it does not itself contain
-    # the sample store. GCC rotates `while (true) { if (!x) break; ... }` so its
-    # back edge's natural loop overlaps most of the sample loop; subtracting
-    # that leaves nothing, and the shape reads as free.
+    # THE WORST OF THEM, PRICED, not the one with the most blocks. RenderTransfer
+    # has FOUR sample loops -- the transfer-function switch is hoisted out, so
+    # each arm gets its own -- and picking by block count picked an arm at
+    # random. A shape is as expensive as its dearest path through a sample.
+    def price(entry):
+      return pathcost.longest_path(
+          graph, call_cost, entry=entry[1], restrict=entry[2])
+    source, header, blocks = max(sample, key=price)
+    # A loop nested inside the sample loop that does NOT itself store is an
+    # edge loop: paid once per oscillator period, not per sample.
     nested = set()
-    for h2, t2, b2 in loops:
-        if b2 < body and not any(re.search(r'\bstrh', text[a]) for a in b2):
-            nested |= b2
-    per = body - nested
-    cyc = sum(cost(text[a], a == tail) for a in per)
-    edge = sum(cost(text[a], False) for a in nested)
-    spills = sum(1 for a in per if re.search(r'(ldr|str)\w*\s+\S+,\s*\[sp', text[a]))
-    br = sum(1 for a in per if re.match(r'^b(?!l)', text[a].split()[0]))
+    for other_source, other_target in graph.back_edges():
+        other = graph.loop_body(other_source, other_target)
+        if other < blocks and not stores(other):
+            nested |= other
+    per_sample = blocks - nested
+    cycles = pathcost.longest_path(
+        graph, call_cost, entry=header, restrict=per_sample)
     short = re.sub(r'^_ZN5yarns10Oscillator\d+', '', name).split('E')[0]
-    rows.append((cyc, len(per), spills, br, edge, short))
+    # A MODULATED SHAPE WRAPS FASTER THAN ITS NOTE, so everything a wrap guards
+    # is paid at the modulator's rate, not the master's.
+    ratio = (MAX_SYNC_RATIO if 'RENDER_MODULATED' in SHAPE_BODIES.get(short, '')
+             else 1.0)
+    regions = wrap_guarded_regions(graph, per_sample)
+    region_zero = [(a, a, 0) for body in regions for leader in body
+                   for a, _ in graph.blocks[leader]]
+    # One (address, address, 0) per instruction, not a span: a span would sweep
+    # up whatever GCC laid between the edge blocks and zero it too.
+    edge_zero = [(a, a, 0) for leader in per_sample
+                 for a, _ in graph.blocks[leader] if is_edge_address(a)]
+
+    # THE COMMON SAMPLE AND THE DEAR ONE. Everything expensive in these loops
+    # is guarded by a phase wrap -- the BLEP, the sync reset, the edge -- so the
+    # cheap path is the sample where nothing wrapped, and the gap between the
+    # paths is the whole of the rare work. That needs no region to be located,
+    # which matters: the guards do not survive inlining in a findable form.
+    base = pathcost.shortest_path(
+        graph, call_cost, entry=header, restrict=per_sample)
+    rare_cycles = cycles - base
+
+    def at(midi):
+      # Charged at the rate the FASTEST accumulator wraps, which for a sync
+      # shape is the modulator's. Conservative: it over-charges a region the
+      # slower master guards, and a budget should err that way.
+      return base + min(edges_per_sample(midi) * ratio, 1.0) * rare_cycles
+
+    effective, effective_c4 = at(HIGHEST_MIDI), at(MIDDLE_C_MIDI)
+    total = sum(pathcost.instruction_cycles(text)
+                for leader in per_sample for _, text in graph.blocks[leader])
+    edge = sum(pathcost.instruction_cycles(text)
+               for leader in nested for _, text in graph.blocks[leader])
+    instructions = sum(len(graph.blocks[leader]) for leader in per_sample)
+    spills = sum(1 for leader in per_sample for _, text in graph.blocks[leader]
+                 if re.search(r'(ldr|str)\w*\s+\S+,\s*\[sp', text))
+    branches = sum(1 for leader in per_sample
+                   for _, text in graph.blocks[leader]
+                   if re.match(r'^b(?!l)', pathcost.mnemonic(text)))
+    rows.append((effective, effective_c4, cycles, rare_cycles,
+                 instructions, spills, branches, short))
 
 rows.sort(reverse=True)
-VOICES = 4
-print('  %-28s %5s %6s %7s %8s %6s %7s'
-      % ('shape', 'instr', 'cycles', 'spills', 'branches', 'edge', '%CPU'))
-for cyc, n, sp, br, ec, nm in rows:
-    print('  %-28s %5d %6d %7d %8d %6d %6.1f%%'
-          % (nm[:28], n, cyc, sp, br, ec, cyc * VOICES * 45000 / 72e6 * 100))
+if '--metrics' in sys.argv[2:]:
+  # For tools/block_budget.py: one line a shape, no formatting to parse around.
+  for effective, effective_c4, cycles, edge_cycles, n, spills, branches, short in rows:
+    print('%s %.4f %.4f' % (short, effective, effective_c4))
+  raise SystemExit(0)
+if not HAVE_LINES:
+  print('  NO LINE INFO in this disassembly (use objdump -dl): the edge body is')
+  print('  charged to every sample, which OVERSTATES every band-limited shape.')
+# NOT FOUR. A bare literal here priced every shape against a voice count no
+# layout sounds; the hungriest is PARAPHONIC_PLUS_TWO, at six. multi.h folds the
+# layout map and static-asserts kMaxAudioVoices against it, so this reads the
+# constant instead of carrying a second opinion.
+VOICES = int(re.search(
+    r'kMaxAudioVoices\s*=\s*(\d+)',
+    open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), 'yarns/voice.h')).read()).group(1))
+print('  %-28s %7s %7s %6s %6s %8s %8s'
+      % ('shape', '%CPU hi', '%CPU C4', 'rare', 'worst', 'spills', 'branches'))
+for effective, effective_c4, cycles, edge_cycles, n, spills, branches, short in rows:
+    print('  %-28s %6.1f%% %6.1f%% %6d %6d %8d %8d'
+          % (short[:28], effective * VOICES * FRAME_HZ / 72e6 * 100,
+             effective_c4 * VOICES * FRAME_HZ / 72e6 * 100,
+             edge_cycles, cycles, spills, branches))
 print('  ---')
-print('  %%CPU = this shape on all %d audio voices, 45 kHz on 72 MHz.' % VOICES)
-print('  THIS IS AN UPPER BOUND, NOT THE EXECUTED COST. It sums every block in')
-print('  the loop, and mutually exclusive arms of an if/switch cannot all run on')
-print('  one sample -- so a branchy shape is charged for paths it did not take.')
-print('  Read it as "worst case through the loop"; that is the right quantity')
-print('  for a realtime budget, but it is NOT what an average sample costs.')
-print('  BRANCHES ARE UNDERCOUNTED: 3 cycles are charged for the loop-closing')
-print('  branch and 1 for any other, but a TAKEN branch costs ~3 -- so a shape')
-print('  with several internal branches is dearer on hardware than shown.')
+print('  %%CPU = this shape on all %d audio voices at %d Hz on 72 MHz.' % (VOICES, FRAME_HZ))
+print('  THE COMMON SAMPLE AND THE DEAR ONE. Everything costly in these loops is')
+print('  guarded by a phase wrap -- the BLEP, a sync reset, an edge -- so the cheap')
+print('  path is the sample where nothing wrapped. rare = the gap between the')
+print('  cheapest and dearest ways through one sample; worst = the dearest.')
+print('  It is charged at the rate the FASTEST accumulator wraps: %.3f a sample at' % edges_per_sample(HIGHEST_MIDI))
+print('  MIDI %d and %.3f at middle C, times the sync ratio (up to %.0fx) for a' % (
+    HIGHEST_MIDI, edges_per_sample(MIDDLE_C_MIDI), MAX_SYNC_RATIO))
+print('  modulated shape, capped at one. Conservative: a region the slower master')
+print('  guards is over-charged, which is the direction a budget should err.')
+print('  ASSUMES THE GAP IS ALL WRAP-GUARDED. A shape with a genuinely even')
+print('  branch would have its cheap path under-counted; none here has one.')
+print('  Still an estimate: a Cortex-M3 timing table, good for DELTAS.')
