@@ -30,6 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # symbol and the lookup rots. Match the prefix that ends at the parameter list
 # and insist it is unique.
 RENDER_STAGE = '_ZN5yarns8Envelope11RenderStageE'
+CHIFF_BLOCK = '_ZN5yarns8Envelope20AdvanceChiffForBlockE'
 HAND_OFF = '_ZN5yarns8Envelope18HandOffToNextStageE'
 NOTE_ON = '_ZN5yarns8Envelope6NoteOnE'
 TRIGGER = '_ZN5yarns8Envelope7TriggerE'
@@ -81,6 +82,7 @@ RENDER_STAGE = resolve(RENDER_STAGE)
 HAND_OFF = resolve(HAND_OFF)
 NOTE_ON = resolve(NOTE_ON)
 TRIGGER = resolve(TRIGGER)
+CHIFF_BLOCK = resolve(CHIFF_BLOCK)
 if RENDER_STAGE not in functions:
   print('  RenderStage not found in the disassembly')
   sys.exit(1)
@@ -301,8 +303,24 @@ note_on_breakdown = pathcost.longest_path_breakdown(
     note_on_graph, note_on_call_cost, call_names, weights=search_weights)
 
 loop_iterations = BLOCK_SAMPLES // LOOP_SAMPLES
+# THE CHIFF IS DERIVED ONCE A BLOCK, OUTSIDE RenderStage, and must be counted
+# here or it is counted nowhere. It used to sit in the run setup; moving it out
+# made run_cycles fall by 573 and the envelope look 7 points cheaper, which was
+# an artifact of measuring the function it left rather than the work it does.
+# A cost that moves between functions has not moved.
+chiff_block_graph = pathcost.Graph(functions[CHIFF_BLOCK])
+chiff_block_cycles = pathcost.longest_path(
+    chiff_block_graph, call_cost,
+    weights=[(min(a for leader in chiff_block_graph.loop_body(source, target)
+                  for a, _ in chiff_block_graph.blocks[leader]),
+              max(a for leader in chiff_block_graph.loop_body(source, target)
+                  for a, _ in chiff_block_graph.blocks[leader]),
+              DRAW_LEVELS)
+             for source, target in chiff_block_graph.back_edges()])
+
 block_cycles = (loop_iterations * cycles
                 + CHUNKS_PER_BLOCK * chunk_cycles
+                + chiff_block_cycles
                 + run_cycles)
 # A BLOCK IS NOT ONE RUN WHEN A STAGE ENDS INSIDE IT. RenderStage renders
 # `min(block_samples_left, stage_samples_left_)` and then TAIL-CALLS ITSELF via
@@ -319,6 +337,7 @@ block_cycles = (loop_iterations * cycles
 RUNS_PER_BLOCK = TRIGGER_CHAIN
 block_cycles_handoff = (loop_iterations * cycles
                         + CHUNKS_PER_BLOCK * chunk_cycles
+                        + chiff_block_cycles
                         + RUNS_PER_BLOCK * run_cycles
                         + (RUNS_PER_BLOCK - 1) * handoff_cycles)
 budget = CPU_HZ * BLOCK_SAMPLES / FRAME_HZ
@@ -331,6 +350,7 @@ report = {
     'function_instructions': len(lines),
     'chunk_cycles': chunk_cycles,
     'run_cycles': run_cycles,
+    'chiff_block_cycles': chiff_block_cycles,
     'handoff_cycles': handoff_cycles,
     'note_on_cycles': note_on_cycles,
     'block_cycles': block_cycles,
@@ -345,6 +365,7 @@ print(f'  {"per sample":<22} {loop_iterations:>5} x {cycles}'
 print(f'  {"per chunk":<22} {CHUNKS_PER_BLOCK if chunk_cycles else 0:>5}'
       f' x {chunk_cycles}')
 print(f'  {"per run":<22} {1:>5} x {run_cycles}')
+print(f'  {"chiff, per block":<22} {1:>5} x {chiff_block_cycles}')
 print('  --- where the run setup goes ---')
 for label, spent in run_breakdown:
   if spent:
