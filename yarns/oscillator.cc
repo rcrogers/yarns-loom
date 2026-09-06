@@ -436,6 +436,23 @@ void Oscillator::Render(int16_t* audio_mix) {
   RENDER_PERIODIC(__VA_ARGS__); \
   modulator_phase_ = modulator_phase; \
 
+// TRUE ON THE SAMPLE A PHASE ACCUMULATOR WRAPPED.
+//
+// Named, rather than left as the bare `phase < phase_increment` it compiles to,
+// because THE RATE AT WHICH IT IS TRUE IS phase_increment / 2^32 A SAMPLE -- and
+// everything it guards is paid at that rate, not once a sample. A cycle budget
+// that charges a guarded region every sample is wrong by the reciprocal of this,
+// which for a master reset at middle C is a factor of 170.
+//
+// tools/osc_cycles.py finds these by source line and weights what they guard.
+// A bare comparison gives it nothing to find, and that is the whole reason this
+// exists. It costs nothing: MEASURED, every shape's cycle count and the flash
+// size are unchanged. (The .text is not byte-identical -- GCC reschedules
+// slightly -- so this is verified by measurement, not by inspection.)
+static inline bool PhaseWrapped(uint32_t phase, uint32_t phase_increment) {
+  return phase < phase_increment;
+}
+
 // HOW FAR INTO THIS SAMPLE THE EDGE FELL, in 0..65535: the phase past the edge
 // against the phase one sample covers.
 //
@@ -504,7 +521,7 @@ static inline uint32_t EdgeTime(
   bool transition_during_reset = false; \
   uint32_t reset_time = 0; \
   SET_MODULATOR_PHASE_INCREMENT_FROM_RATIO; \
-  if (phase < phase_increment) { \
+  if (PhaseWrapped(phase, phase_increment)) { \
     sync_reset = true; \
     reset_time = FractionU32(phase, phase_increment) >> 16; \
     uint32_t modulator_phase_at_reset = modulator_phase + \
@@ -517,7 +534,7 @@ static inline uint32_t EdgeTime(
     next_sample += discontinuity * NextBlepSample(reset_time) >> 15; \
   } \
   modulator_phase += modulator_phase_increment; \
-  self_reset = modulator_phase < modulator_phase_increment; \
+  self_reset = PhaseWrapped(modulator_phase, modulator_phase_increment); \
   /* Block additional BLEP if modulator was reset by master alone */ \
   bool reset_by_master_only = sync_reset && !transition_during_reset; \
   /* HOISTED BY HAND, because -fno-move-loop-invariants means GCC will not:
@@ -540,7 +557,7 @@ void Oscillator::RenderLPPulse(int16_t* input_samples, int16_t* audio_mix) {
   svf.RenderInit(0x7fff);
   uint32_t pw = 0x80000000;
   RENDER_PERIODIC(
-    bool self_reset = phase < phase_increment;
+    bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
     svf.RenderSample(this_sample, timbre);
@@ -553,7 +570,7 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(0x6000);
   RENDER_PERIODIC(
-    bool self_reset = phase < phase_increment;
+    bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_SAW(phase, phase_increment) }
     next_sample += phase >> 17;
     svf.RenderSample(this_sample, timbre);
@@ -591,7 +608,7 @@ void Oscillator::RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix)
     timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1); // 3/4
     uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo_u16, timbre)) << 15; // 50-0%
-    bool self_reset = phase < phase_increment;
+    bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
     // * 2 and not << 1: the value is signed and negative below 0x4000,
@@ -602,7 +619,7 @@ void Oscillator::RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix)
 
 void Oscillator::RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
-    bool self_reset = phase < phase_increment;
+    bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_SAW(phase, phase_increment) }
     timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1); // 3/4
@@ -630,7 +647,7 @@ void Oscillator::RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix)
     uint32_t pw = Interpolate88(lut_env_expo_u16, timbre) << 15; // 0-50% width of each flat part
     uint32_t saw_width = UINT32_MAX - (pw << 1); // 0-100% width of up-ramp
 
-    bool self_reset = phase < phase_increment;
+    bool self_reset = PhaseWrapped(phase, phase_increment);
     // BLEP falling pulse edge only
     while (self_reset) { EDGES_PULSE(phase, phase_increment) }
     if (phase < pw) next_sample += 0;
@@ -890,7 +907,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
     modulator_phase += modulator_phase_increment;
-    if (phase < phase_increment) {
+    if (PhaseWrapped(phase, phase_increment)) {
       modulator_phase = kPhaseResetSaw[filter_type];
     }
     int16_t carrier = sine(modulator_phase);
