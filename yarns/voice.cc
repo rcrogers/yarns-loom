@@ -246,25 +246,34 @@ void CVOutput::Refresh() {
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
   // Buffer is fully overwritten by both branches below — skip zero-init.
-  int16_t samples[kAudioBlockSize];
+  // ALIGNED, because both branches below walk it as uint32 to move two int16 a
+  // pass. GCC gives a stack array of this size four-byte alignment anyway;
+  // saying so makes the two aliasing walks legal rather than lucky.
+  int16_t samples[kAudioBlockSize] __attribute__((aligned(4)));
+  // The pair both halves of this function walk the buffer with.
+  typedef uint32_t __attribute__((may_alias)) u32_alias;
+  u32_alias* const words = reinterpret_cast<u32_alias*>(samples);
   if (is_envelope()) {
     envelope_.RenderSamples(
       samples, static_cast<int32_t>(static_cast<uint32_t>(envelope_bias_) << 16));
     // Q15 (0..32767) → Q16 (0..65534): both int16s in each 32-bit word
     // are < 0x8000, so packing two per iteration via uint32 shift is
     // exact (no cross-half carry). Halves the loop count.
-    typedef uint32_t __attribute__((may_alias)) u32_alias;
-    u32_alias* p = reinterpret_cast<u32_alias*>(samples);
     for (size_t i = 0; i < kAudioBlockSize / 2; ++i) {
-      p[i] <<= 1;
+      words[i] <<= 1;
     }
     dac.BufferSamples(block, channel, samples);
   } else if (is_audio()) {
-    std::fill(
-        samples,
-        samples + kAudioBlockSize,
-        zero_dac_code_
-    );
+    // TWO AT A TIME. std::fill compiles to one strh a sample -- 448 cycles an
+    // output, three outputs a block in the hungriest layout -- for a value that
+    // is the same in every slot. The same halving the Q15->Q16 shift above
+    // already uses; tools/block_budget.py reads the stride off the loop, so it
+    // reports this without being told.
+    const uint32_t zero_pair =
+        (static_cast<uint32_t>(zero_dac_code_) << 16) | zero_dac_code_;
+    for (size_t i = 0; i < kAudioBlockSize / 2; ++i) {
+      words[i] = zero_pair;
+    }
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
       audio_voices_[v]->oscillator()->Render(samples);
     }
