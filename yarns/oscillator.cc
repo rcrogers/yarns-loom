@@ -957,17 +957,17 @@ static int32_t WhistleOutputGain(int32_t pitch, int32_t share_of_full_u15) {
   // from MIDI 24 to 84, at every Q.
   const int32_t tilt_numerator = 1;
   const int32_t tilt_denominator = 2;
-  // HOW HARD THE CAP IS DRIVEN. Holding the peak is no longer this constant's
-  // job -- bp_ceiling does that, at the share -- so what is left to choose is
-  // level against how often the cap engages. Noise only visits its peak (crest
-  // MEASURED 3.8 to 5.3 over 500 s runs), and everything under the peak is
-  // level left unspent; driving into the cap is what buys it back.
+  // HOW HARD THE KNEE IS DRIVEN. Nothing here holds the peak -- the limiter's
+  // curve does, asymptotically -- so this chooses LEVEL against how much of
+  // the signal the knee is bending. Noise only visits its peak (crest MEASURED
+  // 3.8 to 5.3 over 500 s runs), and everything under the peak was level left
+  // unspent; driving into the knee is what buys it back.
   //
-  // MEASURED at 10 Vpp, 200 s runs: rms 1.82 V at one voice for 1.5% of samples
-  // capped, 1.62 V at four voices for 20.6%, against LP SAW's 2.94 and 2.66.
-  // Four voices cap harder by construction -- the excitation takes the
-  // geometric-mean share, which is sqrt(n) above the nth the cap allows.
-  const int32_t noise_level_trim_q15 = 9400;
+  // MEASURED per voice at TIMBRE 127, against the hard cap this replaces:
+  // -9.82 dBFS for 1.45% of samples CUT, against -6.95 dBFS for 0.00%. At four
+  // voices the same change takes 22.7% cut to none. Doubling this again is a
+  // further +2.4 dB and puts 1.45% back on the curve's far end.
+  const int32_t noise_level_trim_q15 = 18800;
   int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * tilt_numerator / tilt_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
@@ -1015,26 +1015,52 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       ? static_cast<int32_t>(
             (static_cast<uint32_t>(tilted_gain) << 15) / drive_q15)
       : tilted_gain;
+  // THE PEAK IS HELD AT THE nTH EVEN THOUGH THE EXCITATION TAKES THE GEOMETRIC
+  // MEAN, because a peak is what the span limits and there is no room above
+  // it: n voices at the nth reach the span exactly, and 683 codes past that
+  // the DAC code wraps. What holds it is now the CURVE, which is asymptotic to
+  // the nth, rather than a cut at it.
+  //
+  // HOW FAR PAST THE nTH THE CURVE'S DOMAIN REACHES. Excursions between the
+  // nth and this are COMPRESSED rather than cut, which is the whole of what a
+  // knee is; past it the domain clamp cuts, and MEASURED that is 0.00% of
+  // samples at this trim. It PAIRS WITH THE TABLE: `ws_soft_limit` is
+  // tanh(4x), and k / tanh(k) == 4 is what makes the small-signal gain exactly
+  // 1, so quiet notes pass through as the cap left them. Change one and the
+  // other moves -- see yarns/resources/waveshapers.py.
+  const int32_t kCurveHeadroom = 4;
+  // WHERE THE STATE MEETS THE CURVE'S DOMAIN EDGE. Clamping bp -- not the
+  // product -- is what bounds the multiply: the make-up is a reciprocal and
+  // reaches 16.3x at the tightest damp, so a railed bp times it OVERFLOWS
+  // int32, MEASURED 1.06x INT32_MAX at the bottom of the keyboard.
+  // 32-BIT OPS ONLY: a umull forms the product and utils.h's divide takes it
+  // from there. A plain 64/32 divide drags ~1.4 kB of soft-division in --
+  // MEASURED +1730 bytes when this was written the obvious way.
+  const uint32_t curve_domain_codes =
+      static_cast<uint32_t>(scale_ >> 1) * kCurveHeadroom;
+  int32_t drive_into_curve_q15 = output_gain > 0
+      ? static_cast<int32_t>(DivU64ByU32(
+            stmlib::MulU32(static_cast<uint32_t>(output_gain), INT16_MAX),
+            static_cast<uint32_t>(output_gain) * INT16_MAX,
+            curve_domain_codes))
+      : 0;
   // PINNED TO A REGISTER. Once the share is folded in above, GCC 4.8.3 stops
   // hoisting this and re-materializes it inside the loop instead -- MEASURED
   // at 20 instructions and 27 cycles a sample, on the most expensive shape
   // there is. The empty asm makes it opaque, so it has to live in a register.
-  asm volatile("" : "+r"(output_gain));
-  // THE PEAK IS CAPPED AT THE nTH EVEN THOUGH THE EXCITATION TAKES THE
-  // GEOMETRIC MEAN, because a peak is what the span limits and there is no
-  // room above it: n voices at the nth reach the span exactly, and 683 codes
-  // past that the DAC code wraps.
-  //
-  // CAPPED ON bp, BEFORE THE MAKE-UP, NOT ON THE OUTPUT AFTER IT. The make-up
-  // is a reciprocal and reaches 16.3x at the tightest damp, so a railed bp
-  // times it OVERFLOWS int32 -- MEASURED 1.06x INT32_MAX at the bottom of the
-  // keyboard, where the make-up is largest. Capping the state the multiply
-  // reads bounds the product by construction, and costs the same two compares
-  // the output clamp did.
+  asm volatile("" : "+r"(drive_into_curve_q15));
+  // kCurveHeadroom times where the hard cap sat, which is the same statement:
+  // the state may travel that much further before it meets the domain edge.
   const int32_t bp_ceiling = output_gain > 0
       ? static_cast<int32_t>(
             (static_cast<uint32_t>(scale_ >> 1) << 15) / output_gain)
+            * kCurveHeadroom
       : INT16_MAX;
+  // THE CURVE'S OUTPUT IS FULL-SCALE int16 AND THE VOICE'S SHARE IS NOT, so
+  // the asymptote has to be brought back to the share. A fixed table cannot
+  // carry it: the share moves with voice count.
+  const int32_t limiter_makeup_q15 = static_cast<int32_t>(
+      (static_cast<uint32_t>(scale_ >> 1) << 15) / INT16_MAX);
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
@@ -1043,7 +1069,10 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     svf.RenderSampleAtPitch(excitation, timbre);
     int32_t band_pass = svf.bp;
     CONSTRAIN(band_pass, -bp_ceiling, bp_ceiling);
-    this_sample = band_pass * output_gain >> 15;
+    const int32_t driven = band_pass * drive_into_curve_q15 >> 15;
+    this_sample = Interpolate88(
+        ws_soft_limit, static_cast<uint16_t>(driven + 32768))
+        * limiter_makeup_q15 >> 15;
   )
   svf_ = svf;
 }
@@ -1062,39 +1091,49 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // percussive envelope that is a thump; under a sustained one it is a standing
   // offset, which is why the band-pass is the one to reach for by default.
   const bool band_pass = shape_ == OSC_SHAPE_PING_BP;
-  // SOLVED, NOT TRIMMED, and the same for both outputs. Whatever the exciter
-  // does, `bp` and `lp` leave the SVF through Clip16, so the state this reads
-  // is bounded by INT16_MAX; the share is a fraction of kEnvelopeSampleMax.
-  // The gain that lands one bound exactly on the other spends the whole of the
-  // state's range and CANNOT clip:
+  // UNITY IS SOLVED, NOT TRIMMED. Whatever the exciter does, `bp` and `lp`
+  // leave the SVF through Clip16, so the state this reads is bounded by
+  // INT16_MAX; the share is a fraction of kEnvelopeSampleMax. The gain that
+  // lands one bound exactly on the other spends the whole of the state's range
+  // and cannot exceed the share:
   //
   //     state * gain_q12 >> 12 == scale_ >> 1   at state == INT16_MAX
   //
-  // MEASURED per voice at every pitch and TIMBRE: 0.00% of samples capped,
-  // both shapes, and +2.5 dB on the 3072 this replaces -- which was a trim,
-  // and left a quarter of the share unreachable.
+  // THE LIMITER IS WHY IT IS A REFERENCE AND NOT A CEILING. Unity leaves the
+  // level of a RING far under the share -- MEASURED -13.8 dBFS against the
+  // low-pass's -8.4 at MIDI 60, because a ring visits its peak and the
+  // low-pass's DC pedestal sits on it -- and under a hard cap that gap could
+  // only be spent as clipping. The curve spends it as compression instead.
   //
-  // WHAT IT DOES NOT EQUALISE is how loud the two SOUND. A ring visits its
-  // peak and a pedestal sits on it, so at the same peak bound the low-pass
-  // MEASURED -8.4 dBFS at MIDI 60 against the band-pass's -13.8, over a 1 s
-  // note at TIMBRE 127. Spending that gap costs
-  // clipping, which is a TRIM decision and belongs where a trim can be seen,
-  // not folded into this.
+  //   TWICE UNITY. MEASURED: the band-pass gains ~6 dB, which is the whole of
+  //   what it was under LP SAW by; the low-pass, whose pedestal already sat on
+  //   the share, stays where it is and trades its Clip16 rail for the curve.
+  //   The 3rd harmonic that buys it is 31 dB down and every harmonic above it
+  //   is 21 dB below the one before -- see the knee's own comment.
+  const int32_t kPingUnityGain_q12 = (kEnvelopeSampleMax << 12) / INT16_MAX;
   const int32_t ping_gain_q12 =
-      (kEnvelopeSampleMax << 12) / INT16_MAX
-          * coherent_share_of_full_u15_ >> 15;
-  // AND THE PEAK IS CAPPED AT THE VOICE'S SHARE, the way WHISTLE's is since
-  // 290782f8. With the gain above the cap is UNREACHABLE by construction --
-  // it is kept as the guard that makes that a property of the render rather
-  // than of this derivation staying true.
+      kPingUnityGain_q12 * 2 * coherent_share_of_full_u15_ >> 15;
   const int32_t voice_ceiling = scale_ >> 1;
+  // THE SAME KNEE WHISTLE TAKES, and the same pairing: the curve is tanh(4x)
+  // and its domain reaches kCurveHeadroom times the share, which is what makes
+  // the small-signal gain 1. A quiet ring is untouched; only what would have
+  // been cut is bent.
+  const int32_t kCurveHeadroom = 4;
+  const int32_t drive_into_curve_q12 = ping_gain_q12 * INT16_MAX
+      / (voice_ceiling * kCurveHeadroom);
+  const int32_t limiter_makeup_q15 = static_cast<int32_t>(
+      (static_cast<uint32_t>(voice_ceiling) << 15) / INT16_MAX);
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Halved going in: the resonant step response overshoots the excitation, and
     // at full scale the ring railed for 7% of the note.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
-    int32_t out = (band_pass ? svf.bp : svf.lp) * ping_gain_q12 >> 12;
-    CONSTRAIN(out, -voice_ceiling, voice_ceiling);
-    this_sample = out;
+    int32_t driven = (band_pass ? svf.bp : svf.lp) * drive_into_curve_q12 >> 12;
+    // The state is Clip16-bounded and the drive is under the domain by
+    // construction, so this holds the table's index and nothing else.
+    CONSTRAIN(driven, INT16_MIN, INT16_MAX);
+    this_sample = Interpolate88(
+        ws_soft_limit, static_cast<uint16_t>(driven + 32768))
+        * limiter_makeup_q15 >> 15;
   )
   svf_ = svf;
 }
