@@ -387,6 +387,43 @@ template<> struct MaxLayoutEnvelopes<0> {
   static const int value = LayoutEnvelopes<0>::value;
 };
 
+// THE SAME FOLD FOR AUDIO VOICES, and it exists because its absence cost a
+// session: with no named maximum to read, tools/osc_cycles.py carried a bare
+// `VOICES = 4` and priced every shape against a voice count no layout has. The
+// hungriest layout is PARAPHONIC_PLUS_TWO -- a paraphonic part plus two mono
+// ones -- which sounds SIX.
+template<int kDcRole, int kNumAudioVoices>
+struct CVOutputMaxAudioVoices { static const int value = kNumAudioVoices; };
+
+#define YARNS_CV_MAP_AUDIO_VOICES(dc_role, first_voice, num_dc_voices, num_audio_voices) \
+  + CVOutputMaxAudioVoices<dc_role, num_audio_voices>::value
+
+template<int kLayout> struct LayoutAudioVoices { static const int value = 0; };
+#define YARNS_LAYOUT_AUDIO_VOICES(layout)                                       \
+  template<> struct LayoutAudioVoices<layout> {                                 \
+    static const int value = 0 YARNS_CV_MAP_##layout(YARNS_CV_MAP_AUDIO_VOICES);\
+  };
+YARNS_LAYOUTS(YARNS_LAYOUT_AUDIO_VOICES)
+#undef YARNS_LAYOUT_AUDIO_VOICES
+
+template<int kLayout> struct MaxLayoutAudioVoices {
+  static const int max_of_preceding_layouts =
+      MaxLayoutAudioVoices<kLayout - 1>::value;
+  static const int this_layout = LayoutAudioVoices<kLayout>::value;
+  static const int value = this_layout > max_of_preceding_layouts
+      ? this_layout : max_of_preceding_layouts;
+};
+template<> struct MaxLayoutAudioVoices<0> {
+  static const int value = LayoutAudioVoices<0>::value;
+};
+
+// What a CPU budget multiplies a shape's per-sample cost by. Held here rather
+// than in the tools, for the reason kMaxChiffEnvelopes is: a number restated
+// somewhere else drifts, and this one did.
+typedef char audio_voices_must_equal_the_loudest_layout[
+    (MaxLayoutAudioVoices<LAYOUT_LAST - 1>::value == kMaxAudioVoices)
+        ? 1 : -1];
+
 // kMaxChiffEnvelopes (envelope.h, which cannot see its owners) states how many
 // envelopes can be live at once. EXACTLY equal to the hungriest layout's fold,
 // so the stated number cannot drift from the layout map.

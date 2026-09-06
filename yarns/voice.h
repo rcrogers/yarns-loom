@@ -76,6 +76,12 @@ enum ModAux {
 // path. See kEnvelopesPerOscillator for how the two are counted together.
 const uint8_t kEnvelopesPerCVOutput = 1;
 
+// The most audio voices any layout sounds at once, which is what a CPU budget
+// multiplies a shape's per-sample cost by. multi.h folds the layout map and
+// static-asserts this equals it; multi.h cannot declare it because envelope.h
+// and the tools both need it without pulling multi.h in.
+const uint8_t kMaxAudioVoices = 6;
+
 // A role used by a CV output when it is not acting as an audio oscillator
 enum DCRole {
   DC_PITCH,
