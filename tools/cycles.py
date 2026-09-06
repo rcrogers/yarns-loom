@@ -25,8 +25,6 @@ import pathcost
 
 dis_path, args = sys.argv[1], sys.argv[2:]
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                    'cycles_baseline.txt')
 
 # Mangled names carry the parameter types, so a signature change renames the
 # symbol and the lookup rots. Match the prefix that ends at the parameter list
@@ -36,9 +34,6 @@ HAND_OFF = '_ZN5yarns8Envelope18HandOffToNextStageE'
 NOTE_ON = '_ZN5yarns8Envelope6NoteOnE'
 TRIGGER = '_ZN5yarns8Envelope7TriggerE'
 
-# TWELVE ENVELOPES RENDER PER BLOCK: four CVOutput::envelope_ plus four audio
-# voices x (gain, timbre). Same figure kMaxChiffEnvelopes is sized from.
-ENVELOPES = 13
 # STM32F103 at its 72 MHz ceiling.
 CPU_HZ = 72e6
 
@@ -51,6 +46,14 @@ def source_constant(relative_path, pattern, cast=int):
     raise SystemExit('  %s: no match for %s' % (relative_path, pattern))
   return cast(match.group(1))
 
+
+# HOW MANY ENVELOPES RENDER PER BLOCK, read rather than restated. It used to be
+# a literal here, under a comment describing four CVOutput envelopes plus four
+# audio voices -- a configuration no layout offers, since CVOutput::is_envelope
+# is literally !is_audio(). multi.h folds the layout map and static-asserts this
+# figure against it; the hungriest layout is PARAPHONIC_PLUS_TWO.
+ENVELOPES = source_constant(
+    'yarns/envelope.h', r'kMaxChiffEnvelopes\s*=\s*(\d+)')
 
 BLOCK_SAMPLES = 1 << source_constant(
     'yarns/drivers/dac.h', r'kAudioBlockSizeBits\s*=\s*(\d+)')
@@ -157,7 +160,7 @@ spills = sum(1 for _, t in body if re.search(r'(ldr|str)\w*\s+\S+,\s*\[sp', t))
 # THE PER-RUN AND PER-CHUNK PATHS. Weighting a region by 0 charges it nowhere,
 # which is how each tier is isolated from the ones counted separately.
 graph = pathcost.Graph(lines)
-call_cost, _ = pathcost.call_cost_function(
+call_cost, call_names = pathcost.call_cost_function(
     functions,
     # Priced separately below: a handoff is not part of an ordinary run, and
     # neither is a re-entry. RenderStage tail-calls ITSELF for the rest of a
@@ -208,9 +211,59 @@ for source, target in graph.back_edges():
 if chunk_region:
   rendering.append((chunk_region[0], chunk_region[1], 0))
 run_cycles = pathcost.longest_path(graph, call_cost, weights=rendering)
+# WHERE THE RUN'S SETUP GOES. It is ~a third of the envelope's block cost and
+# every cycle of it is parameter computation, so it is the part that can be
+# made cheaper without moving a sample. A total on its own could not be acted
+# on; this says which callee to open.
+run_breakdown = pathcost.longest_path_breakdown(
+    graph, call_cost, call_names, weights=rendering)
 # A stage transition, which re-enters RenderStage for the rest of the block.
 handoff_call_cost, _ = pathcost.call_cost_function(
     functions, boundary=(RENDER_STAGE,))
+# TRIGGER RECURSES, AND GCC TURNED THAT INTO A LOOP. `return Trigger(stage + 1)`
+# fires whenever a stage starts where it is meant to end -- peak equal to
+# sustain reaches it on an ordinary note -- and the tail call is compiled to a
+# back edge, which longest_path cuts. Priced as written, Trigger read as ONE
+# pass of a body that can run several, and note_on_cycles was short by that
+# much.
+#
+# THE BOUND IS WHERE THE CHAIN STOPS, NOT THE NUMBER OF STAGES. The recursion
+# strictly increases the stage, and the switch above it has cases only for the
+# TIMED stages; the first stage without one falls to `default:`, which returns
+# before the recursion is reached. So the chain is ATTACK up to and including
+# that stage. Read off the enum and the switch, so adding a stage or giving
+# SUSTAIN a case moves this by itself.
+_stage_order = re.findall(
+    r'(ENV_STAGE_\w+),',
+    source_constant('yarns/envelope.h',
+                    r'enum EnvelopeStage \{(.*?)\};', cast=str))
+_timed_stages = set(re.findall(
+    r'case (ENV_STAGE_\w+)\s*:\s*stage_phase_increment_u32_',
+    source_constant('yarns/envelope.cc',
+                    r'void Envelope::Trigger\(EnvelopeStage stage\) \{(.*?)\n\}',
+                    cast=str)))
+TRIGGER_CHAIN = next(
+    (i + 1 for i, name in enumerate(_stage_order) if name not in _timed_stages),
+    len(_stage_order))
+ENV_NUM_STAGES = TRIGGER_CHAIN
+trigger_graph = pathcost.Graph(functions[TRIGGER])
+trigger_weights = [
+    (min(a for leader in trigger_graph.loop_body(source, target)
+         for a, _ in trigger_graph.blocks[leader]),
+     max(a for leader in trigger_graph.loop_body(source, target)
+         for a, _ in trigger_graph.blocks[leader]),
+     ENV_NUM_STAGES)
+    for source, target in trigger_graph.back_edges()]
+trigger_cycles = pathcost.longest_path(
+    trigger_graph, handoff_call_cost, weights=trigger_weights)
+_uncounted_trigger = pathcost.longest_path(trigger_graph, handoff_call_cost)
+
+
+def note_on_call_cost(target):
+  """Trigger at its recursive worst; everything else as the handoff prices it."""
+  if target == functions[TRIGGER][0][0]:
+    return trigger_cycles
+  return handoff_call_cost(target)
 handoff_cycles = pathcost.longest_path(
     pathcost.Graph(functions[HAND_OFF]), handoff_call_cost)
 # NOTEON HAS ONE SEARCH LEFT and it calls nothing, so it cannot be identified
@@ -241,12 +294,33 @@ for source, target in note_on_graph.back_edges():
 # A rotated loop peels its first iteration ahead of the header, so a trip or so
 # of each search sits outside the range weighted here. Sizing, not accounting.
 note_on_cycles = pathcost.longest_path(
-    note_on_graph, handoff_call_cost, weights=search_weights)
+    note_on_graph, note_on_call_cost, weights=search_weights)
+# NoteOn is a worst-case burst of its own -- 13 of them can land in one block --
+# and like the run setup it is all parameter computation.
+note_on_breakdown = pathcost.longest_path_breakdown(
+    note_on_graph, note_on_call_cost, call_names, weights=search_weights)
 
 loop_iterations = BLOCK_SAMPLES // LOOP_SAMPLES
 block_cycles = (loop_iterations * cycles
                 + CHUNKS_PER_BLOCK * chunk_cycles
                 + run_cycles)
+# A BLOCK IS NOT ONE RUN WHEN A STAGE ENDS INSIDE IT. RenderStage renders
+# `min(block_samples_left, stage_samples_left_)` and then TAIL-CALLS ITSELF via
+# HandOffToNextStage, so a note-on with a fast attack pays the run setup once
+# per stage, not once per block. The shortest stage is four samples
+# (envelope.cc, kMaxSlewRate), so the whole chain fits inside one block easily.
+#
+# The chain is the same one TRIGGER_CHAIN counts -- the timed stages up to the
+# first hold -- because a hold has no countdown to expire and runs to the end of
+# the block. Three runs, two handoffs.
+#
+# The sample loop is NOT multiplied: the block still renders the same 64
+# samples, just split across more runs. What multiplies is the SETUP.
+RUNS_PER_BLOCK = TRIGGER_CHAIN
+block_cycles_handoff = (loop_iterations * cycles
+                        + CHUNKS_PER_BLOCK * chunk_cycles
+                        + RUNS_PER_BLOCK * run_cycles
+                        + (RUNS_PER_BLOCK - 1) * handoff_cycles)
 budget = CPU_HZ * BLOCK_SAMPLES / FRAME_HZ
 
 report = {
@@ -260,6 +334,8 @@ report = {
     'handoff_cycles': handoff_cycles,
     'note_on_cycles': note_on_cycles,
     'block_cycles': block_cycles,
+    'runs_per_block': RUNS_PER_BLOCK,
+    'block_cycles_handoff': block_cycles_handoff,
 }
 for key, value in report.items():
   print(f'  {key:<22} {value}')
@@ -269,6 +345,13 @@ print(f'  {"per sample":<22} {loop_iterations:>5} x {cycles}'
 print(f'  {"per chunk":<22} {CHUNKS_PER_BLOCK if chunk_cycles else 0:>5}'
       f' x {chunk_cycles}')
 print(f'  {"per run":<22} {1:>5} x {run_cycles}')
+print('  --- where the run setup goes ---')
+for label, spent in run_breakdown:
+  if spent:
+    print(f'  {label:<46} {spent:>5}  {spent / run_cycles * 100:4.1f}%')
+print(f'  {"stage handoffs":<22} {RUNS_PER_BLOCK:>5} runs a block worst case, '
+      f'{block_cycles_handoff} cycles ('
+      f'{block_cycles_handoff * ENVELOPES / budget * 100:.1f}% of CPU)')
 print(f'  {"percent_of_cpu":<22} {block_cycles * ENVELOPES / budget * 100:.1f}%'
       f'  ({ENVELOPES} envelopes x {FRAME_HZ} Hz on {CPU_HZ / 1e6:.0f} MHz)')
 print(f'  {"render_percent":<22} '
@@ -277,31 +360,22 @@ print(f'  {"render_percent":<22} '
 print(f'  {"note_on_burst":<22} '
       f'{note_on_cycles * ENVELOPES / budget * 100:.1f}%'
       f'  ({ENVELOPES} NoteOns landing in one block, on top of the above)')
+print('  A CHAIN IS CHARGED ITS WORST PASS EVERY TIME, which is an upper bound and')
+print('  not a reachable one: Trigger recurses only where a stage starts on its')
+print('  target, and that is the case its dearest branch cannot take. Work removed')
+print('  from the REPEATED passes alone is therefore invisible here, and can even')
+print('  read as a regression if it costs the first pass a compare. Reason about')
+print('  that class of change from the CFG, not from this number.')
+print(f'  trigger_chain          {TRIGGER_CHAIN:>5}  passes, worst body charged for each')
+print('  --- where NoteOn goes ---')
+for label, spent in note_on_breakdown:
+  if spent:
+    print(f'  {label:<46} {spent:>5}  {spent / note_on_cycles * 100:4.1f}%')
 
-if '--update' in args:
-  with open(BASE, 'w') as f:
-    for key, value in report.items():
-      f.write(f'{key} {value}\n')
-  print('  baseline updated')
-  sys.exit(0)
-
-if not os.path.exists(BASE):
-  print('  no baseline yet -- run with --update')
-  sys.exit(0)
-
-old = {}
-for line in open(BASE):
-  key, value = line.split()
-  old[key] = int(value)
-print('  ---')
-worse = False
-for key, value in report.items():
-  if key in old and value != old[key]:
-    tag = 'REGRESSION' if value > old[key] else 'improved  '
-    if value > old[key]:
-      worse = True
-    print(f'  {tag} {key:<20} {old[key]} -> {value}')
-if worse:
-  print('  WORSE THAN BASELINE')
-  sys.exit(1)
-print('  no regression against the baseline')
+if '--metrics' in args:
+  # Machine-readable, for cycles.sh to diff two builds with. Nothing is written
+  # to the tree: a stored number is priced by the model that stored it, and this
+  # file's model has moved more than once. Two builds priced by TODAY's model
+  # move together, so a comparison cannot go stale.
+  for key, value in report.items():
+    print(f'{key} {value}')
