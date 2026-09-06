@@ -8,3 +8,5 @@ test_ubsan.dSYM/
 envelope_banding_control.cc
 test_banding_control
 test_banding_control.dSYM/
+envelope_rate_*.cc
+test_rate_*
