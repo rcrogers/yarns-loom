@@ -53,6 +53,24 @@ enum TimbreSweep {
 };
 const int kBlocks = 16;
 
+// DUMP-ONLY OVERRIDES. The `hash` mode never sets them, so the goldens see the
+// same 290 cases they always did. They exist because two open questions --
+// WHISTLE's hum at TIMBRE 0, and its settling time against Q -- both need ONE
+// pitch rendered LONG ENOUGH TO HAVE A SPECTRUM, and 16 blocks is 23 ms.
+//   - narrowband noise has no second-scale steady state at high Q. Read the
+//     whistle plan's "HOW TO MEASURE THIS SHAPE" before quoting a level off
+//     anything this renders.
+int g_blocks = kBlocks;
+int g_pitch_only = -1;   // -1 = every pitch in kPitches
+int g_sweep_only = -1;   // -1 = every sweep
+// PANEL SEMANTICS. The timbre buffer a shape reads is the WARPED value, and
+// several warps INVERT -- WHISTLE's TIMBRE 0 is the WIDEST damp, which is the
+// LOWEST Q. A sweep indexed by the raw buffer is therefore indexed by damp and
+// not by the knob, and reads backwards. With warp=1 the held value is put
+// through the shape's OWN WarpTimbre first, so `timbre=` means the knob.
+//   - the shape's own function, never a copy of its arithmetic here.
+bool g_warp_timbre = false;
+
 // Full-scale timbre at the CURRENT width. A wider one must render the same
 // audio from the proportionally larger value, which is what the check asserts.
 int g_timbre_max = 32767;
@@ -102,14 +120,16 @@ uint32_t HashShape(int shape, bool dump) {
   // shapes before it took.
   stmlib::Random::Seed(0x21);
   for (int gain_profile = 0; gain_profile < kNumGainProfiles; ++gain_profile)
-  for (int sweep = 0; sweep < kNumSweeps; ++sweep)
+  for (int sweep = 0; sweep < kNumSweeps; ++sweep) {
+  if (g_sweep_only >= 0 && sweep != g_sweep_only) continue;
   for (size_t p = 0; p < sizeof(kPitches) / sizeof(kPitches[0]); ++p) {
+    if (g_pitch_only >= 0 && kPitches[p] != g_pitch_only << 7) continue;
     // One voice, so its share of the output budget is the whole of it and the
     // two shares coincide.
     osc.Init(kScale, kScale);
     osc.set_shape(static_cast<OscillatorShape>(shape));
     osc.Refresh(static_cast<int16_t>(kPitches[p]), 0, 0);
-    for (int b = 0; b < kBlocks; ++b) {
+    for (int b = 0; b < g_blocks; ++b) {
       int16_t timbre_gain[2 * kAudioBlockSize];
       int16_t mix[kAudioBlockSize];
       memset(mix, 0, sizeof(mix));
@@ -119,11 +139,14 @@ uint32_t HashShape(int shape, bool dump) {
         int from, to;
         SweepRange(sweep, &from, &to);
         timbre_gain[i] = g_hold_timbre
-            ? static_cast<int16_t>(g_held_timbre)
+            ? (g_warp_timbre
+                 ? osc.WarpTimbre(static_cast<int16_t>(g_held_timbre),
+                                  static_cast<OscillatorShape>(shape))
+                 : static_cast<int16_t>(g_held_timbre))
             : static_cast<int16_t>(
-                from + (to - from) * step / (kBlocks * kAudioBlockSize));
+                from + (to - from) * step / (g_blocks * kAudioBlockSize));
         timbre_gain[i + kAudioBlockSize] =
-            GainAt(gain_profile, step, kBlocks * kAudioBlockSize);
+            GainAt(gain_profile, step, g_blocks * kAudioBlockSize);
       }
       (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);
       for (size_t i = 0; i < kAudioBlockSize; ++i) {
@@ -134,6 +157,7 @@ uint32_t HashShape(int shape, bool dump) {
         if (dump) printf("%d\n", mix[i]);
       }
     }
+  }
   }
   return hash;
 }
@@ -163,6 +187,10 @@ int main(int argc, char** argv) {
   if (!strcmp(mode, "dump")) {
     g_hold_timbre = OptInt(argc, argv, "hold", 0) != 0;
     g_held_timbre = OptInt(argc, argv, "timbre", 0);
+    g_blocks = OptInt(argc, argv, "blocks", kBlocks);
+    g_pitch_only = OptInt(argc, argv, "pitch", -1);   // a MIDI note, not an index
+    g_sweep_only = OptInt(argc, argv, "sweep", -1);
+    g_warp_timbre = OptInt(argc, argv, "warp", 0) != 0;
     HashShape(OptInt(argc, argv, "shape", 0), true);
     return 0;
   }
