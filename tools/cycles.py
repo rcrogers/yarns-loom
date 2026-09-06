@@ -248,17 +248,42 @@ TRIGGER_CHAIN = next(
     (i + 1 for i, name in enumerate(_stage_order) if name not in _timed_stages),
     len(_stage_order))
 ENV_NUM_STAGES = TRIGGER_CHAIN
+# ONE WORST PASS AND THEN CHEAP ONES, not the worst pass every time.
+#
+# Weighting the body by the chain length charged the dearest route through it on
+# every pass, which is not reachable: the recursion fires only where a stage
+# STARTS ON ITS TARGET, and that is exactly the case the dear route -- the
+# closed-form anchor -- cannot take, because it would be multiplying a zero
+# delta. So the repeated passes are the CHEAP path through the body, by
+# construction rather than by assumption.
+#
+# WHAT THIS MODEL ASSUMES, and it is an assumption the CODE has to keep: that a
+# repeated pass takes the cheap route. Trigger's anchor is guarded by
+# `stage_target_q30_ != stage_start_q30_`, which is false on exactly the passes
+# that recurse, so it does. Remove that guard and the repeat would take the
+# anchor while this went on pricing the cheap path -- an under-count, not an
+# over-count. The guard is load-bearing for the measurement as well as for the
+# cycles.
+#
+# It also made work removed from the repeated passes invisible, and worse than
+# invisible: the anchor skip in 1e1e3a8d reads as +6 under the old model,
+# because the compare it adds to the first pass is counted and the two anchors
+# it removes are not.
 trigger_graph = pathcost.Graph(functions[TRIGGER])
-trigger_weights = [
-    (min(a for leader in trigger_graph.loop_body(source, target)
-         for a, _ in trigger_graph.blocks[leader]),
-     max(a for leader in trigger_graph.loop_body(source, target)
-         for a, _ in trigger_graph.blocks[leader]),
-     ENV_NUM_STAGES)
-    for source, target in trigger_graph.back_edges()]
-trigger_cycles = pathcost.longest_path(
-    trigger_graph, handoff_call_cost, weights=trigger_weights)
-_uncounted_trigger = pathcost.longest_path(trigger_graph, handoff_call_cost)
+# THE REPEATED PASS MUST REACH THE RECURSION SITE. Taking the shortest path
+# through the whole function instead finds a route that RETURNS -- the hold
+# branch leaves from inside the switch -- and prices a recursive pass at 15
+# cycles, which is not one. Restricting the walk to the natural loop of the back
+# edge is what makes it a pass that actually recurses.
+trigger_first_pass = pathcost.longest_path(trigger_graph, handoff_call_cost)
+_chain_source, _chain_target = max(
+    trigger_graph.back_edges(),
+    key=lambda edge: len(trigger_graph.loop_body(edge[0], edge[1])))
+_chain_body = trigger_graph.loop_body(_chain_source, _chain_target)
+trigger_repeat_pass = pathcost.shortest_path(
+    trigger_graph, handoff_call_cost, entry=_chain_target, restrict=_chain_body)
+trigger_cycles = (trigger_first_pass
+                  + (TRIGGER_CHAIN - 1) * trigger_repeat_pass)
 
 
 def note_on_call_cost(target):
@@ -418,13 +443,12 @@ print(f'  {"render_percent":<22} '
 print(f'  {"note_on_burst":<22} '
       f'{note_on_cycles * ENVELOPES / budget * 100:.1f}%'
       f'  ({ENVELOPES} NoteOns landing in one block, on top of the above)')
-print('  A CHAIN IS CHARGED ITS WORST PASS EVERY TIME, which is an upper bound and')
-print('  not a reachable one: Trigger recurses only where a stage starts on its')
-print('  target, and that is the case its dearest branch cannot take. Work removed')
-print('  from the REPEATED passes alone is therefore invisible here, and can even')
-print('  read as a regression if it costs the first pass a compare. Reason about')
-print('  that class of change from the CFG, not from this number.')
-print(f'  trigger_chain          {TRIGGER_CHAIN:>5}  passes, worst body charged for each')
+print('  A CHAIN IS ONE WORST PASS AND THEN CHEAP ONES: Trigger recurses only')
+print('  where a stage starts on its target, which is the case its dearest')
+print('  branch cannot take, so the repeated passes are the cheap path through')
+print('  the body by construction.')
+print(f'  trigger_chain          {TRIGGER_CHAIN:>5}  passes: {trigger_first_pass} '
+      f'worst + {TRIGGER_CHAIN - 1} x {trigger_repeat_pass} cheapest = {trigger_cycles}')
 print('  --- where NoteOn goes ---')
 for label, spent in note_on_breakdown:
   if spent:
