@@ -101,3 +101,31 @@ console.log(`   60-200 Hz                ${band(60, 200).toFixed(1)}`);
 console.log(`   the block rate, 703 Hz   ${band(703 - binHz, 703 + binHz).toFixed(1)}` +
             `   (+/- one bin)`);
 if (f0) console.log(`   f0 +/- 10%               ${band(f0 * 0.9, f0 * 1.1).toFixed(1)}`);
+
+// ALIASING, WHICH IS THE POWER THAT IS NOT AT A HARMONIC.
+//
+// The top-peaks view cannot show this: a shape's aliases are individually far
+// below its harmonics and there are many of them, so they never enter a top
+// five. What matters is their SUM. Every bin within tolerance of k*f0 for some
+// integer k is signal; everything else, above a floor to skip the DC skirt, is
+// alias. A pure tone reads about -80 dB here, which is the window's own leakage
+// and the floor of what this can resolve.
+if (f0) {
+  // WIDE ENOUGH FOR THE WINDOW, or a harmonic reports itself as alias. A Hann
+  // main lobe is two bins either side, so a tolerance narrower than that counts
+  // a harmonic's own leakage against it -- at MIDI 48 that read 37% of the
+  // power as aliasing for a shape whose peaks are all exact harmonics.
+  const TOLERANCE = Math.max(0.02 * f0, 2 * binHz);
+  let aliasPower = 0, harmonicPower = 0;
+  for (let k = 2; k < N / 2; ++k) {
+    const hz = k * binHz;
+    if (hz < f0 * 0.5) continue;   // below the fundamental is skirt, not alias
+    const nearest = Math.round(hz / f0);
+    const isHarmonic = nearest >= 1 &&
+        Math.abs(hz - nearest * f0) < TOLERANCE;
+    if (isHarmonic) harmonicPower += power[k]; else aliasPower += power[k];
+  }
+  const ratio = aliasPower / (harmonicPower + aliasPower);
+  console.log(`   NOT AT A HARMONIC        ${(10 * Math.log10(ratio)).toFixed(1)}` +
+              `   <- aliasing, as dB of the total`);
+}
