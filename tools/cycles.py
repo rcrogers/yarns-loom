@@ -335,7 +335,40 @@ block_cycles = (loop_iterations * cycles
 # The sample loop is NOT multiplied: the block still renders the same 64
 # samples, just split across more runs. What multiplies is the SETUP.
 RUNS_PER_BLOCK = TRIGGER_CHAIN
-block_cycles_handoff = (loop_iterations * cycles
+# A FRAGMENTED BLOCK CANNOT USE THE UNROLLED LOOP FOR ITS SHORT RUNS. The render
+# takes the whole-word path only while eight samples and a whole draw word are
+# both left; anything shorter goes through the head/tail loop, which pays its
+# `cmp buf, end` and branch EVERY SAMPLE instead of every eighth. So a block
+# split by stage handoffs is dearer in the loop as well as in the setup, and
+# only the setup was being counted.
+#
+# The head/tail loop is the one whose body holds a single store, and the
+# tightest such -- the outer `while (sample_buffer != run_end)` wrapper holds one
+# too. The short runs are as short as a stage can be, which envelope.cc states
+# where it refuses to call four samples a jump.
+MIN_STAGE_SAMPLES = source_constant(
+    'yarns/envelope.cc', r'if \(samples < (\d+)\) return 0;')
+_single_store = []
+for _source, _target in graph.back_edges():
+  _body = graph.loop_body(_source, _target)
+  _stores = sum(1 for _l in _body for _, _t in graph.blocks[_l]
+                if re.match(r'^strh', pathcost.mnemonic(_t)))
+  if _stores == 1:
+    _single_store.append((len(_body), _target, _body))
+if not _single_store:
+  raise SystemExit('  no head/tail loop found; the render loop changed shape')
+_, _head_tail_entry, _head_tail_body = min(_single_store)
+head_tail_cycles = pathcost.longest_path(
+    graph, call_cost, entry=_head_tail_entry, restrict=_head_tail_body)
+
+head_tail_samples = min(BLOCK_SAMPLES,
+                        (RUNS_PER_BLOCK - 1) * MIN_STAGE_SAMPLES)
+_word_samples = BLOCK_SAMPLES - head_tail_samples
+_word_iterations = _word_samples // LOOP_SAMPLES
+loop_cycles_handoff = (_word_iterations * cycles
+                       + (head_tail_samples + _word_samples % LOOP_SAMPLES)
+                       * head_tail_cycles)
+block_cycles_handoff = (loop_cycles_handoff
                         + CHUNKS_PER_BLOCK * chunk_cycles
                         + chiff_block_cycles
                         + RUNS_PER_BLOCK * run_cycles
@@ -351,6 +384,7 @@ report = {
     'chunk_cycles': chunk_cycles,
     'run_cycles': run_cycles,
     'chiff_block_cycles': chiff_block_cycles,
+    'head_tail_cycles': head_tail_cycles,
     'handoff_cycles': handoff_cycles,
     'note_on_cycles': note_on_cycles,
     'block_cycles': block_cycles,
@@ -370,6 +404,9 @@ print('  --- where the run setup goes ---')
 for label, spent in run_breakdown:
   if spent:
     print(f'  {label:<46} {spent:>5}  {spent / run_cycles * 100:4.1f}%')
+print(f'  {"head/tail a sample":<22} {head_tail_cycles:>5} against '
+      f'{cycles / LOOP_SAMPLES:.1f} unrolled; {head_tail_samples} samples of a '
+      f'fragmented block take it')
 print(f'  {"stage handoffs":<22} {RUNS_PER_BLOCK:>5} runs a block worst case, '
       f'{block_cycles_handoff} cycles ('
       f'{block_cycles_handoff * ENVELOPES / budget * 100:.1f}% of CPU)')
