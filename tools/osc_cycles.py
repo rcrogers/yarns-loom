@@ -102,7 +102,7 @@ def _span(source_text, opener):
   lines = source_text.split('\n')
   for number, line in enumerate(lines, 1):
     if opener in line:
-      for end in range(number, min(number + 12, len(lines) + 1)):
+      for end in range(number, len(lines) + 1):
         if lines[end - 1].startswith('}'):
           return number, end
   raise SystemExit('  cannot find %r; regions cannot be found without it' % opener)
@@ -111,6 +111,11 @@ def _span(source_text, opener):
 WRAP_GUARD_LINES = _span(
     open(os.path.join(ROOT, 'yarns/oscillator.cc'), encoding='utf8').read(),
     'static inline bool PhaseWrapped(')
+# FractionU32 is reached only from SYNC's master-reset arm, so its cycles are
+# wrap-guarded even though they carry a dsp.h line rather than an oscillator one.
+FRACTION_SOURCE_LINES = _span(
+    open(os.path.join(ROOT, 'stmlib/dsp/dsp.h'), encoding='utf8').read(),
+    'inline uint32_t FractionU32(')
 # BOTH ENDS, ALWAYS. The edge rate is the pitch, so one column is half an
 # answer: the top of the keyboard is the budget and middle C is what the
 # instrument mostly does, and a band-limited shape is a different animal at
@@ -198,9 +203,14 @@ def is_edge_address(address):
     return EDGE_SOURCE_LINES[0] <= line <= EDGE_SOURCE_LINES[1]
   if name == 'oscillator.h':
     return BLEP_SOURCE_LINES[0] <= line <= BLEP_SOURCE_LINES[1]
+  if name == 'dsp.h':
+    return FRACTION_SOURCE_LINES[0] <= line <= FRACTION_SOURCE_LINES[1]
+  if name == 'oscillator.cc':
+    return WRAP_GUARD_LINES[0] <= line <= WRAP_GUARD_LINES[1]
   return False
 
 rows = []
+unexplained_shapes = []
 for name, body in functions.items():
     if 'Oscillator' not in name or 'Render' not in name or not body:
         continue
@@ -272,9 +282,40 @@ for name, body in functions.items():
     branches = sum(1 for leader in per_sample
                    for _, text in graph.blocks[leader]
                    if re.match(r'^b(?!l)', pathcost.mnemonic(text)))
+    # HOW MUCH OF THE RARE WORK THIS CANNOT ACCOUNT FOR, which is a BOUND on the
+    # model's uncertainty and not a failure.
+    #
+    # The model charges the whole longest/shortest gap at the wrap rate, on the
+    # grounds that everything costly in these loops sits behind a phase wrap.
+    # Zeroing the machinery that is identifiable BY SOURCE -- EdgeTime, the
+    # EDGES macros, the BLEP helpers, FractionU32, PhaseWrapped -- leaves a
+    # residue, and the residue is mostly the SHAPE'S OWN code inside those same
+    # guarded regions: SYNC's discontinuity, EDGES_PULSE's high_ handling. That
+    # carries the shape's line, not an edge one, so no line-based test can tell
+    # it from steady-path code -- and identifying the region from its guard does
+    # not survive inlining, which was tried.
+    #
+    # So this is reported, not asserted. Read it as: if ALL of this residue were
+    # really unconditional, the shape's cheap path would be understated by that
+    # much. It is an upper bound on the error, and for the SYNC shapes it is
+    # about half the rare work.
+    unexplained = (
+        pathcost.longest_path(graph, call_cost, weights=edge_zero,
+                              entry=header, restrict=per_sample)
+        - pathcost.shortest_path(graph, call_cost, weights=edge_zero,
+                                 entry=header, restrict=per_sample))
+    if unexplained:
+      unexplained_shapes.append((short, unexplained, rare_cycles))
     rows.append((effective, effective_c4, cycles, rare_cycles,
                  instructions, spills, branches, short))
 
+if unexplained_shapes:
+  print('  RARE WORK THIS CANNOT ATTRIBUTE TO EDGE OR WRAP MACHINERY BY SOURCE.')
+  print('  Mostly shape code inside a guarded region, which carries the shape\'s')
+  print('  own line -- an UPPER BOUND on how much of the cheap path is understated,')
+  print('  not a defect list. Shown worst first.')
+  for short, gap, rare in sorted(unexplained_shapes, key=lambda r: -r[1]):
+    print('    %-28s %3d of %3d rare cycles' % (short, gap, rare))
 rows.sort(reverse=True)
 if '--metrics' in sys.argv[2:]:
   # For tools/block_budget.py: one line a shape, no formatting to parse around.
