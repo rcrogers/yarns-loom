@@ -633,7 +633,13 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // from its phase; a hold's has converged.
   if (!chiff_slew_input_fraction_q30_) {
     stage_start_q30_ = nominal_value_q30_;
-  } else if (stage_phase_increment_u32_) {
+  } else if (stage_phase_increment_u32_ && stage_target_q30_ != stage_start_q30_) {
+    // THE EQUAL CASE IS WHY THE SECOND TEST IS THERE, not tidiness: the
+    // recursion below fires exactly when the two are equal, and re-enters
+    // before the target is reassigned. So on every recursive pass the closed
+    // form below multiplies a zero delta -- an Interpolate824 and a 64-bit
+    // multiply to add nothing. Falling to the else instead assigns the target
+    // over an equal start, which is the same no-op for free.
     // A stage that ran to completion leaves stage_samples_left_ == 0, which
     // wraps the product back to phase 0 -- aliasing "fully elapsed" onto "not
     // started" and anchoring the new stage where the old one began. Saturate.
@@ -877,7 +883,13 @@ static int32_t ChiffClipThreshold_q30(
     chiff_slew_input_q30, chiff_amplitude_q30 << kChiffClipAmplitudesShift);
 }
 
-Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples) {
+// ALWAYS INLINED, and it has to be said rather than left to GCC 4.8: it has one
+// call site and -finline-functions-called-once, and it was STILL emitted as a
+// call. Out of line it cannot share anything with the render's own setup, so
+// SlewRateFromTimeLog2_q31 ran twice a run on the same slew time -- once here
+// for the input fraction, once there for the rate.
+__attribute__((always_inline))
+inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples) {
   ChiffRunDecay decay;
   decay.slew_time_step_q5_27 = 0;
   decay.drive_q4_26 = 1 << kChiffSlewStateFractionalBits;  // 1.0

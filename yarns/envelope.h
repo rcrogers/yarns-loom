@@ -169,7 +169,7 @@ class Envelope {
 
  private:
   int32_t ChiffSlewInput_q30() const;
-  ChiffRunDecay AdvanceChiffDecay(uint32_t run_samples);
+  inline ChiffRunDecay AdvanceChiffDecay(uint32_t run_samples);
   void AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff);
 
 
