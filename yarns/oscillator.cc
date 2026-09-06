@@ -1062,30 +1062,31 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // percussive envelope that is a thump; under a sustained one it is a standing
   // offset, which is why the band-pass is the one to reach for by default.
   const bool band_pass = shape_ == OSC_SHAPE_PING_BP;
-  // WHAT THE INPUT RANGE ALLOWS, which is the only thing a level can be set
-  // against. The gain buffer is bounded [0, scale_ >> 1] and the timbre buffer
-  // by the warp, whatever the exciter is doing: the chiff changes the SHAPE of
-  // the signal within that range, not the range. So the bound is taken over the
-  // inputs a resonator answers to -- a held level, a square at the note's own
-  // resonance, and full-range noise -- and not over exciter settings, which
-  // only sample them.
+  // SOLVED, NOT TRIMMED, and the same for both outputs. Whatever the exciter
+  // does, `bp` and `lp` leave the SVF through Clip16, so the state this reads
+  // is bounded by INT16_MAX; the share is a fraction of kEnvelopeSampleMax.
+  // The gain that lands one bound exactly on the other spends the whole of the
+  // state's range and CANNOT clip:
   //
-  // MEASURED that way across pitch x TIMBRE, the worst any in-range input
-  // reaches is 0.638 of the share at gain 2048, and it sits at TIMBRE 0: the
-  // widest damp, where the band is broad enough to pass the excitation rather
-  // than ring it. 3072 puts that worst case at 0.958.
+  //     state * gain_q12 >> 12 == scale_ >> 1   at state == INT16_MAX
   //
-  // BOTH OUTPUTS TAKE THE SAME GAIN. At the bound they are within a count of
-  // each other; it is only under a SUSTAINED excitation that the low-pass reads
-  // twice the band-pass, because it passes the DC the band-pass rejects. That
-  // difference is the reason to choose between the two shapes, not an error to
-  // correct with a trim.
+  // MEASURED per voice at every pitch and TIMBRE: 0.00% of samples capped,
+  // both shapes, and +2.5 dB on the 3072 this replaces -- which was a trim,
+  // and left a quarter of the share unreachable.
+  //
+  // WHAT IT DOES NOT EQUALISE is how loud the two SOUND. A ring visits its
+  // peak and a pedestal sits on it, so at the same peak bound the low-pass
+  // MEASURED -8.4 dBFS at MIDI 60 against the band-pass's -13.8, over a 1 s
+  // note at TIMBRE 127. Spending that gap costs
+  // clipping, which is a TRIM decision and belongs where a trim can be seen,
+  // not folded into this.
   const int32_t ping_gain_q12 =
-      3072 * coherent_share_of_full_u15_ >> 15;
+      (kEnvelopeSampleMax << 12) / INT16_MAX
+          * coherent_share_of_full_u15_ >> 15;
   // AND THE PEAK IS CAPPED AT THE VOICE'S SHARE, the way WHISTLE's is since
-  // 290782f8. The bound above says no in-range input reaches it, so the cap is
-  // not what sets the level -- it is what makes the level a PROPERTY of the
-  // render rather than a claim about which inputs happened to be tried.
+  // 290782f8. With the gain above the cap is UNREACHABLE by construction --
+  // it is kept as the guard that makes that a property of the render rather
+  // than of this derivation staying true.
   const int32_t voice_ceiling = scale_ >> 1;
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Halved going in: the resonant step response overshoots the excitation, and
