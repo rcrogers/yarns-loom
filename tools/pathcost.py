@@ -23,6 +23,12 @@ import re
 #   push/pop    1 cycle plus 1 per register.
 DIV_CYCLES = 12
 BRANCH_CYCLES = 3
+# A CONDITIONAL BRANCH THE PATH DOES NOT TAKE IS A FALL-THROUGH, and on
+# Cortex-M3 that is the cheap direction: the pipeline is not refilled. Charging
+# every branch alike made a branchy shape dearer than it is -- SYNC PULSE has 24
+# of them -- and, worse, made BRANCH LAYOUT unmeasurable, so any __builtin_expect
+# work would have reported as exactly zero.
+NOT_TAKEN_BRANCH_CYCLES = 1
 LONG_MULTIPLY_CYCLES = 4
 MEMORY_CYCLES = 2
 
@@ -299,13 +305,85 @@ class Graph(object):
     return best
 
 
-def longest_path(graph, call_cost, weights=()):
+def shortest_path(graph, call_cost, weights=(), entry=None, restrict=None):
+  """The CHEAPEST way through, which for a sample loop is the common sample.
+
+  The dear path through an oscillator's loop is the one where a phase wrapped:
+  a BLEP is laid down, a reset is computed, an edge is taken. None of that
+  happens on most samples. Longest-path alone therefore prices every sample as
+  though every rare thing happened at once -- and a budget wants the BLOCK,
+  which is mostly cheap samples. The gap between the two paths IS the rare work,
+  and the caller weights it by how often it actually happens.
+  """
+  cut = set(graph.back_edges())
+  memo = {}
+
+  def factor_at(address):
+    result = 1
+    for low, high, factor in weights:
+      if low <= address <= high:
+        result = factor
+    return result
+
+  def cost_of(leader):
+    if leader in memo:
+      return memo[leader]
+    memo[leader] = 0
+    own = sum(factor_at(address) * instruction_cycles(text)
+              for address, text in graph.blocks[leader])
+    own += sum(factor_at(graph.blocks[leader][-1][0]) *
+               (BRANCH_CYCLES + call_cost(target))
+               for target in graph.calls[leader])
+    best, taken = None, None
+    for successor in graph.edges[leader]:
+      if (leader, successor) in cut:
+        continue
+      if restrict is not None and successor not in restrict:
+        continue
+      value = cost_of(successor) + _branch_adjustment(
+          graph, leader, successor, factor_at)
+      if best is None or value < best:
+        best, taken = value, successor
+    memo[leader] = own + (best if best is not None else 0)
+    return memo[leader]
+
+  return cost_of(graph.entry if entry is None else entry)
+
+
+def _branch_adjustment(graph, leader, chosen, factor_at):
+  """Refund the taken-branch penalty when the path falls through instead.
+
+  `instruction_cycles` prices every branch as taken, because on its own it
+  cannot know which way a path went. Here we do: the block's terminator is a
+  conditional branch and the successor in question is not its target.
+
+  APPLIED PER CANDIDATE, INSIDE THE COMPARISON, not to the winner afterwards.
+  Adjusting after the pick means the walk chooses on unadjusted cost and is then
+  handed a refund that depends on the choice -- so the LONGEST path could come
+  out cheaper than the shortest, which it did, by a cycle, on DIRAC COMB.
+  """
+  block = graph.blocks[leader]
+  if chosen is None or not block:
+    return 0
+  address, text = block[-1]
+  kind, target = classify(text)
+  if kind != 'branch' or chosen == target:
+    return 0
+  return -factor_at(address) * (BRANCH_CYCLES - NOT_TAKEN_BRANCH_CYCLES)
+
+
+def longest_path(graph, call_cost, weights=(), entry=None, restrict=None):
   """Longest path from the entry with back edges cut, in cycles.
 
   `weights` is a list of (low, high, factor) address ranges: instructions in
   the range are charged factor times, which is how a caller applies a trip
   count the CFG cannot supply. Later entries win, so a nested loop's range can
   follow the loop that contains it. Factor 0 excludes a range entirely.
+
+  `entry` starts the walk somewhere other than the function's own entry, and
+  `restrict` limits it to a set of block leaders. Together they price ONE
+  LOOP BODY -- the walk stops at the loop's exits instead of running on into
+  the rest of the function.
   """
   def factor_at(address):
     result = 1
@@ -330,12 +408,75 @@ def longest_path(graph, call_cost, weights=()):
     own += sum(factor_at(graph.blocks[leader][-1][0]) *
                (BRANCH_CYCLES + call_cost(target))
                for target in graph.calls[leader])
-    best = max([cost_of(successor) for successor in graph.edges[leader]
-                if (leader, successor) not in cut] or [0])
-    memo[leader] = own + best
+    best, taken = 0, None
+    for successor in graph.edges[leader]:
+      if (leader, successor) in cut:
+        continue
+      if restrict is not None and successor not in restrict:
+        continue
+      value = cost_of(successor) + _branch_adjustment(
+          graph, leader, successor, factor_at)
+      if taken is None or value > best:
+        best, taken = value, successor
+    memo[leader] = own + (best if taken is not None else 0)
     return memo[leader]
 
-  return cost_of(graph.entry)
+  return cost_of(graph.entry if entry is None else entry)
+
+
+def longest_path_breakdown(graph, call_cost, by_address, weights=()):
+  """WHERE the longest path's cycles go, as (label, cycles) pairs.
+
+  `longest_path` answers how much; a number that large is not actionable
+  without knowing which callee owns it. Same walk, same cuts, same weights --
+  it re-derives the chosen successors and then tallies the blocks on that one
+  path, so the total agrees with `longest_path` by construction.
+  """
+  def factor_at(address):
+    result = 1
+    for low, high, factor in weights:
+      if low <= address <= high:
+        result = factor
+    return result
+
+  cut = set(graph.back_edges())
+  memo, chosen = {}, {}
+
+  def cost_of(leader):
+    if leader in memo:
+      return memo[leader]
+    memo[leader] = 0
+    own = sum(factor_at(address) * instruction_cycles(text)
+              for address, text in graph.blocks[leader])
+    own += sum(factor_at(graph.blocks[leader][-1][0]) *
+               (BRANCH_CYCLES + call_cost(target))
+               for target in graph.calls[leader])
+    best, pick = 0, None
+    for successor in graph.edges[leader]:
+      if (leader, successor) in cut:
+        continue
+      value = cost_of(successor) + _branch_adjustment(
+          graph, leader, successor, factor_at)
+      if pick is None or value > best:
+        best, pick = value, successor
+    chosen[leader] = pick
+    memo[leader] = own + (best if pick is not None else 0)
+    return memo[leader]
+
+  cost_of(graph.entry)
+  tally, leader = {}, graph.entry
+  while leader is not None:
+    inline = sum(factor_at(address) * instruction_cycles(text)
+                 for address, text in graph.blocks[leader])
+    inline += _branch_adjustment(graph, leader, chosen.get(leader), factor_at)
+    tally['(inline)'] = tally.get('(inline)', 0) + inline
+    for target in graph.calls[leader]:
+      name = by_address.get(target, hex(target))
+      charge = factor_at(graph.blocks[leader][-1][0]) * (
+          BRANCH_CYCLES + call_cost(target))
+      tally[name] = tally.get(name, 0) + charge
+    leader = chosen.get(leader)
+  return sorted(tally.items(), key=lambda pair: -pair[1])
 
 
 def call_cost_function(functions, boundary=()):
