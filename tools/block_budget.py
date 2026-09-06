@@ -220,9 +220,23 @@ for calls, body in ((True, dispatch[0]), (False, shift)):
 # --- Oscillator::Render's own body: the timbre warp, the tremolo, the dispatch.
 # Its two envelope renders and its shape call are counted below, so they are
 # excluded here rather than counted twice.
+# WITH its warp and its phase-increment helper, WITHOUT the two envelope renders
+# it calls -- those are cycles.py's rows. The shape it dispatches to goes through
+# a function pointer, which no static walk resolves and osc_cycles.py prices.
+envelope_render = [n for n in functions if '8Envelope13RenderSamples' in n]
+osc_call_cost, _ = pathcost.call_cost_function(
+    functions, boundary=tuple(envelope_render))
 osc = function('Oscillator6RenderEPs')
-add('Oscillator::Render (warp + dispatch, excl. callees)',
-    pathcost.longest_path(osc, NO_CALLEES), sum(AUDIO_VOICES_PER_OUTPUT))
+add('Oscillator::Render (warp + dispatch, excl. envelopes)',
+    pathcost.longest_path(osc, osc_call_cost), sum(AUDIO_VOICES_PER_OUTPUT))
+# CVOutput::RenderSamples' own straight-line body: the branch on output kind and
+# the frame it sets up. Its three loops are rows of their own, and its callees
+# are priced elsewhere, so both are zeroed here rather than double-counted.
+cv_body_zero = [(a, a, 0) for body in (fill, shift, dispatch[0])
+                for leader in body for a, _ in cv.blocks[leader]]
+add('CVOutput::RenderSamples (body, excl. its loops)',
+    pathcost.longest_path(cv, NO_CALLEES, weights=cv_body_zero),
+    OUTPUTS_BUFFERED)
 
 # --- the DSP itself, from the two tools that own it --------------------------
 def tool(script, *args):
@@ -273,6 +287,65 @@ for kind, extra in (('steady block', STEADY), ('ATTACK block', ATTACK)):
     print('  %-46s %8s %4s %9d %6.1f%%%s' % ('TOTAL', '', '', total,
                                              total / BUDGET * 100, flag))
     print()
+# EVERY FUNCTION IN THE TREE IS ACCOUNTED FOR, OR THIS SAYS SO.
+#
+# The rows above are a list someone wrote, and a list cannot tell you what is
+# missing from it. That is exactly how AdvanceChiffForBlock's 625 cycles left
+# the budget: the work moved out of RenderStage, cycles.py prices RenderStage,
+# and the envelope read seven points cheaper for doing the same arithmetic. A
+# COST THAT MOVES BETWEEN FUNCTIONS HAS NOT MOVED, and nothing noticed.
+#
+# So: walk the call tree from the per-block entry and demand a reason for each
+# function in it. A new callee is then a loud failure rather than a silent zero.
+ACCOUNTED = {
+    'CVOutput13RenderSamples': 'three loop rows plus a body row',
+    '3Dac13BufferSamples': 'a row',
+    '3Dac11FillDCNoops': 'the plain-CV branch; no output in this layout takes it',
+    '10Oscillator6Render': 'a row, with its warp and its helpers',
+    'Oscillator10WarpTimbre': 'inside the Oscillator::Render row',
+    'Oscillator21ComputePhaseIncrement': 'inside the Oscillator::Render row',
+    '8Envelope13RenderSamples': 'cycles.py block_cycles',
+    '8Envelope20AdvanceChiffForBlock': 'cycles.py block_cycles (chiff_block_cycles)',
+    '8Envelope11RenderStage': 'cycles.py block_cycles (run_cycles)',
+    '8Envelope18HandOffToNextStage': 'cycles.py block_cycles_handoff',
+    '8Envelope7Trigger': 'inside handoff_cycles and note_on_cycles',
+    'ChiffSlewTimeAtAmount': 'inside its callers',
+    'ChiffSlewInputFractionAtAmount': 'inside its callers',
+    'DivU64ByU32': 'inside its callers',
+}
+
+
+def account_for_the_whole_tree():
+  by_address = {body[0][0]: name for name, body in functions.items()}
+  entry = [n for n in functions if 'CVOutput13RenderSamples' in n]
+  if len(entry) != 1:
+    sys.exit('  cannot find the per-block entry point')
+  seen, stack = set(), [entry[0]]
+  while stack:
+    name = stack.pop()
+    if name in seen or name not in functions:
+      continue
+    seen.add(name)
+    graph = pathcost.Graph(functions[name])
+    for targets in graph.calls.values():
+      for address in targets:
+        if address in by_address:
+          stack.append(by_address[address])
+  missing = [n for n in sorted(seen)
+             if not any(key in n for key in ACCOUNTED)]
+  if missing:
+    print('  UNACCOUNTED, and therefore counted NOWHERE:')
+    for name in missing:
+      print('    %s' % re.sub(r'^_ZN5yarns', '', name)[:66])
+    print('  Give each a row or a reason in ACCOUNTED. A budget that does not')
+    print('  know what it is missing is not a budget.')
+    return False
+  print('  all %d functions in the per-block call tree are accounted for' % len(seen))
+  return True
+
+
+account_for_the_whole_tree()
+print()
 print('  NOT COUNTED, and it is not nothing: ui.DoEvents, midi_handler.ProcessInput')
 print('  and multi.LowPriority share the same main loop and the same 72 MHz. They')
 print('  are not per-block, so they are not in a per-block table -- but a note-on')
