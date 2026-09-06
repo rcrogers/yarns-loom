@@ -520,8 +520,15 @@ static inline uint32_t EdgeTime(
   self_reset = modulator_phase < modulator_phase_increment; \
   /* Block additional BLEP if modulator was reset by master alone */ \
   bool reset_by_master_only = sync_reset && !transition_during_reset; \
-  while (!reset_by_master_only) { \
-    edges_code; \
+  /* HOISTED BY HAND, because -fno-move-loop-invariants means GCC will not:
+   * nothing in edges_code writes reset_by_master_only, so the test was
+   * loop-invariant and re-run every edge, and the value had to stay live
+   * across a body that already spills. The loop only ever leaves by break,
+   * so guarding it is the same program. */ \
+  if (!reset_by_master_only) { \
+    while (true) { \
+      edges_code; \
+    } \
   } \
   if (sync_reset) { \
     modulator_phase = reset_time * (modulator_phase_increment >> 16); \
