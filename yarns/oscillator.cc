@@ -960,10 +960,14 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // units, and the reciprocal at the output no longer cancels what produced
   // it. Rescale it into the new units.
   if (previous_damp_drive_u15_ > 0 && damp_drive_u15 != previous_damp_drive_u15_) {
-    svf.bp = static_cast<int32_t>(svf.bp) * damp_drive_u15
-        / previous_damp_drive_u15_;
-    svf.lp = static_cast<int32_t>(svf.lp) * damp_drive_u15
-        / previous_damp_drive_u15_;
+    // Clipped like every other write to these. The rescale can carry the state
+    // 16x past int16, and the next cutoff * bp then reaches 2.27e9 at MIDI 108,
+    // outside int32. A state the rescale puts out of range is one the filter
+    // would have railed at had the drive been there all along.
+    svf.bp = stmlib::Clip16(static_cast<int32_t>(svf.bp) * damp_drive_u15
+        / previous_damp_drive_u15_);
+    svf.lp = stmlib::Clip16(static_cast<int32_t>(svf.lp) * damp_drive_u15
+        / previous_damp_drive_u15_);
   }
   previous_damp_drive_u15_ = damp_drive_u15;
   const int32_t state_to_output_q15 = WhistleStateToOutput(
