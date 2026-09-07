@@ -996,11 +996,13 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // excitation: 0 dB of signal to quantisation noise when bp rails, 71 to 78 dB
   // just under it.
   const uint32_t damp_at_widest_q1_14 = 2392;
-  // CLAMPED TO WHAT THE WARP CAN ACTUALLY ASK FOR, because the make-up below is
-  // a RECIPROCAL of this: eight octaves down from the widest is damp 9, and a
-  // floor any lower lets it reach 50x and amplify whatever is still in the
-  // filter. The timbre envelope slews, so it passes through values the warp
-  // never produces -- at the end of a note among other places.
+  // A FLOOR AGAINST MODULATION. NOT against the warp: TIMBRE 127 lands EXACTLY
+  // here, so no value the warp asks for is ever clamped -- MEASURED, at every
+  // pitch and TIMBRE. What overshoots below it is the timbre ENVELOPE, whose
+  // chiff overshoots its destination and whose slew passes through values on
+  // the way to one. It matters because the make-up below is a RECIPROCAL of
+  // this: without the floor the make-up steps 50x between blocks under a
+  // maximal timbre envelope, and 3x with no modulation at all.
   const uint32_t damp_at_tightest_q1_14 =
       damp_at_widest_q1_14 >> kWhistleQOctaves;
   uint32_t damp_now = static_cast<uint32_t>(
@@ -1011,54 +1013,35 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       (damp_now << 15) / damp_at_widest_q1_14 * 32768u);
   const int32_t tilted_gain =
       WhistleOutputGain(resonant_pitch, incoherent_share_of_full_u15_);
-  int32_t output_gain = drive_q15
+  // THE LINEAR GAIN THE CURVE STANDS IN FOR: the share, corrected for pitch,
+  // times the make-up the drive law owes back. Its own step because both
+  // scalars below derive from it, and 32 bits will not hold one expression.
+  const int32_t state_to_output_q15 = drive_q15
       ? static_cast<int32_t>(
             (static_cast<uint32_t>(tilted_gain) << 15) / drive_q15)
       : tilted_gain;
-  // THE PEAK IS HELD AT THE nTH EVEN THOUGH THE EXCITATION TAKES THE GEOMETRIC
-  // MEAN, because a peak is what the span limits and there is no room above
-  // it: n voices at the nth reach the span exactly, and 683 codes past that
-  // the DAC code wraps. What holds it is now the CURVE, which is asymptotic to
-  // the nth, rather than a cut at it.
-  //
-  // HOW FAR PAST THE nTH THE CURVE'S DOMAIN REACHES. Excursions between the
-  // nth and this are COMPRESSED rather than cut, which is the whole of what a
-  // knee is; past it the domain clamp cuts, and MEASURED that is 0.00% of
-  // samples at this trim. It PAIRS WITH THE TABLE: `ws_soft_limit` is
-  // tanh(4x), and k / tanh(k) == 4 is what makes the small-signal gain exactly
-  // 1, so quiet notes pass through as the cap left them. Change one and the
-  // other moves -- see yarns/resources/waveshapers.py.
+  // HOW FAR PAST THE SHARE THE CURVE'S DOMAIN REACHES. Excursions between the
+  // share and this are COMPRESSED rather than cut, which is the whole of what
+  // a knee is. IT PAIRS WITH THE TABLE: k / tanh(k) == kCurveHeadroom is what
+  // makes the small-signal gain exactly 1, so a quiet note passes through
+  // untouched. Change one and the other moves; waveshapers.py holds the k.
   const int32_t kCurveHeadroom = 4;
-  // WHERE THE STATE MEETS THE CURVE'S DOMAIN EDGE. Clamping bp -- not the
-  // product -- is what bounds the multiply: the make-up is a reciprocal and
-  // reaches 16.3x at the tightest damp, so a railed bp times it OVERFLOWS
-  // int32, MEASURED 1.06x INT32_MAX at the bottom of the keyboard.
-  // 32-BIT OPS ONLY: a umull forms the product and utils.h's divide takes it
-  // from there. A plain 64/32 divide drags ~1.4 kB of soft-division in --
-  // MEASURED +1730 bytes when this was written the obvious way.
-  const uint32_t curve_domain_codes =
-      static_cast<uint32_t>(scale_ >> 1) * kCurveHeadroom;
-  int32_t drive_into_curve_q15 = output_gain > 0
-      ? static_cast<int32_t>(DivU64ByU32(
-            stmlib::MulU32(static_cast<uint32_t>(output_gain), INT16_MAX),
-            static_cast<uint32_t>(output_gain) * INT16_MAX,
-            curve_domain_codes))
-      : 0;
-  // PINNED TO A REGISTER. Once the share is folded in above, GCC 4.8.3 stops
-  // hoisting this and re-materializes it inside the loop instead -- MEASURED
-  // at 20 instructions and 27 cycles a sample, on the most expensive shape
-  // there is. The empty asm makes it opaque, so it has to live in a register.
-  asm volatile("" : "+r"(drive_into_curve_q15));
-  // kCurveHeadroom times where the hard cap sat, which is the same statement:
-  // the state may travel that much further before it meets the domain edge.
-  const int32_t bp_ceiling = output_gain > 0
-      ? static_cast<int32_t>(
-            (static_cast<uint32_t>(scale_ >> 1) << 15) / output_gain)
-            * kCurveHeadroom
+  // THE STATE IN THE CURVE'S DOMAIN, and the only gain the loop applies. The
+  // share lands at 1/kCurveHeadroom of full scale, so the peak is held
+  // ASYMPTOTICALLY by the curve instead of being cut at a ceiling -- which is
+  // what lets a voice nowhere near the limit keep the whole of its level.
+  const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(
+      stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
+      static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
+      static_cast<uint32_t>(scale_ >> 1) * kCurveHeadroom));
+  // EXACTLY THE RECIPROCAL ABOVE, and that identity is the bound: a clamped bp
+  // times the drive is 2^30, so the loop's product can neither overflow int32
+  // nor index past the table. Arithmetic, not a measurement.
+  const int32_t bp_ceiling = state_into_curve_q15 > 0
+      ? (INT16_MAX << 15) / state_into_curve_q15
       : INT16_MAX;
-  // THE CURVE'S OUTPUT IS FULL-SCALE int16 AND THE VOICE'S SHARE IS NOT, so
-  // the asymptote has to be brought back to the share. A fixed table cannot
-  // carry it: the share moves with voice count.
+  // The curve's output is full-scale int16 and the share is not, and a fixed
+  // table cannot carry the difference: the share moves with voice count.
   const int32_t limiter_makeup_q15 = static_cast<int32_t>(
       (static_cast<uint32_t>(scale_ >> 1) << 15) / INT16_MAX);
   RENDER_CORE_NO_OUTPUT_GAIN(
@@ -1069,7 +1052,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     svf.RenderSampleAtPitch(excitation, timbre);
     int32_t band_pass = svf.bp;
     CONSTRAIN(band_pass, -bp_ceiling, bp_ceiling);
-    const int32_t driven = band_pass * drive_into_curve_q15 >> 15;
+    const int32_t driven = band_pass * state_into_curve_q15 >> 15;
     this_sample = Interpolate88(
         ws_soft_limit, static_cast<uint16_t>(driven + 32768))
         * limiter_makeup_q15 >> 15;
