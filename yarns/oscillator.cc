@@ -1104,10 +1104,13 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
   svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
   // THE BAND-PASS REJECTS THE EXCITER'S DC AND THE LOW-PASS PASSES IT, and both
-  // are worth having: past the ring the low-pass output IS the envelope's own
-  // level, MEASURED as a flat 8191 at every pitch and TIMBRE. Under a
-  // percussive envelope that is a thump; under a sustained one it is a standing
-  // offset, which is why the band-pass is the one to reach for by default.
+  // are worth having. Passing DC means that past the ring the low-pass state IS
+  // the excitation's own level -- not a measured coincidence but the definition
+  // of a low-pass: MEASURED settling to 16383, which is what the halving below
+  // hands it. Under a percussive envelope that is a thump; under a sustained
+  // one it is a standing offset, which is why the band-pass is the one to reach
+  // for by default. (It settles there at every pitch below the tightest damp;
+  // at the top of TIMBRE the ring outlasts seconds and has not settled yet.)
   const bool band_pass = shape_ == OSC_SHAPE_PING_BP;
   // UNITY IS SOLVED, NOT TRIMMED. Whatever the exciter does, `bp` and `lp`
   // leave the SVF through Clip16, so the state this reads is bounded by
