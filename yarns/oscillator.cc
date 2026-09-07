@@ -169,10 +169,10 @@ int16_t Oscillator::WarpTimbre(
   // Limit cutoff range for filtered noise
   if (shape >= OSC_SHAPE_NOISE_NOTCH && shape <= OSC_SHAPE_NOISE_HP) {
     // Off the bottom below timbre -8192, where 1/8 of the range has been
-    // subtracted away and the frequency goes NEGATIVE -- which CutoffFromFreq
+    // subtracted away and the frequency goes negative -- which CutoffFromFreq
     // then shifts left into its table index, so the cutoff lands wherever the
     // wrap puts it. A negative TIMBRE MOD ENVELOPE reaches it: NoteOn warps the
-    // DESTINATION, which is only constrained to int16.
+    // destination, which is only constrained to int16.
     int32_t cutoff_freq = 0x1000 + (TimbreAtOrAboveZero(timbre) >> 1); // 1/8..5/8
     return SVF::CutoffFromFreq(cutoff_freq);
   }
@@ -187,7 +187,7 @@ int16_t Oscillator::WarpTimbre(
   // Phase distortion modulator tracks pitch
   if (shape >= OSC_SHAPE_CZ_PULSE_LP && shape <= OSC_SHAPE_CZ_SAW_HP) {
     // int32, because timbre - 2048 leaves int16 below timbre -30720 and wraps
-    // POSITIVE there: the modulator jumps a whole map's width the wrong way,
+    // positive there: the modulator jumps a whole map's width the wrong way,
     // which a negative TIMBRE MOD ENVELOPE reaches. Widening keeps the sweep
     // monotone instead of clamping it, because this map already runs below the
     // carrier at low timbre -- the knob's own bottom is pitch - 648 -- so
@@ -541,14 +541,10 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
 // silence.
 void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
-    // WHERE THE FORMANT SITS IS 1/width THE FUNDAMENTAL, which is what the knob
-    // is really choosing. Three quarters of the table put the top of it at 31x
-    // -- past Nyquist for any note above MIDI 78 -- and reached a third of the
-    // way down in the first sixteen steps.
-    //   SQUARED, so the onset is gentle: the bottom quarter of the knob is
-    //   still within 12% of a plain sine.
-    //   Half the table, so the top is 8.4x, which stays under Nyquist to
-    //   MIDI 100.
+    // The formant sits at 1/width the fundamental, which is what the knob
+    // chooses. Squared, so the onset is gentle: the bottom quarter of the knob
+    // stays within 12% of a plain sine. Half the table puts the top at 8.4x,
+    // under Nyquist to MIDI 100.
     timbre = TimbreAtOrAboveZero(timbre);
     uint16_t index = static_cast<uint16_t>(timbre * timbre >> 15);
     uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo_u16, index); // 100-12%
@@ -621,10 +617,8 @@ void Oscillator::RenderSyncSine(int16_t* input_samples, int16_t* audio_mix) {
       false // No extra transition
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
-    // ACCUMULATE, DO NOT ASSIGN: this_sample arrives holding the BLEP residual
-    // SYNC wrote a line ago, so assigning the naive wave over it drops the
-    // correction and the shape aliases. Only a shape with no discontinuity may
-    // assign.
+    // Accumulate, do not assign: this_sample arrives holding the BLEP residual
+    // SYNC wrote a line ago. Only a shape with no discontinuity may assign.
     next_sample += sine(modulator_phase);
   )
 }
