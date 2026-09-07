@@ -55,10 +55,31 @@ def source_int(relative_path, pattern, cast):
 
 STORE = re.compile(r'\bstrh')
 
+OSCILLATOR_CC = open(os.path.join(ROOT, 'yarns/oscillator.cc'),
+                     encoding='utf8').read()
+
 SHAPE_BODIES = dict(re.findall(
     r'void Oscillator::(\w+)\(int16_t\* \w+, int16_t\* \w+\) \{(.*?)\n\}',
-    open(os.path.join(ROOT, 'yarns/oscillator.cc'), encoding='utf8').read(),
-    re.DOTALL))
+    OSCILLATOR_CC, re.DOTALL))
+
+# The shapes to price: the RenderFn entries fn_table_ can dispatch, and only
+# those. A commented-out entry is unreachable, and a Render symbol the table
+# never names is dead. Any of these the pass cannot price is an error below.
+_table = re.search(r'Oscillator::fn_table_\[\] = \{(.*?)\n\};',
+                   OSCILLATOR_CC, re.DOTALL)
+if not _table:
+  raise SystemExit('  cannot find fn_table_; there is no set to price')
+REACHABLE = frozenset(re.findall(
+    r'&Oscillator::(\w+)', re.sub(r'//[^\n]*', '', _table.group(1))))
+
+
+def shape_name(symbol):
+  """Itanium mangling: the length prefix delimits the name, so a name holding
+  a capital E survives."""
+  match = re.match(r'^_ZN5yarns10Oscillator(\d+)', symbol)
+  if not match:
+    return ''
+  return symbol[match.end():match.end() + int(match.group(1))]
 
 # THE EDGE WORK IS NOT PAID EVERY SAMPLE, and charging it as though it were is
 # what made the band-limited shapes head this table.
@@ -108,9 +129,7 @@ def _span(source_text, opener):
   raise SystemExit('  cannot find %r; regions cannot be found without it' % opener)
 
 
-WRAP_GUARD_LINES = _span(
-    open(os.path.join(ROOT, 'yarns/oscillator.cc'), encoding='utf8').read(),
-    'static inline bool PhaseWrapped(')
+WRAP_GUARD_LINES = _span(OSCILLATOR_CC, 'static inline bool PhaseWrapped(')
 # FractionU32 is reached only from SYNC's master-reset arm, so its cycles are
 # wrap-guarded even though they carry a dsp.h line rather than an oscillator one.
 FRACTION_SOURCE_LINES = _span(
@@ -212,7 +231,8 @@ def is_edge_address(address):
 rows = []
 unexplained_shapes = []
 for name, body in functions.items():
-    if 'Oscillator' not in name or 'Render' not in name or not body:
+    short = shape_name(name)
+    if short not in REACHABLE or not body:
         continue
     graph = pathcost.Graph(body)
     def stores(leaders):
@@ -243,7 +263,6 @@ for name, body in functions.items():
     per_sample = blocks - nested
     cycles = pathcost.longest_path(
         graph, call_cost, entry=header, restrict=per_sample)
-    short = re.sub(r'^_ZN5yarns10Oscillator\d+', '', name).split('E')[0]
     # A MODULATED SHAPE WRAPS FASTER THAN ITS NOTE, so everything a wrap guards
     # is paid at the modulator's rate, not the master's.
     ratio = (MAX_SYNC_RATIO if 'RENDER_MODULATED' in SHAPE_BODIES.get(short, '')
@@ -306,8 +325,12 @@ for name, body in functions.items():
                                  entry=header, restrict=per_sample))
     if unexplained:
       unexplained_shapes.append((short, unexplained, rare_cycles))
-    rows.append((effective, effective_c4, cycles, rare_cycles,
-                 instructions, spills, branches, short))
+    rows.append((cycles, base, effective_c4, effective, spills, branches, short))
+
+unpriced = REACHABLE - set(row[-1] for row in rows)
+if unpriced:
+  raise SystemExit('  no sample loop found for %s -- the table cannot rank '
+                   'shapes it does not hold' % ', '.join(sorted(unpriced)))
 
 if unexplained_shapes and '--metrics' not in sys.argv[2:]:
   print('  RARE WORK THIS CANNOT ATTRIBUTE TO EDGE OR WRAP MACHINERY BY SOURCE.')
@@ -316,41 +339,32 @@ if unexplained_shapes and '--metrics' not in sys.argv[2:]:
   print('  not a defect list. Shown worst first.')
   for short, gap, rare in sorted(unexplained_shapes, key=lambda r: -r[1]):
     print('    %-28s %3d of %3d rare cycles' % (short, gap, rare))
+# By the ceiling: the number a real-time budget is set by.
 rows.sort(reverse=True)
 if '--metrics' in sys.argv[2:]:
   # For tools/block_budget.py: one line a shape, no formatting to parse around.
-  for effective, effective_c4, cycles, edge_cycles, n, spills, branches, short in rows:
+  for cycles, base, effective_c4, effective, spills, branches, short in rows:
     print('%s %.4f %.4f' % (short, effective, effective_c4))
   raise SystemExit(0)
 if not HAVE_LINES:
   print('  NO LINE INFO in this disassembly (use objdump -dl): the edge body is')
   print('  charged to every sample, which OVERSTATES every band-limited shape.')
-# NOT FOUR. A bare literal here priced every shape against a voice count no
-# layout sounds; the hungriest is PARAPHONIC_PLUS_TWO, at six. multi.h folds the
-# layout map and static-asserts kMaxAudioVoices against it, so this reads the
-# constant instead of carrying a second opinion.
-VOICES = int(re.search(
-    r'kMaxAudioVoices\s*=\s*(\d+)',
-    open(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), 'yarns/voice.h')).read()).group(1))
-print('  %-28s %7s %7s %6s %6s %8s %8s'
-      % ('shape', '%CPU hi', '%CPU C4', 'rare', 'worst', 'spills', 'branches'))
-for effective, effective_c4, cycles, edge_cycles, n, spills, branches, short in rows:
-    print('  %-28s %6.1f%% %6.1f%% %6d %6d %8d %8d'
-          % (short[:28], effective * VOICES * FRAME_HZ / 72e6 * 100,
-             effective_c4 * VOICES * FRAME_HZ / 72e6 * 100,
-             edge_cycles, cycles, spills, branches))
+print('  %-28s %6s %6s %6s %6s %8s %8s'
+      % ('shape', 'floor', 'ceil', 'C4', 'MIDI %d' % HIGHEST_MIDI,
+         'spills', 'branches'))
+for cycles, base, effective_c4, effective, spills, branches, short in rows:
+    print('  %-28s %6d %6d %6.0f %6.0f %8d %8d'
+          % (short[:28], base, cycles, effective_c4, effective,
+             spills, branches))
 print('  ---')
-print('  %%CPU = this shape on all %d audio voices at %d Hz on 72 MHz.' % (VOICES, FRAME_HZ))
-print('  THE COMMON SAMPLE AND THE DEAR ONE. Everything costly in these loops is')
-print('  guarded by a phase wrap -- the BLEP, a sync reset, an edge -- so the cheap')
-print('  path is the sample where nothing wrapped. rare = the gap between the')
-print('  cheapest and dearest ways through one sample; worst = the dearest.')
-print('  It is charged at the rate the FASTEST accumulator wraps: %.3f a sample at' % edges_per_sample(HIGHEST_MIDI))
-print('  MIDI %d and %.3f at middle C, times the sync ratio (up to %.0fx) for a' % (
-    HIGHEST_MIDI, edges_per_sample(MIDDLE_C_MIDI), MAX_SYNC_RATIO))
-print('  modulated shape, capped at one. Conservative: a region the slower master')
-print('  guards is over-charged, which is the direction a budget should err.')
-print('  ASSUMES THE GAP IS ALL WRAP-GUARDED. A shape with a genuinely even')
-print('  branch would have its cheap path under-counted; none here has one.')
-print('  Still an estimate: a Cortex-M3 timing table, good for DELTAS.')
+print('  Cycles a sample. floor = a sample where nothing wrapped; ceil = the')
+print('  dearest way through one sample. The right two charge the')
+print('  gap between them at the rate a wrap falls at that pitch: %.3f a sample'
+      % edges_per_sample(HIGHEST_MIDI))
+print('  at MIDI %d and %.3f at middle C, times the modulator ratio (up to %.0fx)'
+      % (HIGHEST_MIDI, edges_per_sample(MIDDLE_C_MIDI), MAX_SYNC_RATIO))
+print('  on a modulated shape, capped at one. That over-charges a region the')
+print('  slower master guards, which is the direction a budget should err.')
+print('  Assumes the gap is all wrap-guarded: a shape with a genuinely even')
+print('  branch has its floor under-counted, and none here has one.')
+print('  A Cortex-M3 timing table, so an estimate. Good for DELTAS.')
