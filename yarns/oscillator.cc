@@ -931,76 +931,46 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // The gain envelope is the EXCITER, spent going into the filter rather than
 // scaling what leaves it. Its own chiff rides in with it, so EXCITER AMOUNT
 // decides how much of the excitation is noise.
-// A RESONANCE, NOT A NOTE, BELOW THIS. The cutoff coefficient is 212 here and
-// 150 an octave down, and the filter stops being one: MEASURED at MIDI 24 the
-// peak sits at 43.9 Hz for a note of 32.7. The resonance is the only pitch this
-// shape has, so this is a real floor on it.
-// HOW FAR PAST scale_ THE LIMITER'S CURVE REACHES. Excursions between what the
-// voice may put on the output and this are COMPRESSED rather than cut, which is
-// the whole of what a knee is; scale_ >> 1 itself lands at 1/kCurveHeadroom of
-// the curve's domain. IT PAIRS WITH THE TABLE, and the pairing is what makes the curve a
-// LIMITER rather than an overdrive: k / tanh(k) == kCurveHeadroom sets the
-// small-signal gain to exactly 1, so a voice nowhere near the limit passes
-// through untouched. Change one and the other moves --
-// yarns/resources/waveshapers.py holds the k.
+// Below this the cutoff coefficient stops tracking and the resonance is the
+// only pitch the shape has: at MIDI 24 the peak sits at 43.9 Hz for a note of
+// 32.7.
+// How far past scale_ the curve reaches: excursions between what the voice may
+// put out and this are compressed, and scale_ >> 1 lands at 1/kCurveHeadroom of
+// the domain. k / tanh(k) == kCurveHeadroom sets the small-signal gain to 1, so
+// change one and the other moves; waveshapers.py holds the k.
 static const int32_t kCurveHeadroom = 4;
 
-// The curve, and its full-scale output converted to DAC codes. No fixed table
-// can carry that conversion: how many codes a voice may use moves with voice
-// count, so it comes from Init.
+// How many codes a voice may use moves with voice count, so the conversion
+// comes from Init rather than from the table.
 static inline int32_t SoftLimit(int32_t driven, int32_t state_to_codes_u15) {
   return Interpolate88(ws_soft_limit, static_cast<uint16_t>(driven + 32768))
       * state_to_codes_u15 >> 15;
 }
 
 static const int32_t kWhistleLowestPitch = 30 << 7;
-// THE ENVELOPE ALREADY CARRIES THE VOICE'S SHARE OF THE OUTPUT BUDGET, because
-// NoteOn peaks it there and this shape's EXCITATION is noise times that
-// envelope. So the filter state arrives scaled, and this must not scale it
-// again -- doing so cost 6 dB at every voice count. What is left for the gain
-// below to set is the resonator's own gain with pitch, and how hard the result
-// is driven into the limiter's curve. Holding it inside the output voltage
-// range is the curve's job, not this one's.
-
-// THE RESONATOR'S OWN GAIN AT RESONANCE, which is what both corrections in
-// this shape are correcting. It has two terms and they are handled in
-// different places, which is the whole of why the shape behaves as it does:
+// The envelope already carries what the voice may put out, and this shape's
+// excitation is noise times that envelope, so the state arrives scaled. The
+// gain below sets the resonator's pitch term and the drive into the curve.
 //
-//   with DAMP -- gain rises as 1/sqrt(damp). Corrected at the INPUT, by
-//   scaling the excitation, and taken back at the output. The state moves and
-//   the level does not. See damp_drive_q15.
-//
-//   with PITCH -- gain rises 2.85 dB an octave, MEASURED. Corrected at the
-//   OUTPUT only, below. The level moves and the state does not, and that
-//   asymmetry is why the state RAILS above MIDI 84: MEASURED |bp| at 0.53 of
-//   its rail at MIDI 108 against 0.08 at MIDI 24, railing 6-10% of samples at
-//   the top of the keyboard. A pitch term at the input is what that wants.
-//
-// BOTH NUMBERS BELOW ARE AVERAGES OVER MINUTES, and they have to be: at the Q
-// the top of TIMBRE asks for, this output is narrowband noise whose own
-// envelope decorrelates in about Q/f seconds -- 13 s at Q 1741 and middle C.
-// A render of a few seconds reads ONE DRAW from that envelope, not a level, and
-// two such draws an octave apart differ by more than the tilt being measured.
+// Both numbers in it are averages over minutes: at the top of TIMBRE this
+// output is narrowband noise whose envelope decorrelates in about Q/f seconds,
+// so a render of a few seconds reads one draw and not a level.
+// The resonator's gain at resonance rises as 1/sqrt(damp) and 2.85 dB an
+// octave with pitch. Both corrections here undo one term of it:
+//   damp, at the input, so the state moves and the level does not.
+//   pitch, at the output, so the level moves and the state does not. The state
+//   therefore rails above MIDI 84; a pitch term at the input is what that
+//   wants.
 static int32_t WhistleStateToOutput(
     int32_t pitch, int32_t state_to_codes_u15,
     int32_t damp_drive_q15) {
-  // HALF AN OCTAVE OF LEVEL PER OCTAVE OF PITCH undoes the resonator's pitch
-  // term. MEASURED over 20 s x 4 seeds: rms spans 0.97 dB from MIDI 24 to 84
-  // at TIMBRE 64 and 1.16 dB at TIMBRE 127. ABOVE MIDI 84 IT UNDER-CORRECTS --
-  // 3.4 dB down by MIDI 108 -- which is the same place the state rails, one
-  // uncorrected axis showing up twice.
+  // Half an octave of level per octave of pitch, which holds rms flat to
+  // MIDI 84 and under-corrects above it.
   const int32_t pitch_correction_numerator = 1;
   const int32_t pitch_correction_denominator = 2;
-  // HOW HARD THE KNEE IS DRIVEN. Nothing here holds the peak -- the limiter's
-  // curve does, asymptotically -- so this chooses LEVEL against how much of
-  // the signal the knee is bending. Noise only visits its peak (crest MEASURED
-  // 3.8 to 5.3 over 500 s runs), and everything under the peak was level left
-  // unspent; driving into the knee is what buys it back.
-  //
-  // MEASURED per voice at TIMBRE 127, against the hard cap this replaces:
-  // -9.82 dBFS for 1.45% of samples CUT, against -6.95 dBFS for 0.00%. At four
-  // voices the same change takes 22.7% cut to none. Doubling this again is a
-  // further +2.4 dB and puts 1.45% back on the curve's far end.
+  // How far into the curve the signal is driven, which is the level: noise
+  // visits its peak rarely, and everything under it is unspent until something
+  // bends the peak.
   const int32_t level_into_knee_q15 = 18800;
   int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * pitch_correction_numerator
@@ -1009,8 +979,6 @@ static int32_t WhistleStateToOutput(
   int32_t gain = level_into_knee_q15 *
       (Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 1) >> 15;
   int32_t whole = octaves_q16 >> 16;
-  // The state-to-codes conversion applied HERE rather than by the caller, so
-  // only the result crosses back into a loop that has to keep its registers.
   const int32_t level_at_pitch_u15 =
       whole >= 20 ? 0 : ((gain >> whole) * state_to_codes_u15 >> 15);
   return damp_drive_q15
@@ -1023,34 +991,18 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
   svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
-  // WHERE THE FILTER STATE SITS, which is not the same question as how loud the
-  // output is. bp swings as sqrt(Q) for a given drive -- MEASURED, rms rises as
-  // Q^0.52 across Q 7 to 443 -- so at high Q it rails and the state carries a
-  // few bits of signal instead of fifteen. Drive it by sqrt(damp) and make the
-  // same factor back at the output: the two are reciprocal, so the LEVEL is
-  // untouched and only the state moves. It moves it off the rail ALONG DAMP --
-  // MEASURED, |bp| holds 0.47 to 0.53 of its rail across the whole eight
-  // octaves of Q at MIDI 108. Along PITCH nothing here corrects it, and the
-  // correction that exists is applied at the output; see WhistleShareAtPitch.
-  //
-  // MEASURED against the same filter in double precision, fed the same
-  // excitation: 0 dB of signal to quantisation noise when bp rails, 71 to 78 dB
-  // just under it.
-  // THE DAMP'S OWN RANGE, and Q is its reciprocal: 0.146 down to 0.00055 here,
-  // so Q 6.9 up to 1820, the kWhistleQOctaves eight. It is NOT a bandwidth --
-  // that is f0 / Q, so the same damp is 38 Hz wide at middle C and 611 at MIDI
-  // 108, and naming these ends for the band attributed to damp a quantity that
-  // is half pitch's.
+  // bp swings as sqrt(Q) for a given drive, so at high Q it rails and carries
+  // a few bits instead of fifteen. Driving by sqrt(damp) and taking the same
+  // factor back at the output moves the state without moving the level.
+  // Q is the reciprocal of damp: 6.9 at the maximum, 1820 at the minimum.
+  // Bandwidth is f0 / Q, so it is not damp's alone.
   const uint32_t damp_max_q1_14 = 2392;
-  // A FLOOR AGAINST MODULATION. NOT against the warp: TIMBRE 127 lands EXACTLY
-  // here, so no value the warp asks for is ever clamped -- MEASURED, at every
-  // pitch and TIMBRE. What overshoots below it is the timbre ENVELOPE, whose
-  // chiff overshoots its destination and whose slew passes through values on
-  // the way to one. It matters because the make-up below is a RECIPROCAL of
-  // this: without the floor the make-up steps 50x between blocks under a
-  // maximal timbre envelope, and 3x with no modulation at all.
+  // A floor for the timbre envelope's overshoot; the warp never reaches it.
+  // The make-up is a reciprocal of this, so without the floor it steps 50x
+  // between blocks.
   const uint32_t damp_min_q1_14 =
       damp_max_q1_14 >> kWhistleQOctaves;
+  // The loop reads the per-sample damp; under a fast timbre the two disagree.
   uint32_t damp_at_block_start_q1_14 = static_cast<uint32_t>(
       input_samples[0] > 0 ? input_samples[0] : 0);
   if (damp_at_block_start_q1_14 < damp_min_q1_14) {
@@ -1063,27 +1015,16 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       (damp_at_block_start_q1_14 << 15) / damp_max_q1_14 * 32768u);
   const int32_t state_to_output_q15 = WhistleStateToOutput(
       resonant_pitch, incoherent_state_to_codes_u15_, damp_drive_q15);
-  // THE LINEAR GAIN THE CURVE STANDS IN FOR: what the voice may put on the
-  // output, corrected for pitch,
-  // times the make-up the damp correction owes back. Its own step because both
-  // scalars below derive from it, and 32 bits will not hold one expression.
-
-  // THE STATE IN THE CURVE'S DOMAIN, and the only gain the loop applies.
-  // scale_ >> 1 lands at 1/kCurveHeadroom of full scale, so the peak is held
-  // ASYMPTOTICALLY by the curve instead of being cut at a ceiling -- which is
-  // what lets a voice nowhere near the limit keep the whole of its level.
   const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(
       stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
       static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
       static_cast<uint32_t>(scale_ >> 1) * kCurveHeadroom));
-  // EXACTLY THE RECIPROCAL ABOVE, and that identity is the bound: a clamped bp
-  // times the drive is 2^30, so the loop's product can neither overflow int32
-  // nor index past the table. Arithmetic, not a measurement.
+  // The reciprocal, so the loop's product is INT16_MAX << 15: inside int32,
+  // and the table's last index.
   const int32_t bp_ceiling = state_into_curve_q15 > 0
       ? (INT16_MAX << 15) / state_into_curve_q15
       : INT16_MAX;
-  // Read once, not per sample: as a member it is a load inside the loop, and
-  // MEASURED that is 2 cycles a sample here and 6 in PING.
+  // A member here is a load per sample.
   const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Noise of its own, because a whistle sustains and the chiff decays.
@@ -1099,59 +1040,34 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   svf_ = svf;
 }
 
-// Above ~MIDI 63 the ring needs EXCITER AMOUNT: a bare envelope is too smooth to
-// carry energy at the note, and what is left is its own contour through the
-// low-pass. MEASURED at MIDI 81, chiff off the peak sits at 27 Hz, chiff up it
-// sits at 873 Hz against a note of 880.
+// Above ~MIDI 63 the ring needs EXCITER AMOUNT: a bare envelope is too smooth
+// to carry energy at the note.
 void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
   svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
-  // THE BAND-PASS REJECTS THE EXCITER'S DC AND THE LOW-PASS PASSES IT, and both
-  // are worth having. Passing DC means that past the ring the low-pass state IS
-  // the excitation's own level -- not a measured coincidence but the definition
-  // of a low-pass: MEASURED settling to 16383, which is what the halving below
-  // hands it. Under a percussive envelope that is a thump; under a sustained
-  // one it is a standing offset, which is why the band-pass is the one to reach
-  // for by default. (It settles there at every pitch below the tightest damp;
-  // at the top of TIMBRE the ring outlasts seconds and has not settled yet.)
+  // The low-pass passes the exciter's DC, so past the ring its state is the
+  // excitation's level: a thump under a percussive envelope, a standing offset
+  // under a sustained one. The band-pass rejects it.
   const bool band_pass = shape_ == OSC_SHAPE_PING_BP;
-  // UNITY IS SOLVED, NOT TRIMMED. Whatever the exciter does, `bp` and `lp`
-  // leave the SVF through Clip16, so the state this reads is bounded by
-  // INT16_MAX, and state_to_codes_u15 says what a full-scale state is worth in
-  // DAC codes. The gain that lands one bound exactly on the other spends the
-  // whole of the state's range and cannot exceed what the voice may put out:
-  //
-  //     state * gain_q12 >> 12 == scale_ >> 1   at state == INT16_MAX
-  //
-  // THE LIMITER IS WHY IT IS A REFERENCE AND NOT A CEILING. Unity leaves the
-  // level of a RING far under what the voice may put out -- MEASURED -13.8
-  // dBFS against the
-  // low-pass's -8.4 at MIDI 60, because a ring visits its peak and the
-  // low-pass's DC pedestal sits on it -- and under a hard cap that gap could
-  // only be spent as clipping. The curve spends it as compression instead.
-  //
-  //   MEASURED per voice at MIDI 60, TIMBRE 127, unity against twice it: the
-  //   band-pass gains 5.4 dB and the LOW-PASS 4.2 -- its pedestal moves from
-  //   0.76 of scale_ >> 1 to 0.96, which is the curve's asymptote taking over
-  //   from the Clip16 rail. The 3rd harmonic that buys it is 31 dB down and
-  //   every harmonic above it is 21 dB below the one before.
+  // Both states leave the SVF through Clip16, so the gain that lands INT16_MAX
+  // on what the voice may put out spends the whole of the state's range. The
+  // curve makes that a reference rather than a ceiling: it leaves a ring far
+  // under, and the drive multiple spends the difference for 5.4 dB in the
+  // band-pass and 4.2 in the low-pass.
   const int32_t kPingUnityGain_q12 = (kEnvelopeSampleMax << 12) / INT16_MAX;
   const int32_t kPingDriveMultiple = 2;
   const int32_t ping_gain_q12 = kPingUnityGain_q12 * kPingDriveMultiple
       * coherent_state_to_codes_u15_ >> 15;
   const int32_t voice_ceiling = scale_ >> 1;
-  // THIS BOUNDS THE TABLE INDEX BY ARITHMETIC, so the loop needs no clamp:
-  // the state is Clip16-bounded, so `driven` peaks at INT16_MAX times
-  // kPingDriveMultiple / kCurveHeadroom. Drive it as far as the domain reaches
-  // and that stops being true, so the two are tied together here.
+  // driven peaks at INT16_MAX * kPingDriveMultiple / kCurveHeadroom, so the
+  // table index is bounded by the two constants and needs no clamp.
   STATIC_ASSERT(kPingDriveMultiple <= kCurveHeadroom, ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 = ping_gain_q12 * INT16_MAX
       / (voice_ceiling * kCurveHeadroom);
   const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
   RENDER_CORE_NO_OUTPUT_GAIN(
-    // Halved going in: the resonant step response overshoots the excitation, and
-    // at full scale the ring railed for 7% of the note.
+    // Halved: the resonant step response overshoots the excitation.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
     const int32_t driven =
         (band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
