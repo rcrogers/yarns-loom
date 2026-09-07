@@ -13,13 +13,15 @@
 #   make ui         host display: the real driver, its GPIO decoded
 #   make osc        host oscillator: all 42 shapes, sample for sample
 #   make mix        the summed mix stays inside the span the voices were given
+#   make level      what one voice puts out, per shape -- a measurement, no verdict
+#   make step       a sample step against the bandwidth that could produce it
 #   make warp       every shape's timbre map is monotone, including below zero
 #   make qemu       differentials: envelope and oscillator asm == C, under QEMU
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
 #   make cycles     what the envelope costs per block, against the baseline
 
-.PHONY: all sim host cv ui osc warp mix qemu check firmware cycles
+.PHONY: all sim host cv ui osc warp mix level step qemu check firmware cycles
 
 # Rebuild the sim, then run the full verification.
 all: sim check
@@ -60,6 +62,23 @@ warp:
 mix:
 	sh tools/mixtest/build.sh
 
+# WHAT ONE VOICE PUTS OUT. No verdict: these numbers are the input to voicing
+# decisions, and a gate on them would freeze a decision nobody has taken.
+level:
+	sh tools/leveltest/build.sh
+	./tools/leveltest/leveltest table
+
+# A SAMPLE STEP against the bandwidth that could have produced it. Also no
+# verdict -- the bound holds for the narrowband shapes only, and driver.cc
+# carries what it has already ruled out.
+#
+# In `check` for the COMPILE, which is the rot guard both harnesses need: this
+# one builds leveltest first for its generated shape names, so a rename in
+# oscillator.h or voice.h breaks the gate instead of a tool nobody ran. The
+# scratch version of leveltest died of exactly that, unnoticed.
+step:
+	sh tools/steptest/build.sh
+
 # THE ASM DIFFERENTIALS. Both prove a hand-written asm path renders exactly what
 # the C it replaces does -- the one class of bug a golden cannot see, because a
 # golden pins what the code does, not that two implementations agree.
@@ -73,7 +92,7 @@ qemu:
 
 # Verify the tree is in sync WITHOUT rebuilding, so a stale committed sim shows
 # up as a simparity failure rather than being silently refreshed.
-check: host cv ui osc warp mix qemu
+check: host cv ui osc warp mix step qemu
 	node tools/chiff_checks/simparity.js chiff_sim.html
 	node tools/chiff_checks/peakfloor.js
 	node tools/chiff_checks/xvmod.js

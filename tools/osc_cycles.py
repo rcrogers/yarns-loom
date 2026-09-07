@@ -350,15 +350,15 @@ if not HAVE_LINES:
   print('  NO LINE INFO in this disassembly (use objdump -dl): the edge body is')
   print('  charged to every sample, which OVERSTATES every band-limited shape.')
 print('  %-28s %6s %6s %6s %6s %8s %8s'
-      % ('shape', 'floor', 'ceil', 'C4', 'MIDI %d' % HIGHEST_MIDI,
+      % ('shape', 'floor', 'C4', 'MIDI %d' % HIGHEST_MIDI, 'ceil',
          'spills', 'branches'))
 for cycles, base, effective_c4, effective, spills, branches, short in rows:
-    print('  %-28s %6d %6d %6.0f %6.0f %8d %8d'
-          % (short[:28], base, cycles, effective_c4, effective,
+    print('  %-28s %6d %6.0f %6.0f %6d %8d %8d'
+          % (short[:28], base, effective_c4, effective, cycles,
              spills, branches))
 print('  ---')
-print('  Cycles a sample. floor = a sample where nothing wrapped; ceil = the')
-print('  dearest way through one sample. The right two charge the')
+print('  Cycles a sample, cheapest case to dearest. floor = a sample where')
+print('  nothing wrapped; ceil = the dearest way through one. The middle two charge the')
 print('  gap between them at the rate a wrap falls at that pitch: %.3f a sample'
       % edges_per_sample(HIGHEST_MIDI))
 print('  at MIDI %d and %.3f at middle C, times the modulator ratio (up to %.0fx)'
