@@ -82,12 +82,16 @@ def blocks(dis_path):
 
 
 def goldens():
-  path = os.path.join(ROOT, 'tools/osctest/golden_shapes.json')
-  try:
-    with open(path) as f:
-      return json.load(f)
-  except (IOError, ValueError):
-    return {}
+  """Whether the render still matches the RECORDED goldens. Ground truth is the
+  recording, not another snapshot: two snapshots can be wrong together."""
+  subprocess.run(['sh', 'tools/osctest/build.sh'], cwd=ROOT,
+                 capture_output=True, text=True)
+  out = subprocess.run([sys.executable, os.path.join(HERE, 'osctest/golden.js')],
+                       cwd=ROOT, capture_output=True, text=True)
+  check = subprocess.run(['node', 'tools/osctest/golden.js'], cwd=ROOT,
+                         capture_output=True, text=True)
+  return {'matches_recorded': 'PASS' in check.stdout,
+          'detail': check.stdout.strip().splitlines()[:4]}
 
 
 def capture():
@@ -132,12 +136,11 @@ def report(before, after):
       moved = True
       print('  block: %-38s %.1f%% -> %.1f%%  %+.1f' % (case, a, b, b - a))
 
-  changed = [s for s in set(before['goldens']) | set(after['goldens'])
-             if before['goldens'].get(s) != after['goldens'].get(s)]
-  if changed:
+  if not after['goldens'].get('matches_recorded', True):
     moved = True
-    print('  goldens MOVED for shape(s): %s' % ', '.join(sorted(changed, key=int)))
-    print('    the render changed; neutral is not available. Say why.')
+    print('  goldens do NOT match the recording: the render changed.')
+    for line in after['goldens'].get('detail', []):
+      print('    ' + line)
 
   if not moved:
     print('  no metric moved: cycles, spills, block totals, flash and goldens '

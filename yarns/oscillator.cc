@@ -981,7 +981,9 @@ static const int32_t kWhistleLowestPitch = 30 << 7;
 // envelope decorrelates in about Q/f seconds -- 13 s at Q 1741 and middle C.
 // A render of a few seconds reads ONE DRAW from that envelope, not a level, and
 // two such draws an octave apart differ by more than the tilt being measured.
-static int32_t WhistleLevelAtPitch(int32_t pitch, int32_t state_to_codes_u15) {
+static int32_t WhistleStateToOutput(
+    int32_t pitch, int32_t state_to_codes_u15,
+    int32_t damp_drive_q15) {
   // HALF AN OCTAVE OF LEVEL PER OCTAVE OF PITCH undoes the resonator's pitch
   // term. MEASURED over 20 s x 4 seeds: rms spans 0.97 dB from MIDI 24 to 84
   // at TIMBRE 64 and 1.16 dB at TIMBRE 127. ABOVE MIDI 84 IT UNDER-CORRECTS --
@@ -1009,7 +1011,12 @@ static int32_t WhistleLevelAtPitch(int32_t pitch, int32_t state_to_codes_u15) {
   int32_t whole = octaves_q16 >> 16;
   // The state-to-codes conversion applied HERE rather than by the caller, so
   // only the result crosses back into a loop that has to keep its registers.
-  return whole >= 20 ? 0 : ((gain >> whole) * state_to_codes_u15 >> 15);
+  const int32_t level_at_pitch_u15 =
+      whole >= 20 ? 0 : ((gain >> whole) * state_to_codes_u15 >> 15);
+  return damp_drive_q15
+      ? static_cast<int32_t>(
+            (static_cast<uint32_t>(level_at_pitch_u15) << 15) / damp_drive_q15)
+      : level_at_pitch_u15;
 }
 
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
@@ -1054,27 +1061,21 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   }
   const int32_t damp_drive_q15 = IntegerSqrt(
       (damp_at_block_start_q1_14 << 15) / damp_max_q1_14 * 32768u);
-  const int32_t level_at_pitch_u15 =
-      WhistleLevelAtPitch(resonant_pitch, incoherent_state_to_codes_u15_);
+  const int32_t state_to_output_q15 = WhistleStateToOutput(
+      resonant_pitch, incoherent_state_to_codes_u15_, damp_drive_q15);
   // THE LINEAR GAIN THE CURVE STANDS IN FOR: what the voice may put on the
   // output, corrected for pitch,
   // times the make-up the damp correction owes back. Its own step because both
   // scalars below derive from it, and 32 bits will not hold one expression.
 
-  const int32_t state_to_output_q15 = damp_drive_q15
-      ? static_cast<int32_t>(
-            (static_cast<uint32_t>(level_at_pitch_u15) << 15)
-                / damp_drive_q15)
-      : level_at_pitch_u15;
   // THE STATE IN THE CURVE'S DOMAIN, and the only gain the loop applies.
   // scale_ >> 1 lands at 1/kCurveHeadroom of full scale, so the peak is held
   // ASYMPTOTICALLY by the curve instead of being cut at a ceiling -- which is
   // what lets a voice nowhere near the limit keep the whole of its level.
-  const int32_t voice_ceiling = scale_ >> 1;
   const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(
       stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
       static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
-      static_cast<uint32_t>(voice_ceiling) * kCurveHeadroom));
+      static_cast<uint32_t>(scale_ >> 1) * kCurveHeadroom));
   // EXACTLY THE RECIPROCAL ABOVE, and that identity is the bound: a clamped bp
   // times the drive is 2^30, so the loop's product can neither overflow int32
   // nor index past the table. Arithmetic, not a measurement.
