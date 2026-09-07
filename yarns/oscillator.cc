@@ -154,21 +154,12 @@ void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias)
   raw_timbre_bias_ = timbre_bias;
 }
 
-// THE BOTTOM OF A MAP IS ITS BOTTOM. The per-sample timbre is SIGNED and goes
-// below zero in the field, because NoteOn warps the DESTINATION and a negative
-// TIMBRE MOD ENVELOPE puts one there; only int16 constrains it. Every map that
-// takes it is an ABSOLUTE POSITION -- a width, a cutoff, a damp -- so below the
-// bottom it must answer the bottom.
+// The per-sample timbre is signed: NoteOn warps the destination, so a negative
+// TIMBRE MOD ENVELOPE puts one below zero. A map that reads it as an absolute
+// position -- a width, a cutoff, a damp -- answers its bottom there.
 //
-// Two ways it went wrong without this, and both are silent:
-//   - an UNSIGNED parameter (lut_env_expo_u16's index, and CutoffFromFreq's shift)
-//     wraps a negative to the TOP of the range: the narrowest or brightest
-//     thing the shape can do, at the moment the player asked for the least.
-//   - a shift by a wrapped count is undefined, and answers zero on this target.
-//
-// A shape whose parameter is genuinely signed does not want this: TANH SINE's
-// timbre is a depth and DIRAC COMB's is a zone offset, both continuous through
-// zero. osctest's `negative` mode is what tells the two apart.
+// A shape whose parameter is continuous through zero, a depth or an offset,
+// does not take this.
 static inline int16_t TimbreAtOrAboveZero(int16_t timbre) {
   return timbre < 0 ? 0 : timbre;
 }
@@ -429,38 +420,24 @@ void Oscillator::Render(int16_t* audio_mix) {
   RENDER_PERIODIC(__VA_ARGS__); \
   modulator_phase_ = modulator_phase; \
 
-// TRUE ON THE SAMPLE A PHASE ACCUMULATOR WRAPPED.
-//
-// Named, rather than left as the bare `phase < phase_increment` it compiles to,
-// because THE RATE AT WHICH IT IS TRUE IS phase_increment / 2^32 A SAMPLE -- and
-// everything it guards is paid at that rate, not once a sample. A cycle budget
-// that charges a guarded region every sample is wrong by the reciprocal of this,
-// which for a master reset at middle C is a factor of 170.
-//
-// tools/osc_cycles.py finds these by source line and weights what they guard.
-// A bare comparison gives it nothing to find, and that is the whole reason this
-// exists. It costs nothing: MEASURED, every shape's cycle count and the flash
-// size are unchanged. (The .text is not byte-identical -- GCC reschedules
-// slightly -- so this is verified by measurement, not by inspection.)
+// True on the sample a phase accumulator wrapped, which happens at a rate of
+// phase_increment / 2^32. tools/osc_cycles.py locates these by source line and
+// charges what they guard at that rate.
 static inline bool PhaseWrapped(uint32_t phase, uint32_t phase_increment) {
   return phase < phase_increment;
 }
 
-// HOW FAR INTO THIS SAMPLE THE EDGE FELL, in 0..65535: the phase past the edge
+// How far into this sample the edge fell, in 0..65535: the phase past the edge
 // against the phase one sample covers.
 //
-// The fast form divides by the increment's HIGH HALF, which rounds to zero for
-// a modulator advancing less than 65536 phase units a sample. That is
-// reachable: a negative TIMBRE MOD ENVELOPE can collapse the sync ratio, and if
-// it does so while the follower sits within one increment of its wrap, the wrap
-// is crossed by an increment too small to survive the shift. Cortex-M3's UDIV
-// answers zero for a zero divisor, which lands a half-scale BLEP where none
-// belongs. Below the threshold the division runs at FULL WIDTH instead, which
-// is exact and cannot divide by zero: the numerator is under one increment
-// there, so the shift has room, and an increment of zero takes the same arm as
-// an edge a whole sample old. FractionU32 would also serve and is what the
-// master's reset time uses, but inlining it at three sites costs 1152 bytes of
-// flash and a clz where two compares do.
+// The fast form divides by the increment's high half, which rounds to zero for
+// a modulator advancing less than 65536 phase units a sample -- reachable when
+// a negative TIMBRE MOD ENVELOPE collapses the sync ratio while the follower
+// sits within one increment of its wrap. UDIV answers zero for a zero divisor,
+// which lands a half-scale BLEP where none belongs. Below the threshold the
+// division runs at full width: the numerator is under one increment there, so
+// the shift has room, and a zero increment takes the same arm as an edge a
+// whole sample old.
 static inline uint32_t EdgeTime(
     uint32_t phase_past_edge, uint32_t phase_increment) {
   if (phase_increment >= (1 << 16)) {
