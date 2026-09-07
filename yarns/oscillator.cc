@@ -954,6 +954,18 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   }
   const int32_t damp_drive_u15 = IntegerSqrt(
       (damp_at_block_start_u1_14 << 15) / kWhistleDampMax_u1_14 * 32768u);
+  // The excitation is scaled by damp_drive_u15 going in and the output by its
+  // reciprocal coming out, so the state is held in units of that drive. When
+  // the drive moves, the state already in the filter is still in the old
+  // units, and the reciprocal at the output no longer cancels what produced
+  // it. Rescale it into the new units.
+  if (previous_damp_drive_u15_ > 0 && damp_drive_u15 != previous_damp_drive_u15_) {
+    svf.bp = static_cast<int32_t>(svf.bp) * damp_drive_u15
+        / previous_damp_drive_u15_;
+    svf.lp = static_cast<int32_t>(svf.lp) * damp_drive_u15
+        / previous_damp_drive_u15_;
+  }
+  previous_damp_drive_u15_ = damp_drive_u15;
   const int32_t state_to_output_q15 = WhistleStateToOutput(
       resonant_pitch, incoherent_scale_u15_, damp_drive_u15);
   const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(

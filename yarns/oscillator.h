@@ -156,6 +156,7 @@ class Oscillator {
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
     svf_.Init();
+    previous_damp_drive_u15_ = 0;
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
@@ -365,6 +366,9 @@ class Oscillator {
   int32_t next_sample_;
   int16_t prev_transfer_raw_;
   int16_t prev_transfer_avg_;
+  // WHISTLE normalises its filter state by damp_drive_u15. Changing that
+  // exponent means rescaling the state it normalised, so the last one is kept.
+  int32_t previous_damp_drive_u15_;
   uint16_t scale_;
   uint16_t incoherent_scale_;
   uint16_t coherent_scale_u15_;
