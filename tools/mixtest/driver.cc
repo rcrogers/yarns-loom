@@ -52,13 +52,16 @@ ADSR adsr;
 const int kPitches[] = { 24, 48, 60, 84, 108 };
 const int kTimbres[] = { 0, 8192, 16384, 32767 };
 const int kChiffAmounts[] = { 0, 64, 127 };
+// The panel knob, which sets where a shape's map starts before the envelope
+// moves it. WHISTLE's level spans 24 dB across this.
+const int kKnobs[] = { 0, 64, 127 };
 // Long enough for the strike and the ring after it; the shapes that break the
 // contract do it at the onset.
 const int kBlocks = 45000 / 4 / kAudioBlockSize;
 
 struct Worst {
   int32_t excursion;
-  int shape, pitch, timbre, chiff, voices;
+  int shape, pitch, timbre, chiff, voices, knob;
 };
 
 int32_t Excursion(int16_t sample, uint16_t zero_code) {
@@ -69,13 +72,15 @@ int32_t Excursion(int16_t sample, uint16_t zero_code) {
 }
 
 void RunCase(int shape, int num_voices, int pitch, int timbre, int chiff,
-             Worst* worst) {
+             int timbre_knob, Worst* worst) {
   Random::Seed(0x21);
   for (uint8_t v = 0; v < kMaxVoices; ++v) voices[v].Init();
   audio_output.Init(true);
   for (uint8_t v = 0; v < num_voices; ++v) {
     voices[v].set_oscillator_mode(OSCILLATOR_MODE_ENVELOPED);
     voices[v].set_oscillator_shape(static_cast<uint8_t>(shape));
+    voices[v].set_timbre_init(static_cast<uint8_t>(timbre_knob));
+    voices[v].timbre_init_current_ = voices[v].timbre_init_target_;
   }
   audio_output.AssignVoices(&voices[0], DC_PITCH,
                             num_voices, num_voices);
@@ -107,6 +112,7 @@ void RunCase(int shape, int num_voices, int pitch, int timbre, int chiff,
         worst->excursion = e;
         worst->shape = shape; worst->pitch = pitch; worst->timbre = timbre;
         worst->chiff = chiff; worst->voices = num_voices;
+        worst->knob = timbre_knob;
       }
     }
   }
@@ -131,8 +137,10 @@ int main(int argc, char** argv) {
     for (int n = 1; n <= kMaxVoices; ++n) {
       for (size_t p = 0; p < sizeof(kPitches)/sizeof(kPitches[0]); ++p) {
         for (size_t t = 0; t < sizeof(kTimbres)/sizeof(kTimbres[0]); ++t) {
-          for (size_t c = 0; c < sizeof(kChiffAmounts)/sizeof(kChiffAmounts[0]); ++c) {
-            RunCase(shape, n, kPitches[p], kTimbres[t], kChiffAmounts[c], &worst);
+          for (size_t c = 0; c < sizeof(kChiffAmounts)/sizeof(kChiffAmounts[0]); ++c)
+          for (size_t k = 0; k < sizeof(kKnobs)/sizeof(kKnobs[0]); ++k) {
+            RunCase(shape, n, kPitches[p], kTimbres[t], kChiffAmounts[c],
+                    kKnobs[k], &worst);
           }
         }
       }
@@ -141,10 +149,10 @@ int main(int argc, char** argv) {
     if (over) ++failures;
     if (over || verbose) {
       printf("%s shape %2d  worst %6d of %d (%.2f)  "
-             "MIDI %d, TIMBRE %d, EXCITER %d, %d voice(s)\n",
+             "MIDI %d, TIMBRE %d + mod %d, EXCITER %d, %d voice(s)\n",
              over ? "FAIL" : "    ", shape, worst.excursion, allowance,
              worst.excursion / (double) allowance,
-             worst.pitch, worst.timbre, worst.chiff, worst.voices);
+             worst.pitch, worst.knob, worst.timbre, worst.chiff, worst.voices);
     }
   }
   if (failures) {
@@ -156,6 +164,6 @@ int main(int argc, char** argv) {
   printf("PASS %d shapes stay inside the output range at 1..%d voices "
          "(%lu cases each)\n",
          OSC_SHAPE_FM + 1, kMaxVoices,
-         (unsigned long) (kMaxVoices * 5 * 4 * 3));
+         (unsigned long) (kMaxVoices * 5 * 4 * 3 * 3));
   return 0;
 }
