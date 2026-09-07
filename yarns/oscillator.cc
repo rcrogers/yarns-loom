@@ -234,7 +234,7 @@ int16_t Oscillator::WarpTimbre(
     // was worth asking while bp sat on its rail -- the extra was not realised,
     // MEASURED as 0.4 dB of change in peak-to-octave-up between Q 435 and 3482.
     // Off the rail it is realised, and the ring at middle C runs about 2 s.
-    const int32_t damp_at_widest_q1_14 = 2392;
+    const int32_t damp_max_q1_14 = 2392;
     const uint32_t q_octaves = kWhistleQOctaves;
     // OFF THE BOTTOM OF THE MAP IS THE WIDEST SETTING, and it has to be said
     // here: the cast below wraps a negative timbre into a shift of 65527, which
@@ -243,7 +243,7 @@ int16_t Oscillator::WarpTimbre(
     // it -- and the note then grows for as long as it is held.
     if (timbre < 0) timbre = 0;
     uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * q_octaves) << 1;
-    int32_t damp = damp_at_widest_q1_14 * // 2^-octaves
+    int32_t damp = damp_max_q1_14 * // 2^-octaves
       Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16;
     return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
   }
@@ -968,7 +968,7 @@ static const int32_t kWhistleLowestPitch = 30 << 7;
 //
 //   with DAMP -- gain rises as 1/sqrt(damp). Corrected at the INPUT, by
 //   scaling the excitation, and taken back at the output. The state moves and
-//   the level does not. See excitation_scale_q15.
+//   the level does not. See damp_drive_q15.
 //
 //   with PITCH -- gain rises 2.85 dB an octave, MEASURED. Corrected at the
 //   OUTPUT only, below. The level moves and the state does not, and that
@@ -1029,7 +1029,12 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // MEASURED against the same filter in double precision, fed the same
   // excitation: 0 dB of signal to quantisation noise when bp rails, 71 to 78 dB
   // just under it.
-  const uint32_t damp_at_widest_q1_14 = 2392;
+  // THE DAMP'S OWN RANGE, and Q is its reciprocal: 0.146 down to 0.00055 here,
+  // so Q 6.9 up to 1820, the kWhistleQOctaves eight. It is NOT a bandwidth --
+  // that is f0 / Q, so the same damp is 38 Hz wide at middle C and 611 at MIDI
+  // 108, and naming these ends for the band attributed to damp a quantity that
+  // is half pitch's.
+  const uint32_t damp_max_q1_14 = 2392;
   // A FLOOR AGAINST MODULATION. NOT against the warp: TIMBRE 127 lands EXACTLY
   // here, so no value the warp asks for is ever clamped -- MEASURED, at every
   // pitch and TIMBRE. What overshoots below it is the timbre ENVELOPE, whose
@@ -1037,14 +1042,18 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // the way to one. It matters because the make-up below is a RECIPROCAL of
   // this: without the floor the make-up steps 50x between blocks under a
   // maximal timbre envelope, and 3x with no modulation at all.
-  const uint32_t damp_at_tightest_q1_14 =
-      damp_at_widest_q1_14 >> kWhistleQOctaves;
-  uint32_t damp_q1_14 = static_cast<uint32_t>(
+  const uint32_t damp_min_q1_14 =
+      damp_max_q1_14 >> kWhistleQOctaves;
+  uint32_t damp_at_block_start_q1_14 = static_cast<uint32_t>(
       input_samples[0] > 0 ? input_samples[0] : 0);
-  if (damp_q1_14 < damp_at_tightest_q1_14) damp_q1_14 = damp_at_tightest_q1_14;
-  if (damp_q1_14 > damp_at_widest_q1_14) damp_q1_14 = damp_at_widest_q1_14;
-  const int32_t excitation_scale_q15 = IntegerSqrt(
-      (damp_q1_14 << 15) / damp_at_widest_q1_14 * 32768u);
+  if (damp_at_block_start_q1_14 < damp_min_q1_14) {
+    damp_at_block_start_q1_14 = damp_min_q1_14;
+  }
+  if (damp_at_block_start_q1_14 > damp_max_q1_14) {
+    damp_at_block_start_q1_14 = damp_max_q1_14;
+  }
+  const int32_t damp_drive_q15 = IntegerSqrt(
+      (damp_at_block_start_q1_14 << 15) / damp_max_q1_14 * 32768u);
   const int32_t level_at_pitch_u15 =
       WhistleLevelAtPitch(resonant_pitch, incoherent_state_to_codes_u15_);
   // THE LINEAR GAIN THE CURVE STANDS IN FOR: what the voice may put on the
@@ -1052,10 +1061,10 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // times the make-up the damp correction owes back. Its own step because both
   // scalars below derive from it, and 32 bits will not hold one expression.
 
-  const int32_t state_to_output_q15 = excitation_scale_q15
+  const int32_t state_to_output_q15 = damp_drive_q15
       ? static_cast<int32_t>(
             (static_cast<uint32_t>(level_at_pitch_u15) << 15)
-                / excitation_scale_q15)
+                / damp_drive_q15)
       : level_at_pitch_u15;
   // THE STATE IN THE CURVE'S DOMAIN, and the only gain the loop applies.
   // scale_ >> 1 lands at 1/kCurveHeadroom of full scale, so the peak is held
@@ -1079,7 +1088,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
         Random::GetSample() * input_samples[kAudioBlockSize] >> 15;
-    excitation = excitation * excitation_scale_q15 >> 15;
+    excitation = excitation * damp_drive_q15 >> 15;
     svf.RenderSampleAtPitch(excitation, timbre);
     int32_t band_pass = svf.bp;
     CONSTRAIN(band_pass, -bp_ceiling, bp_ceiling);
