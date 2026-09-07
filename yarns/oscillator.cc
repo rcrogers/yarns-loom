@@ -279,8 +279,8 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   int32_t new_scale = WarpTimbre(midpoint_timbre, new_shape);
   timbre_envelope_.Rescale(new_scale, old_scale);
 
-  // scale_for_shape moves when the shape changes which way the voices sum: a held
-  // note is meant to change shape, not loudness.
+  // scale_for_shape moves when the new shape sums its voices differently, and a
+  // held note should change shape without changing loudness.
   gain_envelope_.Rescale(scale_for_shape(new_shape), scale_for_shape(shape_));
 
   shape_ = new_shape;
@@ -364,8 +364,8 @@ void Oscillator::Render(int16_t* audio_mix) {
 // The product shift folds into ARM's barrel-shifted ADD operand
 // (add r, mix, prod, asr #15).
 // The scaffolding every shape shares: the BLEP carry, the timbre read, and the
-// single walk down the two halves. WHAT REACHES THE MIX IS THE CALLER'S, because
-// where the gain envelope is spent is not the same for every shape.
+// single walk down the two halves. The caller supplies mix_term, since shapes
+// differ in where they spend the gain envelope.
 #define RENDER_LOOP(mix_term, ...) \
   int16_t next_sample = next_sample_; \
   for (size_t size = kAudioBlockSize; size--;) { \
