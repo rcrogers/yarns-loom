@@ -150,9 +150,9 @@ class Oscillator {
   inline void Init(uint16_t coherent_scale, uint16_t incoherent_scale) {
     scale_ = coherent_scale;
     incoherent_scale_ = incoherent_scale;
-    coherent_state_to_codes_u15_ = static_cast<uint16_t>(
+    coherent_scale_u15_ = static_cast<uint16_t>(
         (static_cast<uint32_t>(coherent_scale >> 1) << 15) / INT16_MAX);
-    incoherent_state_to_codes_u15_ = static_cast<uint16_t>(
+    incoherent_scale_u15_ = static_cast<uint16_t>(
         (static_cast<uint32_t>(incoherent_scale >> 1) << 15) / INT16_MAX);
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
@@ -220,16 +220,10 @@ class Oscillator {
         shape == OSC_SHAPE_PING_LP;
   }
 
-  // WHAT A FULL-SCALE FILTER STATE IS WORTH IN DAC CODES: the voice's ceiling
-  // over the state's own range, so an excitation shape can apply its allowance
-  // at its OUTPUT. NOT a "share" -- it is a UNIT CONVERSION, and it is worth
-  // the distinction because it prints as the same integer as the ceiling it
-  // came from (25665 at one voice, 6416 at four): (x << 15) / 32767 is x. Two
-  // units, one number, so a mix-up cannot be caught by reading a value.
-  // Precomputed because scale_ is fixed from Init.
-  inline uint16_t state_to_codes_u15(OscillatorShape shape) const {
+  // scale_for() >> 1 as a multiplier for a full-scale int16.
+  inline uint16_t scale_u15(OscillatorShape shape) const {
     return shape == OSC_SHAPE_WHISTLE
-        ? incoherent_state_to_codes_u15_ : coherent_state_to_codes_u15_;
+        ? incoherent_scale_u15_ : coherent_scale_u15_;
   }
 
   // start_pitch is the new note's pitch at onset (the portamento glide's
@@ -400,8 +394,8 @@ class Oscillator {
   int16_t prev_transfer_avg_;
   uint16_t scale_;
   uint16_t incoherent_scale_;
-  uint16_t coherent_state_to_codes_u15_;
-  uint16_t incoherent_state_to_codes_u15_;
+  uint16_t coherent_scale_u15_;
+  uint16_t incoherent_scale_u15_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);

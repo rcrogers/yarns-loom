@@ -930,17 +930,17 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // Below this the cutoff coefficient stops tracking and the resonance is the
 // only pitch the shape has: at MIDI 24 the peak sits at 43.9 Hz for a note of
 // 32.7.
-// How far past scale_ the curve reaches: excursions between what the voice may
-// put out and this are compressed, and scale_ >> 1 lands at 1/kCurveHeadroom of
-// the domain. k / tanh(k) == kCurveHeadroom sets the small-signal gain to 1, so
+// The soft limiter's domain as a multiple of scale_ >> 1: excursions between what the voice may
+// put out and this are compressed, and scale_ >> 1 lands at 1/kSoftLimitHeadroom of
+// the domain. k / tanh(k) == kSoftLimitHeadroom sets the small-signal gain to 1, so
 // change one and the other moves; waveshapers.py holds the k.
-static const int32_t kCurveHeadroom = 4;
+static const int32_t kSoftLimitHeadroom = 4;
 
 static inline int32_t SoftLimit(
-    int32_t state_in_curve, int32_t state_to_codes_u15) {
+    int32_t state_in_curve, int32_t scale_u15) {
   return Interpolate88(
       ws_soft_limit, static_cast<uint16_t>(state_in_curve + 32768))
-      * state_to_codes_u15 >> 15;
+      * scale_u15 >> 15;
 }
 
 static const int32_t kWhistleLowestPitch = 30 << 7;
@@ -958,7 +958,7 @@ static const int32_t kWhistleLowestPitch = 30 << 7;
 //   therefore rails above MIDI 84; a pitch term at the input is what that
 //   wants.
 static int32_t WhistleStateToOutput(
-    int32_t pitch, int32_t state_to_codes_u15,
+    int32_t pitch, int32_t scale_u15,
     int32_t damp_drive_u15) {
   // Half an octave of level per octave of pitch, which holds rms flat to
   // MIDI 84 and under-corrects above it.
@@ -978,7 +978,7 @@ static int32_t WhistleStateToOutput(
   const int32_t level_at_pitch_u15 =
       whole_octaves >= 20
           ? 0
-          : ((level_u15 >> whole_octaves) * state_to_codes_u15 >> 15);
+          : ((level_u15 >> whole_octaves) * scale_u15 >> 15);
   return damp_drive_u15
       ? static_cast<int32_t>(
             (static_cast<uint32_t>(level_at_pitch_u15) << 15) / damp_drive_u15)
@@ -1012,18 +1012,18 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t damp_drive_u15 = IntegerSqrt(
       (damp_at_block_start_u1_14 << 15) / damp_max_u1_14 * 32768u);
   const int32_t state_to_output_q15 = WhistleStateToOutput(
-      resonant_pitch, incoherent_state_to_codes_u15_, damp_drive_u15);
+      resonant_pitch, incoherent_scale_u15_, damp_drive_u15);
   const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(
       stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
       static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
-      static_cast<uint32_t>(scale_ >> 1) * kCurveHeadroom));
+      static_cast<uint32_t>(scale_ >> 1) * kSoftLimitHeadroom));
   // The reciprocal, so the loop's product is INT16_MAX << 15: inside int32,
   // and the table's last index.
   const int32_t bp_ceiling = state_into_curve_q15 > 0
       ? (INT16_MAX << 15) / state_into_curve_q15
       : INT16_MAX;
   // A member here is a load per sample.
-  const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
+  const int32_t scale_u15 = coherent_scale_u15_;
   RENDER_CORE_EXCITED(
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
@@ -1033,7 +1033,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     int32_t state = svf.bp;
     CONSTRAIN(state, -bp_ceiling, bp_ceiling);
     const int32_t state_in_curve = state * state_into_curve_q15 >> 15;
-    this_sample = SoftLimit(state_in_curve, state_to_codes_u15);
+    this_sample = SoftLimit(state_in_curve, scale_u15);
   )
   svf_ = svf;
 }
@@ -1049,26 +1049,26 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // under a sustained one. The band-pass rejects it.
   const bool is_band_pass = shape_ == OSC_SHAPE_PING_BP;
   // Both states leave the SVF through Clip16, so the gain that lands INT16_MAX
-  // on what the voice may put out spends the whole of the state's range. The
+  // on scale_ >> 1 spends the whole of the state's range. The
   // curve makes that a reference rather than a ceiling: it leaves a ring far
   // under, and the drive multiple spends the difference for 5.4 dB in the
   // band-pass and 4.2 in the low-pass.
   const int32_t kUnityStateToOutput_q12 = (kEnvelopeSampleMax << 12) / INT16_MAX;
   const int32_t kPingDriveMultiple = 2;
   const int32_t state_to_output_q12 = kUnityStateToOutput_q12 * kPingDriveMultiple
-      * coherent_state_to_codes_u15_ >> 15;
-  // state_in_curve peaks at INT16_MAX * kPingDriveMultiple / kCurveHeadroom, so the
+      * coherent_scale_u15_ >> 15;
+  // state_in_curve peaks at INT16_MAX * kPingDriveMultiple / kSoftLimitHeadroom, so the
   // table index is bounded by the two constants and needs no clamp.
-  STATIC_ASSERT(kPingDriveMultiple <= kCurveHeadroom, ping_drive_leaves_curve);
+  STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom, ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 = state_to_output_q12 * INT16_MAX
-      / ((scale_ >> 1) * kCurveHeadroom);
-  const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
+      / ((scale_ >> 1) * kSoftLimitHeadroom);
+  const int32_t scale_u15 = coherent_scale_u15_;
   RENDER_CORE_EXCITED(
     // Halved: the resonant step response overshoots the excitation.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
     const int32_t state_in_curve =
         (is_band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
-    this_sample = SoftLimit(state_in_curve, state_to_codes_u15);
+    this_sample = SoftLimit(state_in_curve, scale_u15);
   )
   svf_ = svf;
 }
