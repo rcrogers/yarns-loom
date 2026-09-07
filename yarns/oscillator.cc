@@ -982,7 +982,7 @@ static const int32_t kWhistleLowestPitch = 30 << 7;
 // envelope decorrelates in about Q/f seconds -- 13 s at Q 1741 and middle C.
 // A render of a few seconds reads ONE DRAW from that envelope, not a level, and
 // two such draws an octave apart differ by more than the tilt being measured.
-static int32_t WhistleShareAtPitch(int32_t pitch, int32_t share_of_full_u15) {
+static int32_t WhistleLevelAtPitch(int32_t pitch, int32_t state_to_codes_u15) {
   // HALF AN OCTAVE OF LEVEL PER OCTAVE OF PITCH undoes the resonator's pitch
   // term. MEASURED over 20 s x 4 seeds: rms spans 0.97 dB from MIDI 24 to 84
   // at TIMBRE 64 and 1.16 dB at TIMBRE 127. ABOVE MIDI 84 IT UNDER-CORRECTS --
@@ -1010,7 +1010,7 @@ static int32_t WhistleShareAtPitch(int32_t pitch, int32_t share_of_full_u15) {
   int32_t whole = octaves_q16 >> 16;
   // The voice's share, applied HERE rather than by the caller, so only the
   // result crosses back into a loop that has to keep its registers.
-  return whole >= 20 ? 0 : ((gain >> whole) * share_of_full_u15 >> 15);
+  return whole >= 20 ? 0 : ((gain >> whole) * state_to_codes_u15 >> 15);
 }
 
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
@@ -1046,24 +1046,18 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   if (damp_q1_14 > damp_at_widest_q1_14) damp_q1_14 = damp_at_widest_q1_14;
   const int32_t excitation_scale_q15 = IntegerSqrt(
       (damp_q1_14 << 15) / damp_at_widest_q1_14 * 32768u);
-  const int32_t share_at_pitch_u15 =
-      WhistleShareAtPitch(resonant_pitch, incoherent_share_of_full_u15_);
-  // THE LINEAR GAIN THE CURVE STANDS IN FOR: the share, corrected for pitch,
+  const int32_t level_at_pitch_u15 =
+      WhistleLevelAtPitch(resonant_pitch, incoherent_state_to_codes_u15_);
+  // THE LINEAR GAIN THE CURVE STANDS IN FOR: the voice's ceiling in codes,
+  // corrected for pitch,
   // times the make-up the damp correction owes back. Its own step because both
   // scalars below derive from it, and 32 bits will not hold one expression.
-  //
-  // THE SHARE IS A FRACTION OF THE ENVELOPE'S FULL SCALE and what it multiplies
-  // is the FILTER STATE, whose range is INT16_MAX. Those are two different
-  // scales and this composes them as though they were one, which is true only
-  // while the numbers agree. Widening the envelope is contemplated -- see
-  // tools/osctest/driver.cc -- so say it here rather than discover it as a
-  // level change. PING states the same ratio in its own gain instead.
-  STATIC_ASSERT(kEnvelopeSampleMax == INT16_MAX, whistle_share_scale_is_int16);
+
   const int32_t state_to_output_q15 = excitation_scale_q15
       ? static_cast<int32_t>(
-            (static_cast<uint32_t>(share_at_pitch_u15) << 15)
+            (static_cast<uint32_t>(level_at_pitch_u15) << 15)
                 / excitation_scale_q15)
-      : share_at_pitch_u15;
+      : level_at_pitch_u15;
   // THE STATE IN THE CURVE'S DOMAIN, and the only gain the loop applies. The
   // share lands at 1/kCurveHeadroom of full scale, so the peak is held
   // ASYMPTOTICALLY by the curve instead of being cut at a ceiling -- which is
@@ -1134,7 +1128,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t kPingUnityGain_q12 = (kEnvelopeSampleMax << 12) / INT16_MAX;
   const int32_t kPingDriveMultiple = 2;
   const int32_t ping_gain_q12 = kPingUnityGain_q12 * kPingDriveMultiple
-      * coherent_share_of_full_u15_ >> 15;
+      * coherent_state_to_codes_u15_ >> 15;
   const int32_t voice_ceiling = scale_ >> 1;
   // WHICH BOUNDS THE TABLE INDEX BY ARITHMETIC, so the loop needs no clamp:
   // the state is Clip16-bounded, so `driven` peaks at INT16_MAX times
