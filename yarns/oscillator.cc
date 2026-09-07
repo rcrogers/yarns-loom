@@ -216,9 +216,9 @@ int16_t Oscillator::WarpTimbre(
         ComputePhaseIncrement(pitch)));
   }
 
-  // TIMBRE IS Q: the cutoff tracks the note, so the control tightens the ring
-  // rather than moving it. Geometric, and as damp rather than as a resonance,
-  // because a resonance stops at the damp LUT's last entry and that is Q 129.
+  // TIMBRE is Q: the cutoff tracks the note, so the control tightens the ring
+  // instead of moving it. Carried as damp, geometrically: a resonance stops at
+  // the damp LUT's last entry, which is Q 129.
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_LP) {
     // Below the bottom of the map is the widest setting: the cast wraps a
     // negative timbre into a shift of 65527, which takes the damp to zero, and
@@ -336,11 +336,8 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
 void Oscillator::Render(int16_t* audio_mix) {
   // Skipping zero-init: both buffers are fully overwritten by the
   // envelope renders below.
-  // ONE ARRAY, TWO HALVES, so the render loop walks a SINGLE pointer: timbre at
-  // [p], gain at [p + kAudioBlockSize]. A fixed immediate offset costs nothing
-  // (`ldrsh r, [base, #128]`), and post-incrementing the one pointer serves
-  // both -- where two separate buffers need two pointers, and every register
-  // held here is one the shape cannot have.
+  // Timbre at [p], gain at [p + kAudioBlockSize]: one pointer walks both, and
+  // every register held here is one the shape cannot have.
   int16_t timbre_gain[2 * kAudioBlockSize];
   // The shapes are handed the WHOLE array and index the gain half off it, so
   // what they take is input_samples, not either half by itself.
@@ -360,10 +357,8 @@ void Oscillator::Render(int16_t* audio_mix) {
   (this->*fn)(input_samples, audio_mix);
 }
 
-// TIMBRE AND GAIN ARE TWO HALVES OF ONE ARRAY, and this loop relies on it: gain
-// is read at input_samples[kAudioBlockSize], so ONE pointer walks both and
-// every shape gets a register back. There is deliberately NO gain_samples
-// parameter, so non-adjacent buffers cannot be handed in by mistake.
+// Gain is read at input_samples[kAudioBlockSize], which is why there is no
+// second parameter for it.
 //
 // Per-sample MAC into audio_mix: mix[i] += (this_sample * gain[i]) >> 15.
 // The product shift folds into ARM's barrel-shifted ADD operand
@@ -463,10 +458,9 @@ static inline uint32_t EdgeTime(
     high_ = false; \
   }
 
-// BOTH READ TIMBRE AS UNSIGNED, on Envelope::RenderSamples' guarantee that
-// every sample it writes is in [0, kEnvelopeSampleMax] (envelope.h). A
-// negative one would shift into the sign bit here and sign-extend to a
-// modulator hundreds of thousands of times too fast there.
+// Timbre is unsigned here: the shift puts it in the modulator's phase
+// increment, where a sign bit reads as a rate hundreds of thousands of times
+// too fast.
 #define SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE \
   uint32_t modulator_phase_increment = timbre << (32 - kEnvelopeSampleBits);
 
@@ -553,7 +547,7 @@ void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) 
     // way down in the first sixteen steps.
     //   SQUARED, so the onset is gentle: the bottom quarter of the knob is
     //   still within 12% of a plain sine.
-    //   HALF THE TABLE, so the top is 8.4x, which stays under Nyquist to
+    //   Half the table, so the top is 8.4x, which stays under Nyquist to
     //   MIDI 100.
     timbre = TimbreAtOrAboveZero(timbre);
     uint16_t index = static_cast<uint16_t>(timbre * timbre >> 15);
@@ -751,17 +745,14 @@ void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   const uint8_t transfer_index = transfer_function_;
   uint32_t bias = transfer_bias_;
   uint8_t gain_shift = transfer_gain_shift_;
-  // THE SHAPE IS FIXED FOR THE WHOLE BLOCK, so the choice is made HERE and the
+  // The shape is fixed for the whole block, so the choice is made here and the
   // loop carries no dispatch. It used to switch twice per sample on indices set
   // before the loop, which fragmented the body into basic blocks joined by
   // taken branches.
   //
-  // SINE AND EXPO ARE THE SAME CODE with a different quadrant table, so the
-  // choice between those two is a POINTER and costs nothing. Only triangle is
-  // separate code, which is why this specialises 2x2 and not 3x3 -- one loop
-  // per (carrier is triangle?, transfer is triangle?), four in all. A triangle
-  // LUT would collapse it to one loop, but 514 bytes of table to replace a
-  // shift and an xor is the wrong trade.
+  // Sine and expo are the same code with a different quadrant table, so that
+  // choice is a pointer. Triangle is separate code, so the specialisation is
+  // 2x2: one loop per (carrier is triangle?, transfer is triangle?).
   // Both indices come from `% 3` and `/ 6`, so neither can leave [0, 2].
   const uint16_t* carrier_table =
       carrier_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
@@ -876,7 +867,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
     if (filter_type & 2) { // Band- or high-pass
       output = (window * carrier) >> 16;
     } else {
-      // UNSIGNED, because the product is 65535 * 65535 at the corner and that
+      // Unsigned: the product is 65535 * 65535 at the corner, and that
       // overflows int32. What it does today is wrap, and the int16 store then
       // truncates the wrap away, so the OUTPUT is right -- MEASURED identical
       // to the same expression in 64 bits over the whole domain. But signed
