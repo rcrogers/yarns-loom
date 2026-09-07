@@ -1,6 +1,6 @@
 // THE MIX MUST STAY INSIDE THE OUTPUT VOLTAGE RANGE, for every shape, at every
 // voice count, whatever the panel asks for. voice.h hands each voice scale_,
-// and scale_ >> 1 is what one of them may put on the output.
+// and scale_ is what one of them may put on the output.
 //
 // This is the contract nothing enforced. Each voice is given a share of the
 // range and every shape ends in a clip, so the arithmetic works out ONLY while
@@ -118,12 +118,12 @@ int main(int argc, char** argv) {
   const bool verbose = argc > 1 && !strcmp(argv[1], "verbose");
 
   // THE ALLOWANCE IS READ BACK FROM voice.h, not restated here: one voice is
-  // given the whole of it, and scale_ >> 1 is what its envelope peaks at.
+  // given the whole of it, and scale_ is what its envelope peaks at.
   // Stating that twice is how the check and the thing checked drift apart.
   voices[0].Init();
   audio_output.Init(true);
   audio_output.AssignVoices(&voices[0], DC_PITCH, 1, 1);
-  const int32_t allowance = voices[0].oscillator()->scale_ >> 1;
+  const int32_t allowance = voices[0].oscillator()->scale_;
 
   int failures = 0;
   for (int shape = 0; shape <= OSC_SHAPE_FM; ++shape) {

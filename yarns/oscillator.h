@@ -148,12 +148,14 @@ class Oscillator {
   ~Oscillator() { }
 
   inline void Init(uint16_t coherent_scale, uint16_t incoherent_scale) {
-    scale_ = coherent_scale;
-    incoherent_scale_ = incoherent_scale;
+    // Halved once here: the arguments are peak-to-peak and every reader wants
+    // the amplitude.
+    scale_ = coherent_scale >> 1;
+    incoherent_scale_ = incoherent_scale >> 1;
     coherent_scale_u15_ = static_cast<uint16_t>(
-        (static_cast<uint32_t>(coherent_scale >> 1) << 15) / INT16_MAX);
+        (static_cast<uint32_t>(scale_) << 15) / INT16_MAX);
     incoherent_scale_u15_ = static_cast<uint16_t>(
-        (static_cast<uint32_t>(incoherent_scale >> 1) << 15) / INT16_MAX);
+        (static_cast<uint32_t>(incoherent_scale_) << 15) / INT16_MAX);
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
@@ -205,25 +207,9 @@ class Oscillator {
 
   void set_shape(OscillatorShape shape);
 
-  // WHICH OF THE TWO SHARES THE SHAPE SUMS AS. WHISTLE excites its filter with
-  // NOISE, so its voices are independent and add in power; every other shape is
-  // periodic and its voices add in amplitude.
-  inline uint16_t scale_for(OscillatorShape shape) const {
+  // WHISTLE's voices are noise and add in power; the rest add in amplitude.
+  inline uint16_t scale_for_shape(OscillatorShape shape) const {
     return shape == OSC_SHAPE_WHISTLE ? incoherent_scale_ : scale_;
-  }
-
-  // A SHAPE THE ENVELOPE EXCITES, spending the gain going INTO what rings
-  // rather than scaling what leaves it -- the shapes whose render takes
-  // RENDER_CORE_NO_OUTPUT_GAIN.
-  static inline bool envelope_excites(OscillatorShape shape) {
-    return shape == OSC_SHAPE_WHISTLE || shape == OSC_SHAPE_PING_BP ||
-        shape == OSC_SHAPE_PING_LP;
-  }
-
-  // scale_for() >> 1 as a multiplier for a full-scale int16.
-  inline uint16_t scale_u15(OscillatorShape shape) const {
-    return shape == OSC_SHAPE_WHISTLE
-        ? incoherent_scale_u15_ : coherent_scale_u15_;
   }
 
   // start_pitch is the new note's pitch at onset (the portamento glide's
@@ -233,21 +219,12 @@ class Oscillator {
       ADSR& adsr, bool drone,
       int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
       uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
-    // AN EXCITATION SHAPE'S ENVELOPE RUNS AT FULL SCALE, and scale_ is applied
-    // at the shape's OUTPUT instead. scale_ is a LEVEL, and a level
-    // only commutes with what follows it while that is linear -- spending it
-    // into a filter that clips makes the voice count decide the filter's
-    // operating point, so the state shrinks and its clip moves with n.
-    // Applied at the output it is a pure scaling again, which is where the
-    // NOISE shapes have always applied it, and it leaves this envelope looking
-    // like the timbre envelope beside it: a per-voice description of the sound,
-    // knowing nothing of how many voices there are.
-    const uint16_t peak = envelope_excites(shape_)
-        ? kEnvelopeSampleMax : (scale_for(shape_) >> 1);
-    // The peak IS the ceiling here: a voice may spend scale_ >> 1 of the
-    // output voltage range and no more, chiff included, because n voices at
-    // that fill the range exactly. Where velocity or AMPLITUDE MOD put the note's own peak
-    // below it, the difference is room the chiff may use.
+    const bool gain_envelope_is_pre_filter =
+        shape_ == OSC_SHAPE_WHISTLE || shape_ == OSC_SHAPE_PING_BP ||
+        shape_ == OSC_SHAPE_PING_LP;
+    // Pre-filter, so scale_ is applied at the shape's output instead.
+    const uint16_t peak = gain_envelope_is_pre_filter
+        ? kEnvelopeSampleMax : scale_for_shape(shape_);
     gain_envelope_.NoteOn(
       adsr, drone ? peak : 0, peak, peak,
       chiff_amount_q30, chiff_audible_samples);

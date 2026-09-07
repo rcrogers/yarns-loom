@@ -296,10 +296,9 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   int32_t new_scale = WarpTimbre(midpoint_timbre, new_shape);
   timbre_envelope_.Rescale(new_scale, old_scale);
 
-  // The gain envelope carries the voice's SHARE of the output budget, and the
-  // scale_ moves when the shape changes which way the voices sum. Rescale it for
-  // the same reason: a held note is meant to change shape, not loudness.
-  gain_envelope_.Rescale(scale_for(new_shape), scale_for(shape_));
+  // scale_for_shape moves when the shape changes which way the voices sum: a held
+  // note is meant to change shape, not loudness.
+  gain_envelope_.Rescale(scale_for_shape(new_shape), scale_for_shape(shape_));
 
   shape_ = new_shape;
 
@@ -414,8 +413,8 @@ void Oscillator::Render(int16_t* audio_mix) {
      input_samples[kAudioBlockSize]) >> 15, /* the other half */ \
     __VA_ARGS__) \
 
-// For the shapes envelope_excites() names: the body spends the gain half on the
-// way into whatever rings, so the mix takes the sample as it stands.
+// The body spends the gain half on the way into whatever rings, so the mix
+// takes the sample as it stands.
 #define RENDER_CORE_EXCITED(...) \
   RENDER_LOOP(this_sample, __VA_ARGS__) \
 
@@ -930,9 +929,9 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // Below this the cutoff coefficient stops tracking and the resonance is the
 // only pitch the shape has: at MIDI 24 the peak sits at 43.9 Hz for a note of
 // 32.7.
-// The soft limiter's domain as a multiple of scale_ >> 1: excursions between what the voice may
-// put out and this are compressed, and scale_ >> 1 lands at 1/kSoftLimitHeadroom of
-// the domain. k / tanh(k) == kSoftLimitHeadroom sets the small-signal gain to 1, so
+// The soft limiter's domain as a multiple of scale_: excursions between what
+// the voice may put out and this are compressed, and scale_ lands at
+// 1/kSoftLimitHeadroom of the domain. k / tanh(k) == kSoftLimitHeadroom sets the small-signal gain to 1, so
 // change one and the other moves; waveshapers.py holds the k.
 static const int32_t kSoftLimitHeadroom = 4;
 
@@ -1016,7 +1015,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(
       stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
       static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
-      static_cast<uint32_t>(scale_ >> 1) * kSoftLimitHeadroom));
+      static_cast<uint32_t>(scale_) * kSoftLimitHeadroom));
   // The reciprocal, so the loop's product is INT16_MAX << 15: inside int32,
   // and the table's last index.
   const int32_t bp_ceiling = state_into_curve_q15 > 0
@@ -1049,19 +1048,21 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // under a sustained one. The band-pass rejects it.
   const bool is_band_pass = shape_ == OSC_SHAPE_PING_BP;
   // Both states leave the SVF through Clip16, so the gain that lands INT16_MAX
-  // on scale_ >> 1 spends the whole of the state's range. The
-  // curve makes that a reference rather than a ceiling: it leaves a ring far
-  // under, and the drive multiple spends the difference for 5.4 dB in the
-  // band-pass and 4.2 in the low-pass.
-  const int32_t kUnityStateToOutput_q12 = (kEnvelopeSampleMax << 12) / INT16_MAX;
+  // on scale_ spends the whole of the state's range. The curve makes that
+  // a reference rather than a ceiling: it leaves a ring far under, and the
+  // drive multiple spends the difference -- 5.4 dB in the band-pass, 4.2 in
+  // the low-pass.
+  const int32_t kUnityStateToOutput_q12 =
+      (kEnvelopeSampleMax << 12) / INT16_MAX;
   const int32_t kPingDriveMultiple = 2;
-  const int32_t state_to_output_q12 = kUnityStateToOutput_q12 * kPingDriveMultiple
-      * coherent_scale_u15_ >> 15;
-  // state_in_curve peaks at INT16_MAX * kPingDriveMultiple / kSoftLimitHeadroom, so the
-  // table index is bounded by the two constants and needs no clamp.
-  STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom, ping_drive_leaves_curve);
+  const int32_t state_to_output_q12 = kUnityStateToOutput_q12
+      * kPingDriveMultiple * coherent_scale_u15_ >> 15;
+  // state_in_curve peaks at INT16_MAX * kPingDriveMultiple /
+  // kSoftLimitHeadroom, so the two constants bound the table index.
+  STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom,
+                ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 = state_to_output_q12 * INT16_MAX
-      / ((scale_ >> 1) * kSoftLimitHeadroom);
+      / (scale_ * kSoftLimitHeadroom);
   const int32_t scale_u15 = coherent_scale_u15_;
   RENDER_CORE_EXCITED(
     // Halved: the resonant step response overshoots the excitation.
