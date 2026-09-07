@@ -927,9 +927,6 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
   )
 }
 
-// The gain envelope is the EXCITER, spent going into the filter rather than
-// scaling what leaves it. Its own chiff rides in with it, so EXCITER AMOUNT
-// decides how much of the excitation is noise.
 // Below this the cutoff coefficient stops tracking and the resonance is the
 // only pitch the shape has: at MIDI 24 the peak sits at 43.9 Hz for a note of
 // 32.7.
@@ -939,8 +936,6 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // change one and the other moves; waveshapers.py holds the k.
 static const int32_t kCurveHeadroom = 4;
 
-// How many codes a voice may use moves with voice count, so the conversion
-// comes from Init rather than from the table.
 static inline int32_t SoftLimit(
     int32_t state_in_curve, int32_t state_to_codes_u15) {
   return Interpolate88(
