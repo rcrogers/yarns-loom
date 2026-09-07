@@ -47,3 +47,4 @@ build
 
 # Local Claude Code working files (plans, settings)
 .claude/
+.metrics/
