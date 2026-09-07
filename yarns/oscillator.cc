@@ -890,13 +890,6 @@ static inline int32_t SoftLimit(
 }
 
 static const int32_t kWhistleLowestPitch = 30 << 7;
-// The envelope already carries what the voice may put out, and this shape's
-// excitation is noise times that envelope, so the state arrives scaled. The
-// gain below sets the resonator's pitch term and the drive into the curve.
-//
-// Both numbers in it are averages over minutes: at the top of TIMBRE this
-// output is narrowband noise whose envelope decorrelates in about Q/f seconds,
-// so a render of a few seconds reads one draw and not a level.
 // The resonator's gain at resonance rises as 1/sqrt(damp) and 2.85 dB an
 // octave with pitch. Both corrections here undo one term of it:
 //   damp, at the input, so the state moves and the level does not.
@@ -935,16 +928,19 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
   svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
-  // bp swings as sqrt(Q) for a given drive, so at high Q it rails and carries
-  // a few bits instead of fifteen. Driving by sqrt(damp) and taking the same
-  // factor back at the output moves the state without moving the level.
-  // Bandwidth is f0 / Q, so it is not damp's alone.
-  // A floor for the timbre envelope's overshoot; the warp never reaches it.
-  // The make-up is a reciprocal of this, so without the floor it steps 50x
-  // between blocks.
+  // For a fixed drive, bp grows as sqrt(Q), so at the tightest damp it hits its
+  // rail and only a few of its bits are signal. Scaling the excitation down by
+  // sqrt(damp) and scaling the output back up by the same factor keeps bp in
+  // range and leaves the level unchanged.
+  //
+  // The timbre envelope can overshoot below the smallest damp the warp
+  // produces. Clamping it here keeps that make-up factor finite: it is a
+  // reciprocal, and an unclamped damp lets it jump 50x from one block to the
+  // next.
   const uint32_t damp_min_u1_14 =
       kWhistleDampMax_u1_14 >> kWhistleQOctaves;
-  // The loop reads the per-sample damp; under a fast timbre the two disagree.
+  // This is the damp at the start of the block, but the filter below reads a
+  // new damp every sample. A fast-moving TIMBRE makes the two differ.
   uint32_t damp_at_block_start_u1_14 = static_cast<uint32_t>(
       input_samples[0] > 0 ? input_samples[0] : 0);
   if (damp_at_block_start_u1_14 < damp_min_u1_14) {
@@ -961,12 +957,12 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
       static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
       static_cast<uint32_t>(scale_) * kSoftLimitHeadroom));
-  // The reciprocal, so the loop's product is INT16_MAX << 15: inside int32,
-  // and the table's last index.
+  // Clamping bp here bounds the multiply below: bp_ceiling is the reciprocal of
+  // state_into_curve_q15, so their product is INT16_MAX << 15 -- inside int32,
+  // and exactly the last index of the table.
   const int32_t bp_ceiling = state_into_curve_q15 > 0
       ? (INT16_MAX << 15) / state_into_curve_q15
       : INT16_MAX;
-  // A member here is a load per sample.
   const int32_t scale_u15 = coherent_scale_u15_;
   RENDER_CORE_EXCITED(
     // Noise of its own, because a whistle sustains and the chiff decays.
