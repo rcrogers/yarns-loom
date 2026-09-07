@@ -942,8 +942,10 @@ static const int32_t kCurveHeadroom = 4;
 
 // How many codes a voice may use moves with voice count, so the conversion
 // comes from Init rather than from the table.
-static inline int32_t SoftLimit(int32_t driven, int32_t state_to_codes_u15) {
-  return Interpolate88(ws_soft_limit, static_cast<uint16_t>(driven + 32768))
+static inline int32_t SoftLimit(
+    int32_t state_in_curve, int32_t state_to_codes_u15) {
+  return Interpolate88(
+      ws_soft_limit, static_cast<uint16_t>(state_in_curve + 32768))
       * state_to_codes_u15 >> 15;
 }
 
@@ -976,11 +978,13 @@ static int32_t WhistleStateToOutput(
   octaves_q16 = octaves_q16 * pitch_correction_numerator
       / pitch_correction_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
-  int32_t gain = level_into_knee_q15 *
+  int32_t level_q15 = level_into_knee_q15 *
       (Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 1) >> 15;
-  int32_t whole = octaves_q16 >> 16;
+  int32_t whole_octaves = octaves_q16 >> 16;
   const int32_t level_at_pitch_u15 =
-      whole >= 20 ? 0 : ((gain >> whole) * state_to_codes_u15 >> 15);
+      whole_octaves >= 20
+          ? 0
+          : ((level_q15 >> whole_octaves) * state_to_codes_u15 >> 15);
   return damp_drive_q15
       ? static_cast<int32_t>(
             (static_cast<uint32_t>(level_at_pitch_u15) << 15) / damp_drive_q15)
@@ -1034,8 +1038,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     svf.RenderSampleAtPitch(excitation, timbre);
     int32_t band_pass = svf.bp;
     CONSTRAIN(band_pass, -bp_ceiling, bp_ceiling);
-    const int32_t driven = band_pass * state_into_curve_q15 >> 15;
-    this_sample = SoftLimit(driven, state_to_codes_u15);
+    const int32_t state_in_curve = band_pass * state_into_curve_q15 >> 15;
+    this_sample = SoftLimit(state_in_curve, state_to_codes_u15);
   )
   svf_ = svf;
 }
@@ -1055,23 +1059,22 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // curve makes that a reference rather than a ceiling: it leaves a ring far
   // under, and the drive multiple spends the difference for 5.4 dB in the
   // band-pass and 4.2 in the low-pass.
-  const int32_t kPingUnityGain_q12 = (kEnvelopeSampleMax << 12) / INT16_MAX;
+  const int32_t kUnityStateToOutput_q12 = (kEnvelopeSampleMax << 12) / INT16_MAX;
   const int32_t kPingDriveMultiple = 2;
-  const int32_t ping_gain_q12 = kPingUnityGain_q12 * kPingDriveMultiple
+  const int32_t state_to_output_q12 = kUnityStateToOutput_q12 * kPingDriveMultiple
       * coherent_state_to_codes_u15_ >> 15;
-  const int32_t voice_ceiling = scale_ >> 1;
-  // driven peaks at INT16_MAX * kPingDriveMultiple / kCurveHeadroom, so the
+  // state_in_curve peaks at INT16_MAX * kPingDriveMultiple / kCurveHeadroom, so the
   // table index is bounded by the two constants and needs no clamp.
   STATIC_ASSERT(kPingDriveMultiple <= kCurveHeadroom, ping_drive_leaves_curve);
-  const int32_t state_into_curve_q12 = ping_gain_q12 * INT16_MAX
-      / (voice_ceiling * kCurveHeadroom);
+  const int32_t state_into_curve_q12 = state_to_output_q12 * INT16_MAX
+      / ((scale_ >> 1) * kCurveHeadroom);
   const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Halved: the resonant step response overshoots the excitation.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
-    const int32_t driven =
+    const int32_t state_in_curve =
         (band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
-    this_sample = SoftLimit(driven, state_to_codes_u15);
+    this_sample = SoftLimit(state_in_curve, state_to_codes_u15);
   )
   svf_ = svf;
 }
