@@ -1072,6 +1072,9 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t bp_ceiling = state_into_curve_q15 > 0
       ? (INT16_MAX << 15) / state_into_curve_q15
       : INT16_MAX;
+  // Read once, not per sample: as a member it is a load inside the loop, and
+  // MEASURED that is 2 cycles a sample here and 6 in PING.
+  const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
@@ -1081,7 +1084,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     int32_t band_pass = svf.bp;
     CONSTRAIN(band_pass, -bp_ceiling, bp_ceiling);
     const int32_t driven = band_pass * state_into_curve_q15 >> 15;
-    this_sample = SoftLimit(driven, coherent_state_to_codes_u15_);
+    this_sample = SoftLimit(driven, state_to_codes_u15);
   )
   svf_ = svf;
 }
@@ -1135,13 +1138,14 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   STATIC_ASSERT(kPingDriveMultiple <= kCurveHeadroom, ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 = ping_gain_q12 * INT16_MAX
       / (voice_ceiling * kCurveHeadroom);
+  const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Halved going in: the resonant step response overshoots the excitation, and
     // at full scale the ring railed for 7% of the note.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
     const int32_t driven =
         (band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
-    this_sample = SoftLimit(driven, coherent_state_to_codes_u15_);
+    this_sample = SoftLimit(driven, state_to_codes_u15);
   )
   svf_ = svf;
 }
