@@ -44,17 +44,17 @@ static const size_t kNumZones = 15;
 
 static const uint16_t kPitchTableStart = 116 * 128;
 static const uint16_t kOctave = 12 * 128;
-// The audio sample's peak: the magnitude the transfer gain is derived
-// against, and the width the fold knee is scaled in.
 // SYNC's modulator frequency, as a multiple of the carrier's: _q3_12, so up
 // to 8x. The span TIMBRE asks for is 2.67 octaves, or 6.35x.
 static const int kSyncRatioFractionalBits = 12;
-// How far TIMBRE sweeps WHISTLE's and PING's Q, and so how far the drive law's
-// reciprocal may go.
+// How far TIMBRE sweeps WHISTLE's and PING's Q, and so how far the damp
+// correction's reciprocal may go.
 static const uint32_t kWhistleQOctaves = 8;
-// WHISTLE and PING sweep Q over this many octaves, from the damp the widest
-// setting asks for. 2392 is the damp LUT at the resonance the shapes used to
-// start from, which is Q 6.8; six octaves of it reaches Q 440.
+// The widest damp those shapes ask for, which is Q 6.9; kWhistleQOctaves above
+// it is Q 1820.
+static const uint32_t kWhistleDampMax_u1_14 = 2392;
+// The audio sample's peak: the magnitude the transfer gain is derived
+// against, and the width the fold knee is scaled in.
 static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
@@ -220,22 +220,14 @@ int16_t Oscillator::WarpTimbre(
   // rather than moving it. Geometric, and as damp rather than as a resonance,
   // because a resonance stops at the damp LUT's last entry and that is Q 129.
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_LP) {
-    // 2392 is the damp LUT at the resonance these shapes used to start from,
-    // which is Q 6.8; eight octaves of it reaches Q 1741. Six was as far as it
-    // was worth asking while bp sat on its rail -- the extra was not realised,
-    // MEASURED as 0.4 dB of change in peak-to-octave-up between Q 435 and 3482.
-    // Off the rail it is realised, and the ring at middle C runs about 2 s.
-    const int32_t damp_max_u1_14 = 2392;
-    const uint32_t q_octaves = kWhistleQOctaves;
-    // OFF THE BOTTOM OF THE MAP IS THE WIDEST SETTING, and it has to be said
-    // here: the cast below wraps a negative timbre into a shift of 65527, which
-    // takes the damp to ZERO, and zero damp is a resonator with no loss in it.
-    // NoteOn warps the DESTINATION, so a negative TIMBRE MOD ENVELOPE reaches
-    // it -- and the note then grows for as long as it is held.
+    // Below the bottom of the map is the widest setting: the cast wraps a
+    // negative timbre into a shift of 65527, which takes the damp to zero, and
+    // a resonator with no loss in it grows for as long as the note is held.
     if (timbre < 0) timbre = 0;
-    uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * q_octaves) << 1;
-    int32_t damp = damp_max_u1_14 * // 2^-octaves
-      Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16;
+    uint32_t octaves_q16 =
+        (static_cast<uint32_t>(timbre) * kWhistleQOctaves) << 1;
+    int32_t damp = static_cast<int32_t>(kWhistleDampMax_u1_14 * // 2^-octaves
+      Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16);
     return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
   }
 
@@ -961,25 +953,23 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // bp swings as sqrt(Q) for a given drive, so at high Q it rails and carries
   // a few bits instead of fifteen. Driving by sqrt(damp) and taking the same
   // factor back at the output moves the state without moving the level.
-  // Q is the reciprocal of damp: 6.9 at the maximum, 1820 at the minimum.
   // Bandwidth is f0 / Q, so it is not damp's alone.
-  const uint32_t damp_max_u1_14 = 2392;
   // A floor for the timbre envelope's overshoot; the warp never reaches it.
   // The make-up is a reciprocal of this, so without the floor it steps 50x
   // between blocks.
   const uint32_t damp_min_u1_14 =
-      damp_max_u1_14 >> kWhistleQOctaves;
+      kWhistleDampMax_u1_14 >> kWhistleQOctaves;
   // The loop reads the per-sample damp; under a fast timbre the two disagree.
   uint32_t damp_at_block_start_u1_14 = static_cast<uint32_t>(
       input_samples[0] > 0 ? input_samples[0] : 0);
   if (damp_at_block_start_u1_14 < damp_min_u1_14) {
     damp_at_block_start_u1_14 = damp_min_u1_14;
   }
-  if (damp_at_block_start_u1_14 > damp_max_u1_14) {
-    damp_at_block_start_u1_14 = damp_max_u1_14;
+  if (damp_at_block_start_u1_14 > kWhistleDampMax_u1_14) {
+    damp_at_block_start_u1_14 = kWhistleDampMax_u1_14;
   }
   const int32_t damp_drive_u15 = IntegerSqrt(
-      (damp_at_block_start_u1_14 << 15) / damp_max_u1_14 * 32768u);
+      (damp_at_block_start_u1_14 << 15) / kWhistleDampMax_u1_14 * 32768u);
   const int32_t state_to_output_q15 = WhistleStateToOutput(
       resonant_pitch, incoherent_scale_u15_, damp_drive_u15);
   const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(
