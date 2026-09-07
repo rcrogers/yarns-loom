@@ -577,12 +577,10 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
   svf_ = svf;
 }
 
-// ONE CYCLE COMPRESSED INTO `width` OF THE PERIOD, then held at the value the
-// cycle ends on. A sine ends where it began, at zero, so the hold is SILENCE
-// where the saw's and the pulse's is a plateau at full scale -- which is why
-// this carrier is worth a shape and they already had theirs. Nothing is
-// discontinuous at either end, so there is no edge to BLEP and none for TIMBRE
-// to sharpen: what it sweeps is a formant over a gap.
+// One cycle compressed into `width` of the period, then held at the value the
+// cycle ends on, which for a sine is zero. Nothing is discontinuous at either
+// end, so there is no edge to BLEP: what TIMBRE sweeps is a formant over the
+// silence.
 void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     // WHERE THE FORMANT SITS IS 1/width THE FUNDAMENTAL, which is what the knob
