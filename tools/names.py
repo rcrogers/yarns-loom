@@ -57,6 +57,16 @@ def main():
           print('  %s:%d  %-34s %d use%s'
                 % (path, n, name, uses, '' if uses == 1 else 's'))
 
+  # A comment that names something this file never calls is explaining code it
+  # does not own: the fact belongs where the thing is.
+  print('comments naming identifiers this file never uses:')
+  for path, text in sources.items():
+    own = set(re.findall(r'[A-Za-z_][A-Za-z0-9_]*', strip_comments(text)))
+    for n, comment in comments(text):
+      for word in sorted(set(CODEISH.findall(comment))):
+        if word in words and word not in own:
+          print('  %s:%d  %s' % (path, n, word))
+
   print('identifiers named in comments that the code does not have:')
   for path, text in sources.items():
     for n, comment in comments(text):

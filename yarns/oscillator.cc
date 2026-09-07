@@ -347,14 +347,9 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
   return phase_increment;
 }
 
-// Hot-path audio render. Timbre and gain envelopes are evaluated up-front
-// into stack buffers, then the wave render reads gain per sample and
-// multiply-accumulates directly into audio_mix — folding the old
-// q15_multiply_accumulate pass into the wave loop. Saves the 128B
-// audio_samples intermediate plus the per-sample LDR/MUL/STR round-trip.
-// Stack locals (not static) are measurably faster in this tight loop
-// across 4 simultaneously-triggered paraphonic voices; see
-// yarns/stack_budget.h for the cumulative-stack accounting.
+// Both envelopes are evaluated up-front into stack buffers, then the wave
+// render reads gain per sample and multiply-accumulates into audio_mix. The
+// buffers are stack locals, which yarns/stack_budget.h accounts for.
 void Oscillator::Render(int16_t* audio_mix) {
   // Skipping zero-init: both buffers are fully overwritten by the
   // envelope renders below.
@@ -1090,8 +1085,6 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
   StateVariableFilter svf = svf_;
   svf.RenderInit(pitch_ << 1);
   OscillatorShape shape = shape_;
-  // int32_t scale = Interpolate824(lut_svf_scale_u15, pitch_ << 18);
-  // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;
   RENDER_CORE(
     svf.RenderSample(Random::GetSample(), timbre);
     switch (shape) {
@@ -1101,9 +1094,6 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
       case OSC_SHAPE_NOISE_HP: this_sample = svf.hp; break;
       default: break;
     }
-    // CLIP(this_sample);
-    // result = result * gain_correction >> 15;
-    // result = Interpolate88(ws_moderate_overdrive, result + 32768);
   )
   svf_ = svf;
 }

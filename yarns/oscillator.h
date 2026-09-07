@@ -47,9 +47,7 @@ namespace yarns {
 
 static const uint16_t kHighestNote = 128 * 128;
 
-// Envelopes an Oscillator carries: gain_envelope_ and timbre_envelope_. The
-// layout map in multi.h counts audio voices with it, so adding an envelope
-// here moves kMaxChiffEnvelopes.
+// gain_envelope_ and timbre_envelope_.
 const uint8_t kEnvelopesPerOscillator = 2;
 
 class StateVariableFilter : public SVF {
@@ -139,9 +137,7 @@ enum OscillatorShape {
 
 class Oscillator {
  public:
-  // Wave render: multiply-accumulate each sample (* gain >> 15) into audio_mix.
-  // Saves a 128B intermediate buffer and the per-sample LDR/MUL/STR round-trip
-  // that q15_multiply_accumulate would otherwise need.
+  // Multiply-accumulates each sample (* gain >> 15) into audio_mix.
   typedef void (Oscillator::*RenderFn)(int16_t* input_samples, int16_t* audio_mix);
 
   Oscillator() { }
