@@ -72,8 +72,7 @@ enum ModAux {
   MOD_AUX_LAST
 };
 
-// Envelopes a CVOutput carries: envelope_, reachable only on the is_envelope()
-// path. See kEnvelopesPerOscillator for how the two are counted together.
+// envelope_, reachable only on the is_envelope() path.
 const uint8_t kEnvelopesPerCVOutput = 1;
 
 // The most audio voices any layout sounds at once, which is what a CPU budget
@@ -146,14 +145,12 @@ class Voice {
   
   inline int32_t note() const { return note_; }
   inline uint8_t velocity() const { return mod_velocity_; }
-  inline uint16_t mod_aux(ModAux s) const { return mod_aux_[s]; }
   inline uint16_t aux_cv_16bit() const { return mod_aux_[aux_cv_source_]; }
   inline uint16_t aux_cv_2_16bit() const { return mod_aux_[aux_cv_source_2_]; }
   inline uint8_t aux_cv() const { return aux_cv_16bit() >> 8; }
   inline uint8_t aux_cv_2() const { return aux_cv_2_16bit() >> 8; }
   
   inline bool gate_on() const { return gate_; }
-  inline bool is_highest_priority() const { return is_highest_priority_; }
   inline void set_highest_priority(bool v) { is_highest_priority_ = v; }
 
   inline bool gate() const { return gate_ && !retrigger_delay_; }

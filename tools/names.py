@@ -3,6 +3,7 @@
 #   a comment naming an identifier the code no longer has.
 #
 #   python3 tools/names.py yarns/oscillator.h yarns/oscillator.cc
+import collections
 import glob
 import os
 import re
@@ -42,7 +43,8 @@ def main():
     for f in glob.glob(os.path.join(root, pattern), recursive=True):
       tree.append(strip_comments(open(f, errors='ignore').read()))
   tree_code = '\n'.join(tree)
-  words = set(re.findall(r'[A-Za-z_][A-Za-z0-9_]*', tree_code))
+  counts = collections.Counter(re.findall(r'[A-Za-z_][A-Za-z0-9_]*', tree_code))
+  words = set(counts)
 
   print('declarations used once or not at all:')
   for path, text in sources.items():
@@ -52,7 +54,7 @@ def main():
         if not m:
           continue
         name = m.group(1)
-        uses = len(re.findall(r'\b%s\b' % re.escape(name), tree_code)) - 1
+        uses = counts[name] - 1
         if uses <= 1:
           print('  %s:%d  %-34s %d use%s'
                 % (path, n, name, uses, '' if uses == 1 else 's'))

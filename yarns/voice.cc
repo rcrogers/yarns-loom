@@ -326,10 +326,8 @@ void Voice::NoteOn(
     }
   }
 
-  // start_pitch is the onset pitch assembled exactly as Refresh will (so the
-  // bias bump cancels the pitch jump with no residual chirp under bend/
-  // vibrato); target_pitch is the destination note's nominal pitch, used for
-  // the envelope's frozen warped target.
+  // The onset pitch is assembled exactly as Refresh will, so the bias bump
+  // cancels the pitch jump with no residual chirp under bend or vibrato.
   if (uses_audio()) oscillator_.NoteOn(
     adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE,
     ApplyPitchMods(note_source_), note_target_ + tuning_, timbre_envelope_target,

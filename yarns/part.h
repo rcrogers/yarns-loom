@@ -892,10 +892,6 @@ class Part {
   }
   inline bool cc_thru() const { return midi_.out_mode != MIDI_OUT_MODE_OFF; }
   
-  inline bool has_velocity_filtering() {
-    return midi_.min_velocity != 0 || midi_.max_velocity != 127;
-  }
-
   inline uint8_t FindVoiceForNote(uint8_t note) const {
     for (uint8_t i = 0; i < num_voices_; ++i) {
       if (active_note_[i] == note) {
@@ -1030,8 +1026,6 @@ class Part {
   
   bool has_siblings_;
   
-  bool multi_is_recording_;
-
   DISALLOW_COPY_AND_ASSIGN(Part);
 };
 
