@@ -1023,15 +1023,24 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   if (damp_q1_14 > damp_at_widest_q1_14) damp_q1_14 = damp_at_widest_q1_14;
   const int32_t excitation_scale_q15 = IntegerSqrt(
       (damp_q1_14 << 15) / damp_at_widest_q1_14 * 32768u);
-  const int32_t share_at_pitch =
+  const int32_t share_at_pitch_u15 =
       WhistleShareAtPitch(resonant_pitch, incoherent_share_of_full_u15_);
   // THE LINEAR GAIN THE CURVE STANDS IN FOR: the share, corrected for pitch,
-  // times the make-up the drive law owes back. Its own step because both
+  // times the make-up the damp correction owes back. Its own step because both
   // scalars below derive from it, and 32 bits will not hold one expression.
+  //
+  // THE SHARE IS A FRACTION OF THE ENVELOPE'S FULL SCALE and what it multiplies
+  // is the FILTER STATE, whose range is INT16_MAX. Those are two different
+  // scales and this composes them as though they were one, which is true only
+  // while the numbers agree. Widening the envelope is contemplated -- see
+  // tools/osctest/driver.cc -- so say it here rather than discover it as a
+  // level change. PING states the same ratio in its own gain instead.
+  STATIC_ASSERT(kEnvelopeSampleMax == INT16_MAX, whistle_share_scale_is_int16);
   const int32_t state_to_output_q15 = excitation_scale_q15
       ? static_cast<int32_t>(
-            (static_cast<uint32_t>(share_at_pitch) << 15) / excitation_scale_q15)
-      : share_at_pitch;
+            (static_cast<uint32_t>(share_at_pitch_u15) << 15)
+                / excitation_scale_q15)
+      : share_at_pitch_u15;
   // HOW FAR PAST THE SHARE THE CURVE'S DOMAIN REACHES. Excursions between the
   // share and this are COMPRESSED rather than cut, which is the whole of what
   // a knee is. IT PAIRS WITH THE TABLE: k / tanh(k) == kCurveHeadroom is what
