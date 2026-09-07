@@ -414,10 +414,9 @@ void Oscillator::Render(int16_t* audio_mix) {
      input_samples[kAudioBlockSize]) >> 15, /* the other half */ \
     __VA_ARGS__) \
 
-// FOR A SHAPE THE ENVELOPE EXCITES rather than scales. Its body spends the gain
-// half itself, on the way INTO whatever rings, so the mix takes the sample as it
-// stands -- scaling it again here would apply the envelope twice.
-#define RENDER_CORE_NO_OUTPUT_GAIN(...) \
+// For the shapes envelope_excites() names: the body spends the gain half on the
+// way into whatever rings, so the mix takes the sample as it stands.
+#define RENDER_CORE_EXCITED(...) \
   RENDER_LOOP(this_sample, __VA_ARGS__) \
 
 #define RENDER_PERIODIC(...) \
@@ -1030,7 +1029,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       : INT16_MAX;
   // A member here is a load per sample.
   const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
-  RENDER_CORE_NO_OUTPUT_GAIN(
+  RENDER_CORE_EXCITED(
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
         Random::GetSample() * input_samples[kAudioBlockSize] >> 15;
@@ -1069,7 +1068,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t state_into_curve_q12 = state_to_output_q12 * INT16_MAX
       / ((scale_ >> 1) * kCurveHeadroom);
   const int32_t state_to_codes_u15 = coherent_state_to_codes_u15_;
-  RENDER_CORE_NO_OUTPUT_GAIN(
+  RENDER_CORE_EXCITED(
     // Halved: the resonant step response overshoots the excitation.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
     const int32_t state_in_curve =
