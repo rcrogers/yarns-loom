@@ -876,10 +876,11 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // Below this the cutoff coefficient stops tracking and the resonance is the
 // only pitch the shape has: at MIDI 24 the peak sits at 43.9 Hz for a note of
 // 32.7.
-// The soft limiter's domain as a multiple of scale_: excursions between what
-// the voice may put out and this are compressed, and scale_ lands at
-// 1/kSoftLimitHeadroom of the domain. k / tanh(k) == kSoftLimitHeadroom sets the small-signal gain to 1, so
-// change one and the other moves; waveshapers.py holds the k.
+// The soft limiter's curve reaches this many times scale_, so an excursion of
+// up to that much is compressed instead of clipped. The curve is tanh(k*x)
+// with k equal to this, which is what makes its gain 1 for small signals, so
+// changing one means changing the other. yarns/resources/waveshapers.py
+// generates the table.
 static const int32_t kSoftLimitHeadroom = 4;
 
 static inline int32_t SoftLimit(
@@ -890,12 +891,14 @@ static inline int32_t SoftLimit(
 }
 
 static const int32_t kWhistleLowestPitch = 30 << 7;
-// The resonator's gain at resonance rises as 1/sqrt(damp) and 2.85 dB an
-// octave with pitch. Both corrections here undo one term of it:
-//   damp, at the input, so the state moves and the level does not.
-//   pitch, at the output, so the level moves and the state does not. The state
-//   therefore rails above MIDI 84; a pitch term at the input is what that
-//   wants.
+// The resonator's gain at resonance rises as 1/sqrt(damp), and rises again
+// with pitch, by 2.85 dB an octave.
+//
+// The damp term is corrected at the input, by scaling the excitation, which
+// moves the filter state and leaves the level alone. The pitch term is
+// corrected here at the output, which moves the level and leaves the state
+// alone -- so the state still rails above MIDI 84, where that term is
+// largest.
 static int32_t WhistleStateToOutput(
     int32_t pitch, int32_t scale_u15,
     int32_t damp_drive_u15) {
@@ -984,29 +987,31 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
   svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
-  // The low-pass passes the exciter's DC, so past the ring its state is the
-  // excitation's level: a thump under a percussive envelope, a standing offset
-  // under a sustained one. The band-pass rejects it.
+  // The low-pass passes the exciter's DC, so once the ring dies away its state
+  // sits at the excitation's own level -- a thump under a percussive envelope,
+  // a standing offset under a sustained one. The band-pass rejects the DC.
   const bool is_band_pass = shape_ == OSC_SHAPE_PING_BP;
-  // Both states leave the SVF through Clip16, so the gain that lands INT16_MAX
-  // on scale_ spends the whole of the state's range. The curve makes that
-  // a reference rather than a ceiling: it leaves a ring far under, and the
-  // drive multiple spends the difference -- 5.4 dB in the band-pass, 4.2 in
-  // the low-pass.
+  // svf.bp and svf.lp are both clipped to INT16_MAX, so a gain that maps
+  // INT16_MAX onto scale_ uses the whole of their range without exceeding it.
+  // A ring only touches that peak briefly, so kPingDriveMultiple drives past
+  // it and leaves the curve to compress what goes over: 5.4 dB louder in the
+  // band-pass, 4.2 dB in the low-pass.
   const int32_t kUnityStateToOutput_q12 =
       (kEnvelopeSampleMax << 12) / INT16_MAX;
   const int32_t kPingDriveMultiple = 2;
   const int32_t state_to_output_q12 = kUnityStateToOutput_q12
       * kPingDriveMultiple * coherent_scale_u15_ >> 15;
-  // state_in_curve peaks at INT16_MAX * kPingDriveMultiple /
-  // kSoftLimitHeadroom, so the two constants bound the table index.
+  // state_in_curve therefore peaks at INT16_MAX * kPingDriveMultiple /
+  // kSoftLimitHeadroom, which stays inside the table as long as the multiple
+  // does not exceed the headroom.
   STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom,
                 ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 = state_to_output_q12 * INT16_MAX
       / (scale_ * kSoftLimitHeadroom);
   const int32_t scale_u15 = coherent_scale_u15_;
   RENDER_CORE_EXCITED(
-    // Halved: the resonant step response overshoots the excitation.
+    // The resonant step response overshoots its input, so the excitation is
+    // halved to leave room for the overshoot.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
     const int32_t state_in_curve =
         (is_band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
