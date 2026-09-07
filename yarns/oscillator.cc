@@ -234,7 +234,7 @@ int16_t Oscillator::WarpTimbre(
     // was worth asking while bp sat on its rail -- the extra was not realised,
     // MEASURED as 0.4 dB of change in peak-to-octave-up between Q 435 and 3482.
     // Off the rail it is realised, and the ring at middle C runs about 2 s.
-    const int32_t damp_max_q1_14 = 2392;
+    const int32_t damp_max_u1_14 = 2392;
     const uint32_t q_octaves = kWhistleQOctaves;
     // OFF THE BOTTOM OF THE MAP IS THE WIDEST SETTING, and it has to be said
     // here: the cast below wraps a negative timbre into a shift of 65527, which
@@ -243,7 +243,7 @@ int16_t Oscillator::WarpTimbre(
     // it -- and the note then grows for as long as it is held.
     if (timbre < 0) timbre = 0;
     uint32_t octaves_q16 = (static_cast<uint32_t>(timbre) * q_octaves) << 1;
-    int32_t damp = damp_max_q1_14 * // 2^-octaves
+    int32_t damp = damp_max_u1_14 * // 2^-octaves
       Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16;
     return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
   }
@@ -965,7 +965,7 @@ static const int32_t kWhistleLowestPitch = 30 << 7;
 //   wants.
 static int32_t WhistleStateToOutput(
     int32_t pitch, int32_t state_to_codes_u15,
-    int32_t damp_drive_q15) {
+    int32_t damp_drive_u15) {
   // Half an octave of level per octave of pitch, which holds rms flat to
   // MIDI 84 and under-corrects above it.
   const int32_t pitch_correction_numerator = 1;
@@ -973,21 +973,21 @@ static int32_t WhistleStateToOutput(
   // How far into the curve the signal is driven, which is the level: noise
   // visits its peak rarely, and everything under it is unspent until something
   // bends the peak.
-  const int32_t level_into_knee_q15 = 18800;
+  const int32_t level_into_knee_u15 = 18800;
   int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * pitch_correction_numerator
       / pitch_correction_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
-  int32_t level_q15 = level_into_knee_q15 *
+  int32_t level_u15 = level_into_knee_u15 *
       (Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 1) >> 15;
   int32_t whole_octaves = octaves_q16 >> 16;
   const int32_t level_at_pitch_u15 =
       whole_octaves >= 20
           ? 0
-          : ((level_q15 >> whole_octaves) * state_to_codes_u15 >> 15);
-  return damp_drive_q15
+          : ((level_u15 >> whole_octaves) * state_to_codes_u15 >> 15);
+  return damp_drive_u15
       ? static_cast<int32_t>(
-            (static_cast<uint32_t>(level_at_pitch_u15) << 15) / damp_drive_q15)
+            (static_cast<uint32_t>(level_at_pitch_u15) << 15) / damp_drive_u15)
       : level_at_pitch_u15;
 }
 
@@ -1000,25 +1000,25 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // factor back at the output moves the state without moving the level.
   // Q is the reciprocal of damp: 6.9 at the maximum, 1820 at the minimum.
   // Bandwidth is f0 / Q, so it is not damp's alone.
-  const uint32_t damp_max_q1_14 = 2392;
+  const uint32_t damp_max_u1_14 = 2392;
   // A floor for the timbre envelope's overshoot; the warp never reaches it.
   // The make-up is a reciprocal of this, so without the floor it steps 50x
   // between blocks.
-  const uint32_t damp_min_q1_14 =
-      damp_max_q1_14 >> kWhistleQOctaves;
+  const uint32_t damp_min_u1_14 =
+      damp_max_u1_14 >> kWhistleQOctaves;
   // The loop reads the per-sample damp; under a fast timbre the two disagree.
-  uint32_t damp_at_block_start_q1_14 = static_cast<uint32_t>(
+  uint32_t damp_at_block_start_u1_14 = static_cast<uint32_t>(
       input_samples[0] > 0 ? input_samples[0] : 0);
-  if (damp_at_block_start_q1_14 < damp_min_q1_14) {
-    damp_at_block_start_q1_14 = damp_min_q1_14;
+  if (damp_at_block_start_u1_14 < damp_min_u1_14) {
+    damp_at_block_start_u1_14 = damp_min_u1_14;
   }
-  if (damp_at_block_start_q1_14 > damp_max_q1_14) {
-    damp_at_block_start_q1_14 = damp_max_q1_14;
+  if (damp_at_block_start_u1_14 > damp_max_u1_14) {
+    damp_at_block_start_u1_14 = damp_max_u1_14;
   }
-  const int32_t damp_drive_q15 = IntegerSqrt(
-      (damp_at_block_start_q1_14 << 15) / damp_max_q1_14 * 32768u);
+  const int32_t damp_drive_u15 = IntegerSqrt(
+      (damp_at_block_start_u1_14 << 15) / damp_max_u1_14 * 32768u);
   const int32_t state_to_output_q15 = WhistleStateToOutput(
-      resonant_pitch, incoherent_state_to_codes_u15_, damp_drive_q15);
+      resonant_pitch, incoherent_state_to_codes_u15_, damp_drive_u15);
   const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(
       stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
       static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
@@ -1034,7 +1034,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
         Random::GetSample() * input_samples[kAudioBlockSize] >> 15;
-    excitation = excitation * damp_drive_q15 >> 15;
+    excitation = excitation * damp_drive_u15 >> 15;
     svf.RenderSampleAtPitch(excitation, timbre);
     int32_t state = svf.bp;
     CONSTRAIN(state, -bp_ceiling, bp_ceiling);
