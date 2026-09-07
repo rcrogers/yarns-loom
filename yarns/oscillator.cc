@@ -297,7 +297,7 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   timbre_envelope_.Rescale(new_scale, old_scale);
 
   // The gain envelope carries the voice's SHARE of the output budget, and the
-  // share moves when the shape changes which way the voices sum. Rescale it for
+  // scale_ moves when the shape changes which way the voices sum. Rescale it for
   // the same reason: a held note is meant to change shape, not loudness.
   gain_envelope_.Rescale(scale_for(new_shape), scale_for(shape_));
 
@@ -935,23 +935,22 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // 150 an octave down, and the filter stops being one: MEASURED at MIDI 24 the
 // peak sits at 43.9 Hz for a note of 32.7. The resonance is the only pitch this
 // shape has, so this is a real floor on it.
-// HOW FAR PAST THE VOICE'S SHARE THE LIMITER'S CURVE REACHES. Excursions
-// between the share and this are COMPRESSED rather than cut, which is the whole
-// of what a knee is; the share itself lands at 1/kCurveHeadroom of the curve's
-// domain. IT PAIRS WITH THE TABLE, and the pairing is what makes the curve a
+// HOW FAR PAST scale_ THE LIMITER'S CURVE REACHES. Excursions between what the
+// voice may put on the output and this are COMPRESSED rather than cut, which is
+// the whole of what a knee is; scale_ >> 1 itself lands at 1/kCurveHeadroom of
+// the curve's domain. IT PAIRS WITH THE TABLE, and the pairing is what makes the curve a
 // LIMITER rather than an overdrive: k / tanh(k) == kCurveHeadroom sets the
 // small-signal gain to exactly 1, so a voice nowhere near the limit passes
 // through untouched. Change one and the other moves --
 // yarns/resources/waveshapers.py holds the k.
 static const int32_t kCurveHeadroom = 4;
 
-// The curve, and its output brought back to the share: the table is full-scale
-// int16 and a share is not, and no fixed table can carry a difference that
-// moves with voice count.
-static inline int32_t SoftLimitToShare(
-    int32_t driven, int32_t curve_to_share_q15) {
+// The curve, and its full-scale output converted to DAC codes. No fixed table
+// can carry that conversion: how many codes a voice may use moves with voice
+// count, so it comes from Init.
+static inline int32_t SoftLimit(int32_t driven, int32_t state_to_codes_u15) {
   return Interpolate88(ws_soft_limit, static_cast<uint16_t>(driven + 32768))
-      * curve_to_share_q15 >> 15;
+      * state_to_codes_u15 >> 15;
 }
 
 static const int32_t kWhistleLowestPitch = 30 << 7;
@@ -960,8 +959,8 @@ static const int32_t kWhistleLowestPitch = 30 << 7;
 // envelope. So the filter state arrives scaled, and this must not scale it
 // again -- doing so cost 6 dB at every voice count. What is left for the gain
 // below to set is the resonator's own gain with pitch, and how hard the result
-// is driven into the limiter's curve. Holding it inside the span is the
-// curve's job, not this one's.
+// is driven into the limiter's curve. Holding it inside the output voltage
+// range is the curve's job, not this one's.
 
 // THE RESONATOR'S OWN GAIN AT RESONANCE, which is what both corrections in
 // this shape are correcting. It has two terms and they are handled in
@@ -1008,8 +1007,8 @@ static int32_t WhistleLevelAtPitch(int32_t pitch, int32_t state_to_codes_u15) {
   int32_t gain = level_into_knee_q15 *
       (Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 1) >> 15;
   int32_t whole = octaves_q16 >> 16;
-  // The voice's share, applied HERE rather than by the caller, so only the
-  // result crosses back into a loop that has to keep its registers.
+  // The state-to-codes conversion applied HERE rather than by the caller, so
+  // only the result crosses back into a loop that has to keep its registers.
   return whole >= 20 ? 0 : ((gain >> whole) * state_to_codes_u15 >> 15);
 }
 
@@ -1048,8 +1047,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       (damp_q1_14 << 15) / damp_at_widest_q1_14 * 32768u);
   const int32_t level_at_pitch_u15 =
       WhistleLevelAtPitch(resonant_pitch, incoherent_state_to_codes_u15_);
-  // THE LINEAR GAIN THE CURVE STANDS IN FOR: the voice's ceiling in codes,
-  // corrected for pitch,
+  // THE LINEAR GAIN THE CURVE STANDS IN FOR: what the voice may put on the
+  // output, corrected for pitch,
   // times the make-up the damp correction owes back. Its own step because both
   // scalars below derive from it, and 32 bits will not hold one expression.
 
@@ -1058,8 +1057,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
             (static_cast<uint32_t>(level_at_pitch_u15) << 15)
                 / excitation_scale_q15)
       : level_at_pitch_u15;
-  // THE STATE IN THE CURVE'S DOMAIN, and the only gain the loop applies. The
-  // share lands at 1/kCurveHeadroom of full scale, so the peak is held
+  // THE STATE IN THE CURVE'S DOMAIN, and the only gain the loop applies.
+  // scale_ >> 1 lands at 1/kCurveHeadroom of full scale, so the peak is held
   // ASYMPTOTICALLY by the curve instead of being cut at a ceiling -- which is
   // what lets a voice nowhere near the limit keep the whole of its level.
   const int32_t voice_ceiling = scale_ >> 1;
@@ -1073,8 +1072,6 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t bp_ceiling = state_into_curve_q15 > 0
       ? (INT16_MAX << 15) / state_into_curve_q15
       : INT16_MAX;
-  const int32_t curve_to_share_q15 = static_cast<int32_t>(
-      (static_cast<uint32_t>(voice_ceiling) << 15) / INT16_MAX);
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Noise of its own, because a whistle sustains and the chiff decays.
     int32_t excitation =
@@ -1084,7 +1081,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     int32_t band_pass = svf.bp;
     CONSTRAIN(band_pass, -bp_ceiling, bp_ceiling);
     const int32_t driven = band_pass * state_into_curve_q15 >> 15;
-    this_sample = SoftLimitToShare(driven, curve_to_share_q15);
+    this_sample = SoftLimit(driven, coherent_state_to_codes_u15_);
   )
   svf_ = svf;
 }
@@ -1108,21 +1105,22 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   const bool band_pass = shape_ == OSC_SHAPE_PING_BP;
   // UNITY IS SOLVED, NOT TRIMMED. Whatever the exciter does, `bp` and `lp`
   // leave the SVF through Clip16, so the state this reads is bounded by
-  // INT16_MAX; the share is a fraction of kEnvelopeSampleMax. The gain that
-  // lands one bound exactly on the other spends the whole of the state's range
-  // and cannot exceed the share:
+  // INT16_MAX, and state_to_codes_u15 says what a full-scale state is worth in
+  // DAC codes. The gain that lands one bound exactly on the other spends the
+  // whole of the state's range and cannot exceed what the voice may put out:
   //
   //     state * gain_q12 >> 12 == scale_ >> 1   at state == INT16_MAX
   //
   // THE LIMITER IS WHY IT IS A REFERENCE AND NOT A CEILING. Unity leaves the
-  // level of a RING far under the share -- MEASURED -13.8 dBFS against the
+  // level of a RING far under what the voice may put out -- MEASURED -13.8
+  // dBFS against the
   // low-pass's -8.4 at MIDI 60, because a ring visits its peak and the
   // low-pass's DC pedestal sits on it -- and under a hard cap that gap could
   // only be spent as clipping. The curve spends it as compression instead.
   //
   //   MEASURED per voice at MIDI 60, TIMBRE 127, unity against twice it: the
   //   band-pass gains 5.4 dB and the LOW-PASS 4.2 -- its pedestal moves from
-  //   0.76 of the share to 0.96, which is the curve's asymptote taking over
+  //   0.76 of scale_ >> 1 to 0.96, which is the curve's asymptote taking over
   //   from the Clip16 rail. The 3rd harmonic that buys it is 31 dB down and
   //   every harmonic above it is 21 dB below the one before.
   const int32_t kPingUnityGain_q12 = (kEnvelopeSampleMax << 12) / INT16_MAX;
@@ -1130,22 +1128,20 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t ping_gain_q12 = kPingUnityGain_q12 * kPingDriveMultiple
       * coherent_state_to_codes_u15_ >> 15;
   const int32_t voice_ceiling = scale_ >> 1;
-  // WHICH BOUNDS THE TABLE INDEX BY ARITHMETIC, so the loop needs no clamp:
+  // THIS BOUNDS THE TABLE INDEX BY ARITHMETIC, so the loop needs no clamp:
   // the state is Clip16-bounded, so `driven` peaks at INT16_MAX times
   // kPingDriveMultiple / kCurveHeadroom. Drive it as far as the domain reaches
   // and that stops being true, so the two are tied together here.
   STATIC_ASSERT(kPingDriveMultiple <= kCurveHeadroom, ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 = ping_gain_q12 * INT16_MAX
       / (voice_ceiling * kCurveHeadroom);
-  const int32_t curve_to_share_q15 = static_cast<int32_t>(
-      (static_cast<uint32_t>(voice_ceiling) << 15) / INT16_MAX);
   RENDER_CORE_NO_OUTPUT_GAIN(
     // Halved going in: the resonant step response overshoots the excitation, and
     // at full scale the ring railed for 7% of the note.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
     const int32_t driven =
         (band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
-    this_sample = SoftLimitToShare(driven, curve_to_share_q15);
+    this_sample = SoftLimit(driven, coherent_state_to_codes_u15_);
   )
   svf_ = svf;
 }

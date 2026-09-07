@@ -1,12 +1,13 @@
-// THE MIX MUST STAY INSIDE THE SPAN voice.h HANDS OUT, for every shape, at
-// every voice count, whatever the panel asks for.
+// THE MIX MUST STAY INSIDE THE OUTPUT VOLTAGE RANGE, for every shape, at every
+// voice count, whatever the panel asks for. voice.h hands each voice scale_,
+// and scale_ >> 1 is what one of them may put on the output.
 //
 // This is the contract nothing enforced. Each voice is given a share of the
-// span and every shape ends in a clip, so the arithmetic works out ONLY while
+// range and every shape ends in a clip, so the arithmetic works out ONLY while
 // each shape stays inside its share -- and the mix accumulator is an int16
 // carrying a uint16 DAC code, so a shape that does not is not clipped, it
 // WRAPS: the code passes 65535 and the output jumps from -5 V to +7 V. Six
-// shapes broke the contract silently the moment the span doubled (5f739a20),
+// shapes broke the contract silently the moment the range doubled (5f739a20),
 // because the shapes the gain envelope EXCITES turn the chiff's overdrive into
 // output past their share.
 //
@@ -117,8 +118,8 @@ int main(int argc, char** argv) {
   const bool verbose = argc > 1 && !strcmp(argv[1], "verbose");
 
   // THE ALLOWANCE IS READ BACK FROM voice.h, not restated here: one voice is
-  // given the whole span, and its share of it is what its envelope peaks at.
-  // Stating the span twice is how the check and the thing checked drift apart.
+  // given the whole of it, and scale_ >> 1 is what its envelope peaks at.
+  // Stating that twice is how the check and the thing checked drift apart.
   voices[0].Init();
   audio_output.Init(true);
   audio_output.AssignVoices(&voices[0], DC_PITCH, 1, 1);
@@ -147,12 +148,12 @@ int main(int argc, char** argv) {
     }
   }
   if (failures) {
-    printf("\n%d shape(s) leave the span the voices were given. Past it the DAC\n"
-           "code wraps and the output inverts; there is no clipping in between.\n",
-           failures);
+    printf("\n%d shape(s) leave the output range the voices were given. Past it\n"
+           "the DAC code wraps and the output inverts; there is no clipping in\n"
+           "between.\n", failures);
     return 1;
   }
-  printf("PASS %d shapes stay inside the span at 1..%d voices "
+  printf("PASS %d shapes stay inside the output range at 1..%d voices "
          "(%lu cases each)\n",
          OSC_SHAPE_FM + 1, kMaxVoices,
          (unsigned long) (kMaxVoices * 5 * 4 * 3));

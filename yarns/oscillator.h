@@ -239,8 +239,8 @@ class Oscillator {
       ADSR& adsr, bool drone,
       int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
       uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
-    // AN EXCITATION SHAPE'S ENVELOPE RUNS AT FULL SCALE, and its share is
-    // applied at the shape's OUTPUT instead. The share is a LEVEL, and a level
+    // AN EXCITATION SHAPE'S ENVELOPE RUNS AT FULL SCALE, and scale_ is applied
+    // at the shape's OUTPUT instead. scale_ is a LEVEL, and a level
     // only commutes with what follows it while that is linear -- spending it
     // into a filter that clips makes the voice count decide the filter's
     // operating point, so the state shrinks and its clip moves with n.
@@ -250,9 +250,9 @@ class Oscillator {
     // knowing nothing of how many voices there are.
     const uint16_t peak = envelope_excites(shape_)
         ? kEnvelopeSampleMax : (scale_for(shape_) >> 1);
-    // The peak IS the ceiling here: a voice may spend its share of the output
-    // span and no more, chiff included, because n voices at their share sum to
-    // exactly the span. Where velocity or AMPLITUDE MOD put the note's own peak
+    // The peak IS the ceiling here: a voice may spend scale_ >> 1 of the
+    // output voltage range and no more, chiff included, because n voices at
+    // that fill the range exactly. Where velocity or AMPLITUDE MOD put the note's own peak
     // below it, the difference is room the chiff may use.
     gain_envelope_.NoteOn(
       adsr, drone ? peak : 0, peak, peak,
