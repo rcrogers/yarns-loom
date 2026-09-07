@@ -1036,9 +1036,9 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
         Random::GetSample() * input_samples[kAudioBlockSize] >> 15;
     excitation = excitation * damp_drive_q15 >> 15;
     svf.RenderSampleAtPitch(excitation, timbre);
-    int32_t band_pass = svf.bp;
-    CONSTRAIN(band_pass, -bp_ceiling, bp_ceiling);
-    const int32_t state_in_curve = band_pass * state_into_curve_q15 >> 15;
+    int32_t state = svf.bp;
+    CONSTRAIN(state, -bp_ceiling, bp_ceiling);
+    const int32_t state_in_curve = state * state_into_curve_q15 >> 15;
     this_sample = SoftLimit(state_in_curve, state_to_codes_u15);
   )
   svf_ = svf;
@@ -1053,7 +1053,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // The low-pass passes the exciter's DC, so past the ring its state is the
   // excitation's level: a thump under a percussive envelope, a standing offset
   // under a sustained one. The band-pass rejects it.
-  const bool band_pass = shape_ == OSC_SHAPE_PING_BP;
+  const bool is_band_pass = shape_ == OSC_SHAPE_PING_BP;
   // Both states leave the SVF through Clip16, so the gain that lands INT16_MAX
   // on what the voice may put out spends the whole of the state's range. The
   // curve makes that a reference rather than a ceiling: it leaves a ring far
@@ -1073,7 +1073,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     // Halved: the resonant step response overshoots the excitation.
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
     const int32_t state_in_curve =
-        (band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
+        (is_band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
     this_sample = SoftLimit(state_in_curve, state_to_codes_u15);
   )
   svf_ = svf;
