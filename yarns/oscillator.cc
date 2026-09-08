@@ -881,6 +881,12 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
   SET_CZ_RATIO_LIMITS
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
   const bool output_is_pulse = filter_type & 2;
+  // The step belongs to the pulse. The integrator turns a step in its input into
+  // a change of slope, so the low-pass output steps by none of it and the
+  // peaking output by half -- and half is zero here, since peaking resets at a
+  // half turn, where the sine is zero. High-pass resets there too.
+  const int32_t wrap_step = output_is_pulse
+      ? WrapStep(sine(kPhaseResetPulse[filter_type]), true) : 0;
   int32_t integrator = pd_square_.integrator;
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
@@ -888,6 +894,13 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
     if ((phase << 1) < (phase_increment << 1)) {
       pd_square_.polarity = !pd_square_.polarity;
       modulator_phase = kPhaseResetPulse[filter_type];
+      // The window resets twice a period, so the edge is timed against the
+      // doubled phase the test above uses. The polarity has just flipped, and
+      // it decides which way this reset jumps.
+      const uint32_t t = EdgeTime(phase << 1, phase_increment << 1);
+      const int32_t step = pd_square_.polarity ? -wrap_step : wrap_step;
+      this_sample += ThisBlepSample(t) * step >> 16;
+      next_sample += NextBlepSample(t) * step >> 16;
     }
     int16_t carrier = quadrant_lookup(sine_table, modulator_phase);
     uint16_t window = ~(phase >> 15); // Double saw
@@ -916,7 +929,10 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
         output = (pulse + integrator) >> 1;
       }
     }
-    this_sample = output;
+    // A sample ahead, like the saw below and every other BLEP shape here: the
+    // correction is split across this_sample and next_sample and only lands on
+    // the edge if the waveform is delayed to match.
+    next_sample += output;
   )
   pd_square_.integrator = integrator;
 }
