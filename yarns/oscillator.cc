@@ -595,11 +595,20 @@ void Oscillator::RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix)
 
     // Exponential timbre curve, biased high
     uint32_t pw = Interpolate88(lut_env_expo_u16, timbre) << 15; // 0-50% width of each flat part
+    // The ramp may not rise in less than a sample. Below that it is a step, and
+    // the BLEP below corrects the falling edge only -- at MIDI 97 the top of
+    // the knob rose in 0.14 samples and the shape aliased at -4.1 dB against
+    // -25 dB over the rest of its range.
+    const uint32_t widest_flat = (UINT32_MAX - phase_increment) >> 1;
+    if (pw > widest_flat) pw = widest_flat;
     uint32_t saw_width = UINT32_MAX - (pw << 1); // 0-100% width of up-ramp
 
     bool self_reset = PhaseWrapped(phase, phase_increment);
-    // BLEP falling pulse edge only
-    while (self_reset) { EDGES_PULSE(phase, phase_increment) }
+    // One edge, the fall at the wrap: the ramp's two corners are slope breaks,
+    // which need no step correction. EDGES_PULSE was inert here -- its rising
+    // arm broke on `phase < pw` at every wrap, and where pw is zero its two
+    // corrections cancelled -- so this shape was not band-limited at all.
+    while (true) { EDGES_SAW(phase, phase_increment) }
     if (phase < pw) next_sample += 0;
     else if (phase < pw + saw_width) next_sample += ((phase - pw) / (saw_width >> 16)) >> 1;
     else next_sample += 0x7fff;
