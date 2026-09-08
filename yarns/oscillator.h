@@ -153,8 +153,6 @@ class Oscillator {
         (static_cast<uint32_t>(scale_) << 15) / INT16_MAX);
     incoherent_scale_u15_ = static_cast<uint16_t>(
         (static_cast<uint32_t>(incoherent_scale_) << 15) / INT16_MAX);
-    prev_transfer_raw_ = 0;
-    prev_transfer_avg_ = 0;
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
@@ -334,10 +332,6 @@ class Oscillator {
     return quadrant_lookup(lut_sine_quadrant_u16, phase);
   }
 
-  inline int16_t expo(uint32_t phase) const {
-    return quadrant_lookup(lut_expo_quadrant_u16, phase);
-  }
-
   inline int16_t triangle(uint32_t phase) const {
     // Phase offset ensures f(0) = 0, with peak at phase 1/4 (like sine).
     // This simplifies transfer waveshaping: input 0 always yields output 0.
@@ -367,8 +361,6 @@ class Oscillator {
   PhaseDistortionSquareModulator pd_square_;
   
   int32_t next_sample_;
-  int16_t prev_transfer_raw_;
-  int16_t prev_transfer_avg_;
   // WHISTLE normalises its filter state by damp_drive_u15. Changing that
   // exponent means rescaling the state it normalised, so the last one is kept.
   int32_t previous_damp_drive_u15_;

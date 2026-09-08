@@ -332,7 +332,7 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
 
 // Both envelopes are evaluated up-front into stack buffers, then the wave
 // render reads gain per sample and multiply-accumulates into audio_mix. The
-// buffers are stack locals, which yarns/stack_budget.h accounts for.
+// buffers are stack locals.
 void Oscillator::Render(int16_t* audio_mix) {
   // Skipping zero-init: both buffers are fully overwritten by the
   // envelope renders below.
