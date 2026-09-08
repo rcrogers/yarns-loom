@@ -122,13 +122,19 @@ uint32_t HashShape(int shape, bool dump) {
   for (int gain_profile = 0; gain_profile < kNumGainProfiles; ++gain_profile)
   for (int sweep = 0; sweep < kNumSweeps; ++sweep) {
   if (g_sweep_only >= 0 && sweep != g_sweep_only) continue;
-  for (size_t p = 0; p < sizeof(kPitches) / sizeof(kPitches[0]); ++p) {
-    if (g_pitch_only >= 0 && kPitches[p] != g_pitch_only << 7) continue;
+  const size_t pitch_cases =
+      g_pitch_only >= 0 ? 1 : sizeof(kPitches) / sizeof(kPitches[0]);
+  for (size_t p = 0; p < pitch_cases; ++p) {
+    // `pitch=` names the note to render, not a grid entry to select: asking for
+    // one off the grid used to walk every case and match none, printing nothing
+    // and exiting 0.
+    const int16_t pitch = g_pitch_only >= 0
+        ? static_cast<int16_t>(g_pitch_only << 7) : kPitches[p];
     // One voice, so its share of the output budget is the whole of it and the
     // two shares coincide.
     osc.Init(kScale, kScale);
     osc.set_shape(static_cast<OscillatorShape>(shape));
-    osc.Refresh(static_cast<int16_t>(kPitches[p]), 0, 0);
+    osc.Refresh(pitch, 0, 0);
     for (int b = 0; b < g_blocks; ++b) {
       int16_t timbre_gain[2 * kAudioBlockSize];
       int16_t mix[kAudioBlockSize];

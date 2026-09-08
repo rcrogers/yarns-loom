@@ -128,4 +128,25 @@ if (f0) {
   const ratio = aliasPower / (harmonicPower + aliasPower);
   console.log(`   NOT AT A HARMONIC        ${(10 * Math.log10(ratio)).toFixed(1)}` +
               `   <- aliasing, as dB of the total`);
+
+  // AN ALIAS OF A HARMONIC OF f0 IS ITSELF AT A MULTIPLE OF f0 WHENEVER THE
+  // PERIOD IS A WHOLE NUMBER OF SAMPLES, and this counts it as signal. Measured
+  // on CZ_PULSE_HP, which reads -25.3 dB at MIDI 84 (43.00 samples a period)
+  // between neighbours at -10.2 and -9.3. A simple fraction folds some of them
+  // and costs less; the denominator says how much.
+  //
+  // So it is stated rather than corrected: the pitch is the caller's, and every
+  // octave of a pitch that divides the rate has the same problem.
+  const samplesPerPeriod = rate / f0;
+  for (let d = 1; d <= 4; ++d) {
+    const scaled = samplesPerPeriod * d;
+    if (Math.abs(scaled - Math.round(scaled)) < 0.02) {
+      console.log(`   period ${samplesPerPeriod.toFixed(2)} samples` +
+          (d === 1 ? ` -- A WHOLE NUMBER, so aliases land on harmonics and the`
+                   : ` = ${Math.round(scaled)}/${d}, so some aliases land on`) +
+          (d === 1 ? ` figure above is a FLOOR. Move f0 off it.`
+                   : ` harmonics and the figure above reads low.`));
+      break;
+    }
+  }
 }
