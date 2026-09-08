@@ -817,6 +817,13 @@ const uint32_t kPhaseResetSaw[] = {
   0x80000000, // High-pass: cos
 };
 
+// THE STEP THE WRAP MAKES, in 1/65536 of full scale. The window is zero at the
+// end of a period and full at the start of the next, so the carrier's reset
+// phase above decides the jump on its own -- a constant per filter type, which
+// is what makes correcting it cheap. High-pass resets to a half turn, where the
+// sine is zero, so it has no step.
+const int32_t kWrapStepSaw[] = { 32767, 65534, 32766, 0 };
+
 const uint32_t kPhaseResetPulse[] = {
   0x40000000,
   0x80000000,
@@ -858,11 +865,16 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
 
 void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix) {
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
+  const int32_t wrap_step = kWrapStepSaw[filter_type];
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
     modulator_phase += modulator_phase_increment;
     if (PhaseWrapped(phase, phase_increment)) {
       modulator_phase = kPhaseResetSaw[filter_type];
+      // Added, not subtracted: this ramp falls and the wrap steps UP.
+      const uint32_t t = EdgeTime(phase, phase_increment);
+      this_sample += ThisBlepSample(t) * wrap_step >> 16;
+      next_sample += NextBlepSample(t) * wrap_step >> 16;
     }
     int16_t carrier = sine(modulator_phase);
     uint16_t window = ~(phase >> 16); // Saw
@@ -878,7 +890,12 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
       // arithmetic this depends on is spelled out instead of assumed.
       output = (static_cast<uint32_t>(window) * (carrier + 32768) >> 16) - 32768;
     }
-    this_sample = output;
+    // Written a sample ahead, and emitted next time round. The correction above
+    // is split across this_sample and next_sample, so it only lands on the edge
+    // if the waveform is delayed the same way every other BLEP shape here
+    // delays it. Assigning this_sample instead put the two halves a sample away
+    // from the step and made the aliasing worse, not better.
+    next_sample += output;
   )
 }
 
