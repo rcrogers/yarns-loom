@@ -266,7 +266,12 @@ ATTACK = [('envelopes, %s runs + handoffs' % metrics['runs_per_block'],
 shapes = [(parts[0], float(parts[1]), float(parts[2]))
           for parts in (l.split() for l in tool('osc_cycles.py', '--metrics').splitlines())
           if len(parts) == 3 and parts[0].startswith('Render')]
-worst_shape, worst_hi, worst_c4 = max(shapes, key=lambda row: row[1])
+# PER PITCH, not once. The dearest shape at the top of the keyboard is not the
+# dearest at middle C: a branchy shape's cost is wrap work it only pays up
+# there, and a flat one costs the same everywhere. Picking once by the top note
+# priced the middle-C block with a shape that is cheaper there.
+worst_shape_hi, worst_hi, _ = max(shapes, key=lambda row: row[1])
+worst_shape_c4, _, worst_c4 = max(shapes, key=lambda row: row[2])
 
 print('layout %s -- the hungriest of %d' % (WORST.replace('LAYOUT_', ''), len(layouts)))
 print('  %d audio outputs carrying %s voices, %d envelope output(s), %d envelopes'
@@ -275,7 +280,9 @@ print('  %d cycles a block at %d Hz on %.0f MHz' % (BUDGET, FRAME_HZ, CPU_HZ / 1
 print()
 print('  %-46s %8s %4s %9s %7s' % ('per-block item', 'each', 'x', 'cycles', '%CPU'))
 for kind, extra in (('steady block', STEADY), ('ATTACK block', ATTACK)):
-  for pitch, shape_cycles in (('top note', worst_hi), ('middle C', worst_c4)):
+  for pitch, shape_cycles, worst_shape in (
+      ('top note', worst_hi, worst_shape_hi),
+      ('middle C', worst_c4, worst_shape_c4)):
     full = rows + extra + [
         ('worst shape, %s (%s)' % (pitch, worst_shape.replace('Render', '')),
          shape_cycles * BLOCK_SAMPLES, sum(AUDIO_VOICES_PER_OUTPUT))]
