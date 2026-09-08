@@ -883,11 +883,20 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // generates the table.
 static const int32_t kSoftLimitHeadroom = 4;
 
+// The curve is passed rather than read here so the caller can pin its address
+// to a register: GCC re-materializes it inside the sample loop otherwise, once
+// for each of the two entries read.
 static inline int32_t SoftLimit(
-    int32_t state_in_curve, int32_t scale_u15) {
-  return Interpolate88(
-      ws_soft_limit, static_cast<uint16_t>(state_in_curve + 32768))
-      * scale_u15 >> 15;
+    const int16_t* curve, int32_t state_in_curve, int32_t scale_u15) {
+  const uint16_t index = static_cast<uint16_t>(state_in_curve + 32768);
+  // Interpolate88's body, off ONE pointer and without its narrowing return.
+  // The result lies between two entries of a table that fits int16, so the
+  // narrowing cannot bite, and it costs a round trip through the stack in the
+  // sample loop.
+  const int16_t* entry = &curve[index >> 8];
+  const int32_t below = entry[0];
+  const int32_t above = entry[1];
+  return (below + ((above - below) * (index & 0xff) >> 8)) * scale_u15 >> 15;
 }
 
 static const int32_t kWhistleLowestPitch = 30 << 7;
@@ -976,24 +985,32 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
       static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
       static_cast<uint32_t>(scale_) * kSoftLimitHeadroom));
-  // Clamping bp here bounds the multiply below: bp_ceiling is the reciprocal of
-  // state_into_curve_q15, so their product is INT16_MAX << 15 -- inside int32,
-  // and exactly the last index of the table.
-  const int32_t bp_ceiling = state_into_curve_q15 > 0
-      ? (INT16_MAX << 15) / state_into_curve_q15
-      : INT16_MAX;
+  // bp is int16 and the drive reaches 77k, so the full-precision product does
+  // not fit int32. Three bits off the drive make it fit with room to spare --
+  // a constant, so what they cost is 0.17% of gain at worst and nothing that
+  // varies -- and the state keeps every bit the filter carried for it.
+  const int32_t kDriveHeadroomBits = 3;
+  const int32_t drive_into_curve_q12 =
+      state_into_curve_q15 >> kDriveHeadroomBits;
   const int32_t scale_u15 = coherent_scale_u15_;
+  // Where the pin sits is measured, not free: hoisted here this loop is 68
+  // cycles a sample and 74 with it at the call site, and RenderPing is the
+  // other way round.
+  const int16_t* curve = ws_soft_limit;
+  asm volatile ("" : "+r"(curve));
+  uint32_t noise_state = noise_state_;
   RENDER_CORE_EXCITED(
     // Noise of its own, because a whistle sustains and the chiff decays.
-    int32_t excitation =
-        Random::GetSample() * input_samples[kAudioBlockSize] >> 15;
+    noise_state = NextXorshift32(noise_state);
+    int32_t excitation = static_cast<int16_t>(noise_state >> 16)
+        * input_samples[kAudioBlockSize] >> 15;
     excitation = excitation * damp_drive_u15 >> 15;
     svf.RenderSampleAtPitch(excitation, timbre);
-    int32_t state = svf.bp;
-    CONSTRAIN(state, -bp_ceiling, bp_ceiling);
-    const int32_t state_in_curve = state * state_into_curve_q15 >> 15;
-    this_sample = SoftLimit(state_in_curve, scale_u15);
+    const int32_t state_in_curve = stmlib::Clip16(
+        svf.bp * drive_into_curve_q12 >> (15 - kDriveHeadroomBits));
+    this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
+  noise_state_ = noise_state;
   svf_ = svf;
 }
 
@@ -1031,7 +1048,9 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
     const int32_t state_in_curve =
         (is_band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
-    this_sample = SoftLimit(state_in_curve, scale_u15);
+    const int16_t* curve = ws_soft_limit;
+    asm volatile ("" : "+r"(curve));
+    this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
   svf_ = svf;
 }

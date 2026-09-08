@@ -101,7 +101,7 @@ int chiff_render(
                   env_mod_attack, env_mod_decay, env_mod_sustain,
                   env_mod_release);
 
-  next_chiff_seed = seed ? seed : 0xCAFEBABEu;
+  RestartXorshift32Seeds(seed ? seed : 0xCAFEBABEu);
 
   // EXCITER AMT VEL MOD. The q7_6 form is for the meta block's readout; the
   // fraction the envelope takes comes from the mirror.
@@ -125,7 +125,7 @@ int chiff_render(
   // Rest level = the note's own min, so an inverted or negative range starts
   // where it ends rather than at a zero that is outside it.
   envelope.Init(static_cast<int16_t>(min_target));
-  // NOT re-seeded here: next_chiff_seed is set above, BEFORE Init, and Init
+  // NOT re-seeded here: the seed sequence is restarted above, BEFORE Init, and Init
   // takes its stride off that. Overriding afterwards gave the page a different
   // stream from the native harness, which is exactly what simparity exists to
   // catch.

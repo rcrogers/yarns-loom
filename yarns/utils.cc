@@ -40,6 +40,20 @@ uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor) {
   return q1 * b + q0;
 }
 
+namespace {
+uint32_t last_xorshift32_seed = 0xCAFEBABE;
+const uint32_t kXorshift32SeedStride = 2654435761u;  // round(2^32 / phi)
+}  // namespace
+
+uint32_t NextXorshift32Seed() {
+  last_xorshift32_seed += kXorshift32SeedStride;
+  return last_xorshift32_seed | 1u;
+}
+
+void RestartXorshift32Seeds(uint32_t from) {
+  last_xorshift32_seed = from;
+}
+
 uint32_t IntegerSqrt(uint32_t x) {
   uint32_t root = 0, remainder = x, bit = 1u << 30;
   while (bit > remainder) bit >>= 2;

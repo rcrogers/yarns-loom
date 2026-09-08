@@ -36,6 +36,7 @@
 
 #include "yarns/envelope.h"
 #include "yarns/resources.h"
+#include "yarns/utils.h"
 #include "yarns/interpolator.h"
 #include "yarns/svf.h"
 #include "yarns/drivers/dac.h"
@@ -152,11 +153,15 @@ class Oscillator {
         (static_cast<uint32_t>(scale_) << 15) / INT16_MAX);
     incoherent_scale_u15_ = static_cast<uint16_t>(
         (static_cast<uint32_t>(incoherent_scale_) << 15) / INT16_MAX);
+    prev_transfer_raw_ = 0;
+    prev_transfer_avg_ = 0;
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
     svf_.Init();
     previous_damp_drive_u15_ = 0;
+    // Its own stream, so that voices summed as independent noise are.
+    noise_state_ = NextXorshift32Seed();
     pitch_ = 60 << 7;
     phase_ = 0;
     phase_increment_ = 1;
@@ -168,8 +173,6 @@ class Oscillator {
     pd_square_.polarity = false;
     high_ = false;
     next_sample_ = 0;
-    prev_transfer_raw_ = 0;
-    prev_transfer_avg_ = 0;
     transfer_crest_factor_ = 1;
   }
 
@@ -369,6 +372,7 @@ class Oscillator {
   // WHISTLE normalises its filter state by damp_drive_u15. Changing that
   // exponent means rescaling the state it normalised, so the last one is kept.
   int32_t previous_damp_drive_u15_;
+  uint32_t noise_state_;
   uint16_t scale_;
   uint16_t incoherent_scale_;
   uint16_t coherent_scale_u15_;

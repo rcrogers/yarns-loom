@@ -44,6 +44,30 @@ namespace yarns {
 // four sites it costs 244 bytes more than the one copy.
 uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
+// xorshift32. Zero is a fixed point, so a seed must be nonzero.
+//
+// Inline, unlike the rest of this header: its callers are per-sample loops, and
+// on Cortex-M3 each line is one barrel-shifted eor -- three cycles and no
+// literal pool, where a multiplicative generator spends two loads on its
+// constants and holds two registers for them.
+inline uint32_t NextXorshift32(uint32_t state) {
+  state ^= state << 13;
+  state ^= state >> 17;
+  state ^= state << 5;
+  return state;
+}
+
+// A seed for NextXorshift32, nonzero and distinct from the last. xorshift32 has
+// one orbit, so seeds are phases of a single stream and near seeds start near
+// each other -- hence a large odd stride. Out of line, and not drawn from
+// stmlib::Random: a seeder that consumes the shared stream moves every other
+// draw off it, which shifted three shapes that had not been touched.
+uint32_t NextXorshift32Seed();
+
+// Restarts that sequence, so a harness can repeat a run. Firmware never calls
+// it: the sequence only has to be deterministic, not chosen.
+void RestartXorshift32Seeds(uint32_t from);
+
 // Floor of the square root. Out of line for the same reason as the divide:
 // every caller is cold, and GCC has no integer sqrt to reach for.
 uint32_t IntegerSqrt(uint32_t x);

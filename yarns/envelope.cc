@@ -50,8 +50,8 @@ namespace {
   //   - Four bits divide a 32-bit word evenly, so the chunking below stays a
   //     shift and a mask. Asserted, not assumed.
   const uint32_t kChiffDrawBits = 4;
-  // The word the draws are packed into. xorshift32 pins the width at 32: its
-  // shift constants are only valid there.
+  // The word the draws are packed into. NextXorshift32 pins the width at 32:
+  // its shift constants are only valid there.
   typedef uint32_t ChiffDrawWord;
   const uint32_t kChiffDrawsPerWord = 32 / kChiffDrawBits;
   // A draw may not straddle a word: both loops extract one with a single ubfx
@@ -73,20 +73,6 @@ namespace {
   typedef char kChiffDrawsMustFillWholeWords[
       (kAudioBlockSize % kChiffDrawsPerWord == 0) ? 1 : -1];
 
-  // xorshift32. Zero is a fixed point, which is why the seeder below sets the
-  // low bit.
-  inline ChiffDrawWord NextChiffDraws(ChiffDrawWord state) {
-    state ^= state << 13;
-    state ^= state >> 17;
-    state ^= state << 5;
-    return state;
-  }
-
-  // Distinct seeds for distinct sequences. xorshift32 has one orbit, so seeds
-  // are phases of a single stream and near seeds start near each other -- hence
-  // a large odd stride.
-  const uint32_t kChiffSeedStride = 2654435761u;  // round(2^32 / golden ratio)
-  uint32_t next_chiff_seed = 0xCAFEBABE;
 }  // namespace
 
 
@@ -188,8 +174,7 @@ void Envelope::Init(int16_t zero_value_s16) {
     &note_target_q30_[ENV_NUM_STAGES],
     zero_value_q30
   );
-  next_chiff_seed += kChiffSeedStride;
-  chiff_draws_ = next_chiff_seed | 1u;
+  chiff_draws_ = NextXorshift32Seed();
   chiff_draws_left_ = kChiffDrawsPerWord;
   Trigger(ENV_STAGE_DEAD);
 }
@@ -1120,7 +1105,7 @@ void Envelope::RenderStage(
               static_cast<int32_t>((draws >> (i * kChiffDrawBits))
                                    & kChiffDrawValueMax));
           }
-          draws = NextChiffDraws(draws);
+          draws = NextXorshift32(draws);
         }
 #endif
         // The loop leaves the next unspent word in hand; draws_left is
@@ -1158,7 +1143,7 @@ void Envelope::RenderStage(
 #endif
       draws_left -= chunk;
       if (!draws_left) {
-        draw_state = NextChiffDraws(draw_state);
+        draw_state = NextXorshift32(draw_state);
         draws = draw_state;
         draws_left = kChiffDrawsPerWord;
       }
