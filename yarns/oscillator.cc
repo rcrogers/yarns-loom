@@ -47,6 +47,11 @@ static const uint16_t kOctave = 12 * 128;
 // SYNC's modulator frequency, as a multiple of the carrier's: _q3_12, so up
 // to 8x. The span TIMBRE asks for is 2.67 octaves, or 6.35x.
 static const int kSyncRatioFractionalBits = 12;
+// CZ's modulator frequency, as a multiple of the carrier's: _u5_10 on the
+// timbre channel, whose 15 bits the envelope guarantees non-negative, so up to
+// 32x. The map asks for 80x and is held to this, which is what bounds the
+// modulator below MIDI 72. Resolution is 3.5 cents at every pitch.
+static const int kCzRatioFractionalBits = 10;
 // How far TIMBRE sweeps WHISTLE's and PING's Q, and so how far the damp
 // correction's reciprocal may go.
 static const uint32_t kWhistleQOctaves = 8;
@@ -195,7 +200,21 @@ int16_t Oscillator::WarpTimbre(
     int32_t timbre_offset = timbre - 2048;
     int32_t shifted_pitch = pitch + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8);
     if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1;
-    return ComputePhaseIncrement(shifted_pitch) >> (32 - 15);
+    // Against the carrier the render will multiply, which Refresh keeps inside
+    // the playable range. NoteOn warps against a target pitch it has not
+    // clamped, and ComputePhaseIncrement shifts a low enough one to zero.
+    int32_t carrier_pitch = pitch;
+    CONSTRAIN(carrier_pitch, 0, kHighestNote - 1);
+    const uint32_t carrier =
+        ComputePhaseIncrement(static_cast<int16_t>(carrier_pitch));
+    const uint32_t modulator = ComputePhaseIncrement(
+        static_cast<int16_t>(shifted_pitch));
+    int32_t ratio = static_cast<int32_t>(DivU64ByU32(
+        modulator >> (32 - kCzRatioFractionalBits),
+        modulator << kCzRatioFractionalBits,
+        carrier));
+    CONSTRAIN(ratio, 0, kEnvelopeSampleMax);
+    return static_cast<int16_t>(ratio);
   }
 
   // Sync modulator tracks pitch
@@ -485,11 +504,23 @@ static inline uint32_t EdgeTime(
     high_ = false; \
   }
 
-// Timbre is unsigned here: the shift puts it in the modulator's phase
-// increment, where a sign bit reads as a rate hundreds of thousands of times
-// too fast.
+// The carrier is what carries the fraction, so a gliding note moves the
+// modulator with it. The clamp is the range in envelope.h and nothing else:
+// every value in it must produce a product this width holds.
 #define SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE \
-  uint32_t modulator_phase_increment = timbre << (32 - kEnvelopeSampleBits);
+  uint32_t modulator_phase_increment = carrier_increment_u0_22 * \
+      static_cast<uint32_t>( \
+          static_cast<uint32_t>(timbre) < widest_ratio_u5_10 \
+              ? static_cast<uint32_t>(timbre) : widest_ratio_u5_10);
+
+// The carrier scaled to pair with a raw ratio, and the widest ratio whose
+// product with it still fits. Both fall out of the width; how high the
+// modulator may go is a question about sound, and WarpTimbre answers it.
+#define SET_CZ_RATIO_LIMITS \
+  const uint32_t carrier_increment_u0_22 = \
+      phase_increment_ >> kCzRatioFractionalBits; \
+  const uint32_t widest_ratio_u5_10 = carrier_increment_u0_22 \
+      ? UINT32_MAX / carrier_increment_u0_22 : UINT32_MAX;
 
 // SYNC's timbre is a multiple of the carrier's frequency, so the modulator's
 // increment is the carrier's scaled by it.
@@ -842,6 +873,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
   // reloads every sample. Worth two cycles a sample here.
   const uint16_t* sine_table = lut_sine_quadrant_u16;
   asm volatile ("" : "+r"(sine_table));
+  SET_CZ_RATIO_LIMITS
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
   const bool output_is_pulse = filter_type & 2;
   int32_t integrator = pd_square_.integrator;
@@ -875,6 +907,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
 }
 
 void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix) {
+  SET_CZ_RATIO_LIMITS
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
   // Band- and high-pass take the signed arm; the other two carry a DC pedestal.
   // Which arm it is decides both the output and the size of the wrap's step.
