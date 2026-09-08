@@ -61,11 +61,12 @@ class StateVariableFilter : public SVF {
   void RenderInitCutoff(int16_t cutoff_u15);
 
   // Cutoff per sample, damping interpolated from a resonance set once a block.
-  // The NOISE shapes take their output from all four taps, so this one keeps
-  // notch and hp.
+  // kKeepNotchAndHp is the caller's: only a shape that reads notch or hp pays
+  // to store them.
+  template<bool kKeepNotchAndHp>
   inline void RenderSample(int32_t in, int16_t cutoff_u15) {
     damp.Tick();
-    ProcessInto<true>(in, cutoff_u15, damp.value());
+    ProcessInto<kKeepNotchAndHp>(in, cutoff_u15, damp.value());
   }
   // The mirror: damping per sample, cutoff interpolated toward the pitch's.
   // WHISTLE and PING read only bp and lp, so notch and hp need not be stored.

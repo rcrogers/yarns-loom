@@ -268,6 +268,33 @@ int16_t Oscillator::WarpTimbre(
   return timbre;
 }
 
+const uint32_t kPhaseResetSaw[] = {
+  0, // Low-pass: -cos
+  0x40000000, // Peaking: sin
+  0x40000000, // Band-pass: sin
+  0x80000000, // High-pass: cos
+};
+
+const uint32_t kPhaseResetPulse[] = {
+  0x40000000,
+  0x80000000,
+  0x40000000,
+  0x80000000,
+};
+
+// What the wrap steps by. The window runs to zero before each reset and is full
+// after it, so the reset phase decides the jump alone -- evaluated from the
+// same expressions the loops use, at a full window, so the two cannot drift.
+static int32_t WrapStep(int32_t reset_carrier, bool signed_arm) {
+  // Unsigned for the same reason the low-pass arm is: the product is
+  // 65535 * 65535 at the corner, which does not fit int32.
+  return signed_arm
+      ? (UINT16_MAX * reset_carrier) >> 16
+      : static_cast<int32_t>(
+            (static_cast<uint32_t>(UINT16_MAX) *
+             static_cast<uint32_t>(reset_carrier + 32768)) >> 16);
+}
+
 void Oscillator::set_shape(OscillatorShape new_shape) {
   if (shape_ == new_shape) return;
 
@@ -516,7 +543,7 @@ void Oscillator::RenderLPPulse(int16_t* input_samples, int16_t* audio_mix) {
     bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
-    svf.RenderSample(this_sample, timbre);
+    svf.RenderSample<true>(this_sample, timbre);
     this_sample = svf.lp;
   )
   svf_ = svf;
@@ -529,7 +556,7 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
     bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_SAW(phase, phase_increment) }
     next_sample += phase >> 17;
-    svf.RenderSample(this_sample, timbre);
+    svf.RenderSample<true>(this_sample, timbre);
     this_sample = svf.lp;
   )
   svf_ = svf;
@@ -810,29 +837,13 @@ void Oscillator::RenderFM(int16_t* input_samples, int16_t* audio_mix) {
   )
 }
 
-const uint32_t kPhaseResetSaw[] = {
-  0, // Low-pass: -cos
-  0x40000000, // Peaking: sin
-  0x40000000, // Band-pass: sin
-  0x80000000, // High-pass: cos
-};
-
-// THE STEP THE WRAP MAKES, in 1/65536 of full scale. The window is zero at the
-// end of a period and full at the start of the next, so the carrier's reset
-// phase above decides the jump on its own -- a constant per filter type, which
-// is what makes correcting it cheap. High-pass resets to a half turn, where the
-// sine is zero, so it has no step.
-const int32_t kWrapStepSaw[] = { 32767, 65534, 32766, 0 };
-
-const uint32_t kPhaseResetPulse[] = {
-  0x40000000,
-  0x80000000,
-  0x40000000,
-  0x80000000,
-};
-
 void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix) {
+  // Forces GCC to keep the table's address in a register, which it otherwise
+  // reloads every sample. Worth two cycles a sample here.
+  const uint16_t* sine_table = lut_sine_quadrant_u16;
+  asm volatile ("" : "+r"(sine_table));
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
+  const bool output_is_pulse = filter_type & 2;
   int32_t integrator = pd_square_.integrator;
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
@@ -841,7 +852,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
       pd_square_.polarity = !pd_square_.polarity;
       modulator_phase = kPhaseResetPulse[filter_type];
     }
-    int16_t carrier = sine(modulator_phase);
+    int16_t carrier = quadrant_lookup(sine_table, modulator_phase);
     uint16_t window = ~(phase >> 15); // Double saw
     int16_t pulse = (carrier * window) >> 16;
     if (pd_square_.polarity) pulse = -pulse;
@@ -849,7 +860,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
     integrator += (pulse * integrator_gain) >> 14; // Orig 16
     CLIP(integrator)
     int16_t output;
-    if (filter_type & 2) { // Band- or high-pass
+    if (output_is_pulse) {
       output = pulse;
     } else {
       // TODO HP is 2dB above LP, which is 2dB above PK
@@ -865,7 +876,11 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
 
 void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix) {
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
-  const int32_t wrap_step = kWrapStepSaw[filter_type];
+  // Band- and high-pass take the signed arm; the other two carry a DC pedestal.
+  // Which arm it is decides both the output and the size of the wrap's step.
+  const bool signed_arm = filter_type & 2;
+  const int32_t wrap_step =
+      WrapStep(sine(kPhaseResetSaw[filter_type]), signed_arm);
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
     modulator_phase += modulator_phase_increment;
@@ -879,7 +894,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
     int16_t carrier = sine(modulator_phase);
     uint16_t window = ~(phase >> 16); // Saw
     int16_t output;
-    if (filter_type & 2) { // Band- or high-pass
+    if (signed_arm) {
       output = (window * carrier) >> 16;
     } else {
       // Unsigned: the product is 65535 * 65535 at the corner, and that
@@ -1068,16 +1083,18 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t state_into_curve_q12 = state_to_output_q12 * INT16_MAX
       / (scale_ * kSoftLimitHeadroom);
   const int32_t scale_u15 = coherent_scale_u15_;
-  RENDER_CORE_EXCITED(
-    // The resonant step response overshoots its input, so the excitation is
-    // halved to leave room for the overshoot.
-    svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre);
-    const int32_t state_in_curve =
-        (is_band_pass ? svf.bp : svf.lp) * state_into_curve_q12 >> 12;
-    const int16_t* curve = ws_soft_limit;
-    asm volatile ("" : "+r"(curve));
-    this_sample = SoftLimit(curve, state_in_curve, scale_u15);
+#define PING_LOOP(STATE) \
+  RENDER_CORE_EXCITED( \
+    /* The resonant step response overshoots its input, so the excitation is */ \
+    /* halved to leave room for the overshoot. */ \
+    svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre); \
+    const int32_t state_in_curve = (STATE) * state_into_curve_q12 >> 12; \
+    const int16_t* curve = ws_soft_limit; \
+    asm volatile ("" : "+r"(curve)); \
+    this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
   )
+  if (is_band_pass) { PING_LOOP(svf.bp) } else { PING_LOOP(svf.lp) }
+#undef PING_LOOP
   svf_ = svf;
 }
 
@@ -1098,17 +1115,22 @@ void Oscillator::RenderDiracComb(int16_t* input_samples, int16_t* audio_mix) {
 void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   svf.RenderInit(pitch_ << 1);
-  OscillatorShape shape = shape_;
-  RENDER_CORE(
-    svf.RenderSample(Random::GetSample(), timbre);
-    switch (shape) {
-      case OSC_SHAPE_NOISE_LP: this_sample = svf.lp; break;
-      case OSC_SHAPE_NOISE_NOTCH: this_sample = svf.notch; break;
-      case OSC_SHAPE_NOISE_BP: this_sample = svf.bp; break;
-      case OSC_SHAPE_NOISE_HP: this_sample = svf.hp; break;
-      default: break;
-    }
+  // Which output the shape takes is fixed for the block, so it picks the loop
+  // rather than being asked inside it -- and the two that read neither notch nor
+  // hp do not pay to store them.
+#define NOISE_LOOP(KEEP, STATE) \
+  RENDER_CORE( \
+    svf.RenderSample<KEEP>(Random::GetSample(), timbre); \
+    this_sample = (STATE); \
   )
+  switch (shape_) {
+    case OSC_SHAPE_NOISE_LP: { NOISE_LOOP(false, svf.lp) } break;
+    case OSC_SHAPE_NOISE_BP: { NOISE_LOOP(false, svf.bp) } break;
+    case OSC_SHAPE_NOISE_NOTCH: { NOISE_LOOP(true,  svf.notch) } break;
+    case OSC_SHAPE_NOISE_HP: { NOISE_LOOP(true,  svf.hp) } break;
+    default: break;
+  }
+#undef NOISE_LOOP
   svf_ = svf;
 }
 
