@@ -513,7 +513,7 @@ static inline uint32_t EdgeTime(
 // modulator with it. The clamp is the range in envelope.h and nothing else:
 // every value in it must produce a product this width holds.
 #define SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE \
-  uint32_t modulator_phase_increment = carrier_increment_u0_22 * \
+  uint32_t modulator_phase_increment = carrier_increment_u22 * \
       static_cast<uint32_t>( \
           static_cast<uint32_t>(timbre) < widest_ratio_u5_10 \
               ? static_cast<uint32_t>(timbre) : widest_ratio_u5_10);
@@ -522,10 +522,10 @@ static inline uint32_t EdgeTime(
 // product with it still fits. Both fall out of the width; how high the
 // modulator may go is a question about sound, and WarpTimbre answers it.
 #define SET_CZ_RATIO_LIMITS \
-  const uint32_t carrier_increment_u0_22 = \
+  const uint32_t carrier_increment_u22 = \
       phase_increment_ >> kCzRatioFractionalBits; \
-  const uint32_t widest_ratio_u5_10 = carrier_increment_u0_22 \
-      ? UINT32_MAX / carrier_increment_u0_22 : UINT32_MAX;
+  const uint32_t widest_ratio_u5_10 = carrier_increment_u22 \
+      ? UINT32_MAX / carrier_increment_u22 : UINT32_MAX;
 
 // SYNC's timbre is a multiple of the carrier's frequency, so the modulator's
 // increment is the carrier's scaled by it.
