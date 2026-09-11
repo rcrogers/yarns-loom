@@ -62,6 +62,10 @@ const int kBlocks = 16;
 //     anything this renders.
 int g_blocks = kBlocks;
 int g_pitch_only = -1;   // -1 = every pitch in kPitches
+// Pitch in the oscillator's OWN units, 128 per semitone, so a glide can be
+// walked finer than `pitch=` can name. A stepped artifact lives BETWEEN the
+// semitones, and a semitone grid cannot see whether it steps or glides.
+int g_pitch_raw = -1;
 int g_sweep_only = -1;   // -1 = every sweep
 // PANEL SEMANTICS. The timbre buffer a shape reads is the WARPED value, and
 // several warps INVERT -- WHISTLE's TIMBRE 0 is the WIDEST damp, which is the
@@ -123,13 +127,16 @@ uint32_t HashShape(int shape, bool dump) {
   for (int sweep = 0; sweep < kNumSweeps; ++sweep) {
   if (g_sweep_only >= 0 && sweep != g_sweep_only) continue;
   const size_t pitch_cases =
-      g_pitch_only >= 0 ? 1 : sizeof(kPitches) / sizeof(kPitches[0]);
+      (g_pitch_only >= 0 || g_pitch_raw >= 0)
+          ? 1 : sizeof(kPitches) / sizeof(kPitches[0]);
   for (size_t p = 0; p < pitch_cases; ++p) {
     // `pitch=` names the note to render, not a grid entry to select: asking for
     // one off the grid used to walk every case and match none, printing nothing
     // and exiting 0.
-    const int16_t pitch = g_pitch_only >= 0
-        ? static_cast<int16_t>(g_pitch_only << 7) : kPitches[p];
+    const int16_t pitch = g_pitch_raw >= 0
+        ? static_cast<int16_t>(g_pitch_raw)
+        : (g_pitch_only >= 0
+            ? static_cast<int16_t>(g_pitch_only << 7) : kPitches[p]);
     // One voice, so its share of the output budget is the whole of it and the
     // two shares coincide.
     osc.Init(kScale, kScale);
@@ -195,6 +202,7 @@ int main(int argc, char** argv) {
     g_held_timbre = OptInt(argc, argv, "timbre", 0);
     g_blocks = OptInt(argc, argv, "blocks", kBlocks);
     g_pitch_only = OptInt(argc, argv, "pitch", -1);   // a MIDI note, not an index
+    g_pitch_raw = OptInt(argc, argv, "pitch_raw", -1);
     g_sweep_only = OptInt(argc, argv, "sweep", -1);
     g_warp_timbre = OptInt(argc, argv, "warp", 0) != 0;
     HashShape(OptInt(argc, argv, "shape", 0), true);
