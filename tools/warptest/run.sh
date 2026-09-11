@@ -14,3 +14,9 @@ clang++ -std=c++11 -O1 -w -DTEST -I ../hosttest/shim -I ../.. \
   warpcheck.cc ../../yarns/oscillator.cc ../../yarns/resources.cc ../../yarns/utils.cc \
   envelope_host.cc rng_stub.cc -o warpcheck || exit 1
 ./warpcheck || exit 1
+# And WHAT each warp answers, not only that it is monotone. warpgolden.cc says
+# why a monotonicity check alone let a whole map move in silence.
+clang++ -std=c++11 -O1 -w -DTEST -I ../hosttest/shim -I ../.. \
+  warpgolden.cc ../../yarns/oscillator.cc ../../yarns/resources.cc ../../yarns/utils.cc \
+  envelope_host.cc rng_stub.cc -o warpgolden || exit 1
+node golden.js || exit 1
