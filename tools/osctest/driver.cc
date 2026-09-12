@@ -80,9 +80,12 @@ int g_vibrato_rate_hz = 5;
 // from the pitch LFO's interpolator. VB=10 moves the note by only +-4 WHOLE
 // units, so the fraction is what makes a vibrato glide instead of step.
 int g_pitch_frac = 0;
-// Drops that fraction, which is what Voice did before it read the interpolator
-// to sixteen bits. The A/B for anything that steps with the note.
-bool g_quantize_pitch = false;
+// The grid the pitch is delivered on, in 1/65536 pitch units. 65536 is what
+// Voice delivered before it read the pitch LFO's interpolator to sixteen bits.
+// 2048 is what it delivers NOW: the interpolator's slope is
+// `(target - value()) << 16 >> 5`, so every value it can hold is a multiple of
+// 1/32 of a unit. 1 is the grid the harness can reach and the hardware cannot.
+int g_pitch_quantum = 1;
 int g_sweep_only = -1;   // -1 = every sweep
 // PANEL SEMANTICS. The timbre buffer a shape reads is the WARPED value, and
 // several warps INVERT -- WHISTLE's TIMBRE 0 is the WIDEST damp, which is the
@@ -179,9 +182,10 @@ uint32_t HashShape(int shape, bool dump) {
       // Once a block, which is where the render reads the increment: Voice
       // writes it at 4 kHz and RENDER_PERIODIC takes whatever stands.
       const int32_t pitch_q16 = PitchAt(pitch, b);
-      osc.Refresh(
-          static_cast<int16_t>(pitch_q16 >> 16),
-          g_quantize_pitch ? 0 : static_cast<uint16_t>(pitch_q16), 0, 0);
+      const int32_t quantized =
+          pitch_q16 / g_pitch_quantum * g_pitch_quantum;
+      osc.Refresh(static_cast<int16_t>(quantized >> 16),
+                  static_cast<uint16_t>(quantized), 0, 0);
       int16_t timbre_gain[2 * kAudioBlockSize];
       int16_t mix[kAudioBlockSize];
       memset(mix, 0, sizeof(mix));
@@ -246,7 +250,7 @@ int main(int argc, char** argv) {
     g_pitch_frac = OptInt(argc, argv, "pitch_frac", 0);
     g_vibrato_depth = OptInt(argc, argv, "vibrato", 0);
     g_vibrato_rate_hz = OptInt(argc, argv, "vibrato_hz", 5);
-    g_quantize_pitch = OptInt(argc, argv, "pitch_quantized", 0) != 0;
+    g_pitch_quantum = OptInt(argc, argv, "pitch_quantum", 1);
     g_sweep_only = OptInt(argc, argv, "sweep", -1);
     g_warp_timbre = OptInt(argc, argv, "warp", 0) != 0;
     HashShape(OptInt(argc, argv, "shape", 0), true);
