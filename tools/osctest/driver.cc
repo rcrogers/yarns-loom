@@ -16,6 +16,7 @@
 #define private public
 #include "yarns/oscillator.h"
 #include "yarns/drivers/dac.h"
+#include "yarns/utils.h"
 #include "stmlib/utils/random.h"
 #include <cstdio>
 #include <cstdlib>
@@ -158,8 +159,12 @@ int32_t PitchAt(int16_t base, int block) {
 uint32_t HashShape(int shape, bool dump) {
   uint32_t hash = 2166136261u;
   // Per shape, so a noise shape's hash does not depend on how many draws the
-  // shapes before it took.
+  // shapes before it took -- BOTH streams. WHISTLE's noise comes from
+  // NextXorshift32Seed, which Init consumes once per case and which nothing
+  // reseeded, so its golden moved with its POSITION in the shape list: a
+  // reorder that renders every shape identically still failed here.
   stmlib::Random::Seed(0x21);
+  RestartXorshift32Seeds(0xCAFEBABE);
   for (int gain_profile = 0; gain_profile < kNumGainProfiles; ++gain_profile)
   for (int sweep = 0; sweep < kNumSweeps; ++sweep) {
   if (g_sweep_only >= 0 && sweep != g_sweep_only) continue;
