@@ -648,6 +648,16 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Timbre: filter cutoff (resonance is set by note pitch)
 - Shapes: low-pass, notch, band-pass, high-pass
 
+#### `WH` Whistle
+- A resonator fed its own white noise, at the level the [envelope](#envelope) sets, so it sounds for as long as the note is held
+- Timbre: resonance Q, over eight octaves (resonance frequency is set by note pitch)
+
+#### `/\-` Ping
+- A resonator struck by the [envelope](#envelope) and left to ring, which makes the [exciter](#exciter) the mallet
+- Timbre: resonance Q, over eight octaves (resonance frequency is set by note pitch)
+- Shapes: low-pass, band-pass
+    - Low-pass passes the strike's DC, which adds a thump at the attack and holds a standing offset under a sustained envelope; band-pass rejects it
+
 #### `┌┐CZ` Phase distortion, resonant pulse
 - Timbre: filter cutoff
 - Shapes: low-pass, peaking, band-pass, high-pass

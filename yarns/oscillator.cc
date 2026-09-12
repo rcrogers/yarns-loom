@@ -87,6 +87,9 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
+  &Oscillator::RenderWhistle,
+  &Oscillator::RenderPing,
+  &Oscillator::RenderPing,
   &Oscillator::RenderPhaseDistortionPulse,
   &Oscillator::RenderPhaseDistortionPulse,
   &Oscillator::RenderPhaseDistortionPulse,
@@ -105,9 +108,6 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   // &Oscillator::RenderSyncTriangle,
   &Oscillator::RenderSyncPulse,
   &Oscillator::RenderSyncSaw,
-  &Oscillator::RenderWhistle,
-  &Oscillator::RenderPing,
-  &Oscillator::RenderPing,
   // &Oscillator::RenderFoldSine,
   // &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderDiracComb,
@@ -252,7 +252,7 @@ int16_t Oscillator::WarpTimbre(
   // TIMBRE is Q: the cutoff tracks the note, so the control tightens the ring
   // instead of moving it. Carried as damp, geometrically: a resonance stops at
   // the damp LUT's last entry, which is Q 129.
-  if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_LP) {
+  if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_BP) {
     // Below the bottom of the map is the widest setting: the cast wraps a
     // negative timbre into a shift of 65527, which takes the damp to zero, and
     // a resonator with no loss in it grows for as long as the note is held.
