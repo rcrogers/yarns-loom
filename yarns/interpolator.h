@@ -57,6 +57,10 @@ class Interpolator {
     y_.i += m_;
   }
   int16_t value() const { return y_.hi; }
+  // The 16 fractional bits value() drops. y_.i is hi * 65536 + lo with lo
+  // unsigned, so value() is the FLOOR and this is the positive remainder --
+  // the decomposition holds for a negative target too.
+  uint16_t fraction() const { return static_cast<uint16_t>(y_.lo); }
   int16_t target() const { return y_target_; }
 
 private:

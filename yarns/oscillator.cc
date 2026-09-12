@@ -153,13 +153,20 @@ void StateVariableFilter::RenderInitCutoff(int16_t cutoff_u15) {
   cutoff.ComputeSlope();
 }
 
-void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias) {
+void Oscillator::Refresh(int16_t pitch, uint16_t pitch_frac,
+                         int16_t timbre_bias, uint16_t gain_bias) {
   pitch_ = pitch;
   // if (shape_ >= OSC_SHAPE_FM) {
   //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
   // }
   CONSTRAIN(pitch_, 0, kHighestNote - 1);
   phase_increment_ = ComputePhaseIncrement(pitch_);
+  // A pitch unit is a factor 2^(1/1536), and pitch_frac is a 16-bit fraction of
+  // one -- linearised, which over a fraction of 1/128 of a semitone is exact to
+  // well under a count. 7573 is 256 * 65536 * (2^(1/1536) - 1). Refresh runs
+  // once a block, so the wide multiply keeps every bit for nothing.
+  phase_increment_ += static_cast<uint32_t>(
+      (static_cast<uint64_t>(phase_increment_ >> 16) * 7573 * pitch_frac) >> 24);
   raw_gain_bias_ = gain_bias;
   raw_timbre_bias_ = timbre_bias;
 }

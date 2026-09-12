@@ -228,7 +228,13 @@ void Voice::Refresh() {
     mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo, is_highest_priority_);
   }
 
-  oscillator_.Refresh(note, timbre_15, tremolo);
+  // The vibrato is already interpolated between its targets; value() returns
+  // only the whole pitch unit and drops the rest. At VB=10 the target moves by
+  // +-4 units, so dropping the fraction leaves the note NINE pitches to visit --
+  // heard as stepping on the CZ shapes, whose folded partials move about 20x
+  // faster than the note and so jump with it.
+  oscillator_.Refresh(
+      note, pitch_lfo_interpolator_.fraction(), timbre_15, tremolo);
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;

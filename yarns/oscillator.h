@@ -175,7 +175,13 @@ class Oscillator {
     transfer_crest_factor_ = 1;
   }
 
-  void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias);
+  void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias) {
+    Refresh(pitch, 0, timbre_bias, gain_bias);
+  }
+  // pitch_frac is a fraction of ONE pitch unit, all sixteen bits of it, which
+  // is what the pitch LFO's interpolator already carries and value() drops.
+  void Refresh(int16_t pitch, uint16_t pitch_frac,
+               int16_t timbre_bias, uint16_t gain_bias);
   // Pitch-tracking shapes warp against an explicit pitch so callers can
   // evaluate the warp at a pitch other than the live carrier (e.g. a new
   // note's pitch before Refresh has updated pitch_). Called at most once per
