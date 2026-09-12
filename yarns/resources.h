@@ -69,8 +69,6 @@ extern const uint16_t lut_arpeggiator_patterns[];
 extern const uint16_t lut_consonance[];
 extern const uint16_t lut_clock_ratio_ticks[];
 extern const uint16_t lut_svf_cutoff_u15[];
-extern const uint16_t lut_svf_damp_u1_15[];
-extern const uint16_t lut_svf_scale_u15[];
 extern const int16_t lut_scale_pythagorean[];
 extern const int16_t lut_scale_1_4_eb[];
 extern const int16_t lut_scale_1_4_e[];
@@ -152,10 +150,6 @@ extern const uint16_t chr_blinking_characters[];
 #define LUT_CLOCK_RATIO_TICKS_SIZE 32
 #define LUT_SVF_CUTOFF_U15 7
 #define LUT_SVF_CUTOFF_U15_SIZE 257
-#define LUT_SVF_DAMP_U1_15 8
-#define LUT_SVF_DAMP_U1_15_SIZE 257
-#define LUT_SVF_SCALE_U15 9
-#define LUT_SVF_SCALE_U15_SIZE 257
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12
 #define LUT_SCALE_1_4_EB 1

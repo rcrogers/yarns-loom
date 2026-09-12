@@ -54,7 +54,7 @@ const uint8_t kEnvelopesPerOscillator = 2;
 class StateVariableFilter : public SVF {
  public:
   void Init();
-  void RenderInit(int16_t resonance_u15);
+  void RenderInitDamp(int16_t damp_u1_14);
   // For a shape whose cutoff comes from the PITCH rather than from the timbre
   // buffer. pitch_ moves once a block and the timbre buffer does not, so which
   // of the two needs interpolating is the other way round for such a shape.

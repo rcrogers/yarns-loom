@@ -168,8 +168,8 @@ void StateVariableFilter::Init() {
   cutoff.Init();
 }
 
-void StateVariableFilter::RenderInit(int16_t resonance_u15) {
-  damp.SetTarget(DampFromResonance(resonance_u15));
+void StateVariableFilter::RenderInitDamp(int16_t damp_u1_14) {
+  damp.SetTarget(damp_u1_14);
   damp.ComputeSlope();
 }
 
@@ -204,6 +204,28 @@ void Oscillator::Refresh(int16_t pitch, uint16_t pitch_frac,
 // does not take this.
 static inline int16_t TimbreAtOrAboveZero(int16_t timbre) {
   return timbre < 0 ? 0 : timbre;
+}
+
+// DAMP FROM A RESONANCE CONTROL, geometrically: every shape whose resonance is
+// variable reads this one map, so the control means the same thing in all of
+// them. The widest damp shifted right kWhistleQOctaves times is nothing, and
+// nothing is a lossless resonator -- the top of the control self-oscillates.
+//
+// The shift spreads the octaves over 2^kEnvelopeSampleBits and the domain is one
+// short of that, so the last unit would land a hair inside the final octave and
+// never reach zero. The correction is that shortfall.
+static int16_t DampFromResonance(int32_t resonance_u15) {
+  // Below the bottom of the map is the widest setting: the cast wraps a negative
+  // value into a shift of 65527, which lands on the same zero the TOP means, at
+  // the opposite end from where it was asked for.
+  if (resonance_u15 < 0) resonance_u15 = 0;
+  const uint32_t octaves_q16 =
+      ((static_cast<uint32_t>(resonance_u15) * kWhistleQOctaves)
+          << (16 - kEnvelopeSampleBits))
+      + (static_cast<uint32_t>(resonance_u15) >> 10);
+  const int32_t damp = static_cast<int32_t>(kWhistleDampMax_u1_14 * // 2^-octaves
+      Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16);
+  return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
 }
 
 int16_t Oscillator::WarpTimbre(
@@ -277,19 +299,7 @@ int16_t Oscillator::WarpTimbre(
   // the top of the control reach zero -- the shift runs out of bits before the
   // exponential runs out of range, and zero damp is a lossless resonator.
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_BP) {
-    // Below the bottom of the map is the widest setting: the cast wraps a
-    // negative timbre into a shift of 65527, which lands on the same zero the
-    // TOP of the control means, at the opposite end from where it was asked for.
-    if (timbre < 0) timbre = 0;
-    // The shift spreads the octaves over 2^kEnvelopeSampleBits, and the domain
-    // is one short of that, so the last unit would land a hair inside the final
-    // octave and never reach zero. The correction is that shortfall.
-    uint32_t octaves_q16 =
-        ((static_cast<uint32_t>(timbre) * kWhistleQOctaves)
-            << (16 - kEnvelopeSampleBits)) + (static_cast<uint32_t>(timbre) >> 10);
-    int32_t damp = static_cast<int32_t>(kWhistleDampMax_u1_14 * // 2^-octaves
-      Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16);
-    return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
+    return DampFromResonance(timbre);
   }
 
   if (
@@ -610,7 +620,7 @@ static inline uint32_t EdgeTime(
 
 void Oscillator::RenderLPPulse(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInit(0x7fff);
+  svf.RenderInitDamp(126); // Q 130: a sharp peak, 19x the saw's
   uint32_t pw = 0x80000000;
   RENDER_PERIODIC(
     bool self_reset = PhaseWrapped(phase, phase_increment);
@@ -624,7 +634,7 @@ void Oscillator::RenderLPPulse(int16_t* input_samples, int16_t* audio_mix) {
 
 void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInit(0x6000);
+  svf.RenderInitDamp(2391); // Q 6.9: a gentle one, against the pulse's 130
   RENDER_PERIODIC(
     bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_SAW(phase, phase_increment) }
@@ -1239,7 +1249,10 @@ void Oscillator::RenderDiracComb(int16_t* input_samples, int16_t* audio_mix) {
 
 void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInit(pitch_ << 1);
+  // The keyboard IS this shape's resonance control, and it reads the same map
+  // every other variable-resonance shape reads -- so the top of the keyboard
+  // self-oscillates, as the top of TIMBRE does on WHISTLE and PING.
+  svf.RenderInitDamp(DampFromResonance(pitch_ << 1));
   // Which output the shape takes is fixed for the block, so it picks the loop
   // rather than being asked inside it -- and the two that read neither notch nor
   // hp do not pay to store them.
