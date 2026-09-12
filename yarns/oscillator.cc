@@ -53,10 +53,11 @@ static const int kSyncRatioFractionalBits = 12;
 // modulator below MIDI 72. Resolution is 3.5 cents at every pitch.
 static const int kCzRatioFractionalBits = 10;
 
-// The phase-distortion integrator's DC gain, as a shift: 2^this. Bounded
-// because its input carries a small pitch-dependent DC that an ideal
-// integrator would accumulate without limit.
-static const int kPdIntegratorLeak = 8;
+// The phase-distortion accumulator keeps 1 - 2^-this of itself every sample,
+// which bounds at 2^this a DC gain an ideal integrator leaves unbounded -- its
+// input carries a small pitch-dependent offset that would otherwise accumulate
+// without limit. 28 Hz at this value.
+static const int kPdLeakyIntegratorShift = 8;
 // How far TIMBRE sweeps WHISTLE's and PING's Q, and so how far the damp
 // correction's reciprocal may go.
 static const uint32_t kWhistleQOctaves = 8;
@@ -923,7 +924,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
     //
     // Rounded, not truncated: an arithmetic shift is a floor, which biases a
     // zero-mean signal by exactly half a count EVERY sample. Measured.
-    integrator -= integrator >> kPdIntegratorLeak;
+    integrator -= integrator >> kPdLeakyIntegratorShift;
     integrator += (pulse * integrator_gain + (1 << 13)) >> 14; // Orig 16
     CLIP(integrator)
     int16_t output;
