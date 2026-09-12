@@ -66,15 +66,23 @@ int g_pitch_only = -1;   // -1 = every pitch in kPitches
 // walked finer than `pitch=` can name. A stepped artifact lives BETWEEN the
 // semitones, and a semitone grid cannot see whether it steps or glides.
 int g_pitch_raw = -1;
-// A GLIDE, because that is what vibrato is and every static render misses it.
-// The pitch ramps from pitch_raw to pitch_raw2 across the whole run, so a
-// stepped artifact shows up as a discontinuity in TIME rather than having to be
-// inferred from a row of separate renders.
+// A GLIDE. The pitch ramps from pitch_raw to pitch_raw2 across the whole run, so
+// a stepped artifact shows up as a discontinuity in TIME rather than having to
+// be inferred from a row of separate renders.
 int g_pitch_raw2 = -1;
+// A VIBRATO, which is the control the CZ stepping is provoked with and the one
+// motion a glide cannot stand in for: it visits every pitch between its ends
+// several times a second. Depth is the LFO's peak in pitch units -- VB=10 with
+// VR=1 is 4 -- and rate is its frequency.
+int g_vibrato_depth = 0;
+int g_vibrato_rate_hz = 5;
 // A 16-bit fraction of one pitch unit, matching what Voice hands the oscillator
 // from the pitch LFO's interpolator. VB=10 moves the note by only +-4 WHOLE
 // units, so the fraction is what makes a vibrato glide instead of step.
 int g_pitch_frac = 0;
+// Drops that fraction, which is what Voice did before it read the interpolator
+// to sixteen bits. The A/B for anything that steps with the note.
+bool g_quantize_pitch = false;
 int g_sweep_only = -1;   // -1 = every sweep
 // PANEL SEMANTICS. The timbre buffer a shape reads is the WARPED value, and
 // several warps INVERT -- WHISTLE's TIMBRE 0 is the WIDEST damp, which is the
@@ -127,6 +135,23 @@ int16_t GainAt(int profile, long step, long total) {
   return static_cast<int16_t>(g_gain - g_gain * step / total);
 }
 
+// Where the note sits at this block, in 16.16 pitch units: the static pitch and
+// its fraction, plus whichever motion was asked for.
+int32_t PitchAt(int16_t base, int block) {
+  int32_t pitch_q16 = (static_cast<int32_t>(base) << 16) + g_pitch_frac;
+  if (g_pitch_raw2 >= 0 && g_blocks > 1) {
+    pitch_q16 += static_cast<int32_t>(
+        (static_cast<int64_t>(g_pitch_raw2 - base) << 16) * block /
+        (g_blocks - 1));
+  }
+  // yarns/resources/waveforms.py sets the rate the increments are built for.
+  const double kAudioRate = 45000.0;
+  const double seconds = static_cast<double>(block) * kAudioBlockSize / kAudioRate;
+  pitch_q16 += static_cast<int32_t>(
+      g_vibrato_depth * 65536.0 * sin(2 * M_PI * g_vibrato_rate_hz * seconds));
+  return pitch_q16;
+}
+
 uint32_t HashShape(int shape, bool dump) {
   uint32_t hash = 2166136261u;
   // Per shape, so a noise shape's hash does not depend on how many draws the
@@ -150,13 +175,13 @@ uint32_t HashShape(int shape, bool dump) {
     // two shares coincide.
     osc.Init(kScale, kScale);
     osc.set_shape(static_cast<OscillatorShape>(shape));
-    osc.Refresh(pitch, static_cast<uint16_t>(g_pitch_frac), 0, 0);
     for (int b = 0; b < g_blocks; ++b) {
-      if (g_pitch_raw2 >= 0 && g_blocks > 1) {
-        const int32_t glided = g_pitch_raw +
-            static_cast<int32_t>(g_pitch_raw2 - g_pitch_raw) * b / (g_blocks - 1);
-        osc.Refresh(static_cast<int16_t>(glided), 0, 0);
-      }
+      // Once a block, which is where the render reads the increment: Voice
+      // writes it at 4 kHz and RENDER_PERIODIC takes whatever stands.
+      const int32_t pitch_q16 = PitchAt(pitch, b);
+      osc.Refresh(
+          static_cast<int16_t>(pitch_q16 >> 16),
+          g_quantize_pitch ? 0 : static_cast<uint16_t>(pitch_q16), 0, 0);
       int16_t timbre_gain[2 * kAudioBlockSize];
       int16_t mix[kAudioBlockSize];
       memset(mix, 0, sizeof(mix));
@@ -219,6 +244,9 @@ int main(int argc, char** argv) {
     g_pitch_raw = OptInt(argc, argv, "pitch_raw", -1);
     g_pitch_raw2 = OptInt(argc, argv, "pitch_raw2", -1);
     g_pitch_frac = OptInt(argc, argv, "pitch_frac", 0);
+    g_vibrato_depth = OptInt(argc, argv, "vibrato", 0);
+    g_vibrato_rate_hz = OptInt(argc, argv, "vibrato_hz", 5);
+    g_quantize_pitch = OptInt(argc, argv, "pitch_quantized", 0) != 0;
     g_sweep_only = OptInt(argc, argv, "sweep", -1);
     g_warp_timbre = OptInt(argc, argv, "warp", 0) != 0;
     HashShape(OptInt(argc, argv, "shape", 0), true);
