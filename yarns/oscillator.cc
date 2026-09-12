@@ -56,7 +56,8 @@ static const int kCzRatioFractionalBits = 10;
 // The phase-distortion accumulator keeps 1 - 2^-this of itself every sample,
 // which bounds at 2^this a DC gain an ideal integrator leaves unbounded -- its
 // input carries a small pitch-dependent offset that would otherwise accumulate
-// without limit. 28 Hz at this value.
+// without limit. A 28 Hz corner at this value, and the LARGEST shift the render
+// uses: it takes less than this as the note rises, never more.
 static const int kPdLeakyIntegratorShift = 8;
 // How far TIMBRE sweeps WHISTLE's and PING's Q, and so how far the damp
 // correction's reciprocal may go.
@@ -895,6 +896,21 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
   // half turn, where the sine is zero. High-pass resets there too.
   const int32_t wrap_step = output_is_pulse
       ? WrapStep(sine(kPhaseResetPulse[filter_type]), true) : 0;
+  // The accumulator's 1/f gain lifts whatever sits nearest DC, and what sits
+  // there is a harmonic past Nyquist folded back -- so the corner follows the
+  // note, which attenuates hardest exactly where the lift is greatest. `clz` is
+  // log2 of the increment, landing the corner between f0/3.3 and f0/4.7; the
+  // spread is the shift moving a whole octave at a time.
+  //
+  // A MIN, not an assignment: a larger shift is a LOWER corner, and below
+  // MIDI 48 `clz` would take it under the 28 Hz the constant sets. Measured
+  // there, that costs 8x the standing DC and clips at MIDI 12. Bounded, the
+  // shape is bit-identical below that note.
+  //   - it cannot reach zero, where the accumulator would keep none of itself
+  //     and stop integrating: the increment cannot reach 2^31, so `clz` is at
+  //     least 1.
+  const int leaky_integrator_shift =
+      std::min(__builtin_clz(phase_increment_), kPdLeakyIntegratorShift);
   int32_t integrator = pd_square_.integrator;
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
@@ -924,7 +940,7 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
     //
     // Rounded, not truncated: an arithmetic shift is a floor, which biases a
     // zero-mean signal by exactly half a count EVERY sample. Measured.
-    integrator -= integrator >> kPdLeakyIntegratorShift;
+    integrator -= integrator >> leaky_integrator_shift;
     integrator += (pulse * integrator_gain + (1 << 13)) >> 14; // Orig 16
     CLIP(integrator)
     int16_t output;
