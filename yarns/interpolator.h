@@ -57,11 +57,10 @@ class Interpolator {
     y_.i += m_;
   }
   int16_t value() const { return y_.hi; }
-  // The 16 fractional bits value() drops. y_.i is hi * 65536 + lo with lo
-  // unsigned, so value() is the FLOOR and this is the positive remainder --
-  // the decomposition holds for a negative target too.
-  uint16_t fraction() const { return static_cast<uint16_t>(y_.lo); }
-  int16_t target() const { return y_target_; }
+  // The whole interpolated value, 16 fractional bits and all. value() is its
+  // FLOOR -- y_.i is hi * 65536 + lo with lo read unsigned, for a negative
+  // target too -- so a caller that scales this keeps what value() would drop.
+  int32_t value_q15_16() const { return y_.i; }
 
 private:
   fixed_point y_;

@@ -216,7 +216,7 @@ class Voice {
   inline int32_t ApplyPitchMods(int32_t note) const {
     note += PitchBend64ths() >> 6;
     note += tuning_;
-    note += pitch_lfo_interpolator_.value();
+    note += VibratoPitch_q15_16() >> 16;
     return note;
   }
 
@@ -226,10 +226,25 @@ class Voice {
     return static_cast<int32_t>(mod_pitch_bend_ - 8192) * pitch_bend_range_;
   }
 
+  // The vibrato's pitch offset, scaled straight off the interpolator that
+  // already carries the LFO to sixteen fractional bits. A second interpolator
+  // targeting WHOLE pitch units used to stand here, and at VB=10 its target had
+  // ten values against that one's 13778: the pitch sat on one of them for half a
+  // second at a slow LFO rate and then jumped, which is the whole of the stepping
+  // the CZ shapes make audible.
+  //
+  // Split either side of the range multiply so the product stays in int32: the
+  // interpolator reaches +-16256 whole units and the range reaches 12.
+  inline int32_t VibratoPitch_q15_16() const {
+    return (scaled_vibrato_lfo_interpolator_.value_q15_16() >> 4)
+        * vibrato_range_ >> 4;
+  }
+
   // What ApplyPitchMods leaves below a whole pitch unit. Under two, since
   // tuning contributes none -- it is whole units already.
   inline uint32_t PitchModsRemainder_u1_16() const {
-    return ((PitchBend64ths() & 63) << 10) + pitch_lfo_interpolator_.fraction();
+    return ((PitchBend64ths() & 63) << 10)
+        + (VibratoPitch_q15_16() & 0xffff);
   }
 
   FastSyncedLFO lfos_[LFO_ROLE_LAST];
@@ -272,7 +287,7 @@ class Voice {
   uint16_t trigger_pulse_;
 
   uint8_t refresh_counter_;
-  Interpolator<kRefreshHzToLfoSampleHzRatioBits> pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
+  Interpolator<kRefreshHzToLfoSampleHzRatioBits> timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
 
   uint16_t tremolo_mod_target_;
   uint16_t tremolo_mod_current_;

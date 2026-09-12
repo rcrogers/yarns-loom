@@ -134,9 +134,10 @@ int main(int argc, char** argv) {
   // by its own smallest step and the oscillator's phase increment has to move
   // with it. A plateau means a fraction is being dropped.
   //
-  // DEMONSTRATED against the commit before the fix: bend 15 of 511 steps, and
+  // DEMONSTRATED against the commits before each fix: bend 15 of 511 steps,
   // portamento 128 of 1821 refreshes -- 128 being exactly the pitch units in
-  // the semitone it glides, which is the staircase itself.
+  // the semitone it glides -- and the slow vibrato sitting still for 496 ms of
+  // every 5000.
   if (!strcmp(mode, "pitch")) {
     int failures = 0;
 
@@ -180,6 +181,42 @@ int main(int argc, char** argv) {
     printf("%s portamento: %d of %d refreshes moved the increment\n",
            moved > refreshes * 3 / 4 ? "PASS" : "FAIL", moved, refreshes - 1);
     if (moved <= refreshes * 3 / 4) ++failures;
+
+    // A SLOW VIBRATO, which is the case a fast one HIDES. The pitch LFO's
+    // interpolator reaches its 125 Hz target in 8 ms and then holds, so if that
+    // target is quantised the note sits still for the rest of the sample --
+    // half a second at a 5 s period -- and then jumps. A CZ fold moves up to 43
+    // times faster than the note, which turns each of those steps into a 40 Hz
+    // leap in an audible tone. Measured as DWELL, because level and swing are
+    // both unchanged by it: the artifact steps at constant loudness.
+    const int kVibratoPeriodMs = 5000;
+    voice.set_vibrato_range(1);
+    voice.set_vibrato_mod(10);
+    voice.lfo(LFO_ROLE_PITCH)->SetPhaseIncrement(static_cast<uint32_t>(
+        4294967296.0 * 1000.0 / (kVibratoPeriodMs * (double) kRefreshHz)));
+    voice.NoteOn(96 << 7, static_cast<uint8_t>(velocity), 0, 0, true, adsr,
+                 static_cast<int16_t>(timbre), chiff_amount_q30,
+                 chiff_audible_samples);
+    for (int i = 0; i < kRefreshHz / 2; ++i) voice.Refresh();
+    previous = 0;
+    int run = 0, longest_run = 0;
+    const int vibrato_ticks = 2 * kRefreshHz * kVibratoPeriodMs / 1000;
+    for (int i = 0; i < vibrato_ticks; ++i) {
+      voice.Refresh();
+      const uint32_t increment = voice.oscillator_.phase_increment_;
+      if (increment == previous) { if (++run > longest_run) longest_run = run; }
+      else { run = 0; previous = increment; }
+    }
+    const int dwell_ms = 1000 * longest_run / kRefreshHz;
+    // Two 125 Hz LFO samples. The shallowest vibrato at the slowest rate holds
+    // that long at the sine's turning point, where the note is stationary
+    // anyway; a quantised target holds for 496.
+    const int kDwellBudgetMs = 50;
+    printf("%s slow vibrato: the pitch sits still for at most %d ms of a %d ms "
+           "sweep\n", dwell_ms <= kDwellBudgetMs ? "PASS" : "FAIL", dwell_ms,
+           kVibratoPeriodMs);
+    if (dwell_ms > kDwellBudgetMs) ++failures;
+    voice.set_vibrato_mod(0);
 
     // AND THE NOTE MUST NOT DRIFT. With nothing modulating it, the fraction has
     // to settle to zero: a standing one detunes a held note by up to a unit.

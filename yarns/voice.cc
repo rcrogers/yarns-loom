@@ -68,7 +68,6 @@ void Voice::Init() {
   timbre_init_current_ = 0;
 
   refresh_counter_ = 0;
-  pitch_lfo_interpolator_.Init();
   timbre_lfo_interpolator_.Init();
   amplitude_lfo_interpolator_.Init();
   scaled_vibrato_lfo_interpolator_.Init();
@@ -203,13 +202,9 @@ void Voice::Refresh() {
 
     scaled_vibrato_lfo_interpolator_.SetTarget(vibrato_lfo * vibrato_mod_ >> 8);
     scaled_vibrato_lfo_interpolator_.ComputeSlope();
-    int32_t pitch_lfo_15 = scaled_vibrato_lfo_interpolator_.target() * vibrato_range_ >> 8;
-    pitch_lfo_interpolator_.SetTarget(pitch_lfo_15);
-    pitch_lfo_interpolator_.ComputeSlope();
   }
   refresh_counter_ = (refresh_counter_ + 1) % (1 << kRefreshHzToLfoSampleHzRatioBits);
 
-  pitch_lfo_interpolator_.Tick();
   timbre_lfo_interpolator_.Tick();
   amplitude_lfo_interpolator_.Tick();
   scaled_vibrato_lfo_interpolator_.Tick();
