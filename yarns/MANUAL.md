@@ -644,36 +644,44 @@ Part setting `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)` sets whether the
 ### Oscillator shape
 Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscillator shape for all voices in the part.
 
-#### `*-` Filtered noise
-- Timbre: filter cutoff (resonance is set by note pitch)
+#### `*-` Noise into state-variable filter
+- Timbre: filter cutoff
+- Note pitch controls the resonance of the SVF
 - Shapes: low-pass, notch, band-pass, high-pass
 
-#### `WH` Whistle
-- A resonator fed its own white noise, at the level the [envelope](#envelope) sets, so it sounds for as long as the note is held
-- Timbre: resonance Q, over eight octaves (resonance frequency is set by note pitch)
+#### `WH` Whistle: enveloped noise into tuned state-variable filter
+- Timbre: resonance of the SVF — white noise at zero, narrowing to a whistle as it closes
+  - At the very top the filter stops losing energy altogether and self-oscillates, giving a pure tone. Reaching that takes [timbre modulation](#modulation-destinations-for-envelope-output); the knob alone stops just short of it
+- Note pitch controls the cutoff frequency of the SVF
+- The [gain envelope](#modulation-destinations-for-envelope-output) controls the amplitude of the noise fed into the filter
+  - This is unlike most shapes, where the gain envelope controls the oscillator's output level
 
-#### `/\-` Ping
+#### `/\-` Ping: direct envelope signal into tuned state-variable filter
 - A resonator struck by the [envelope](#envelope) and left to ring, which makes the [exciter](#exciter) the mallet
-- Timbre: resonance Q, over eight octaves (resonance frequency is set by note pitch)
+- Timbre: resonance of the SVF, which sets how long the ping rings on after the note is released — under a second for the lower half of the control, rising to minutes near the top. Low notes ring longer, roughly doubling per octave down
+  - As with `WHISTLE`, timbre modulation can take the resonance all the way to self-oscillation, where the ring no longer decays at all. Turning the resonance back down ends it
+- Note pitch controls the cutoff frequency of the SVF
+- The gain envelope is itself used as the input to the filter
 - Shapes: low-pass, band-pass
-    - Low-pass passes the strike's DC, which adds a thump at the attack and holds a standing offset under a sustained envelope; band-pass rejects it
 
-#### `-◝` State-variable filter, low-pass
-- Timbre: filter cutoff (resonance is constant)
+#### `-◝` Analog wave into state-variable filter, low-pass
+- Timbre: cutoff frequency of the SVF
+- Resonance is fixed
 - Shapes: pulse, saw
 
 #### `┌┐CZ` Phase distortion, resonant pulse
-- Timbre: filter cutoff
+- Timbre: cutoff frequency of the digital filter
 - Shapes: low-pass, peaking, band-pass, high-pass
 
 #### `|⟍CZ` Phase distortion, resonant saw
-- Timbre: filter cutoff
+- Timbre: cutoff frequency of the digital filter
 - Shapes: low-pass, peaking, band-pass, high-pass
 
 #### `-W` Width modulation
-- Timbre: how small a fraction of the note's period one cycle of the carrier is squeezed into
+- Timbre: compresses each cycle of the carrier wave into a decreasing fraction of the period of the note's pitch
 - Shapes: sine, pulse, saw
-    - The pulse and saw hold a plateau for the rest of the period; a sine ends where it starts, so what follows the cycle is silence — one burst per note cycle, sweeping a vowel-like peak over a gap instead of an edge
+    - Pulse and saw freeze in place after completing a cycle, resetting at the next period
+    - Sine returns to zero after completing a cycle, resuming motion at the next period
 
 #### `|⟍┌┐` Saw-pulse morph
 - Timbre: morph from saw to pulse
