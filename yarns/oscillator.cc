@@ -59,21 +59,35 @@ static const int kCzRatioFractionalBits = 10;
 // without limit. A 28 Hz corner at this value, and the LARGEST shift the render
 // uses: it takes less than this as the note rises, never more.
 static const int kPdLeakyIntegratorShift = 8;
-// How far TIMBRE sweeps WHISTLE's and PING's Q, and so how far the damp
-// correction's reciprocal may go.
-static const uint32_t kWhistleQOctaves = 8;
-// The widest damp those shapes ask for, which is Q 6.9; kWhistleQOctaves above
-// it is Q 1820.
-static const uint32_t kWhistleDampMax_u1_14 = 2392;
+// The widest damp the resonator shapes ask for: the format's own largest, which
+// is Chamberlin's fully damped end. u1.14 holds 1.99994, or Q 0.50002, against
+// a theoretical floor of Q 0.5 -- one LSB short of the whole useful range.
+static const uint32_t kWhistleDampMax_u1_14 = 32767;
+// Halvings of damp across TIMBRE, which is what takes the map to zero: the
+// widest damp shifted right this many times is nothing, and a damp of nothing is
+// a lossless resonator -- self-oscillation, which the timbre envelope sweeps
+// THROUGH at its peak rather than parking on.
+//
+// Sized to the 15-bit timbre SIGNAL, not to the 7-bit TIMBRE INIT knob. The knob
+// is one coarse contributor to that signal, and sizing the map to it would spend
+// the top of the range on values the envelope and the LFO can already reach.
+static const uint32_t kWhistleQOctaves = kEnvelopeSampleBits;
 
 // WHISTLE's drive law is a separate quantity from the map above, and it is
-// bounded where the map need not be: the drive is a reciprocal at the output,
-// so a damp of zero -- which is what self-oscillation is -- would divide by it.
-// The reference is the damp at which the drive is unity and the floor is where
-// it stops following, both in the render's own words.
+// bounded where the map is not: the drive is a reciprocal at the output, so the
+// map's zero would divide by it.
+//   - the REFERENCE is the damp at which the drive is unity. It must be at
+//     least the widest the warp can ask for, or the drive exceeds one at the
+//     wide end and amplifies the excitation into the filter.
+//   - the FLOOR is where the drive stops following the map, and it is stated as
+//     the MAKE-UP's ceiling because that is the quantity that matters: the
+//     make-up is 1/drive, and an unbounded one reached 50x on the timbre
+//     envelope's slew and amplified whatever was still in the filter. A cap of
+//     2^this is a floor of reference >> 2*this.
 static const uint32_t kWhistleDriveReference_u1_14 = kWhistleDampMax_u1_14;
+static const uint32_t kWhistleDriveMakeUpBits = 4;
 static const uint32_t kWhistleDriveFloor_u1_14 =
-    kWhistleDampMax_u1_14 >> kWhistleQOctaves;
+    kWhistleDampMax_u1_14 >> (2 * kWhistleDriveMakeUpBits);
 // The audio sample's peak: the magnitude the transfer gain is derived
 // against, and the width the fold knee is scaled in.
 static const int kSamplePeakBits = 15;
@@ -259,15 +273,20 @@ int16_t Oscillator::WarpTimbre(
   }
 
   // TIMBRE is Q: the cutoff tracks the note, so the control tightens the ring
-  // instead of moving it. Carried as damp, geometrically: a resonance stops at
-  // the damp LUT's last entry, which is Q 129.
+  // instead of moving it. Carried as DAMP, geometrically, which is what lets
+  // the top of the control reach zero -- the shift runs out of bits before the
+  // exponential runs out of range, and zero damp is a lossless resonator.
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_BP) {
     // Below the bottom of the map is the widest setting: the cast wraps a
-    // negative timbre into a shift of 65527, which takes the damp to zero, and
-    // a resonator with no loss in it grows for as long as the note is held.
+    // negative timbre into a shift of 65527, which lands on the same zero the
+    // TOP of the control means, at the opposite end from where it was asked for.
     if (timbre < 0) timbre = 0;
+    // The shift spreads the octaves over 2^kEnvelopeSampleBits, and the domain
+    // is one short of that, so the last unit would land a hair inside the final
+    // octave and never reach zero. The correction is that shortfall.
     uint32_t octaves_q16 =
-        (static_cast<uint32_t>(timbre) * kWhistleQOctaves) << 1;
+        ((static_cast<uint32_t>(timbre) * kWhistleQOctaves)
+            << (16 - kEnvelopeSampleBits)) + (static_cast<uint32_t>(timbre) >> 10);
     int32_t damp = static_cast<int32_t>(kWhistleDampMax_u1_14 * // 2^-octaves
       Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16);
     return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
