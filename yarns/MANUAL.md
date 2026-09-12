@@ -670,9 +670,10 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Timbre: filter cutoff
 - Shapes: low-pass, peaking, band-pass, high-pass
 
-#### `-W` Pulse-width modulation
-- Timbre: pulse width
-- Shapes: pulse, saw
+#### `-W` Width modulation
+- Timbre: how small a fraction of the note's period one cycle of the carrier is squeezed into
+- Shapes: sine, pulse, saw
+    - The pulse and saw hold a plateau for the rest of the period; a sine ends where it starts, so what follows the cycle is silence — one burst per note cycle, sweeping a vowel-like peak over a gap instead of an edge
 
 #### `|⟍┌┐` Saw-pulse morph
 - Timbre: morph from saw to pulse
