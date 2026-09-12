@@ -23,6 +23,13 @@
 // that is why the cap stays.
 //
 // Usage: ./mixtest [verbose]
+//        ./mixtest dump shape=N pitch=96 knob=0 vb=10 vr=1 lfo_ms=5000 blocks=2100
+//
+// THE DUMP IS THE ONLY RENDER IN THIS REPO WITH THE PITCH LFO ACTUALLY RUNNING.
+// `osctest` writes the timbre and gain buffers itself and calls
+// Oscillator::Refresh with a pitch the harness chose, so no measurement taken
+// there contains a vibrato -- and the CZ artifact the user reports is audible
+// ONLY with vibrato on. This walks the real path at the real clocks.
 #define TEST 1
 #define private public
 #include "yarns/voice.h"
@@ -63,6 +70,14 @@ struct Worst {
   int32_t excursion;
   int shape, pitch, timbre, chiff, voices, knob;
 };
+
+int OptInt(int argc, char** argv, const char* key, int fallback) {
+  size_t n = strlen(key);
+  for (int i = 1; i < argc; ++i) {
+    if (!strncmp(argv[i], key, n) && argv[i][n] == '=') return atoi(argv[i] + n + 1);
+  }
+  return fallback;
+}
 
 int32_t Excursion(int16_t sample, uint16_t zero_code) {
   // The buffer holds a uint16 DAC code; the excursion is its distance from the
@@ -118,9 +133,76 @@ void RunCase(int shape, int num_voices, int pitch, int timbre, int chiff,
   }
 }
 
+// ONE VOICE, RENDERED WITH ITS MODULATION LIVE, to stdout as signed samples.
+//
+// THE TWO CLOCKS ARE ASYNCHRONOUS AND THAT IS THE POINT. Voice::Refresh runs at
+// kRefreshHz and the render at 45000/64, which is 5.6889 refreshes a block --
+// not an integer. Refreshing once a block instead would clock the LFO 5.7x
+// slow, so a vibrato would come out at the wrong rate and any artifact that
+// depends on how FAST the pitch moves would be measured at the wrong speed.
+int DumpOneVoice(int argc, char** argv) {
+  const int shape = OptInt(argc, argv, "shape", OSC_SHAPE_CZ_PULSE_LP);
+  // In the pitch pipeline's own units, 128 a semitone, because the artifact's
+  // DC-crossing windows are tens of cents apart and a semitone grid steps over
+  // them. `pitch=` names the semitone.
+  const int pitch_raw =
+      OptInt(argc, argv, "pitch_raw", OptInt(argc, argv, "pitch", 96) << 7);
+  const int knob = OptInt(argc, argv, "knob", 0);
+  const int timbre_mod = OptInt(argc, argv, "timbre", 0);
+  const int vibrato_mod = OptInt(argc, argv, "vb", 10);
+  const int vibrato_range = OptInt(argc, argv, "vr", 1);
+  // The PERIOD, in ms, because the rate that matters here is slow: a vibrato of
+  // several seconds is what makes the pitch's own steps audible as zones, and a
+  // fast one hides them by never dwelling.
+  const int lfo_ms = OptInt(argc, argv, "lfo_ms", 5000);
+  const int lfo_shape = OptInt(argc, argv, "lfo_shape", 0);
+  const int blocks = OptInt(argc, argv, "blocks", 2100);
+  const int chiff = OptInt(argc, argv, "chiff", 0);
+
+  Random::Seed(0x21);
+  voices[0].Init();
+  audio_output.Init(true);
+  voices[0].set_oscillator_mode(OSCILLATOR_MODE_ENVELOPED);
+  voices[0].set_oscillator_shape(static_cast<uint8_t>(shape));
+  voices[0].set_timbre_init(static_cast<uint8_t>(knob));
+  voices[0].timbre_init_current_ = voices[0].timbre_init_target_;
+  voices[0].set_vibrato_range(static_cast<uint8_t>(vibrato_range));
+  voices[0].set_vibrato_mod(static_cast<uint8_t>(vibrato_mod));
+  voices[0].set_lfo_shape(LFO_ROLE_PITCH, static_cast<uint8_t>(lfo_shape));
+  // Part sets this from the LFO RATE setting; named in Hz here so a vibrato can
+  // be asked for directly.
+  voices[0].lfo(LFO_ROLE_PITCH)->SetPhaseIncrement(static_cast<uint32_t>(
+      4294967296.0 * 1000.0 / (static_cast<double>(lfo_ms) * kRefreshHz)));
+  audio_output.AssignVoices(&voices[0], DC_PITCH, 1, 1);
+
+  adsr.peak_u16 = UINT16_MAX;
+  adsr.sustain_u16 = static_cast<uint16_t>(65535L * 60 / 100);
+  adsr.attack_u32 = PanelStageIncrement(0, 0, 0);
+  adsr.decay_u32 = PanelStageIncrement(127, 0, 0);
+  adsr.release_u32 = PanelStageIncrement(64, 0, 0);
+  voices[0].NoteOn(static_cast<int16_t>(pitch_raw), 100, 0, 0, true, adsr,
+                   static_cast<int16_t>(timbre_mod),
+                   PanelChiffAmount_q30(chiff, 0, 0),
+                   PanelChiffAudibleSamples(67, 0, 0));
+
+  const uint16_t zero_code = audio_output.zero_dac_code_;
+  double refreshes_owed = 0.0;
+  for (int block = 0; block < blocks; ++block) {
+    refreshes_owed +=
+        static_cast<double>(kAudioBlockSize) * kRefreshHz / 45000.0;
+    while (refreshes_owed >= 1.0) { voices[0].Refresh(); refreshes_owed -= 1.0; }
+    audio_output.RenderSamples(0, kChannel, 0);
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+      printf("%d\n", Excursion(g_dac_block[kChannel][i], zero_code));
+    }
+  }
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc > 1 && !strcmp(argv[1], "dump")) return DumpOneVoice(argc, argv);
   const bool verbose = argc > 1 && !strcmp(argv[1], "verbose");
 
   // THE ALLOWANCE IS READ BACK FROM voice.h, not restated here: one voice is
