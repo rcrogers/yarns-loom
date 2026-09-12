@@ -1247,12 +1247,26 @@ void Oscillator::RenderDiracComb(int16_t* input_samples, int16_t* audio_mix) {
   )
 }
 
+// The state into the soft limiter. Unity is 1/kSoftLimitHeadroom, the curve's
+// small-signal gain; half again past that holds the level the hard clip used to
+// produce, within 0.7 dB at every cutoff and every note.
+//
+// The stopband is what bounds the multiple. The curve's products are harmonics
+// of what the filter passed, so they land where it is meant to be quiet, and a
+// dark low-pass is where they stand highest above the signal: measured worst at
+// 10.8 dB into 200 Hz-1 kHz at an eighth of the cutoff range, against 4.6 dB at
+// unity and 19.2 dB at twice this.
+static const int32_t kNoiseStateIntoCurve_q12 =
+    3 * 4096 / (2 * kSoftLimitHeadroom);
+
 void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   // The keyboard IS this shape's resonance control, and it reads the same map
   // every other variable-resonance shape reads -- so the top of the keyboard
   // self-oscillates, as the top of TIMBRE does on WHISTLE and PING.
   svf.RenderInitDamp(DampFromResonance(pitch_ << 1));
+  const int16_t* curve = ws_soft_limit;
+  asm volatile ("" : "+r"(curve));
   // Its own stream, in a register. stmlib::Random is an LCG in a STATIC, so
   // every sample paid a load and a store in a loop that is mostly memory
   // traffic already -- and drawing from the shared stream moves every other
@@ -1266,7 +1280,8 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
     block_noise_state = NextXorshift32(block_noise_state); \
     svf.RenderSample<KEEP>( \
         static_cast<int16_t>(block_noise_state >> 16), timbre); \
-    this_sample = (STATE); \
+    this_sample = SoftLimit( \
+        curve, (STATE) * kNoiseStateIntoCurve_q12 >> 12, kEnvelopeSampleMax); \
   )
   switch (shape_) {
     case OSC_SHAPE_NOISE_LP: { NOISE_LOOP(false, svf.lp) } break;
