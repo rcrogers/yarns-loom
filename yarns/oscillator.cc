@@ -1253,12 +1253,19 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
   // every other variable-resonance shape reads -- so the top of the keyboard
   // self-oscillates, as the top of TIMBRE does on WHISTLE and PING.
   svf.RenderInitDamp(DampFromResonance(pitch_ << 1));
+  // Its own stream, in a register. stmlib::Random is an LCG in a STATIC, so
+  // every sample paid a load and a store in a loop that is mostly memory
+  // traffic already -- and drawing from the shared stream moves every other
+  // consumer's draws along with it, which is why WHISTLE has one of these too.
+  uint32_t block_noise_state = noise_state_;
   // Which output the shape takes is fixed for the block, so it picks the loop
   // rather than being asked inside it -- and the two that read neither notch nor
   // hp do not pay to store them.
 #define NOISE_LOOP(KEEP, STATE) \
   RENDER_CORE( \
-    svf.RenderSample<KEEP>(Random::GetSample(), timbre); \
+    block_noise_state = NextXorshift32(block_noise_state); \
+    svf.RenderSample<KEEP>( \
+        static_cast<int16_t>(block_noise_state >> 16), timbre); \
     this_sample = (STATE); \
   )
   switch (shape_) {
@@ -1269,6 +1276,7 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
     default: break;
   }
 #undef NOISE_LOOP
+  noise_state_ = block_noise_state;
   svf_ = svf;
 }
 
