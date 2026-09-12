@@ -66,6 +66,15 @@ int g_pitch_only = -1;   // -1 = every pitch in kPitches
 // walked finer than `pitch=` can name. A stepped artifact lives BETWEEN the
 // semitones, and a semitone grid cannot see whether it steps or glides.
 int g_pitch_raw = -1;
+// A GLIDE, because that is what vibrato is and every static render misses it.
+// The pitch ramps from pitch_raw to pitch_raw2 across the whole run, so a
+// stepped artifact shows up as a discontinuity in TIME rather than having to be
+// inferred from a row of separate renders.
+int g_pitch_raw2 = -1;
+// A 16-bit fraction of one pitch unit, matching what Voice hands the oscillator
+// from the pitch LFO's interpolator. VB=10 moves the note by only +-4 WHOLE
+// units, so the fraction is what makes a vibrato glide instead of step.
+int g_pitch_frac = 0;
 int g_sweep_only = -1;   // -1 = every sweep
 // PANEL SEMANTICS. The timbre buffer a shape reads is the WARPED value, and
 // several warps INVERT -- WHISTLE's TIMBRE 0 is the WIDEST damp, which is the
@@ -141,8 +150,13 @@ uint32_t HashShape(int shape, bool dump) {
     // two shares coincide.
     osc.Init(kScale, kScale);
     osc.set_shape(static_cast<OscillatorShape>(shape));
-    osc.Refresh(pitch, 0, 0);
+    osc.Refresh(pitch, static_cast<uint16_t>(g_pitch_frac), 0, 0);
     for (int b = 0; b < g_blocks; ++b) {
+      if (g_pitch_raw2 >= 0 && g_blocks > 1) {
+        const int32_t glided = g_pitch_raw +
+            static_cast<int32_t>(g_pitch_raw2 - g_pitch_raw) * b / (g_blocks - 1);
+        osc.Refresh(static_cast<int16_t>(glided), 0, 0);
+      }
       int16_t timbre_gain[2 * kAudioBlockSize];
       int16_t mix[kAudioBlockSize];
       memset(mix, 0, sizeof(mix));
@@ -203,6 +217,8 @@ int main(int argc, char** argv) {
     g_blocks = OptInt(argc, argv, "blocks", kBlocks);
     g_pitch_only = OptInt(argc, argv, "pitch", -1);   // a MIDI note, not an index
     g_pitch_raw = OptInt(argc, argv, "pitch_raw", -1);
+    g_pitch_raw2 = OptInt(argc, argv, "pitch_raw2", -1);
+    g_pitch_frac = OptInt(argc, argv, "pitch_frac", 0);
     g_sweep_only = OptInt(argc, argv, "sweep", -1);
     g_warp_timbre = OptInt(argc, argv, "warp", 0) != 0;
     HashShape(OptInt(argc, argv, "shape", 0), true);
