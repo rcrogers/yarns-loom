@@ -658,6 +658,10 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Shapes: low-pass, band-pass
     - Low-pass passes the strike's DC, which adds a thump at the attack and holds a standing offset under a sustained envelope; band-pass rejects it
 
+#### `-◝` State-variable filter, low-pass
+- Timbre: filter cutoff (resonance is constant)
+- Shapes: pulse, saw
+
 #### `┌┐CZ` Phase distortion, resonant pulse
 - Timbre: filter cutoff
 - Shapes: low-pass, peaking, band-pass, high-pass
@@ -665,10 +669,6 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `|⟍CZ` Phase distortion, resonant saw
 - Timbre: filter cutoff
 - Shapes: low-pass, peaking, band-pass, high-pass
-
-#### `-◝` State-variable filter, low-pass
-- Timbre: filter cutoff (resonance is constant)
-- Shapes: pulse, saw
 
 #### `-W` Pulse-width modulation
 - Timbre: pulse width
