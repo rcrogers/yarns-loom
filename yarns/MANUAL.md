@@ -645,36 +645,32 @@ Part setting `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)` sets whether the
 Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscillator shape for all voices in the part.
 
 #### `*-` Noise into state-variable filter
-- Timbre: filter cutoff
-- Note pitch controls the resonance of the SVF
+- Timbre: cutoff frequency of the SVF
+- Note pitch controls the resonance of the SVF, from zero to self-oscillation
 - Shapes: low-pass, notch, band-pass, high-pass
 
 #### `WH` Whistle: enveloped noise into tuned state-variable filter
-- Timbre: resonance of the SVF — white noise at zero, narrowing to a whistle as it closes
-  - At the very top the filter stops losing energy altogether and self-oscillates, giving a pure tone. Reaching that takes [timbre modulation](#modulation-destinations-for-envelope-output); the knob alone stops just short of it
+- Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
-- The [gain envelope](#modulation-destinations-for-envelope-output) controls the amplitude of the noise fed into the filter
-  - This is unlike most shapes, where the gain envelope controls the oscillator's output level
+- The [gain envelope](#modulation-destinations-for-envelope-output) is used as an amplifier on the filter's noise input, instead of as an oscillator output amplifier
 
 #### `/\-` Ping: direct envelope signal into tuned state-variable filter
-- A resonator struck by the [envelope](#envelope) and left to ring, which makes the [exciter](#exciter) the mallet
-- Timbre: resonance of the SVF, which sets how long the ping rings on after the note is released — under a second for the lower half of the control, rising to minutes near the top. Low notes ring longer, roughly doubling per octave down
-  - As with `WHISTLE`, timbre modulation can take the resonance all the way to self-oscillation, where the ring no longer decays at all. Turning the resonance back down ends it
+- Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
-- The gain envelope is itself used as the input to the filter
+- The gain envelope is used as a direct DC input to the filter, instead of as an oscillator output amplifier
 - Shapes: low-pass, band-pass
 
-#### `-◝` Analog wave into state-variable filter, low-pass
-- Timbre: cutoff frequency of the SVF
+#### `-◝` Analog wave into state-variable filter
+- Timbre: cutoff frequency of the low-pass SVF, relative to the note's pitch
 - Resonance is fixed
-- Shapes: pulse, saw
+- Shapes: pulse (Q = 130), saw (Q = 6.9)
 
 #### `┌┐CZ` Phase distortion, resonant pulse
-- Timbre: cutoff frequency of the digital filter
+- Timbre: cutoff frequency of the digital filter, relative to the note's pitch
 - Shapes: low-pass, peaking, band-pass, high-pass
 
 #### `|⟍CZ` Phase distortion, resonant saw
-- Timbre: cutoff frequency of the digital filter
+- Timbre: cutoff frequency of the digital filter, relative to the note's pitch
 - Shapes: low-pass, peaking, band-pass, high-pass
 
 #### `-W` Width modulation
