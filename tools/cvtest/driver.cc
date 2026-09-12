@@ -125,6 +125,78 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  // THE PITCH PIPELINE'S RESOLUTION. Every term that moves the pitch computes
+  // more precision than a whole pitch unit, and each used to shift it away. A CZ
+  // shape's aliases move up to 43 times faster than the note, so a whole unit of
+  // pitch is a 41 Hz step in an audible tone -- the artifact was a staircase.
+  //
+  // The property is BEHAVIOURAL, not a copy of the arithmetic: move one control
+  // by its own smallest step and the oscillator's phase increment has to move
+  // with it. A plateau means a fraction is being dropped.
+  //
+  // DEMONSTRATED against the commit before the fix: bend 15 of 511 steps, and
+  // portamento 128 of 1821 refreshes -- 128 being exactly the pitch units in
+  // the semitone it glides, which is the staircase itself.
+  if (!strcmp(mode, "pitch")) {
+    int failures = 0;
+
+    // PITCH BEND, at its default range of two semitones. 16384 bend steps cover
+    // 256 pitch units, so 64 bend steps share a unit and 63 of every 64 landed
+    // on a plateau.
+    voice.set_pitch_bend_range(2);
+    uint32_t previous = 0;
+    int moved = 0;
+    const int kBendSteps = 512;
+    for (int i = 0; i < kBendSteps; ++i) {
+      voice.PitchBend(static_cast<uint16_t>(8192 + i));
+      voice.Refresh();
+      if (i && voice.oscillator_.phase_increment_ != previous) ++moved;
+      previous = voice.oscillator_.phase_increment_;
+    }
+    printf("%s bend: %d of %d steps moved the increment\n",
+           moved > kBendSteps * 9 / 10 ? "PASS" : "FAIL", moved, kBendSteps - 1);
+    if (moved <= kBendSteps * 9 / 10) ++failures;
+    voice.PitchBend(8192);
+
+    // PORTAMENTO, over ONE SEMITONE. A wide glide crosses a whole pitch unit
+    // every refresh whatever the resolution, so it cannot see this: the
+    // interval has to be narrow enough that the glide spends several refreshes
+    // inside one unit.
+    voice.NoteOn(60 << 7, static_cast<uint8_t>(velocity), 0, 0, true, adsr,
+                 static_cast<int16_t>(timbre), chiff_amount_q30,
+                 chiff_audible_samples);
+    voice.NoteOn(61 << 7, static_cast<uint8_t>(velocity), 32, 0, true, adsr,
+                 static_cast<int16_t>(timbre), chiff_amount_q30,
+                 chiff_audible_samples);
+    previous = 0;
+    moved = 0;
+    int refreshes = 0;
+    while (voice.portamento_phase_increment_ && refreshes < 20000) {
+      voice.Refresh();
+      if (refreshes && voice.oscillator_.phase_increment_ != previous) ++moved;
+      previous = voice.oscillator_.phase_increment_;
+      ++refreshes;
+    }
+    printf("%s portamento: %d of %d refreshes moved the increment\n",
+           moved > refreshes * 3 / 4 ? "PASS" : "FAIL", moved, refreshes - 1);
+    if (moved <= refreshes * 3 / 4) ++failures;
+
+    // AND THE NOTE MUST NOT DRIFT. With nothing modulating it, the fraction has
+    // to settle to zero: a standing one detunes a held note by up to a unit.
+    voice.NoteOn(60 << 7, static_cast<uint8_t>(velocity), 0, 0, true, adsr,
+                 static_cast<int16_t>(timbre), chiff_amount_q30,
+                 chiff_audible_samples);
+    for (int i = 0; i < 4000; ++i) voice.Refresh();
+    const uint32_t settled = voice.oscillator_.phase_increment_;
+    voice.oscillator_.Refresh(60 << 7, 0, 0, 0);
+    printf("%s held note: increment %u against %u for the bare pitch\n",
+           settled == voice.oscillator_.phase_increment_ ? "PASS" : "FAIL",
+           settled, voice.oscillator_.phase_increment_);
+    if (settled != voice.oscillator_.phase_increment_) ++failures;
+
+    return failures ? 1 : 0;
+  }
+
   fprintf(stderr, "unknown mode: %s\n", mode);
   return 1;
 }

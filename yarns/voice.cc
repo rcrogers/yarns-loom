@@ -171,8 +171,11 @@ void Voice::Refresh() {
   uint16_t portamento_level = portamento_exponential_shape_
       ? Interpolate824(lut_env_expo_u16, portamento_phase_)
       : portamento_phase_ >> 16;
-  int32_t note = note_source_ + \
-      ((note_target_ - note_source_) * portamento_level >> 16);
+  // Kept at full width: the sixteen bits this shift drops are a pitch the
+  // oscillator can render, and dropping them steps a CZ fold by 41 Hz.
+  const int32_t portamento_offset_q15_16 =
+      (note_target_ - note_source_) * portamento_level;
+  int32_t note = note_source_ + (portamento_offset_q15_16 >> 16);
 
   note_portamento_ = note;
 
@@ -211,7 +214,19 @@ void Voice::Refresh() {
   amplitude_lfo_interpolator_.Tick();
   scaled_vibrato_lfo_interpolator_.Tick();
 
-  note = ApplyPitchMods(note_portamento_);
+  // Portamento and bend each earn more precision than a whole pitch unit and
+  // each used to shift it away; the pitch LFO's interpolator carries sixteen
+  // bits its value() drops. A CZ shape's folded partials move up to 43 times
+  // faster than the note, so one pitch unit is 41 Hz of artifact at MIDI 96 and
+  // those remainders were heard as the note stepping.
+  //
+  // Summed rather than carried in one wide pitch, which is what keeps this
+  // inside int32: three remainders, each under a unit, and the whole part of
+  // their sum belongs to the note --
+  // floor(a) + floor(b) + floor(c) + floor(fa + fb + fc) is floor(a + b + c).
+  const uint32_t pitch_remainder_u2_16 =
+      (portamento_offset_q15_16 & 0xffff) + PitchModsRemainder_u1_16();
+  note = ApplyPitchMods(note_portamento_) + (pitch_remainder_u2_16 >> 16);
 
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
@@ -228,13 +243,8 @@ void Voice::Refresh() {
     mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo, is_highest_priority_);
   }
 
-  // The vibrato is already interpolated between its targets; value() returns
-  // only the whole pitch unit and drops the rest. At VB=10 the target moves by
-  // +-4 units, so dropping the fraction leaves the note NINE pitches to visit --
-  // heard as stepping on the CZ shapes, whose folded partials move about 20x
-  // faster than the note and so jump with it.
   oscillator_.Refresh(
-      note, pitch_lfo_interpolator_.fraction(), timbre_15, tremolo);
+      note, static_cast<uint16_t>(pitch_remainder_u2_16), timbre_15, tremolo);
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;

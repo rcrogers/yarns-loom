@@ -214,10 +214,22 @@ class Voice {
   // against, keeping the timbre-bias bump consistent (a held bend or active
   // vibrato would otherwise reappear as a per-note chirp).
   inline int32_t ApplyPitchMods(int32_t note) const {
-    note += static_cast<int32_t>(mod_pitch_bend_ - 8192) * pitch_bend_range_ >> 6;
+    note += PitchBend64ths() >> 6;
     note += tuning_;
     note += pitch_lfo_interpolator_.value();
     return note;
+  }
+
+  // In 64ths of a pitch unit, which is the precision the range multiply earns
+  // and the shift above throws away.
+  inline int32_t PitchBend64ths() const {
+    return static_cast<int32_t>(mod_pitch_bend_ - 8192) * pitch_bend_range_;
+  }
+
+  // What ApplyPitchMods leaves below a whole pitch unit. Under two, since
+  // tuning contributes none -- it is whole units already.
+  inline uint32_t PitchModsRemainder_u1_16() const {
+    return ((PitchBend64ths() & 63) << 10) + pitch_lfo_interpolator_.fraction();
   }
 
   FastSyncedLFO lfos_[LFO_ROLE_LAST];

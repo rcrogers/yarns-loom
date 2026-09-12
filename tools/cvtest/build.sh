@@ -35,6 +35,10 @@ clang++ -std=c++11 -O1 -w -DTEST -fsanitize=address -I ../hosttest/shim -I ../..
 ./cvtest_asan chiff > /dev/null || { echo "ASan FAILED: chiff"; exit 1; }
 ./cvtest_asan dac blocks=8 > /dev/null || { echo "ASan FAILED: dac"; exit 1; }
 echo "ASan clean"
+# THE PITCH PIPELINE'S RESOLUTION, which nothing else here reaches: the
+# oscillator's increment has to move when any pitch control moves by its own
+# smallest step.
+./cvtest pitch || exit 1
 node parity.js || exit 1
 # The sim's copy of Part::VoiceNoteOn against the original.
 node panel.js || exit 1
