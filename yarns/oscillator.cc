@@ -65,6 +65,15 @@ static const uint32_t kWhistleQOctaves = 8;
 // The widest damp those shapes ask for, which is Q 6.9; kWhistleQOctaves above
 // it is Q 1820.
 static const uint32_t kWhistleDampMax_u1_14 = 2392;
+
+// WHISTLE's drive law is a separate quantity from the map above, and it is
+// bounded where the map need not be: the drive is a reciprocal at the output,
+// so a damp of zero -- which is what self-oscillation is -- would divide by it.
+// The reference is the damp at which the drive is unity and the floor is where
+// it stops following, both in the render's own words.
+static const uint32_t kWhistleDriveReference_u1_14 = kWhistleDampMax_u1_14;
+static const uint32_t kWhistleDriveFloor_u1_14 =
+    kWhistleDampMax_u1_14 >> kWhistleQOctaves;
 // The audio sample's peak: the magnitude the transfer gain is derived
 // against, and the width the fold knee is scaled in.
 static const int kSamplePeakBits = 15;
@@ -1074,12 +1083,21 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // sqrt(damp) and scaling the output back up by the same factor keeps bp in
   // range and leaves the level unchanged.
   //
-  // The timbre envelope can overshoot below the smallest damp the warp
-  // produces. Clamping it here keeps that make-up factor finite: it is a
-  // reciprocal, and an unclamped damp lets it jump 50x from one block to the
-  // next.
-  const uint32_t damp_min_u1_14 =
-      kWhistleDampMax_u1_14 >> kWhistleQOctaves;
+  // THE DRIVE READS ITS OWN DAMP, not the filter's. The filter takes the raw
+  // per-sample timbre below and may be damped as little as the warp allows;
+  // this one is bounded at both ends, for three reasons that are all about the
+  // reciprocal:
+  //   - the REFERENCE is the damp at which the drive is unity, so it must be at
+  //     least the widest the warp can ask for. Below that the drive would
+  //     EXCEED one at the wide end and amplify the excitation into the filter,
+  //     which is the opposite of the job.
+  //   - the FLOOR bounds the make-up. The timbre envelope slews, so it passes
+  //     through values the warp never emits -- at the end of a note among other
+  //     places -- and an unfloored reciprocal reached 50x there and amplified
+  //     whatever was still in the filter. Heard as glitchy noise after notes.
+  //   - and bp is capped before the multiply, because 16.3x a railed state
+  //     leaves int32.
+  const uint32_t damp_min_u1_14 = kWhistleDriveFloor_u1_14;
   // This is the damp at the start of the block, but the filter below reads a
   // new damp every sample. A fast-moving TIMBRE makes the two differ.
   uint32_t damp_at_block_start_u1_14 = static_cast<uint32_t>(
@@ -1087,11 +1105,11 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   if (damp_at_block_start_u1_14 < damp_min_u1_14) {
     damp_at_block_start_u1_14 = damp_min_u1_14;
   }
-  if (damp_at_block_start_u1_14 > kWhistleDampMax_u1_14) {
-    damp_at_block_start_u1_14 = kWhistleDampMax_u1_14;
+  if (damp_at_block_start_u1_14 > kWhistleDriveReference_u1_14) {
+    damp_at_block_start_u1_14 = kWhistleDriveReference_u1_14;
   }
   const int32_t damp_drive_u15 = IntegerSqrt(
-      (damp_at_block_start_u1_14 << 15) / kWhistleDampMax_u1_14 * 32768u);
+      (damp_at_block_start_u1_14 << 15) / kWhistleDriveReference_u1_14 * 32768u);
   // The excitation is scaled by damp_drive_u15 going in and the output by its
   // reciprocal coming out, so the state is held in units of that drive. When
   // the drive moves, the state already in the filter is still in the old
