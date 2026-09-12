@@ -80,11 +80,11 @@ int g_vibrato_rate_hz = 5;
 // from the pitch LFO's interpolator. VB=10 moves the note by only +-4 WHOLE
 // units, so the fraction is what makes a vibrato glide instead of step.
 int g_pitch_frac = 0;
-// The grid the pitch is delivered on, in 1/65536 pitch units. 65536 is what
-// Voice delivered before it read the pitch LFO's interpolator to sixteen bits.
-// 2048 is what it delivers NOW: the interpolator's slope is
+// The smallest step the pitch is delivered in, in 1/65536 pitch units. 65536 is
+// what Voice delivered before it read the pitch LFO's interpolator to sixteen
+// bits. 2048 is what it delivers NOW: the interpolator's slope is
 // `(target - value()) << 16 >> 5`, so every value it can hold is a multiple of
-// 1/32 of a unit. 1 is the grid the harness can reach and the hardware cannot.
+// 1/32 of a unit. 1 is the harness's own, which no setting can produce.
 int g_pitch_quantum = 1;
 int g_sweep_only = -1;   // -1 = every sweep
 // PANEL SEMANTICS. The timbre buffer a shape reads is the WARPED value, and
