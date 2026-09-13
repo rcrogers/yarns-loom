@@ -66,13 +66,15 @@ class StateVariableFilter : public SVF {
   template<bool kKeepNotchAndHp>
   inline void RenderSample(int32_t in, int16_t cutoff_u15) {
     damp.Tick();
-    ProcessInto<kKeepNotchAndHp>(in, cutoff_u15, damp.value());
+    ProcessInto<kKeepNotchAndHp, false>(in, cutoff_u15, damp.value());
   }
   // The mirror: damping per sample, cutoff interpolated toward the pitch's.
-  // WHISTLE and PING read only bp and lp, so notch and hp need not be stored.
+  // WHISTLE and PING read only bp and lp, so notch and hp need not be stored --
+  // and theirs are the two outputs the gain envelope does not multiply, so a
+  // ring that stops short of zero is a tone that never ends.
   inline void RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
     cutoff.Tick();
-    ProcessInto<false>(in, cutoff.value(), damp_u1_14);
+    ProcessInto<false, true>(in, cutoff.value(), damp_u1_14);
   }
 
  private:
