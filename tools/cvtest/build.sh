@@ -39,6 +39,10 @@ echo "ASan clean"
 # oscillator's increment has to move when any pitch control moves by its own
 # smallest step.
 ./cvtest pitch || exit 1
+# The audio output's span, which is 10 Vpp with 683 codes above it before the
+# code wraps to the opposite rail. Every shape is built to reach its share, so
+# the headroom is thin by design and only a sweep can say it is still there.
+./cvtest headroom || exit 1
 node parity.js || exit 1
 # The sim's copy of Part::VoiceNoteOn against the original.
 node panel.js || exit 1

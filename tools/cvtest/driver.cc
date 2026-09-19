@@ -112,6 +112,127 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  // THE AUDIO OUTPUT'S SPAN, IN THE CODES THE DAC ACTUALLY TAKES. Every other
+  // harness here measures in the int16 the render writes, which is not the
+  // same unit and cannot answer how close a voice sits to the wrap.
+  if (!strcmp(mode, "span")) {
+    CVOutput out;
+    out.Init(true);
+    printf("  volts_dac_code(0)=%u  volts_dac_code(5)=%u  volts_dac_code(7)=%u\n",
+           out.volts_dac_code(0), out.volts_dac_code(5), out.volts_dac_code(7));
+    const uint16_t five_v = out.volts_dac_code(0) - out.volts_dac_code(5);
+    printf("  5 V span = %u codes, so %.1f codes/V\n", five_v, five_v / 5.0);
+    printf("  voices  coherent  incoherent  peak_code  volts_peak  of_5V_span\n");
+    for (uint8_t n = 1; n <= 4; ++n) {
+      const uint16_t full = five_v * 2;
+      const uint16_t coh = full / n;
+      const uint16_t inc = (uint16_t) IntegerSqrt((uint32_t) full * coh);
+      // The envelope saturates at kEnvelopeSampleMax whatever peak it is given.
+      const uint32_t gain = coh > kEnvelopeSampleMax ? kEnvelopeSampleMax : coh;
+      printf("  %5u  %8u  %10u  %9u  %9.2f  %9.1f%%\n", n, coh, inc,
+             (unsigned) gain, gain / (five_v / 5.0), 100.0 * gain / five_v);
+    }
+    // What the render actually writes, through the real path. The model above
+    // is arithmetic; this is the wire.
+    static Voice voices[4];
+    static CVOutput audio;
+    const uint16_t zero = out.volts_dac_code(0);
+    for (int exciter = 0; exciter <= 127; exciter += 127) {
+      printf("\n  rendered, VARIABLE SAW, EXCITER %d:\n", exciter);
+      printf("    voices   low      high     volts_pp   of_10Vpp   outside\n");
+      for (uint8_t n = 1; n <= 4; ++n) {
+        for (uint8_t i = 0; i < 4; ++i) voices[i].Init();
+        audio.Init(true);
+        for (uint8_t i = 0; i < n; ++i) {
+          voices[i].set_oscillator_mode(OSCILLATOR_MODE_ENVELOPED);
+        }
+        audio.AssignVoices(&voices[0], DC_PITCH, n, n);
+        ADSR a = {0};
+        a.peak_u16 = 65535; a.sustain_u16 = 65535;
+        a.attack_u32 = 1u << 26; a.decay_u32 = 1u << 26; a.release_u32 = 1u << 26;
+        const uint32_t amt = PanelChiffAmount_q30(exciter, 0, 0);
+        const uint32_t dur = PanelChiffAudibleSamples(64, 0, 0);
+        for (uint8_t i = 0; i < n; ++i) {
+          voices[i].oscillator()->set_shape(OSC_SHAPE_VARIABLE_SAW);
+          voices[i].NoteOn((60 + i) << 7, 127, 0, 0, true, a, 0, amt, dur);
+        }
+        int32_t lo = INT32_MAX, hi = INT32_MIN;
+        bool outside = false;
+        for (int b = 0; b < 600; ++b) {
+          for (uint8_t i = 0; i < n; ++i) voices[i].Refresh();
+          audio.RenderSamples(0, 0, 0);
+          for (size_t k = 0; k < kAudioBlockSize; ++k) {
+            const uint16_t code = static_cast<uint16_t>(g_dac_block[0][k]);
+            const int32_t e = static_cast<int32_t>(code) - zero;
+            if (e < lo) lo = e;
+            if (e > hi) hi = e;
+            if (code > 64852 || code < 13522) outside = true;
+          }
+        }
+        printf("    %5u  %+7d  %+7d  %9.2f  %8.1f%%   %s\n", n, lo, hi,
+               (hi - lo) / 5133.0, 100.0 * (hi - lo) / (2 * five_v),
+               outside ? "YES" : "no");
+      }
+    }
+    return 0;
+  }
+
+  // NO SHAPE MAY LEAVE THE CALIBRATED RANGE, at any voice count. The span is
+  // 10 Vpp with 683 codes above it, and past those the code WRAPS and the
+  // output jumps to the opposite rail -- so this is not a clip that sounds bad,
+  // it is a discontinuity. `span` prints how close the worst shape sits.
+  if (!strcmp(mode, "headroom")) {
+    static Voice voices[4];
+    static CVOutput audio;
+    CVOutput probe; probe.Init(true);
+    const uint16_t zero = probe.volts_dac_code(0);
+    const uint16_t five_v = zero - probe.volts_dac_code(5);
+    int failures = 0;
+    int32_t worst = 0; int worst_shape = -1, worst_n = 0;
+    for (int shape = 0; shape <= OSC_SHAPE_FM; ++shape) {
+      for (uint8_t n = 1; n <= 4; ++n) {
+        for (uint8_t i = 0; i < 4; ++i) voices[i].Init();
+        audio.Init(true);
+        for (uint8_t i = 0; i < n; ++i) {
+          voices[i].set_oscillator_mode(OSCILLATOR_MODE_ENVELOPED);
+        }
+        audio.AssignVoices(&voices[0], DC_PITCH, n, n);
+        ADSR a = {0};
+        a.peak_u16 = 65535; a.sustain_u16 = 65535;
+        a.attack_u32 = 1u << 26; a.decay_u32 = 1u << 26; a.release_u32 = 1u << 26;
+        const uint32_t amt = PanelChiffAmount_q30(127, 0, 0);
+        const uint32_t dur = PanelChiffAudibleSamples(64, 0, 0);
+        for (uint8_t i = 0; i < n; ++i) {
+          voices[i].oscillator()->set_shape(static_cast<OscillatorShape>(shape));
+          voices[i].NoteOn((48 + 12 * i) << 7, 127, 0, 0, true, a,
+                           kEnvelopeSampleMax, amt, dur);
+        }
+        int32_t peak = 0; bool outside = false;
+        for (int b = 0; b < 180; ++b) {
+          for (uint8_t i = 0; i < n; ++i) voices[i].Refresh();
+          audio.RenderSamples(0, 0, 0);
+          for (size_t k = 0; k < kAudioBlockSize; ++k) {
+            const uint16_t code = static_cast<uint16_t>(g_dac_block[0][k]);
+            const int32_t e = static_cast<int32_t>(code) - zero;
+            const int32_t m = e < 0 ? -e : e;
+            if (m > peak) peak = m;
+            if (code > 64852 || code < 13522) outside = true;
+          }
+        }
+        if (peak > worst) { worst = peak; worst_shape = shape; worst_n = n; }
+        if (outside) {
+          printf("FAIL shape %d at %u voices left the calibrated range\n", shape, n);
+          ++failures;
+        }
+      }
+    }
+    printf("%s %d shapes x 4 voice counts stay inside the 10 Vpp span"
+           "  [worst %d of %u codes, %d left, shape %d at %d voice%s]\n",
+           failures ? "FAIL" : "PASS", OSC_SHAPE_FM + 1, worst, five_v,
+           five_v - worst, worst_shape, worst_n, worst_n == 1 ? "" : "s");
+    return failures ? 1 : 0;
+  }
+
   if (!strcmp(mode, "dac")) {
     for (int block = 0; block < blocks; ++block) {
       aux_1_output.RenderSamples(0, kAux1Channel, 0);
