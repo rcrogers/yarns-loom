@@ -43,6 +43,10 @@ echo "ASan clean"
 # code wraps to the opposite rail. Every shape is built to reach its share, so
 # the headroom is thin by design and only a sweep can say it is still there.
 ./cvtest headroom || exit 1
+# A held note changing shape must land where a note on the new shape would.
+# Rescale takes the scale the envelope RUNS at, which is not the shape's share
+# for the three that spend the gain before their filter.
+./cvtest shapechange || exit 1
 node parity.js || exit 1
 # The sim's copy of Part::VoiceNoteOn against the original.
 node panel.js || exit 1

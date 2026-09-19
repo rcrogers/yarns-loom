@@ -82,7 +82,13 @@ Level Measure(int shape, int voices_assigned, int pitch, int knob,
   Oscillator* osc = voices[0].oscillator();
   const OscillatorShape osc_shape = static_cast<OscillatorShape>(shape);
   Level out;
-  out.share = osc->scale_codes_u16_for_shape(osc_shape);
+  // What this shape may reach. WHISTLE's voices add in power and it takes the
+  // incoherent share for its level law; every other shape takes the coherent
+  // one. The firmware keeps the incoherent share only as a u15, so the codes
+  // it stands for are reconstructed here rather than held for this.
+  const uint32_t scale_u15 = osc_shape == OSC_SHAPE_WHISTLE
+      ? osc->incoherent_scale_u15_ : osc->coherent_scale_u15_;
+  out.share = static_cast<double>(scale_u15) * INT16_MAX / 32768.0;
   out.clamp = osc->coherent_scale_codes_u16_;
   const int32_t at_rail = static_cast<int32_t>(out.clamp) - 1;
 

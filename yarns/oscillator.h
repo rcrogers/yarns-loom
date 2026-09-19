@@ -150,13 +150,13 @@ class Oscillator {
   inline void Init(uint16_t coherent_scale_codes_u16,
                    uint16_t incoherent_scale_codes_u16) {
     coherent_scale_codes_u16_ = coherent_scale_codes_u16;
-    incoherent_scale_codes_u16_ = incoherent_scale_codes_u16;
-    // The same scale as a fraction of the sample's own full scale, which is
-    // what a gain multiplies by.
+    // The same scales as a fraction of the sample's own full scale, which is
+    // what a gain multiplies by. The incoherent one is kept in this form only:
+    // WHISTLE's level law is its one reader.
     coherent_scale_u15_ = static_cast<uint16_t>(
         (static_cast<uint32_t>(coherent_scale_codes_u16_) << 15) / INT16_MAX);
     incoherent_scale_u15_ = static_cast<uint16_t>(
-        (static_cast<uint32_t>(incoherent_scale_codes_u16_) << 15) / INT16_MAX);
+        (static_cast<uint32_t>(incoherent_scale_codes_u16) << 15) / INT16_MAX);
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
@@ -213,10 +213,20 @@ class Oscillator {
 
   void set_shape(OscillatorShape shape);
 
-  // WHISTLE's voices are noise and add in power; the rest add in amplitude.
-  inline uint16_t scale_codes_u16_for_shape(OscillatorShape shape) const {
-    return shape == OSC_SHAPE_WHISTLE
-        ? incoherent_scale_codes_u16_ : coherent_scale_codes_u16_;
+  // WHAT THE GAIN ENVELOPE RUNS AT, which is not the same as what the shape is
+  // worth. A shape that spends the gain BEFORE its filter drives an excitation
+  // with it, so the envelope is a full-range drive and the share is applied to
+  // the shape's output instead; every other shape spends it at the output, and
+  // the envelope carries the share itself.
+  //
+  // One function because two callers need the same answer: NoteOn sets the
+  // envelope to it, and set_shape rescales a held note between two of them.
+  inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
+    const bool spends_gain_before_the_filter =
+        shape == OSC_SHAPE_WHISTLE || shape == OSC_SHAPE_PING_BP ||
+        shape == OSC_SHAPE_PING_LP;
+    return spends_gain_before_the_filter
+        ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
   }
 
   // start_pitch is the new note's pitch at onset (the portamento glide's
@@ -225,12 +235,7 @@ class Oscillator {
       ADSR& adsr, bool drone,
       int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
       uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
-    const bool gain_envelope_is_pre_filter =
-        shape_ == OSC_SHAPE_WHISTLE || shape_ == OSC_SHAPE_PING_BP ||
-        shape_ == OSC_SHAPE_PING_LP;
-    // Pre-filter, so the scale is applied at the shape's output instead.
-    const uint16_t peak = gain_envelope_is_pre_filter
-        ? kEnvelopeSampleMax : scale_codes_u16_for_shape(shape_);
+    const uint16_t peak = gain_envelope_peak_codes_u16(shape_);
     gain_envelope_.NoteOn(
       adsr, drone ? peak : 0, peak, peak,
       chiff_amount_q30, chiff_audible_samples);
@@ -373,7 +378,6 @@ class Oscillator {
   int32_t previous_damp_drive_u15_;
   uint32_t noise_state_;
   uint16_t coherent_scale_codes_u16_;
-  uint16_t incoherent_scale_codes_u16_;
   uint16_t coherent_scale_u15_;
   uint16_t incoherent_scale_u15_;
 

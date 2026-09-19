@@ -378,8 +378,8 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
 
   // The scale moves when the new shape sums its voices differently, and a
   // held note should change shape without changing loudness.
-  gain_envelope_.Rescale(scale_codes_u16_for_shape(new_shape),
-                         scale_codes_u16_for_shape(shape_));
+  gain_envelope_.Rescale(gain_envelope_peak_codes_u16(new_shape),
+                         gain_envelope_peak_codes_u16(shape_));
 
   shape_ = new_shape;
 

@@ -188,6 +188,56 @@ int main(int argc, char** argv) {
   // 10 Vpp with 683 codes above it, and past those the code WRAPS and the
   // output jumps to the opposite rail -- so this is not a clip that sounds bad,
   // it is a discontinuity. `span` prints how close the worst shape sits.
+  // A HELD NOTE KEEPS ITS PLACE IN THE ENVELOPE'S RANGE ACROSS A SHAPE CHANGE.
+  // Rescale is what does it, and it has to be handed the scale the envelope is
+  // actually running at. That is the shape's share for most shapes and the
+  // full range for the three that spend the gain before their filter, so a
+  // caller that reaches for the share alone rescales those three by the wrong
+  // factor and the note jumps.
+  if (!strcmp(mode, "shapechange")) {
+    // Rescale scales the VALUE and the CEILING together, so the note's
+    // fraction of its range survives any factor at all and cannot say whether
+    // the factor was right. What can: where the note ends up against a note
+    // that started on the new shape. Same shape, same sustain, so the two must
+    // agree, and they only do if Rescale was handed the scale the envelope is
+    // really running at.
+    ADSR held = {0};
+    held.peak_u16 = 65535; held.sustain_u16 = 65535;
+    held.attack_u32 = 1u << 28; held.decay_u32 = 1u << 28;
+    held.release_u32 = 1u << 24;
+    int failures = 0;
+    double worst = 0; int worst_a = -1, worst_b = -1;
+    for (int b = 0; b <= OSC_SHAPE_FM; ++b) {
+      Wire();
+      voice.oscillator()->set_shape(static_cast<OscillatorShape>(b));
+      voice.NoteOn(60 << 7, 100, 0, 0, true, held, 0, 0, 0);
+      for (int i = 0; i < 120; ++i) {
+        voice.Refresh(); audio_output.RenderSamples(0, 0, 0);
+      }
+      const double fresh = voice.oscillator_.gain_envelope_.value_without_bias();
+      for (int a = 0; a <= OSC_SHAPE_FM; ++a) {
+        if (a == b) continue;
+        Wire();
+        voice.oscillator()->set_shape(static_cast<OscillatorShape>(a));
+        voice.NoteOn(60 << 7, 100, 0, 0, true, held, 0, 0, 0);
+        for (int i = 0; i < 120; ++i) {
+          voice.Refresh(); audio_output.RenderSamples(0, 0, 0);
+        }
+        voice.oscillator()->set_shape(static_cast<OscillatorShape>(b));
+        const double moved =
+            voice.oscillator_.gain_envelope_.value_without_bias();
+        const double err = fresh > 1 ? fabs(moved - fresh) / fresh : 0;
+        if (err > worst) { worst = err; worst_a = a; worst_b = b; }
+        if (err > 0.02) ++failures;
+      }
+    }
+    printf("%s %d shape changes land where a note on the new shape would"
+           "  [worst %.1f%% off, shape %d -> %d]\n",
+           failures ? "FAIL" : "PASS",
+           (OSC_SHAPE_FM + 1) * OSC_SHAPE_FM, 100 * worst, worst_a, worst_b);
+    return failures ? 1 : 0;
+  }
+
   if (!strcmp(mode, "headroom")) {
     static Voice voices[4];
     static CVOutput audio;
