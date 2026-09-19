@@ -940,10 +940,9 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
   // log2 of the increment, landing the corner between f0/3.3 and f0/4.7; the
   // spread is the shift moving a whole octave at a time.
   //
-  // A MIN, not an assignment: a larger shift is a LOWER corner, and below
-  // MIDI 48 `clz` would take it under the 28 Hz the constant sets. Measured
-  // there, that costs 8x the standing DC and clips at MIDI 12. Bounded, the
-  // shape is bit-identical below that note.
+  // A min, not an assignment: a larger shift is a lower corner, and `clz`
+  // exceeds kPdLeakyIntegratorShift below MIDI 48, which would put the corner
+  // under the 28 Hz that constant sets.
   //   - it cannot reach zero, where the accumulator would keep none of itself
   //     and stop integrating: the increment cannot reach 2^31, so `clz` is at
   //     least 1.
@@ -971,13 +970,13 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
     uint16_t integrator_gain = modulator_phase_increment >> 16; // Orig 14
     // An ideal integrator has infinite gain at DC, and its input is not quite
     // zero-mean: the two half-periods hold different numbers of samples, so the
-    // polarity flip cannot cancel them exactly. MEASURED at 0.8% of rms, which
-    // an unbounded integrator turned into a standing offset of a third of full
-    // scale, wandering with pitch. This gives it a DC gain of 256 -- a 28 Hz
-    // corner, below every note but the lowest few.
+    // polarity flip cannot cancel them exactly, and an unbounded integrator
+    // accumulates the difference without limit. The leak caps the DC gain at
+    // 2^kPdLeakyIntegratorShift -- a 28 Hz corner, below every note but the
+    // lowest few.
     //
     // Rounded, not truncated: an arithmetic shift is a floor, which biases a
-    // zero-mean signal by exactly half a count EVERY sample. Measured.
+    // zero-mean signal by exactly half a count every sample.
     integrator -= integrator >> leaky_integrator_shift;
     integrator += (pulse * integrator_gain + (1 << 13)) >> 14; // Orig 16
     CLIP(integrator)
@@ -1023,12 +1022,8 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
     if (signed_arm) {
       output = (window * carrier) >> 16;
     } else {
-      // Unsigned: the product is 65535 * 65535 at the corner, and that
-      // overflows int32. What it does today is wrap, and the int16 store then
-      // truncates the wrap away, so the OUTPUT is right -- MEASURED identical
-      // to the same expression in 64 bits over the whole domain. But signed
-      // overflow is undefined and GCC optimises on that, so the modular
-      // arithmetic this depends on is spelled out instead of assumed.
+      // Unsigned: the product needs all 32 bits, and signed overflow is
+      // undefined. carrier is biased into range and the bias taken off after.
       output = (static_cast<uint32_t>(window) * (carrier + 32768) >> 16) - 32768;
     }
     // Written a sample ahead, and emitted next time round. The correction above
@@ -1102,8 +1097,7 @@ static inline int32_t ResonantPitch(int16_t pitch) {
 static int32_t WhistleStateToOutput(
     int32_t pitch, int32_t scale_u15,
     int32_t damp_drive_u15) {
-  // Half an octave of level per octave of pitch, which holds rms flat to
-  // MIDI 84 and under-corrects above it.
+  // Holds rms flat to MIDI 84.
   const int32_t pitch_correction_numerator = 1;
   const int32_t pitch_correction_denominator = 2;
   // How far into the curve the signal is driven, which is the level: noise
@@ -1131,27 +1125,10 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   const int32_t resonant_pitch = ResonantPitch(pitch_);
   svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
-  // For a fixed drive, bp grows as sqrt(Q), so at the tightest damp it hits its
-  // rail and only a few of its bits are signal. Scaling the excitation down by
-  // sqrt(damp) and scaling the output back up by the same factor keeps bp in
-  // range and leaves the level unchanged.
-  //
-  // The drive reads its own damp, not the filter's. The filter takes the raw
-  // per-sample timbre below and may be damped as little as the warp allows;
-  // this one is bounded at both ends, for three reasons that are all about the
-  // reciprocal:
-  //   - the REFERENCE is the damp at which the drive is unity, so it must be at
-  //     least the widest the warp can ask for. Below that the drive would
-  //     EXCEED one at the wide end and amplify the excitation into the filter,
-  //     which is the opposite of the job.
-  //   - the FLOOR bounds the make-up. The timbre envelope slews, so it passes
-  //     through values the warp never emits -- at the end of a note among other
-  //     places -- and an unfloored reciprocal reached 50x there and amplified
-  //     whatever was still in the filter. Heard as glitchy noise after notes.
-  //   - and bp is capped before the multiply, because 16.3x a railed state
-  //     leaves int32.
-  // This is the damp at the start of the block, but the filter below reads a
-  // new damp every sample. A fast-moving TIMBRE makes the two differ.
+  // sqrt(damp / reference), bounded at both ends by the constants it reads:
+  // the excitation is scaled by it going in and the output by its reciprocal
+  // coming out. It reads the damp the block opens on, where the filter below
+  // reads a new one every sample -- a fast-moving TIMBRE makes the two differ.
   uint32_t damp_at_block_start_u1_14 = static_cast<uint32_t>(
       input_samples[0] > 0 ? input_samples[0] : 0);
   if (damp_at_block_start_u1_14 < kWhistleDriveFloor_u1_14) {
@@ -1162,16 +1139,13 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   }
   const int32_t damp_drive_u15 = IntegerSqrt(
       (damp_at_block_start_u1_14 << 15) / kWhistleDriveReference_u1_14 * 32768u);
-  // The excitation is scaled by damp_drive_u15 going in and the output by its
-  // reciprocal coming out, so the state is held in units of that drive. When
-  // the drive moves, the state already in the filter is still in the old
-  // units, and the reciprocal at the output no longer cancels what produced
-  // it. Rescale it into the new units.
+  // The state is held in units of the drive, so a drive that moves leaves what
+  // is already in the filter in the old ones, where the output's reciprocal no
+  // longer cancels what produced it.
   if (previous_damp_drive_u15_ > 0 && damp_drive_u15 != previous_damp_drive_u15_) {
-    // Clipped like every other write to these. The rescale can carry the state
-    // 16x past int16, and the next cutoff * bp then reaches 2.27e9 at MIDI 108,
-    // outside int32. A state the rescale puts out of range is one the filter
-    // would have railed at had the drive been there all along.
+    // The rescale can carry the state 16x past int16, and the next cutoff * bp
+    // then reaches 2.27e9 at MIDI 108. A state it puts out of range is one the
+    // filter would have railed at had the drive been there all along.
     svf.bp = stmlib::Clip16(static_cast<int32_t>(svf.bp) * damp_drive_u15
         / previous_damp_drive_u15_);
     svf.lp = stmlib::Clip16(static_cast<int32_t>(svf.lp) * damp_drive_u15
@@ -1182,10 +1156,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       resonant_pitch, incoherent_scale_u15_, damp_drive_u15);
   const int32_t state_into_curve_q15 =
       StateIntoCurve(state_to_output_q15, scale_);
-  // bp is int16 and the drive reaches 77k, so the full-precision product does
-  // not fit int32. Three bits off the drive make it fit with room to spare --
-  // a constant, so what they cost is 0.17% of gain at worst and nothing that
-  // varies -- and the state keeps every bit the filter carried for it.
+  // The headroom comes off the drive rather than the state, so the state keeps
+  // every bit the filter carried for it.
   const int32_t kDriveHeadroomBits = 3;
   const int32_t drive_into_curve_q12 =
       state_into_curve_q15 >> kDriveHeadroomBits;
@@ -1217,19 +1189,15 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // sits at the excitation's own level -- a thump under a percussive envelope,
   // a standing offset under a sustained one. The band-pass rejects the DC.
   const bool is_band_pass = shape_ == OSC_SHAPE_PING_BP;
-  // svf.bp and svf.lp are both clipped to INT16_MAX, so a gain that maps
-  // INT16_MAX onto scale_ uses the whole of their range without exceeding it.
-  // A ring only touches that peak briefly, so kPingDriveMultiple drives past
-  // it and leaves the curve to compress what goes over: 5.4 dB louder in the
-  // band-pass, 4.2 dB in the low-pass.
+  // A gain mapping INT16_MAX onto scale_ uses the whole of the state's range.
+  // A ring only touches that peak briefly, so the drive goes past it and leaves
+  // the curve to compress what goes over -- 6 dB before the curve, measuring
+  // 5.4 in the band-pass and 4.2 in the low-pass after it.
   const int32_t kUnityStateToOutput_q12 =
       (kEnvelopeSampleMax << 12) / INT16_MAX;
   const int32_t kPingDriveMultiple = 2;
   const int32_t state_to_output_q12 = kUnityStateToOutput_q12
       * kPingDriveMultiple * coherent_scale_u15_ >> 15;
-  // state_in_curve therefore peaks at INT16_MAX * kPingDriveMultiple /
-  // kSoftLimitHeadroom, which stays inside the table as long as the multiple
-  // does not exceed the headroom.
   STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom,
                 ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 =
@@ -1278,18 +1246,17 @@ static const int32_t kNoiseStateIntoCurve_q12 =
 
 void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  // The keyboard IS this shape's resonance control, and it reads the same map
+  // The keyboard is this shape's resonance control, and it reads the same map
   // every other variable-resonance shape reads -- so the top of the keyboard
   // self-oscillates, as the top of TIMBRE does on WHISTLE and PING.
   svf.RenderInitDamp(DampFromResonance(pitch_ << 1));
   const int16_t* curve = SoftLimitTableAsRegister();
-  // Its own stream, in a register. stmlib::Random is an LCG in a STATIC, so
-  // every sample paid a load and a store in a loop that is mostly memory
-  // traffic already -- and drawing from the shared stream moves every other
-  // consumer's draws along with it, which is why WHISTLE has one of these too.
+  // Its own stream, held in a register: stmlib::Random keeps its state in a
+  // static, and drawing from the shared one moves every other consumer's draws
+  // along with it.
   uint32_t block_noise_state = noise_state_;
   // Which output the shape takes is fixed for the block, so it picks the loop
-  // rather than being asked inside it -- and the two that read neither notch nor
+  // rather than being asked inside it, and the two that read neither notch nor
   // hp do not pay to store them.
 #define NOISE_LOOP(KEEP, STATE) \
   RENDER_WITH_GAIN_AMPLIFYING_OUTPUT( \
