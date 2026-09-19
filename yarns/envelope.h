@@ -47,6 +47,12 @@ const size_t kMaxChiffEnvelopes = 13;
 const int kEnvelopeSampleBits = 15;
 const int16_t kEnvelopeSampleMax = (1 << kEnvelopeSampleBits) - 1;
 
+// Bits per chiff draw, so sixteen levels. A two-level input's output is a
+// square once the rate reaches 1, so "unslewed" and "overdriven" collide and
+// the drive has nothing to shape; sixteen makes the unslewed end midpoint
+// noise, whose rms is the fraction the drive reclaims.
+const uint32_t kChiffDrawBits = 4;
+
 enum EnvelopeStage {
   ENV_STAGE_ATTACK,
   ENV_STAGE_DECAY,
@@ -115,7 +121,7 @@ class Envelope {
     int32_t clip_threshold_q26;
     int32_t mean_min_q30;
     int32_t mean_max_q30;
-    int32_t levels_q4_26[1 << 4];  // kChiffDrawBits; envelope.cc owns the name
+    int32_t levels_q4_26[1 << kChiffDrawBits];
   };
 
   void RenderStage(

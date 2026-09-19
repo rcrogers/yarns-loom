@@ -60,7 +60,7 @@ BLOCK_SAMPLES = 1 << source_constant(
     'yarns/drivers/dac.h', r'kAudioBlockSizeBits\s*=\s*(\d+)')
 FRAME_HZ = source_constant('yarns/drivers/dac.h', r'kFrameHz\s*=\s*(\d+)')
 DRAW_BITS = source_constant(
-    'yarns/envelope.cc', r'kChiffDrawBits\s*=\s*(\d+)')
+    'yarns/envelope.h', r'kChiffDrawBits\s*=\s*(\d+)')
 # One PRNG word carries this many samples, and the render loop is chunked at
 # that boundary -- so the chunk loop runs BLOCK_SAMPLES / DRAWS_PER_WORD times
 # per full-block run, and its overhead is per-chunk, not per-run.

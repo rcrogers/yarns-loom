@@ -41,21 +41,13 @@ using namespace stmlib;
 // The chiff's draws, and the generator that makes them. Each envelope has its
 // own sequence; instances must not share one.
 namespace {
-  // Sixteen levels, for two reasons:
-  //   - A two-level input's output is a square once the rate reaches 1, so
-  //     "unslewed" and "overdriven" collide and the drive has nothing to
-  //     shape. Sixteen makes the unslewed end midpoint noise, whose
-  //     rms is kChiffDrawRmsFractionOfMax of a square's, and that fraction is
-  //     what the drive reclaims.
-  //   - Four bits divide a 32-bit word evenly, so the chunking below stays a
-  //     shift and a mask. Asserted, not assumed.
-  const uint32_t kChiffDrawBits = 4;
   // The word the draws are packed into. NextXorshift32 pins the width at 32:
   // its shift constants are only valid there.
   typedef uint32_t ChiffDrawWord;
   const uint32_t kChiffDrawsPerWord = 32 / kChiffDrawBits;
   // A draw may not straddle a word: both loops extract one with a single ubfx
-  // at a compile-time offset. Negative array size because this is pre-C++11.
+  // at a compile-time offset, and the draw width has to divide the word evenly
+  // for that. Negative array size because this is pre-C++11.
   typedef char kChiffDrawBitsMustDivideTheWord[
       (32 % kChiffDrawBits == 0) ? 1 : -1];
   // Levels are the odd multiples 2*draw - max, i.e. +/-1, +/-3 ... +/-max, so
@@ -912,9 +904,6 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
 // own schedule, which is absolute, so a stage boundary is not an event it
 // should notice -- see ChiffBlock in envelope.h and L14b.
 void Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff) {
-  typedef char levels_must_match_the_draw_width[
-      (sizeof(chiff->levels_q4_26) / sizeof(chiff->levels_q4_26[0])
-       == (1 << kChiffDrawBits)) ? 1 : -1];
   const ChiffRunDecay decay = AdvanceChiffDecay(block_samples);
   chiff->slew_time_step_q5_27 = decay.slew_time_step_q5_27;
   // Derived, not stored: the rate and the slew time are one quantity, held in
