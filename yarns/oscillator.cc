@@ -376,9 +376,10 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   int32_t new_scale = WarpTimbre(midpoint_timbre, new_shape);
   timbre_envelope_.Rescale(new_scale, old_scale);
 
-  // scale_for_shape moves when the new shape sums its voices differently, and a
+  // The scale moves when the new shape sums its voices differently, and a
   // held note should change shape without changing loudness.
-  gain_envelope_.Rescale(scale_for_shape(new_shape), scale_for_shape(shape_));
+  gain_envelope_.Rescale(scale_codes_u16_for_shape(new_shape),
+                         scale_codes_u16_for_shape(shape_));
 
   shape_ = new_shape;
 
@@ -1037,7 +1038,7 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // Below this the cutoff coefficient stops tracking and the resonance is the
 // only pitch the shape has: at MIDI 24 the peak sits at 43.9 Hz for a note of
 // 32.7.
-// The soft limiter's curve reaches this many times scale_, so an excursion of
+// The soft limiter's curve reaches this many times the scale, so an excursion of
 // up to that much is compressed instead of clipped. The curve is tanh(k*x)
 // with k equal to this, which is what makes its gain 1 for small signals, so
 // changing one means changing the other. yarns/resources/waveshapers.py
@@ -1154,7 +1155,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t state_to_output_q15 = WhistleStateToOutput(
       resonant_pitch, incoherent_scale_u15_, damp_drive_u15);
   const int32_t state_into_curve_q15 =
-      StateIntoCurve(state_to_output_q15, scale_);
+      StateIntoCurve(state_to_output_q15, coherent_scale_codes_u16_);
   // The headroom comes off the drive rather than the state, so the state keeps
   // every bit the filter carried for it.
   const int32_t kDriveHeadroomBits = 3;
@@ -1200,7 +1201,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom,
                 ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 =
-      StateIntoCurve(state_to_output_q12, scale_);
+      StateIntoCurve(state_to_output_q12, coherent_scale_codes_u16_);
   const int32_t scale_u15 = coherent_scale_u15_;
 #define PING_LOOP(STATE) \
   RENDER_CORE(this_sample, \

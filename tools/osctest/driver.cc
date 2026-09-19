@@ -28,10 +28,11 @@ namespace {
 
 Oscillator osc;
 
-// The scale Init is given, and the pitches and timbre span every case walks.
+// The amplitude Init is given -- what one voice may reach -- and the pitches
+// and timbre span every case walks.
 // Three pitches so a shape whose warp tracks pitch is exercised at more than
 // one, and a timbre RAMP so the per-sample path moves rather than sitting.
-const uint16_t kScale = 32767;
+const uint16_t kScale = INT16_MAX >> 1;
 // THE WHOLE KEYBOARD, because a shape whose warp tracks pitch renders different
 // arithmetic at each end of it, and three pitches left most of that unpinned.
 // EVERY FOURTH SEMITONE, which crosses all fifteen bandlimited zones and both

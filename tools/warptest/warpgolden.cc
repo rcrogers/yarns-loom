@@ -34,7 +34,8 @@ uint32_t Fnv(uint32_t h, int16_t v) {
 
 int main(int argc, char** argv) {
   Oscillator osc;
-  osc.Init(32767, 32767);
+  // WarpTimbre reads no scale, so what Init is handed cannot reach it.
+  osc.Init(0, 0);
   for (int shape = 0; shape <= OSC_SHAPE_FM; ++shape) {
     uint32_t hash = 2166136261u;
     for (size_t p = 0; p < sizeof(kPitches) / sizeof(kPitches[0]); ++p) {

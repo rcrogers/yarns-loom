@@ -18,7 +18,18 @@
 using namespace yarns;
 int main() {
   Oscillator osc;
-  osc.Init(51330, 51330);
+  // The two amplitudes a voice is handed at one through four voices, derived
+  // as yarns/voice.h derives them: the span's amplitude over n where the
+  // voices add coherently, and the geometric mean of the whole and that where
+  // they add in power. tools/cvtest span prints the firmware's own.
+  const uint16_t kSpanAmplitudeCodes_u16 = 25665; // the output span's +/-5 V
+  uint16_t scales[4][2];
+  for (uint8_t n = 1; n <= 4; ++n) {
+    scales[n - 1][0] = kSpanAmplitudeCodes_u16 / n;
+    scales[n - 1][1] = static_cast<uint16_t>(IntegerSqrt(
+        static_cast<uint32_t>(kSpanAmplitudeCodes_u16) * scales[n - 1][0]));
+  }
+  osc.Init(scales[0][0], scales[0][1]);
   const int pitches[] = { 0, 24 << 7, 60 << 7, 108 << 7, (128 << 7) - 1 };
   // The values a shape's render can actually be handed: WarpTimbre's output,
   // over the whole signed range its own caller can reach. Feeding a render a
@@ -28,9 +39,6 @@ int main() {
   const int gains[] = { 0, 1, 16384, 32767 };
   // Every allocation: scale_ divides into what a shape derives per block, so
   // one voice count tests one set of derived values. voice.h's pairing.
-  const uint16_t scales[][2] = {
-    { 51330, 51330 }, { 25665, 36295 }, { 17110, 29635 }, { 12832, 25664 },
-  };
   long cases = 0;
   for (int s = 0; s <= OSC_SHAPE_FM; ++s) {
     for (size_t p = 0; p < sizeof(pitches)/sizeof(pitches[0]); ++p) {

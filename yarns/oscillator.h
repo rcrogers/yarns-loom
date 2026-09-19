@@ -147,15 +147,16 @@ class Oscillator {
   Oscillator() { }
   ~Oscillator() { }
 
-  inline void Init(uint16_t coherent_scale, uint16_t incoherent_scale) {
-    // Halved once here: the arguments are peak-to-peak and every reader wants
-    // the amplitude.
-    scale_ = coherent_scale >> 1;
-    incoherent_scale_ = incoherent_scale >> 1;
+  inline void Init(uint16_t coherent_scale_codes_u16,
+                   uint16_t incoherent_scale_codes_u16) {
+    coherent_scale_codes_u16_ = coherent_scale_codes_u16;
+    incoherent_scale_codes_u16_ = incoherent_scale_codes_u16;
+    // The same scale as a fraction of the sample's own full scale, which is
+    // what a gain multiplies by.
     coherent_scale_u15_ = static_cast<uint16_t>(
-        (static_cast<uint32_t>(scale_) << 15) / INT16_MAX);
+        (static_cast<uint32_t>(coherent_scale_codes_u16_) << 15) / INT16_MAX);
     incoherent_scale_u15_ = static_cast<uint16_t>(
-        (static_cast<uint32_t>(incoherent_scale_) << 15) / INT16_MAX);
+        (static_cast<uint32_t>(incoherent_scale_codes_u16_) << 15) / INT16_MAX);
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
@@ -213,8 +214,9 @@ class Oscillator {
   void set_shape(OscillatorShape shape);
 
   // WHISTLE's voices are noise and add in power; the rest add in amplitude.
-  inline uint16_t scale_for_shape(OscillatorShape shape) const {
-    return shape == OSC_SHAPE_WHISTLE ? incoherent_scale_ : scale_;
+  inline uint16_t scale_codes_u16_for_shape(OscillatorShape shape) const {
+    return shape == OSC_SHAPE_WHISTLE
+        ? incoherent_scale_codes_u16_ : coherent_scale_codes_u16_;
   }
 
   // start_pitch is the new note's pitch at onset (the portamento glide's
@@ -226,9 +228,9 @@ class Oscillator {
     const bool gain_envelope_is_pre_filter =
         shape_ == OSC_SHAPE_WHISTLE || shape_ == OSC_SHAPE_PING_BP ||
         shape_ == OSC_SHAPE_PING_LP;
-    // Pre-filter, so scale_ is applied at the shape's output instead.
+    // Pre-filter, so the scale is applied at the shape's output instead.
     const uint16_t peak = gain_envelope_is_pre_filter
-        ? kEnvelopeSampleMax : scale_for_shape(shape_);
+        ? kEnvelopeSampleMax : scale_codes_u16_for_shape(shape_);
     gain_envelope_.NoteOn(
       adsr, drone ? peak : 0, peak, peak,
       chiff_amount_q30, chiff_audible_samples);
@@ -370,8 +372,8 @@ class Oscillator {
   // can rescale what the filter still holds.
   int32_t previous_damp_drive_u15_;
   uint32_t noise_state_;
-  uint16_t scale_;
-  uint16_t incoherent_scale_;
+  uint16_t coherent_scale_codes_u16_;
+  uint16_t incoherent_scale_codes_u16_;
   uint16_t coherent_scale_u15_;
   uint16_t incoherent_scale_u15_;
 

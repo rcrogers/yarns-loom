@@ -211,7 +211,7 @@ int main(int argc, char** argv) {
   voices[0].Init();
   audio_output.Init(true);
   audio_output.AssignVoices(&voices[0], DC_PITCH, 1, 1);
-  const int32_t allowance = voices[0].oscillator()->scale_;
+  const int32_t allowance = voices[0].oscillator()->coherent_scale_codes_u16_;
 
   int failures = 0;
   for (int shape = 0; shape <= OSC_SHAPE_FM; ++shape) {

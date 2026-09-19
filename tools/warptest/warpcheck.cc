@@ -50,7 +50,8 @@ int main() {
   int failures = 0;
   for (int s = 0; s <= OSC_SHAPE_FM; ++s) {
     const OscillatorShape shape = static_cast<OscillatorShape>(s);
-    osc.Init(51330, 51330);
+    // WarpTimbre reads no scale, so what Init is handed cannot reach it.
+    osc.Init(0, 0);
     osc.set_shape(shape);
     for (size_t p = 0; p < sizeof(kPitches) / sizeof(kPitches[0]); ++p) {
       const int16_t pitch = static_cast<int16_t>(kPitches[p]);

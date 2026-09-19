@@ -82,8 +82,8 @@ Level Measure(int shape, int voices_assigned, int pitch, int knob,
   Oscillator* osc = voices[0].oscillator();
   const OscillatorShape osc_shape = static_cast<OscillatorShape>(shape);
   Level out;
-  out.share = osc->scale_for_shape(osc_shape);
-  out.clamp = osc->scale_;
+  out.share = osc->scale_codes_u16_for_shape(osc_shape);
+  out.clamp = osc->coherent_scale_codes_u16_;
   const int32_t at_rail = static_cast<int32_t>(out.clamp) - 1;
 
   double sum_squares = 0;

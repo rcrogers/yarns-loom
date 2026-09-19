@@ -336,8 +336,13 @@ class CVOutput {
     // WRAPS and the output jumps to the opposite rail. The mix accumulator is
     // an int16 holding that code and cannot carry an excursion past it, so
     // nothing downstream may exceed its share of this span.
-    const uint16_t full_scale = (volts_dac_code(0) - volts_dac_code(5)) * 2;
-    // WHAT ONE VOICE MAY SPEND, so that the voices SUMMED reach the span. Which
+    const uint16_t span_pp_codes_u16 =
+        (volts_dac_code(0) - volts_dac_code(5)) * 2;
+    // Halved here, where the span stops being one: everything past this point
+    // is an amplitude, so nothing downstream has to know the difference.
+    const uint16_t scale_codes_u16 = span_pp_codes_u16 >> 1;
+    // WHAT ONE VOICE MAY SPEND, so that the voices SUMMED reach the span's
+    // amplitude. Which
     // share that is depends on how they add, and a shape decides that:
     //   COHERENT -- periodic, so their peaks line up sooner or later, and n of
     //   them reach n times one. An nth each.
@@ -345,12 +350,14 @@ class CVOutput {
     //   times one. full / sqrt(n) each, which is the geometric mean of the
     //   whole and the nth. A shape that takes this one must still CAP its peak
     //   at the nth, or n of them can leave the span.
-    const uint16_t coherent_scale = full_scale / num_audio_voices_;
-    const uint16_t incoherent_scale = static_cast<uint16_t>(IntegerSqrt(
-        static_cast<uint32_t>(full_scale) * coherent_scale));
+    const uint16_t coherent_scale_codes_u16 =
+        scale_codes_u16 / num_audio_voices_;
+    const uint16_t incoherent_scale_codes_u16 = static_cast<uint16_t>(
+        IntegerSqrt(static_cast<uint32_t>(scale_codes_u16)
+                    * coherent_scale_codes_u16));
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
       Voice* audio_voice = audio_voices_[i] = dc_voices_[0] + i;
-      audio_voice->oscillator()->Init(coherent_scale, incoherent_scale);
+      audio_voice->oscillator()->Init(coherent_scale_codes_u16, incoherent_scale_codes_u16);
       audio_voice->set_audio_output(this);
     }
   }
