@@ -209,15 +209,34 @@ int main(int argc, char** argv) {
         a.attack_u32 = 1u << 26; a.decay_u32 = 1u << 26; a.release_u32 = 1u << 26;
         const uint32_t amt = PanelChiffAmount_q30(127, 0, 0);
         const uint32_t dur = PanelChiffAudibleSamples(64, 0, 0);
+        int32_t peak = 0; bool outside = false;
+        // A shape's loudest point need not be at the top of TIMBRE -- a warp
+        // that opens a filter is, one that closes a window is not -- and drone
+        // HOLDS the envelope at its peak where a struck note only passes
+        // through it. Both are swept, because zero margin is the design and a
+        // check that tries one setting cannot speak for it.
+        static const int16_t timbres[] = {
+          -32768, -8192, 0, 8192, 16384, 24576, kEnvelopeSampleMax };
+        for (size_t t = 0; t < sizeof(timbres)/sizeof(timbres[0]); ++t)
+        for (int drone = 0; drone <= 1; ++drone) {
+        for (uint8_t i = 0; i < n; ++i) {
+          voices[i].Init();
+          voices[i].set_oscillator_mode(drone
+              ? OSCILLATOR_MODE_DRONE : OSCILLATOR_MODE_ENVELOPED);
+        }
+        // After Init, which clears the voice's output, and so its shares too.
+        audio.AssignVoices(&voices[0], DC_PITCH, n, n);
         for (uint8_t i = 0; i < n; ++i) {
           voices[i].oscillator()->set_shape(static_cast<OscillatorShape>(shape));
           voices[i].NoteOn((48 + 12 * i) << 7, 127, 0, 0, true, a,
-                           kEnvelopeSampleMax, amt, dur);
+                           timbres[t], amt, dur);
         }
-        int32_t peak = 0; bool outside = false;
-        for (int b = 0; b < 180; ++b) {
+        for (int b = 0; b < 40; ++b) {
           for (uint8_t i = 0; i < n; ++i) voices[i].Refresh();
           audio.RenderSamples(0, 0, 0);
+          // A voice that is not sounding fills no block, and the buffer then
+          // still holds whatever it last did. Only a written block is a sample.
+          if (g_dac_noop[0]) continue;
           for (size_t k = 0; k < kAudioBlockSize; ++k) {
             const uint16_t code = static_cast<uint16_t>(g_dac_block[0][k]);
             const int32_t e = static_cast<int32_t>(code) - zero;
@@ -226,6 +245,7 @@ int main(int argc, char** argv) {
             if (code > 64852 || code < 13522) outside = true;
           }
         }
+        }
         if (peak > worst) { worst = peak; worst_shape = shape; worst_n = n; }
         if (outside) {
           printf("FAIL shape %d at %u voices left the calibrated range\n", shape, n);
@@ -233,7 +253,7 @@ int main(int argc, char** argv) {
         }
       }
     }
-    printf("%s %d shapes x 4 voice counts stay inside the 10 Vpp span"
+    printf("%s %d shapes x 4 voice counts x 7 timbres x drone stay inside the 10 Vpp span"
            "  [worst %d of %u codes, %d left, shape %d at %d voice%s]\n",
            failures ? "FAIL" : "PASS", OSC_SHAPE_FM + 1, worst, five_v,
            five_v - worst, worst_shape, worst_n, worst_n == 1 ? "" : "s");
