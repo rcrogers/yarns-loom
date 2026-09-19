@@ -626,7 +626,7 @@ void Oscillator::RenderLPPulse(int16_t* input_samples, int16_t* audio_mix) {
     bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
-    svf.RenderSample<true>(this_sample, timbre);
+    svf.RenderSample<false>(this_sample, timbre);
     this_sample = svf.lp;
   )
   svf_ = svf;
@@ -639,7 +639,7 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
     bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_SAW(phase, phase_increment) }
     next_sample += phase >> 17;
-    svf.RenderSample<true>(this_sample, timbre);
+    svf.RenderSample<false>(this_sample, timbre);
     this_sample = svf.lp;
   )
   svf_ = svf;
@@ -1049,10 +1049,29 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
 // changing one means changing the other. yarns/resources/waveshapers.py
 // generates the table.
 static const int32_t kSoftLimitHeadroom = 4;
+// GCC re-materialises the table's address where it is read -- once per entry,
+// so twice a sample inside SoftLimit. The blackbox pins it to a register
+// instead, and SoftLimit takes it as a parameter so this can be the caller's.
+//
+// Where to call it is measured, not free. Above the loop it holds a register
+// across everything else in there: WHISTLE is 68 cycles a sample hoisted and 74
+// at the call site, and PING is 64 at the call site and 74 hoisted.
+static inline const int16_t* SoftLimitTableAsRegister() {
+  const int16_t* curve = ws_soft_limit;
+  asm volatile ("" : "+r"(curve));
+  return curve;
+}
 
-// The curve is passed rather than read here so the caller can pin its address
-// to a register: GCC re-materializes it inside the sample loop otherwise, once
-// for each of the two entries read.
+// The curve's domain: the state scaled so the loudest one the shape can make
+// lands at the top of the table. In whatever Q state_to_output is in -- the
+// product leaves int32 for WHISTLE's, so it is taken 64 bits wide.
+static int32_t StateIntoCurve(int32_t state_to_output, int32_t scale) {
+  return static_cast<int32_t>(DivU64ByU32(
+      stmlib::MulU32(static_cast<uint32_t>(state_to_output), INT16_MAX),
+      static_cast<uint32_t>(state_to_output) * INT16_MAX,
+      static_cast<uint32_t>(scale) * kSoftLimitHeadroom));
+}
+
 static inline int32_t SoftLimit(
     const int16_t* curve, int32_t state_in_curve, int32_t scale_u15) {
   const uint16_t index = static_cast<uint16_t>(state_in_curve + 32768);
@@ -1066,7 +1085,12 @@ static inline int32_t SoftLimit(
   return (below + ((above - below) * (index & 0xff) >> 8)) * scale_u15 >> 15;
 }
 
-static const int32_t kWhistleLowestPitch = 30 << 7;
+// The lowest note WHISTLE and PING put their resonance on. Below it the pitch
+// term below is not fitted, so the resonance stays here.
+static const int32_t kResonatorLowestPitch = 30 << 7;
+static inline int32_t ResonantPitch(int16_t pitch) {
+  return pitch < kResonatorLowestPitch ? kResonatorLowestPitch : pitch;
+}
 // The resonator's gain at resonance rises as 1/sqrt(damp), and rises again
 // with pitch, by 2.85 dB an octave.
 //
@@ -1086,7 +1110,7 @@ static int32_t WhistleStateToOutput(
   // visits its peak rarely, and everything under it is unspent until something
   // bends the peak.
   const int32_t level_into_knee_u15 = 18800;
-  int32_t octaves_q16 = (pitch - kWhistleLowestPitch) * 65536 / (12 * 128);
+  int32_t octaves_q16 = (pitch - kResonatorLowestPitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * pitch_correction_numerator
       / pitch_correction_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
@@ -1105,7 +1129,7 @@ static int32_t WhistleStateToOutput(
 
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
+  const int32_t resonant_pitch = ResonantPitch(pitch_);
   svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
   // For a fixed drive, bp grows as sqrt(Q), so at the tightest damp it hits its
   // rail and only a few of its bits are signal. Scaling the excitation down by
@@ -1126,13 +1150,12 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   //     whatever was still in the filter. Heard as glitchy noise after notes.
   //   - and bp is capped before the multiply, because 16.3x a railed state
   //     leaves int32.
-  const uint32_t damp_min_u1_14 = kWhistleDriveFloor_u1_14;
   // This is the damp at the start of the block, but the filter below reads a
   // new damp every sample. A fast-moving TIMBRE makes the two differ.
   uint32_t damp_at_block_start_u1_14 = static_cast<uint32_t>(
       input_samples[0] > 0 ? input_samples[0] : 0);
-  if (damp_at_block_start_u1_14 < damp_min_u1_14) {
-    damp_at_block_start_u1_14 = damp_min_u1_14;
+  if (damp_at_block_start_u1_14 < kWhistleDriveFloor_u1_14) {
+    damp_at_block_start_u1_14 = kWhistleDriveFloor_u1_14;
   }
   if (damp_at_block_start_u1_14 > kWhistleDriveReference_u1_14) {
     damp_at_block_start_u1_14 = kWhistleDriveReference_u1_14;
@@ -1157,10 +1180,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   previous_damp_drive_u15_ = damp_drive_u15;
   const int32_t state_to_output_q15 = WhistleStateToOutput(
       resonant_pitch, incoherent_scale_u15_, damp_drive_u15);
-  const int32_t state_into_curve_q15 = static_cast<int32_t>(DivU64ByU32(
-      stmlib::MulU32(static_cast<uint32_t>(state_to_output_q15), INT16_MAX),
-      static_cast<uint32_t>(state_to_output_q15) * INT16_MAX,
-      static_cast<uint32_t>(scale_) * kSoftLimitHeadroom));
+  const int32_t state_into_curve_q15 =
+      StateIntoCurve(state_to_output_q15, scale_);
   // bp is int16 and the drive reaches 77k, so the full-precision product does
   // not fit int32. Three bits off the drive make it fit with room to spare --
   // a constant, so what they cost is 0.17% of gain at worst and nothing that
@@ -1169,11 +1190,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t drive_into_curve_q12 =
       state_into_curve_q15 >> kDriveHeadroomBits;
   const int32_t scale_u15 = coherent_scale_u15_;
-  // Where the pin sits is measured, not free: hoisted here this loop is 68
-  // cycles a sample and 74 with it at the call site, and RenderPing is the
-  // other way round.
-  const int16_t* curve = ws_soft_limit;
-  asm volatile ("" : "+r"(curve));
+  const int16_t* curve = SoftLimitTableAsRegister();
   uint32_t noise_state = noise_state_;
   RENDER_CORE_EXCITED(
     // Noise of its own, because a whistle sustains and the chiff decays.
@@ -1194,8 +1211,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
 // to carry energy at the note.
 void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  int32_t resonant_pitch = pitch_ < kWhistleLowestPitch ? kWhistleLowestPitch : pitch_;
-  svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(ResonantPitch(pitch_)));
   // The low-pass passes the exciter's DC, so once the ring dies away its state
   // sits at the excitation's own level -- a thump under a percussive envelope,
   // a standing offset under a sustained one. The band-pass rejects the DC.
@@ -1215,8 +1231,8 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // does not exceed the headroom.
   STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom,
                 ping_drive_leaves_curve);
-  const int32_t state_into_curve_q12 = state_to_output_q12 * INT16_MAX
-      / (scale_ * kSoftLimitHeadroom);
+  const int32_t state_into_curve_q12 =
+      StateIntoCurve(state_to_output_q12, scale_);
   const int32_t scale_u15 = coherent_scale_u15_;
 #define PING_LOOP(STATE) \
   RENDER_CORE_EXCITED( \
@@ -1224,8 +1240,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     /* halved to leave room for the overshoot. */ \
     svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre); \
     const int32_t state_in_curve = (STATE) * state_into_curve_q12 >> 12; \
-    const int16_t* curve = ws_soft_limit; \
-    asm volatile ("" : "+r"(curve)); \
+    const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
   )
   if (is_band_pass) { PING_LOOP(svf.bp) } else { PING_LOOP(svf.lp) }
@@ -1265,8 +1280,7 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
   // every other variable-resonance shape reads -- so the top of the keyboard
   // self-oscillates, as the top of TIMBRE does on WHISTLE and PING.
   svf.RenderInitDamp(DampFromResonance(pitch_ << 1));
-  const int16_t* curve = ws_soft_limit;
-  asm volatile ("" : "+r"(curve));
+  const int16_t* curve = SoftLimitTableAsRegister();
   // Its own stream, in a register. stmlib::Random is an LCG in a STATIC, so
   // every sample paid a load and a store in a loop that is mostly memory
   // traffic already -- and drawing from the shared stream moves every other
