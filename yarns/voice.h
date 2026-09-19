@@ -341,15 +341,24 @@ class CVOutput {
     // Halved here, where the span stops being one: everything past this point
     // is an amplitude, so nothing downstream has to know the difference.
     const uint16_t scale_codes_u16 = span_pp_codes_u16 >> 1;
-    // WHAT ONE VOICE MAY SPEND, so that the voices SUMMED reach the span's
-    // amplitude. Which
-    // share that is depends on how they add, and a shape decides that:
-    //   COHERENT -- periodic, so their peaks line up sooner or later, and n of
-    //   them reach n times one. An nth each.
-    //   INDEPENDENT -- noise, which adds in POWER, so n of them reach sqrt(n)
-    //   times one. full / sqrt(n) each, which is the geometric mean of the
-    //   whole and the nth. A shape that takes this one must still CAP its peak
-    //   at the nth, or n of them can leave the span.
+    // WHAT ONE VOICE MAY SPEND, so that the voices summed reach the span's
+    // amplitude. An nth each: periodic voices line their peaks up sooner or
+    // later, so n of them reach n times one.
+    //
+    // A shape whose voices are UNCORRELATED adds in power instead, reaching
+    // only sqrt(n) times one, and an nth leaves it 6 dB under at four voices.
+    // The geometric mean of the whole and the nth is what it may spend --
+    // full/sqrt(n) -- and it must then cap its own peak at the nth, since n
+    // peaks that do align would otherwise leave the span.
+    //
+    // Only WHISTLE takes it, and CREST is why rather than correlation: the
+    // trade is peak headroom for level, so it pays only where the signal
+    // visits its peak rarely. WHISTLE's crest is 3.8 to 5.3. The four NOISE
+    // shapes are uncorrelated too and do lose the same 6 dB, but they drive
+    // full-scale noise into a limiter and come out at crest 1.35 -- MEASURED,
+    // capping them at the nth while driving to full/sqrt(n) returns 1.69 dB of
+    // the 6.02 and clips 70% of samples to do it. There is no headroom there
+    // to trade.
     const uint16_t coherent_scale_codes_u16 =
         scale_codes_u16 / num_audio_voices_;
     const uint16_t incoherent_scale_codes_u16 = static_cast<uint16_t>(

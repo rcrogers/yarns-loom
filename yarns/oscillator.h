@@ -213,7 +213,7 @@ class Oscillator {
 
   void set_shape(OscillatorShape shape);
 
-  // WHAT THE GAIN ENVELOPE RUNS AT, which is not the same as what the shape is
+  // What the gain envelope runs at, which is not the same as what the shape is
   // worth. A shape that spends the gain BEFORE its filter drives an excitation
   // with it, so the envelope is a full-range drive and the share is applied to
   // the shape's output instead; every other shape spends it at the output, and
