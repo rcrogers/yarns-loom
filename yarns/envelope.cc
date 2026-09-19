@@ -145,8 +145,8 @@ const uint32_t kChiffSlewStateFractionalBits = 26;
 static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
 
 void Envelope::Init(int16_t zero_value_s16) {
-  // What NoteOff tests. Statics start null; a re-Init on a layout change must
-  // land back there.
+  // Statics start null, and a re-Init on a layout change must land back
+  // there.
   adsr_ = NULL;
   stage_phase_increment_u32_ = 0;
   stage_samples_left_ = 0;
@@ -159,8 +159,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   chiff_amount_q30_ = 0;
   chiff_phase_q32_ = 0;
   chiff_phase_step_q32_ = 0;
-  // Bias survives NoteOn/NoteOff to stay smooth; only Init resets it.
-  // Init does: a reused envelope starts its first block's ramp from zero.
+  // A reused envelope starts its first block's ramp from zero.
   bias_q31_ = 0;
   int32_t zero_value_q30 = zero_value_s16 << (31 - 16);
   value_without_bias_q30_ = zero_value_q30;
@@ -180,10 +179,8 @@ void Envelope::Init(int16_t zero_value_s16) {
 }
 
 void Envelope::NoteOff() {
-  // Voice::NoteOn forces a release before every triggered note, the first
-  // after boot included, and until that note there is no ADSR to read a
-  // release increment from. Trigger's switch reads it before it can decide
-  // there is nothing to do.
+  // Nothing to release before the first note, which is the only time there is
+  // no ADSR to take a release increment from.
   if (!adsr_) return;
   Trigger(ENV_STAGE_RELEASE);
 }
@@ -992,11 +989,10 @@ void Envelope::RenderStage(
     // trajectory is the same whatever the bias does. The battery pins the
     // independence.
     const int32_t bias_q30 = bias_q31 >> 1;
-    // THE CHIFF IS NOT A PER-RUN QUANTITY, and this used to derive it as one.
-    // RenderSamples built it for the whole block; a stage ending mid-block is
-    // not an event the chiff's schedule knows about. See ChiffBlock.
-    //   - The rate is the exception that proves it: it MOVES, a sample at a
-    //     time, and carries from one run into the next through this struct.
+    // The chiff is not a per-run quantity: a stage ending mid-block is not an
+    // event its schedule knows about. The rate is the exception -- it moves a
+    // sample at a time, and carries from one run into the next through this
+    // struct.
     int32_t chiff_slew_rate_q31 = chiff->slew_rate_q31;
     const uint32_t chiff_slew_rate_retained_per_sample_q31 =
       chiff->rate_retained_per_sample_q31;
@@ -1150,8 +1146,8 @@ void Envelope::RenderStage(
     }
     chiff_draws_ = draw_state;
     chiff_draws_left_ = static_cast<uint8_t>(draws_left);
-    // Where the rate reached: the next run in this block continues from it, and
-    // RenderSamples advances the slew time once for the whole block.
+    // Where the rate reached, for the next run in this block to continue
+    // from.
     chiff->slew_rate_q31 = chiff_slew_rate_q31;
 
     nominal_value_q30 = stage_adjusted_target_q1_30 - nominal_delta_q1_30;

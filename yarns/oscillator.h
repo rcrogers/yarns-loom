@@ -184,10 +184,8 @@ class Oscillator {
   // is what the pitch LFO's interpolator already carries and value() drops.
   void Refresh(int16_t pitch, uint16_t pitch_frac,
                int16_t timbre_bias, uint16_t gain_bias);
-  // Pitch-tracking shapes warp against an explicit pitch so callers can
-  // evaluate the warp at a pitch other than the live carrier (e.g. a new
-  // note's pitch before Refresh has updated pitch_). Called at most once per
-  // block, so the soft-knee branch recomputes its phase increment locally.
+  // Warps against the pitch given rather than the live carrier, for the
+  // shapes whose map tracks pitch.
   int16_t WarpTimbre(int16_t timbre, OscillatorShape shape, int16_t pitch) const;
   int16_t WarpTimbre(int16_t timbre, OscillatorShape shape) const {
     return WarpTimbre(timbre, shape, pitch_);
@@ -220,8 +218,7 @@ class Oscillator {
   }
 
   // start_pitch is the new note's pitch at onset (the portamento glide's
-  // start); target_pitch is its destination. Both arrive before Refresh has
-  // updated pitch_, so we warp explicitly against them here.
+  // start); target_pitch is its destination.
   inline void NoteOn(
       ADSR& adsr, bool drone,
       int16_t start_pitch, int16_t target_pitch, int16_t raw_max_timbre,
@@ -236,15 +233,14 @@ class Oscillator {
       adsr, drone ? peak : 0, peak, peak,
       chiff_amount_q30, chiff_audible_samples);
 
-    // Snap the pitch-driven jump in timbre bias out of RenderSamples' slew so
-    // warped timbre tracks the new pitch instantly; only LFO bias motion stays
-    // smoothed. start_pitch ~= old pitch_ when portamento glides, so the bump
-    // is ~0 then and the glide is left to slew normally.
+    // Snap the pitch-driven jump in timbre bias, so warped timbre tracks the
+    // new pitch instantly and only LFO bias motion stays smoothed. start_pitch
+    // ~= old pitch_ when portamento glides, so the bump is ~0 then and the
+    // glide is left to slew normally.
     int16_t old_warped_bias = WarpTimbre(raw_timbre_bias_, shape_);
     pitch_ = start_pitch;
     CONSTRAIN(pitch_, 0, kHighestNote - 1);
-    // Prime the carrier so the first audio block renders at the new pitch
-    // instead of lagging up to one block behind the next Refresh.
+    // Prime the carrier so the first audio block renders at the new pitch.
     phase_increment_ = ComputePhaseIncrement(pitch_);
     int16_t new_warped_bias = WarpTimbre(raw_timbre_bias_, shape_);
     // Two int16 warped biases differ by up to +/-65534, and shifting that by 16
@@ -370,8 +366,8 @@ class Oscillator {
   PhaseDistortionSquareModulator pd_square_;
   
   int32_t next_sample_;
-  // WHISTLE normalises its filter state by damp_drive_u15. Changing that
-  // exponent means rescaling the state it normalised, so the last one is kept.
+  // The drive the filter state was last normalised by, so a drive that moves
+  // can rescale what the filter still holds.
   int32_t previous_damp_drive_u15_;
   uint32_t noise_state_;
   uint16_t scale_;

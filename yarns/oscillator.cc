@@ -259,9 +259,8 @@ int16_t Oscillator::WarpTimbre(
     int32_t timbre_offset = timbre - 2048;
     int32_t shifted_pitch = pitch + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8);
     if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1;
-    // Against the carrier the render will multiply, which Refresh keeps inside
-    // the playable range. NoteOn warps against a target pitch it has not
-    // clamped, and ComputePhaseIncrement shifts a low enough one to zero.
+    // The ratio is taken against a playable carrier, and the pitch handed in
+    // need not be one.
     int32_t carrier_pitch = pitch;
     CONSTRAIN(carrier_pitch, 0, kHighestNote - 1);
     const uint32_t carrier =
@@ -1246,9 +1245,8 @@ static const int32_t kNoiseStateIntoCurve_q12 =
 
 void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  // The keyboard is this shape's resonance control, and it reads the same map
-  // every other variable-resonance shape reads -- so the top of the keyboard
-  // self-oscillates, as the top of TIMBRE does on WHISTLE and PING.
+  // The keyboard is this shape's resonance control, and it reads the shared
+  // map, so the top of the keyboard self-oscillates.
   svf.RenderInitDamp(DampFromResonance(pitch_ << 1));
   const int16_t* curve = SoftLimitTableAsRegister();
   // Its own stream, held in a register: stmlib::Random keeps its state in a

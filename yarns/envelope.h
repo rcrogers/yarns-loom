@@ -61,10 +61,8 @@ struct ADSR {
   uint32_t attack_u32, decay_u32, release_u32; // Phase increments
 };
 
-// CHIFF DURATION picks an increment off lut_chiff_phase_increments; this is
-// the reciprocal that turns it into the audible duration in samples. Called
-// once per note, where the table is read. Exported because the harnesses
-// report the duration every measurement is expressed against.
+// The reciprocal of a CHIFF DURATION increment: the audible duration in
+// samples.
 uint32_t ChiffAudibleSamples(uint32_t chiff_duration_increment_u32);
 
 // The output is three independent terms:
@@ -179,6 +177,7 @@ class Envelope {
   int32_t stage_target_q30_, value_without_bias_q30_;
 
   // No overshoot: the slope is pre-scaled by the block size.
+  // Not cleared by a note, so bias motion stays smooth across one.
   int32_t bias_q31_;
 
   EnvelopeStage stage_;

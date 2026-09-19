@@ -326,8 +326,7 @@ void Voice::NoteOn(
   // Resolve the portamento endpoints before the oscillator NoteOn so it can
   // warp/prime against the correct pitch: note_source_ is the note's onset
   // pitch (where a glide starts, or the note itself when portamento is off),
-  // note_target_ its destination. Both are known here, ahead of Refresh
-  // updating the oscillator's live pitch.
+  // note_target_ its destination. Both are known here.
   if (has_cv_output()) {
     note_source_ = note_portamento_;
     note_target_ = note;
