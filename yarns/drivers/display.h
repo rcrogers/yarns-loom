@@ -117,8 +117,8 @@ class Display {
   
   uint16_t active_position_;
   uint16_t brightness_pwm_cycle_;
+  uint8_t brightness_pwm_accumulator_;
   uint16_t brightness_;
-  bool redraw_[kDisplayWidth];
   uint16_t blink_counter_;
   uint16_t frame_counter_;
   // Whether the prefix flash actually transitions. Without it every prefix

@@ -10,6 +10,6 @@
 # character, so the checks read the panel rather than the driver's members.
 cd "$(dirname "$0")"
 clang++ -std=c++11 -O1 -w -DTEST -DAPPLICATION -I ../hosttest/shim -I ../.. \
-  driver.cc gpio_stub.cc ../../yarns/drivers/display.cc \
+  driver.cc gpio_stub.cc ../../yarns/drivers/display.cc ../../yarns/utils.cc \
   ../../yarns/resources.cc -o uitest || exit 1
 node display.js || exit 1

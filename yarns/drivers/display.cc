@@ -68,6 +68,7 @@ void Display::Init() {
   GPIOB->BSRR = kPinEnable;
   active_position_ = 0;
   brightness_pwm_cycle_ = 0;
+  brightness_pwm_accumulator_ = 0;
   memset(short_buffer_, ' ', kDisplayWidth);
   memset(long_buffer_, ' ', kScrollBufferSize);
   use_mask_ = false;
@@ -147,7 +148,6 @@ void Display::RefreshSlow() {
   }
   blink_counter_ = (blink_counter_ + 1) % kBlinkMask;
   frame_counter_ = (frame_counter_ + 1) % kFrameBlinkMask;
-  std::fill(&redraw_[0], &redraw_[kDisplayWidth], true); // Force redraw
 
 #else
 
@@ -161,32 +161,36 @@ void Display::RefreshSlow() {
 
 void Display::RefreshFast() {
   if (brightness_pwm_cycle_ == 0) {
-    // On rising edge, switch to next display position and draw it
+    // One character holds the window, so the last one is blanked before the
+    // shift register stops describing it.
     GPIOB->BRR = kCharacterEnablePins[active_position_];
     active_position_ = (active_position_ + 1) % kDisplayWidth;
-    redraw_[active_position_] = true;
-  } else if (brightness_pwm_cycle_ - 1 == actual_brightness_) {
-    // On falling edge, undraw current display position
-    redraw_[active_position_] = true;
-  }
-  if (redraw_[active_position_]) {
-    redraw_[active_position_] = false;
-    if (brightness_pwm_cycle_ <= actual_brightness_) {
-      uint16_t segments = use_mask_
-          ? mask_[active_position_]
-          : chr_characters[
-              static_cast<uint8_t>(displayed_buffer_[active_position_])];
-      // The frames describe the short name, and RefreshSlow points
-      // displayed_buffer_ elsewhere for a scrolling long name and for the
-      // prefix flash -- both of which already have their own other side.
-      if (!frame_high() && displayed_buffer_ == short_buffer_) {
-        segments = blink_frame_[active_position_];
-      }
-      Shift14SegmentsWord(segments);
-      GPIOB->BSRR = kCharacterEnablePins[active_position_];
-    } else {
-      GPIOB->BRR = kCharacterEnablePins[active_position_];
+    uint16_t segments = use_mask_
+        ? mask_[active_position_]
+        : chr_characters[
+            static_cast<uint8_t>(displayed_buffer_[active_position_])];
+    // The frames describe the short name, and RefreshSlow points
+    // displayed_buffer_ elsewhere for a scrolling long name and for the
+    // prefix flash -- both of which already have their own other side.
+    if (!frame_high() && displayed_buffer_ == short_buffer_) {
+      segments = blink_frame_[active_position_];
     }
+    Shift14SegmentsWord(segments);
+  }
+  // The lit ticks are spread across the window instead of taken contiguously
+  // from its start. The count is the same, so the brightness is, but the
+  // current the display draws switches at the tick rate rather than once a
+  // window: taken contiguously the off-time is a square at half the refresh
+  // rate, whose depth the crossfade sweeps, and the supply carries that to the
+  // CV outputs as a rumble at the crossfade's cadence.
+  //
+  // Bresenham, so the spread is even at every duty and costs no table.
+  brightness_pwm_accumulator_ += actual_brightness_ + 1;
+  if (brightness_pwm_accumulator_ >= kDisplayBrightnessPWMMax) {
+    brightness_pwm_accumulator_ -= kDisplayBrightnessPWMMax;
+    GPIOB->BSRR = kCharacterEnablePins[active_position_];
+  } else {
+    GPIOB->BRR = kCharacterEnablePins[active_position_];
   }
   brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
 }
