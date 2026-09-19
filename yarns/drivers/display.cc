@@ -29,6 +29,8 @@
 
 #include "yarns/drivers/display.h"
 
+#include "yarns/utils.h"
+
 #include <stm32f10x_conf.h>
 #include <string.h>
 
@@ -47,6 +49,8 @@ const uint16_t kScrollingPreDelay = 600;
 // Add 1 for kDisplayWidth = 2
 const uint8_t kDisplayBrightnessPWMBits = 6;
 const uint8_t kDisplayBrightnessPWMMax = 1 << kDisplayBrightnessPWMBits;
+// Dither depth at the PWM comparator, a power of two.
+const int32_t kDisplayBrightnessPWMDither = 8;
 
 const uint16_t kCharacterEnablePins[] = {
   GPIO_Pin_6,
@@ -69,6 +73,7 @@ void Display::Init() {
   active_position_ = 0;
   brightness_pwm_cycle_ = 0;
   brightness_pwm_accumulator_ = 0;
+  brightness_pwm_noise_ = NextXorshift32Seed();
   memset(short_buffer_, ' ', kDisplayWidth);
   memset(long_buffer_, ' ', kScrollBufferSize);
   use_mask_ = false;
@@ -182,11 +187,21 @@ void Display::RefreshFast() {
   // current the display draws switches at the tick rate rather than once a
   // window: taken contiguously the off-time is a square at half the refresh
   // rate, whose depth the crossfade sweeps, and the supply carries that to the
-  // CV outputs as a rumble at the crossfade's cadence.
+  // CV outputs.
   //
-  // Bresenham, so the spread is even at every duty and costs no table.
+  // First-order delta-sigma, so the error it carries is shaped toward the tick
+  // rate and away from the band the ear has. Dithered at the comparator
+  // because the undithered pattern repeats every 64/gcd(duty + 1, 64) ticks,
+  // and the crossfade sweeps duty through every one of those periods: the
+  // lines march, which is audible where a flat noise floor is not. The
+  // accumulator carries the dither's error too, so the count over a window is
+  // unchanged. Kept far below the quantiser's step, or the dither flattens the
+  // shaping it is there to protect.
   brightness_pwm_accumulator_ += actual_brightness_ + 1;
-  if (brightness_pwm_accumulator_ >= kDisplayBrightnessPWMMax) {
+  brightness_pwm_noise_ = NextXorshift32(brightness_pwm_noise_);
+  const int32_t dither =
+      (brightness_pwm_noise_ >> 24) & (kDisplayBrightnessPWMDither - 1);
+  if (brightness_pwm_accumulator_ + dither >= kDisplayBrightnessPWMMax) {
     brightness_pwm_accumulator_ -= kDisplayBrightnessPWMMax;
     GPIOB->BSRR = kCharacterEnablePins[active_position_];
   } else {
