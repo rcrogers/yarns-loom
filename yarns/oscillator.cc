@@ -462,9 +462,11 @@ void Oscillator::Render(int16_t* audio_mix) {
 // The product shift folds into ARM's barrel-shifted ADD operand
 // (add r, mix, prod, asr #15).
 // The scaffolding every shape shares: the BLEP carry, the timbre read, and the
-// single walk down the two halves. The caller supplies mix_term, since shapes
-// differ in where they spend the gain envelope.
-#define RENDER_LOOP(mix_term, ...) \
+// single walk down both halves. The caller supplies mix_term because shapes
+// differ in where they spend the gain envelope -- those that amplify their
+// output by it take the wrapper below, and the resonators spend it on the way
+// into what rings, so theirs is this_sample as it stands.
+#define RENDER_CORE(mix_term, ...) \
   int16_t next_sample = next_sample_; \
   for (size_t size = kAudioBlockSize; size--;) { \
     int16_t timbre = input_samples[0]; \
@@ -478,21 +480,19 @@ void Oscillator::Render(int16_t* audio_mix) {
   } \
   next_sample_ = next_sample; \
 
-#define RENDER_CORE(...) \
-  RENDER_LOOP( \
-    (static_cast<int32_t>(this_sample) * \
-     input_samples[kAudioBlockSize]) >> 15, /* the other half */ \
-    __VA_ARGS__) \
-
-// The body spends the gain half on the way into whatever rings, so the mix
-// takes the sample as it stands.
-#define RENDER_CORE_EXCITED(...) \
-  RENDER_LOOP(this_sample, __VA_ARGS__) \
+// Declared after the body so it sits against the mix term that spends it:
+// hoisted to the top of the loop it is live across every shape's body, which
+// costs 96 bytes across thirteen of them and buys nothing.
+#define RENDER_WITH_GAIN_AMPLIFYING_OUTPUT(...) \
+  RENDER_CORE( \
+    (static_cast<int32_t>(this_sample) * gain) >> 15, \
+    __VA_ARGS__ \
+    const int16_t gain = input_samples[kAudioBlockSize];) \
 
 #define RENDER_PERIODIC(...) \
   uint32_t phase = phase_; \
   uint32_t phase_increment = phase_increment_; \
-  RENDER_CORE( \
+  RENDER_WITH_GAIN_AMPLIFYING_OUTPUT( \
     phase += phase_increment; \
     __VA_ARGS__ \
   ) \
@@ -1192,11 +1192,12 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t scale_u15 = coherent_scale_u15_;
   const int16_t* curve = SoftLimitTableAsRegister();
   uint32_t noise_state = noise_state_;
-  RENDER_CORE_EXCITED(
+  RENDER_CORE(this_sample,
+    const int16_t gain = input_samples[kAudioBlockSize];
     // Noise of its own, because a whistle sustains and the chiff decays.
     noise_state = NextXorshift32(noise_state);
-    int32_t excitation = static_cast<int16_t>(noise_state >> 16)
-        * input_samples[kAudioBlockSize] >> 15;
+    int32_t excitation =
+        static_cast<int16_t>(noise_state >> 16) * gain >> 15;
     excitation = excitation * damp_drive_u15 >> 15;
     svf.RenderSampleAtPitch(excitation, timbre);
     const int32_t state_in_curve = stmlib::Clip16(
@@ -1235,10 +1236,11 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
       StateIntoCurve(state_to_output_q12, scale_);
   const int32_t scale_u15 = coherent_scale_u15_;
 #define PING_LOOP(STATE) \
-  RENDER_CORE_EXCITED( \
+  RENDER_CORE(this_sample, \
+    const int16_t gain = input_samples[kAudioBlockSize]; \
     /* The resonant step response overshoots its input, so the excitation is */ \
     /* halved to leave room for the overshoot. */ \
-    svf.RenderSampleAtPitch(input_samples[kAudioBlockSize] >> 1, timbre); \
+    svf.RenderSampleAtPitch(gain >> 1, timbre); \
     const int32_t state_in_curve = (STATE) * state_into_curve_q12 >> 12; \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
@@ -1290,7 +1292,7 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
   // rather than being asked inside it -- and the two that read neither notch nor
   // hp do not pay to store them.
 #define NOISE_LOOP(KEEP, STATE) \
-  RENDER_CORE( \
+  RENDER_WITH_GAIN_AMPLIFYING_OUTPUT( \
     block_noise_state = NextXorshift32(block_noise_state); \
     svf.RenderSample<KEEP>( \
         static_cast<int16_t>(block_noise_state >> 16), timbre); \
