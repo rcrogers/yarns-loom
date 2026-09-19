@@ -137,9 +137,11 @@ int main(int argc, char** argv) {
     static Voice voices[4];
     static CVOutput audio;
     const uint16_t zero = out.volts_dac_code(0);
+    const int only_shape = OptInt(argc, argv, "shape", -1);
     for (int exciter = 0; exciter <= 127; exciter += 127) {
-      printf("\n  rendered, VARIABLE SAW, EXCITER %d:\n", exciter);
-      printf("    voices   low      high     volts_pp   of_10Vpp   outside\n");
+      printf("\n  shape %d, EXCITER %d:\n",
+             only_shape < 0 ? (int) OSC_SHAPE_VARIABLE_SAW : only_shape, exciter);
+      printf("    voices   low      high     volts_pp   of_10Vpp   rms_codes  outside\n");
       for (uint8_t n = 1; n <= 4; ++n) {
         for (uint8_t i = 0; i < 4; ++i) voices[i].Init();
         audio.Init(true);
@@ -153,10 +155,13 @@ int main(int argc, char** argv) {
         const uint32_t amt = PanelChiffAmount_q30(exciter, 0, 0);
         const uint32_t dur = PanelChiffAudibleSamples(64, 0, 0);
         for (uint8_t i = 0; i < n; ++i) {
-          voices[i].oscillator()->set_shape(OSC_SHAPE_VARIABLE_SAW);
-          voices[i].NoteOn((60 + i) << 7, 127, 0, 0, true, a, 0, amt, dur);
+          voices[i].oscillator()->set_shape(static_cast<OscillatorShape>(
+              only_shape < 0 ? OSC_SHAPE_VARIABLE_SAW : only_shape));
+          voices[i].NoteOn(60 << 7, 127, 0, 0, true, a,
+                           kEnvelopeSampleMax, amt, dur);
         }
         int32_t lo = INT32_MAX, hi = INT32_MIN;
+        double sumsq = 0; long count = 0;
         bool outside = false;
         for (int b = 0; b < 600; ++b) {
           for (uint8_t i = 0; i < n; ++i) voices[i].Refresh();
@@ -166,11 +171,13 @@ int main(int argc, char** argv) {
             const int32_t e = static_cast<int32_t>(code) - zero;
             if (e < lo) lo = e;
             if (e > hi) hi = e;
+            sumsq += (double) e * e; ++count;
             if (code > 64852 || code < 13522) outside = true;
           }
         }
-        printf("    %5u  %+7d  %+7d  %9.2f  %8.1f%%   %s\n", n, lo, hi,
-               (hi - lo) / 5133.0, 100.0 * (hi - lo) / (2 * five_v),
+        const double rms = sqrt(sumsq / count);
+        printf("    %5u  %+7d  %+7d  %9.2f  %8.1f%%  %8.0f  %s\n", n, lo, hi,
+               (hi - lo) / 5133.0, 100.0 * (hi - lo) / (2 * five_v), rms,
                outside ? "YES" : "no");
       }
     }
