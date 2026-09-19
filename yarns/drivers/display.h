@@ -46,6 +46,11 @@ const uint16_t kBlinkMask = 320;
 // things. Its own counter: sharing kBlinkMask would drag the held keys along.
 const uint16_t kFrameBlinkMask = 3 * (kBlinkMask >> 1);
 
+// A character's share of the light, 0 to kDisplayBrightnessPWMPeriod. The pins
+// the characters are enabled by are timer outputs, so the duty is where this
+// lives; the harness implements this to watch the same writes.
+void SetCharacterDuty(uint8_t position, uint16_t duty);
+
 class Display {
  public:
   Display() { }
@@ -116,9 +121,7 @@ class Display {
   uint8_t scrolling_step_;
   
   uint16_t active_position_;
-  uint16_t brightness_pwm_cycle_;
-  int32_t brightness_pwm_accumulator_;
-  uint32_t brightness_pwm_noise_;
+  uint16_t mux_ticks_left_;
   uint16_t brightness_;
   uint16_t blink_counter_;
   uint16_t frame_counter_;

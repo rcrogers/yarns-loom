@@ -60,6 +60,58 @@ struct GPIO_TypeDef {
 
 extern GPIO_TypeDef* const GPIOB;
 
+// The character enable pins are timer PWM outputs, so a character's share of
+// the light is its compare register. Assigning calls a hook, as BSRR does, and
+// tools/uitest/gpio_stub.cc is what implements it.
+void TimerCompareWrite(uint8_t character, uint16_t duty);
+
+struct TimCompareRegister {
+  uint8_t character;
+  void operator=(uint16_t duty) { TimerCompareWrite(character, duty); }
+};
+
+struct TIM_TypeDef {
+  TimCompareRegister CCR1;
+  TimCompareRegister CCR2;
+};
+
+extern TIM_TypeDef* const TIM3;
+extern TIM_TypeDef* const TIM4;
+
+typedef enum { DISABLE = 0, ENABLE = 1 } FunctionalState;
+
+typedef struct {
+  uint16_t TIM_Prescaler, TIM_CounterMode, TIM_Period, TIM_ClockDivision;
+  uint8_t TIM_RepetitionCounter;
+} TIM_TimeBaseInitTypeDef;
+
+typedef struct {
+  uint16_t TIM_OCMode, TIM_OutputState, TIM_OutputNState, TIM_Pulse;
+  uint16_t TIM_OCPolarity, TIM_OCNPolarity, TIM_OCIdleState, TIM_OCNIdleState;
+} TIM_OCInitTypeDef;
+
+#define TIM_CKD_DIV1 ((uint16_t)0x0000)
+#define TIM_CounterMode_Up ((uint16_t)0x0000)
+#define TIM_OCMode_PWM1 ((uint16_t)0x0060)
+#define TIM_OutputState_Enable ((uint16_t)0x0001)
+#define TIM_OCPolarity_High ((uint16_t)0x0000)
+#define TIM_OCPreload_Disable ((uint16_t)0x0000)
+#define TIM_OCPreload_Enable ((uint16_t)0x0008)
+#define AFIO_MAPR_TIM3_REMAP ((uint32_t)0x00000C00)
+#define AFIO_MAPR_TIM3_REMAP_PARTIALREMAP ((uint32_t)0x00000800)
+
+struct AFIO_TypeDef { uint32_t MAPR; };
+extern AFIO_TypeDef* const AFIO;
+
+// Configuration the wire cannot show: the harness runs the driver's logic, and
+// the panel it reconstructs is the same whatever the timers were set to.
+void TIM_TimeBaseInit(TIM_TypeDef* timer, TIM_TimeBaseInitTypeDef* init);
+void TIM_OC1Init(TIM_TypeDef* timer, TIM_OCInitTypeDef* init);
+void TIM_OC2Init(TIM_TypeDef* timer, TIM_OCInitTypeDef* init);
+void TIM_OC1PreloadConfig(TIM_TypeDef* timer, uint16_t preload);
+void TIM_OC2PreloadConfig(TIM_TypeDef* timer, uint16_t preload);
+void TIM_Cmd(TIM_TypeDef* timer, FunctionalState state);
+
 void GPIO_Init(GPIO_TypeDef* port, GPIO_InitTypeDef* init);
 
 // Read back what the pins are doing, for a harness that wants the wire.

@@ -6,9 +6,9 @@
 // show -- the 16-bit segment word standing at each character position.
 //
 // So the harness reads the display the way an eye does, not by reaching into
-// the driver's members. What it cannot see is brightness: RefreshFast's PWM
-// blanks a position by driving its enable low, and this records the word at
-// each enable RISE, which is the lit edge.
+// the driver's members. The enable pins are timer PWM outputs, so the lit edge
+// is the driver handing a character a non-zero duty, and the word standing at
+// the latch then is what that character lights with.
 #define TEST 1
 #include <stm32f10x_conf.h>
 #include "yarns/drivers/display.h"
@@ -21,10 +21,6 @@ namespace {
 const uint16_t kPinClk = GPIO_Pin_7;
 const uint16_t kPinEnable = GPIO_Pin_8;
 const uint16_t kPinData = GPIO_Pin_9;
-const uint16_t kCharacterEnablePins[yarns::kDisplayWidth] = {
-  GPIO_Pin_6, GPIO_Pin_5
-};
-
 uint16_t g_pins = 0;
 // The 595's two registers: what has been clocked in, and what the latch holds.
 uint16_t g_shift_register = 0;
@@ -47,14 +43,6 @@ void ApplyPins(uint16_t next) {
     g_shift_register = 0;
     g_shift_count = 0;
   }
-  // A character lights when its enable rises, and the word standing at the
-  // latch is what it lights with: display.cc shifts, then enables.
-  for (uint8_t i = 0; i < yarns::kDisplayWidth; ++i) {
-    if (rose & kCharacterEnablePins[i]) {
-      yarns::g_display_segments[i] = g_latched;
-      ++yarns::g_display_lit_count[i];
-    }
-  }
   g_pins = next;
 }
 
@@ -64,6 +52,28 @@ namespace yarns {
 uint16_t g_display_segments[kDisplayWidth];
 uint32_t g_display_lit_count[kDisplayWidth];
 }
+
+void TimerCompareWrite(uint8_t character, uint16_t duty) {
+  if (character >= yarns::kDisplayWidth || !duty) return;
+  yarns::g_display_segments[character] = g_latched;
+  ++yarns::g_display_lit_count[character];
+}
+
+namespace {
+TIM_TypeDef g_tim3 = { { 255 }, { 1 } };
+TIM_TypeDef g_tim4 = { { 0 }, { 255 } };
+}
+TIM_TypeDef* const TIM3 = &g_tim3;
+TIM_TypeDef* const TIM4 = &g_tim4;
+
+void TIM_TimeBaseInit(TIM_TypeDef*, TIM_TimeBaseInitTypeDef*) { }
+void TIM_OC1Init(TIM_TypeDef*, TIM_OCInitTypeDef*) { }
+void TIM_OC2Init(TIM_TypeDef*, TIM_OCInitTypeDef*) { }
+void TIM_OC1PreloadConfig(TIM_TypeDef*, uint16_t) { }
+void TIM_OC2PreloadConfig(TIM_TypeDef*, uint16_t) { }
+void TIM_Cmd(TIM_TypeDef*, FunctionalState) { }
+namespace { AFIO_TypeDef g_afio = { 0 }; }
+AFIO_TypeDef* const AFIO = &g_afio;
 
 void GpioBitSetReset(uint32_t bits) {
   uint16_t next = g_pins;
