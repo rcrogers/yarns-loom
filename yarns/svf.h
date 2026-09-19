@@ -45,11 +45,12 @@ namespace yarns {
 
 struct SVF {
   int32_t bp, lp, notch, hp;
-  // THE REMAINDER OF THE SHIFT THAT PUTS EACH WIDE PRODUCT BACK IN THE STATE'S
-  // UNITS -- what integer division by 2^14 or 2^15 leaves behind. Named for the
+  // The remainder of the shift that puts each wide product back in the state's
+  // units -- what integer division by 2^14 or 2^15 leaves behind. Named for the
   // product each one belongs to: the damping term subtracted to form notch, and
   // the two integrator steps.
-  // UNSIGNED: each is `x & ((1 << N) - 1)`, so it lands in [0, 2^N) whatever
+  //
+  // Unsigned: each is `x & ((1 << N) - 1)`, so it lands in [0, 2^N) whatever
   // the sign of the product it came from. Each is a fraction of ONE state
   // count, so every bit is fractional -- 14 against the damp's 14, 15 against
   // the cutoff's 15.
@@ -65,8 +66,8 @@ struct SVF {
   // Chamberlin needs the damp range 0..2, which is what its one integer bit
   // buys. Neither parameter is ever negative: both come from tables built from
   // non-negative expressions.
-  // A LAST BIT OF DAMPING, AND OF INTEGRATION, WHEREVER THE PRODUCT WOULD
-  // TRUNCATE AWAY. Every product here is wider than the state it lands in, and
+  // A last bit of damping, and of integration, wherever the product would
+  // truncate away. Every product here is wider than the state it lands in, and
   // what the shift drops is not noise -- it is the whole of the signal wherever
   // the product is smaller than one count, which is most of a quiet ring and
   // ALL of a slow one. Carry that remainder into the next sample so each step
@@ -78,14 +79,14 @@ struct SVF {
   //   - faking a minimum step makes the filter lossy by construction: a forced
   //     count per sample caps Q at 32 however small the damping asked for.
   //
-  // kMustReachSilence IS THE CALLER'S. A remainder carrying the SIGNED damping
+  // kMustReachSilence is the caller's. A remainder carrying the SIGNED damping
   // term cancels against itself over an oscillation and never crosses one
   // count, so the ring stops short of zero and holds there -- measured at up to
   // 3468 counts, for ever. The MAGNITUDE only ever rises, so it always crosses,
   // and bp's sign put back on it always opposes bp. Ring times are within 1.2%
   // either way.
   //
-  // NOTCH AND HP ARE NOT STATE. Each is formed and consumed inside one call --
+  // Notch and hp are not state. Each is formed and consumed inside one call --
   // notch feeds hp, hp feeds the band-pass step -- and neither is read on the
   // next. They are members only because the NOISE shapes take their output from
   // them, so kKeepNotchAndHp says whether this caller is one of those. A caller

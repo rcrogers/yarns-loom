@@ -196,7 +196,7 @@ class Oscillator {
     return WarpTimbre(timbre, shape_);
   }
 
-  // WHAT A SIGNED MODULATION OF TIMBRE IS WORTH, warped. A warp is an
+  // What a signed modulation of timbre is worth, warped. A warp is an
   // ABSOLUTE-POSITION map -- a filter cutoff, a phase increment -- so warping
   // a signed DELTA is meaningless: it asks where the position `delta` sits,
   // not how far `delta` moves you from where you are. Warp the DESTINATION and
@@ -259,7 +259,7 @@ class Oscillator {
     // (steady-state correct). It can't track the glide cheaply, so the bias
     // above is where pitch tracking is made accurate; the envelope's transient
     // pitch dependence during a glide is accepted as-is.
-    // AGAINST THE BIAS, not on its own: raw_max_timbre is TIMBRE MOD ENVELOPE
+    // Against the bias, not on its own: raw_max_timbre is TIMBRE MOD ENVELOPE
     // plus its velocity term, a SIGNED offset from where the timbre control
     // sits. Warping it alone lost the sign on 17 of the 42 shapes -- every
     // NOISE, CZ, LP and SYNC shape, whose warps run through a cutoff table or

@@ -206,7 +206,7 @@ static inline int16_t TimbreAtOrAboveZero(int16_t timbre) {
   return timbre < 0 ? 0 : timbre;
 }
 
-// DAMP FROM A RESONANCE CONTROL, geometrically: every shape whose resonance is
+// Damp from a resonance control, geometrically: every shape whose resonance is
 // variable reads this one map, so the control means the same thing in all of
 // them. The widest damp shifted right kWhistleQOctaves times is nothing, and
 // nothing is a lossless resonator -- the top of the control self-oscillates.
@@ -1136,7 +1136,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // sqrt(damp) and scaling the output back up by the same factor keeps bp in
   // range and leaves the level unchanged.
   //
-  // THE DRIVE READS ITS OWN DAMP, not the filter's. The filter takes the raw
+  // The drive reads its own damp, not the filter's. The filter takes the raw
   // per-sample timbre below and may be damped as little as the warp allows;
   // this one is bounded at both ends, for three reasons that are all about the
   // reciprocal:
