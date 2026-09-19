@@ -1189,12 +1189,12 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // sits at the excitation's own level -- a thump under a percussive envelope,
   // a standing offset under a sustained one. The band-pass rejects the DC.
   const bool is_band_pass = shape_ == OSC_SHAPE_PING_BP;
-  // A gain mapping INT16_MAX onto scale_ uses the whole of the state's range.
-  // A ring only touches that peak briefly, so the drive goes past it and leaves
-  // the curve to compress what goes over -- 6 dB before the curve, measuring
-  // 5.4 in the band-pass and 4.2 in the low-pass after it.
+  // The ratio of the two peaks, so it follows either one if it moves.
   const int32_t kUnityStateToOutput_q12 =
       (kEnvelopeSampleMax << 12) / INT16_MAX;
+  // A ring only touches its peak briefly, so the drive goes past unity and
+  // leaves the curve to compress what goes over -- 6 dB before the curve,
+  // measuring 5.4 in the band-pass and 4.2 in the low-pass after it.
   const int32_t kPingDriveMultiple = 2;
   const int32_t state_to_output_q12 = kUnityStateToOutput_q12
       * kPingDriveMultiple * coherent_scale_u15_ >> 15;
