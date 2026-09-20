@@ -936,23 +936,38 @@ void Oscillator::RenderAudioRatePWM(int16_t* input_samples, int16_t* audio_mix) 
   int16_t interval = lut_fm_modulator_intervals[pwm_shape];
   uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
 
-  // Hold the width's motion against the carrier's equal across the ratios
-  uint8_t depth_2x_downshift = lut_pwm_depth_2x_downshifts[pwm_shape];
-  uint8_t depth_shift = depth_2x_downshift >> 1;
-  bool depth_shift_halfbit = depth_2x_downshift & 1;
+  // The offset saw carries a direction only while its own motion stays under
+  // half a turn, and that motion is the swing's, which the modulator's
+  // increment sets the rate of. So the NOTE caps the depth whatever the ratio
+  // asked for: `clz` is log2 of the increment, and the product reaches a
+  // quarter turn before any shift, so the room is 33 - log2(2*pi) - log2(the
+  // increment) bits.
+  //
+  // clz - 2, NOT clz - 1: `clz` brackets the log rather than giving it, and
+  // only the far end of that bracket is safe at every increment. The near end
+  // reads a whole bit too generous, which at MIDI 108 is the difference
+  // between an offset saw inside Nyquist and one past it.
+  //
+  // A max, not an assignment: a modulator already past Nyquist has no room at
+  // all, and the subtraction is signed so it can say so.
+  const int widest_2x_upshift =
+      std::max(0, (__builtin_clz(modulator_phase_increment) - 2) * 2);
+  const uint8_t depth_2x_upshift = std::min(
+      static_cast<int>(lut_pwm_depth_2x_upshifts[pwm_shape]), widest_2x_upshift);
+  uint8_t depth_shift = depth_2x_upshift >> 1;
+  bool depth_shift_halfbit = depth_2x_upshift & 1;
   uint32_t previous_offset_phase = previous_offset_phase_;
   RENDER_MODULATED(
     modulator_phase += modulator_phase_increment;
-    // A full-scale sine times a full-scale timbre is a quarter turn; doubled,
-    // the shallowest ratio sweeps the width across the WHOLE period, which is
-    // what full scale on this control should mean. Every other ratio takes a
-    // share of that.
-    int32_t swing = (sine(modulator_phase) * timbre) >> depth_shift;
-    // Conditional multiplication by 3/4 to approximate 1/sqrt(2)
-    if (depth_shift_halfbit) swing -= swing >> 2;
-    // * 2 and not << 1: the value is signed, and shifting a negative left is
-    // undefined. Same instruction.
-    uint32_t width = 0x80000000 + static_cast<uint32_t>(swing * 2);
+    // Formed UNSIGNED and left to wrap: only the fraction of a turn reaches
+    // the output, and every turn it wraps through is an edge of the offset
+    // saw, which is corrected like any other.
+    // Conditional multiplication by 1.5 to approximate sqrt(2), taken while
+    // the value is still SIGNED: the halving is an arithmetic shift, and the
+    // unsigned form of a negative swing would halve into a huge positive.
+    int32_t swing = sine(modulator_phase) * timbre;
+    if (depth_shift_halfbit) swing += swing >> 1;
+    uint32_t width = 0x80000000 + (static_cast<uint32_t>(swing) << depth_shift);
     uint32_t offset_phase = phase - width;
     int32_t offset_phase_increment =
         static_cast<int32_t>(offset_phase - previous_offset_phase);

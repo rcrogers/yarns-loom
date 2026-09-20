@@ -819,30 +819,25 @@ fm_index_scales = numpy.array([FM_INDEX_SCALING_BASE / r for r in fm_mc_ratios])
 fm_index_upshifts_f = numpy.log2(fm_index_scales)
 lookup_tables_8.append(('fm_index_2x_upshifts', numpy.round(fm_index_upshifts_f * 2)))
 
-# PWM DEPTH falls as the ratio rises, for the reason the FM index does. The
-# width's peak motion is depth * 2*pi * f_m and the carrier's is f_c, so a
-# depth held flat across the ratios puts every high one past the point where
-# the width outruns the phase while the knob is barely open -- measured at
-# 2*pi, the sweep is saturated within its first fifth and the rest of the
-# control does nothing. Scaling by 1/ratio holds that product constant, so the
-# top of the knob means the same thing at every ratio.
+# PWM DEPTH falls as the ratio rises, for the reason the FM index does.
 #
-# The shallowest ratio sets the depth and keeps the whole swing; the others are
-# scaled against it, so none needs an upshift and the widest swing stays the
-# one the render's own arithmetic already produces.
+# THE SWING IS NOT A PULSE WIDTH, and nothing bounds it to a period. The render
+# is saw(phase) - saw(phase - swing), so the second saw is PHASE MODULATED and
+# frac() does the rest: the output is a two-level pulse for ANY swing, and a
+# swing past a whole turn is one more wrap of that saw, which is an ordinary
+# edge the render already corrects. Reading the swing as a WIDTH capped it at
+# half a turn and cost a factor of eight for nothing.
 #
-# The exponent is how hard that rolloff bites. At 1 the product is constant and
-# every ratio reaches the same edge density, which measured as 22 of the 26
-# shapes sitting inside a +-10% duty wobble -- correct, and far too mild to
-# play. At 1/2 the high ratios keep a throw worth having: pi holds +-0.23 of a
-# turn where 1 gave it +-0.06, and the top of the knob is the only place the
-# width laps the phase hard.
-PWM_DEPTH_EXPONENT = 0.75
-pwm_depth_downshifts_f = PWM_DEPTH_EXPONENT * numpy.log2(
-    numpy.array(fm_mc_ratios) / min(fm_mc_ratios))
+# What does bound it is Nyquist on that saw, whose increment is the carrier's
+# less the swing's motion, and that ceiling goes as 1/f_m -- which is why this
+# scale does. The ceiling is also the NOTE's business, so the render holds the
+# last word and this only says where a shape would like to sit.
+PWM_DEPTH_SCALING_BASE = 12
+pwm_depth_scales = numpy.array(
+    [PWM_DEPTH_SCALING_BASE / r for r in fm_mc_ratios])
 # Half-bit resolution, like the FM index's, which is what the 2x names.
 lookup_tables_8.append(
-    ('pwm_depth_2x_downshifts', numpy.round(pwm_depth_downshifts_f * 2)))
+    ('pwm_depth_2x_upshifts', numpy.round(numpy.log2(pwm_depth_scales) * 2)))
 
 
 clock_ratio_ticks = []
