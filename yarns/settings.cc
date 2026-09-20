@@ -559,7 +559,7 @@ const Setting Settings::settings_[] = {
   {
     "OS", "OSC SHAPE",
     SETTING_DOMAIN_PART, { PART_VOICING_OSCILLATOR_SHAPE, 0 },
-    SETTING_UNIT_OSCILLATOR_SHAPE, 0, OSC_SHAPE_FM + LUT_FM_RATIO_NAMES_SIZE - 1, NULL,
+    SETTING_UNIT_OSCILLATOR_SHAPE, 0, kOscShapeLast - 1, NULL,
     71, 23,
   },
   {
@@ -894,7 +894,9 @@ char Settings::Print(const Setting& setting, uint8_t value, char* buffer) const 
       return PrintInteger(buffer, 1 << value);
 
     case SETTING_UNIT_OSCILLATOR_SHAPE:
-      if (value >= OSC_SHAPE_FM) {
+      if (value >= kOscShapeAudioRatePwm) {
+        strcpy(buffer, lut_pwm_ratio_names[value - kOscShapeAudioRatePwm]);
+      } else if (value >= OSC_SHAPE_FM) {
         strcpy(buffer, lut_fm_ratio_names[value - OSC_SHAPE_FM]);
       } else {
         strcpy(buffer, voicing_oscillator_shape_values[value]);

@@ -100,6 +100,7 @@ extern const int16_t lut_scale_kaushik_todi[];
 extern const int16_t lut_scale_jogeshwari[];
 extern const int16_t lut_fm_modulator_intervals[];
 extern const char* const lut_fm_ratio_names[];
+extern const char* const lut_pwm_ratio_names[];
 extern const char* const lut_clock_ratio_names[];
 extern const int16_t wav_exponential[];
 extern const int16_t wav_ring[];
@@ -216,7 +217,9 @@ extern const uint16_t chr_blinking_characters[];
 #define LUT_FM_MODULATOR_INTERVALS_SIZE 26
 #define LUT_FM_RATIO_NAMES 0
 #define LUT_FM_RATIO_NAMES_SIZE 26
-#define LUT_CLOCK_RATIO_NAMES 1
+#define LUT_PWM_RATIO_NAMES 1
+#define LUT_PWM_RATIO_NAMES_SIZE 26
+#define LUT_CLOCK_RATIO_NAMES 2
 #define LUT_CLOCK_RATIO_NAMES_SIZE 32
 #define WAV_EXPONENTIAL 0
 #define WAV_EXPONENTIAL_SIZE 257

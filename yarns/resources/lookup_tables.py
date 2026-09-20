@@ -797,6 +797,11 @@ for (name, mc_ratio) in ([
 #   fm_ratio_names.append('\\xC0""' + str(n))
 
 lookup_tables_string.append(('fm_ratio_names', fm_mc_ratio_names))
+# The audio-rate PWM shapes modulate the width at the same ratios FM modulates
+# the phase at, and read the same interval table, so a ratio added above
+# reaches both runs.
+lookup_tables_string.append(
+    ('pwm_ratio_names', [n.replace(' FM ', ' PW ', 1) for n in fm_mc_ratio_names]))
 # lookup_tables_signed.append(('fm_carrier_corrections', fm_carrier_corrections))
 
 fm_modulator_intervals = [128 * 12 * numpy.log2(r) for r in fm_mc_ratios]

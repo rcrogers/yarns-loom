@@ -139,6 +139,15 @@ enum OscillatorShape {
   OSC_SHAPE_FM,
 };
 
+// FM and audio-rate PWM are RUNS of shapes rather than single enumerators:
+// each is one render indexed by a modulator ratio, and both read the same
+// ratio table. So a shape past OSC_SHAPE_FM says which run and which ratio,
+// and only the run picks a render.
+const uint8_t kOscShapeRuns = 2;
+const uint8_t kOscShapeRatios = LUT_FM_RATIO_NAMES_SIZE;
+const uint8_t kOscShapeAudioRatePwm = OSC_SHAPE_FM + kOscShapeRatios;
+const uint8_t kOscShapeLast = OSC_SHAPE_FM + kOscShapeRuns * kOscShapeRatios;
+
 class Oscillator {
  public:
   // Multiply-accumulates each sample (* gain >> 15) into audio_mix.
@@ -171,6 +180,7 @@ class Oscillator {
     // carrier's: the modulator's phase and the phase-distortion square's
     // integrator survived Init and a re-Init inherited the old note's.
     modulator_phase_ = 0;
+    previous_offset_phase_ = 0;
     pd_square_.integrator = 0;
     pd_square_.polarity = false;
     high_ = false;
@@ -287,11 +297,16 @@ class Oscillator {
 
   static RenderFn fn_table_[];
 
-  // Which render a shape uses. The table stops at OSC_SHAPE_FM and the shape
-  // does not, so reading it by shape is out of bounds and this is the only way
-  // to ask.
+  // Which render a shape uses. The table is NOT indexed by shape past
+  // OSC_SHAPE_FM, where the shapes are runs that share one render, so this is
+  // the only way to ask.
   static inline RenderFn render_fn(uint8_t shape) {
-    CONSTRAIN(shape, 0, OSC_SHAPE_FM);
+    if (shape > OSC_SHAPE_FM) {
+      // Which run a shape lands in is how many ratio tables past the first it
+      // sits, and every shape in a run renders the same way.
+      shape = OSC_SHAPE_FM + (shape - OSC_SHAPE_FM) / kOscShapeRatios;
+    }
+    CONSTRAIN(shape, 0, OSC_SHAPE_FM + kOscShapeRuns - 1);
     return fn_table_[shape];
   }
 
@@ -318,7 +333,8 @@ class Oscillator {
   void RenderExponentialSine(int16_t* input_samples, int16_t* audio_mix);
   void RenderTransfer(int16_t* input_samples, int16_t* audio_mix);
   void RenderFM(int16_t* input_samples, int16_t* audio_mix);
-  
+  void RenderAudioRatePWM(int16_t* input_samples, int16_t* audio_mix);
+
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
   inline int32_t ThisBlepSample(uint32_t t) const {
@@ -375,6 +391,10 @@ class Oscillator {
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t modulator_phase_;
+  // Where the offset saw stood a sample ago, which is what its own motion is
+  // measured against. Derived from the carrier and the width rather than
+  // accumulated, so it cannot drift out of `phase - width`.
+  uint32_t previous_offset_phase_;
   bool high_;
 
   StateVariableFilter svf_;

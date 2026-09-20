@@ -155,10 +155,13 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderTransfer,
   &Oscillator::RenderTransfer,
   &Oscillator::RenderFM,
+  &Oscillator::RenderAudioRatePWM,
 };
 
+// One entry per shape up to OSC_SHAPE_FM, then one per run.
 STATIC_ASSERT(
-  sizeof(Oscillator::fn_table_) / sizeof(Oscillator::RenderFn) == OSC_SHAPE_FM + 1,
+  sizeof(Oscillator::fn_table_) / sizeof(Oscillator::RenderFn) ==
+      OSC_SHAPE_FM + kOscShapeRuns,
   oscillator_fn_table_size_mismatch
 );
 
@@ -916,6 +919,62 @@ void Oscillator::RenderFM(int16_t* input_samples, int16_t* audio_mix) {
       (index_shift_halfbit ? (phase_mod << (index_shift - 1)) : 0);
     this_sample = sine(phase + phase_mod);
   )
+}
+
+// A pulse is saw(phase) - saw(phase - width), and that second saw is what
+// carries the moving edge: its wrap IS the crossing, so its own motion is the
+// rate the crossing happens at. Timing that edge against the CARRIER's
+// increment instead puts it wrong by however fast the width is moving, which
+// at audio rate is the same order as the carrier -- and a width that outruns
+// the phase sends the offset saw backwards, where its wrap steps the other way
+// and a rising-edge latch loses the edge entirely.
+//
+// The level is the comparison, which is exact. The saw pair is here for the
+// edges alone.
+void Oscillator::RenderAudioRatePWM(int16_t* input_samples, int16_t* audio_mix) {
+  int16_t interval = lut_fm_modulator_intervals[shape_ - kOscShapeAudioRatePwm];
+  uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
+  uint32_t previous_offset_phase = previous_offset_phase_;
+  RENDER_MODULATED(
+    modulator_phase += modulator_phase_increment;
+    // A full-scale sine times a full-scale timbre is a quarter turn, so the
+    // width sweeps a quarter of the period either side of half.
+    uint32_t width =
+        0x80000000 + static_cast<uint32_t>(sine(modulator_phase) * timbre);
+    uint32_t offset_phase = phase - width;
+    int32_t offset_phase_increment =
+        static_cast<int32_t>(offset_phase - previous_offset_phase);
+
+    if (PhaseWrapped(phase, phase_increment)) {
+      uint32_t t = EdgeTime(phase, phase_increment);
+      this_sample -= ThisBlepSample(t);
+      next_sample -= NextBlepSample(t);
+    }
+    if (offset_phase_increment >= 0) {
+      if (PhaseWrapped(offset_phase, offset_phase_increment)) {
+        uint32_t t = EdgeTime(offset_phase, offset_phase_increment);
+        this_sample += ThisBlepSample(t);
+        next_sample += NextBlepSample(t);
+      }
+    } else {
+      // Travelling backwards, so the wrap is an underflow: it happened if the
+      // step was longer than the distance to zero, and the phase past it is
+      // measured the other way round.
+      uint32_t distance = 0 - static_cast<uint32_t>(offset_phase_increment);
+      if (previous_offset_phase < distance) {
+        uint32_t t = EdgeTime(0 - offset_phase, distance);
+        this_sample -= ThisBlepSample(t);
+        next_sample -= NextBlepSample(t);
+      }
+    }
+    previous_offset_phase = offset_phase;
+
+    next_sample += phase < width ? 0 : 0x7fff;
+    // * 2 and not << 1: the value is signed and negative below 16384,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 16384) * 2;
+  )
+  previous_offset_phase_ = previous_offset_phase;
 }
 
 void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix) {

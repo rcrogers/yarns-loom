@@ -993,6 +993,15 @@ const char* const lut_fm_ratio_names[] = {
   "\xC1""3 FM \xC1""/3", "\xC1""2 FM \xC1""/2", " \xC1"" FM \xC1""*1", "2\xC1"" FM \xC1""*2",
   "3\xC1"" FM \xC1""*3", "3\xC1"" FM \xC1""*3/2",
 };
+const char* const lut_pwm_ratio_names[] = {
+  "11 PW 1/1", "21 PW 2/1", "31 PW 3/1", "51 PW 5/1",
+  "71 PW 7/1", "52 PW 5/2", "72 PW 7/2", "92 PW 9/2",
+  "73 PW 7/3", "83 PW 8/3", "94 PW 9/4", "?1 PW 1/?-1(4/9)",
+  "?2 PW 1/?-1(3/7)", "?3 PW 1/?-1(2/9)", "?4 PW 1/?-1(2/7)", "?5 PW 1/?-1(2/5)",
+  "?6 PW 1/?-1(1/7)", "?7 PW 1/?-1(1/5)", "?8 PW 1/?-1(1/3)", "\xC1""4 PW \xC1""/4",
+  "\xC1""3 PW \xC1""/3", "\xC1""2 PW \xC1""/2", " \xC1"" PW \xC1""*1", "2\xC1"" PW \xC1""*2",
+  "3\xC1"" PW \xC1""*3", "3\xC1"" PW \xC1""*3/2",
+};
 const char* const lut_clock_ratio_names[] = {
   "18 1/8", "17 1/7", "16 1/6", "15 1/5",
   "29 2/9", "14 1/4", "27 2/7", "13 1/3",
@@ -1007,6 +1016,7 @@ const char* const lut_clock_ratio_names[] = {
 
 const char* const* const lookup_table_string_table[] = {
   lut_fm_ratio_names,
+  lut_pwm_ratio_names,
   lut_clock_ratio_names,
 };
 
