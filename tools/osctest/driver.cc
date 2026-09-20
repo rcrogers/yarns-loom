@@ -248,6 +248,14 @@ int main(int argc, char** argv) {
   g_timbre_max = OptInt(argc, argv, "timbre_max", 32767);
   g_gain = OptInt(argc, argv, "gain", 32767);
 
+  // Where the runs start and stop, so a script that walks them reads the
+  // boundary off the build rather than carrying its own copy to go stale.
+  if (!strcmp(mode, "shapes")) {
+    printf("fm_base %d\naudio_rate_pwm_base %d\nratios %d\nlast %d\n",
+           OSC_SHAPE_FM, kOscShapeAudioRatePwm, kOscShapeRatios, kOscShapeLast);
+    return 0;
+  }
+
   if (!strcmp(mode, "dump")) {
     g_hold_timbre = OptInt(argc, argv, "hold", 0) != 0;
     g_held_timbre = OptInt(argc, argv, "timbre", 0);
