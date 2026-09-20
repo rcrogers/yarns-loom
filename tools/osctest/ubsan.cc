@@ -81,8 +81,13 @@ int main() {
             const int16_t from = (b & 1) ? timbre_far : timbre;
             const int16_t to = (b & 1) ? timbre : timbre_far;
             for (size_t i = 0; i < kAudioBlockSize; ++i) {
+              // Signed divisor: kAudioBlockSize is size_t, and `to` is below
+              // `from` on every other block, so an unsigned divisor turned
+              // half these ramps into noise -- the values the sweep is here
+              // to walk were never walked.
               timbre_gain[i] = static_cast<int16_t>(
-                  from + (to - from) * static_cast<int>(i) / kAudioBlockSize);
+                  from + (to - from) * static_cast<int>(i) /
+                      static_cast<int>(kAudioBlockSize));
               timbre_gain[i + kAudioBlockSize] = static_cast<int16_t>(gains[g]);
             }
             (osc.*Oscillator::render_fn(s))(timbre_gain, mix);

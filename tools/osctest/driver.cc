@@ -204,8 +204,14 @@ uint32_t HashShape(int shape, bool dump) {
         SweepRange(sweep, &from, &to);
         const int16_t raw_timbre = g_hold_timbre
             ? static_cast<int16_t>(g_held_timbre)
+            // Signed divisor: kAudioBlockSize is size_t, so an unsigned
+            // divisor drags the numerator unsigned with it, and a FALLING
+            // sweep's numerator is negative. Division does not survive that
+            // the way the truncation to int16 survives it, so the falling
+            // ramp came out as noise around its starting value.
             : static_cast<int16_t>(
-                from + (to - from) * step / (g_blocks * kAudioBlockSize));
+                from + (to - from) * step /
+                    static_cast<long>(g_blocks * kAudioBlockSize));
         timbre_gain[i] = g_warp_timbre
             ? osc.WarpTimbre(raw_timbre, static_cast<OscillatorShape>(shape))
             : raw_timbre;
