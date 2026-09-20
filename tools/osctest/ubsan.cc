@@ -40,7 +40,10 @@ int main() {
   // Every allocation: scale_ divides into what a shape derives per block, so
   // one voice count tests one set of derived values. voice.h's pairing.
   long cases = 0;
-  for (int s = 0; s <= OSC_SHAPE_FM; ++s) {
+  // EVERY SHAPE, the runs past OSC_SHAPE_FM included: those are where the
+  // ratio tables and the signed edge arithmetic live, and the sweep stopped
+  // at the first of them.
+  for (int s = 0; s < kOscShapeLast; ++s) {
     for (size_t p = 0; p < sizeof(pitches)/sizeof(pitches[0]); ++p) {
       for (size_t t = 0; t < sizeof(warp_inputs)/sizeof(warp_inputs[0]); ++t) {
           const int16_t timbre = osc.WarpTimbre(
@@ -82,7 +85,7 @@ int main() {
                   from + (to - from) * static_cast<int>(i) / kAudioBlockSize);
               timbre_gain[i + kAudioBlockSize] = static_cast<int16_t>(gains[g]);
             }
-            (osc.*Oscillator::fn_table_[s])(timbre_gain, mix);
+            (osc.*Oscillator::render_fn(s))(timbre_gain, mix);
           }
           ++cases;
 
