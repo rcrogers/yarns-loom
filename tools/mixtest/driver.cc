@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
   const int32_t allowance = voices[0].oscillator()->coherent_scale_codes_u16_;
 
   int failures = 0;
-  for (int shape = 0; shape <= OSC_SHAPE_FM; ++shape) {
+  for (int shape = 0; shape < kOscShapeLast; ++shape) {
     Worst worst; memset(&worst, 0, sizeof(worst));
     for (int n = 1; n <= kMaxVoices; ++n) {
       for (size_t p = 0; p < sizeof(kPitches)/sizeof(kPitches[0]); ++p) {
@@ -245,7 +245,7 @@ int main(int argc, char** argv) {
   }
   printf("PASS %d shapes stay inside the output range at 1..%d voices "
          "(%lu cases each)\n",
-         OSC_SHAPE_FM + 1, kMaxVoices,
+         kOscShapeLast, kMaxVoices,
          (unsigned long) (kMaxVoices * 5 * 4 * 3 * 3));
   return 0;
 }

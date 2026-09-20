@@ -296,7 +296,7 @@ int main(int argc, char** argv) {
   if (!strcmp(mode, "negative")) {
     g_hold_timbre = true;
     int failures = 0;
-    for (int s = 0; s <= OSC_SHAPE_FM; ++s) {
+    for (int s = 0; s < kOscShapeLast; ++s) {
       // ONLY THE SHAPES THAT CAN ACTUALLY SEE ONE. A warp that maps or clamps
       // negatives keeps them out of the buffer entirely, and feeding one to
       // such a shape's render tests a value the firmware cannot produce --
@@ -334,7 +334,10 @@ int main(int argc, char** argv) {
     printf("PASS no shape wraps when the timbre goes below zero\n");
     return 0;
   }
-  for (int s = 0; s <= OSC_SHAPE_FM; ++s) {
+  // EVERY SHAPE, the runs past OSC_SHAPE_FM included. Stopping at the first of
+  // them left the ratio tables and the arithmetic they index unpinned, which is
+  // 51 of the 97 shapes and the newest of them.
+  for (int s = 0; s < kOscShapeLast; ++s) {
     printf("%d %08x\n", s, HashShape(s, false));
   }
   return 0;

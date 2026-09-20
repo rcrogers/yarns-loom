@@ -48,7 +48,7 @@ Oscillator osc;
 
 int main() {
   int failures = 0;
-  for (int s = 0; s <= OSC_SHAPE_FM; ++s) {
+  for (int s = 0; s < kOscShapeLast; ++s) {
     const OscillatorShape shape = static_cast<OscillatorShape>(s);
     // WarpTimbre reads no scale, so what Init is handed cannot reach it.
     osc.Init(0, 0);
@@ -103,6 +103,6 @@ int main() {
     return 1;
   }
   printf("PASS %d shapes: every warp is monotone across the whole signed range\n",
-         OSC_SHAPE_FM + 1);
+         kOscShapeLast);
   return 0;
 }

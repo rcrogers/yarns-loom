@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
   printf("  %-18s %8s %8s %8s %8s %8s\n",
          "shape", "dB/share", "rms", "peak", "peak/sh", "at rail");
   const int first = table ? 0 : OptInt(argc, argv, "shape", OSC_SHAPE_WHISTLE);
-  const int last = table ? OSC_SHAPE_FM : first;
+  const int last = table ? kOscShapeLast - 1 : first;
   for (int shape = first; shape <= last; ++shape) {
     const Level level =
         Measure(shape, voices_assigned, pitch, knob, seconds, seed);

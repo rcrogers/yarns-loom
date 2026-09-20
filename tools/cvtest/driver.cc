@@ -207,7 +207,7 @@ int main(int argc, char** argv) {
     held.release_u32 = 1u << 24;
     int failures = 0;
     double worst = 0; int worst_a = -1, worst_b = -1;
-    for (int b = 0; b <= OSC_SHAPE_FM; ++b) {
+    for (int b = 0; b < kOscShapeLast; ++b) {
       Wire();
       voice.oscillator()->set_shape(static_cast<OscillatorShape>(b));
       voice.NoteOn(60 << 7, 100, 0, 0, true, held, 0, 0, 0);
@@ -215,7 +215,7 @@ int main(int argc, char** argv) {
         voice.Refresh(); audio_output.RenderSamples(0, 0, 0);
       }
       const double fresh = voice.oscillator_.gain_envelope_.value_without_bias();
-      for (int a = 0; a <= OSC_SHAPE_FM; ++a) {
+      for (int a = 0; a < kOscShapeLast; ++a) {
         if (a == b) continue;
         Wire();
         voice.oscillator()->set_shape(static_cast<OscillatorShape>(a));
@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
     printf("%s %d shape changes land where a note on the new shape would"
            "  [worst %.1f%% off, shape %d -> %d]\n",
            failures ? "FAIL" : "PASS",
-           (OSC_SHAPE_FM + 1) * OSC_SHAPE_FM, 100 * worst, worst_a, worst_b);
+           kOscShapeLast * (kOscShapeLast - 1), 100 * worst, worst_a, worst_b);
     return failures ? 1 : 0;
   }
 
@@ -246,7 +246,7 @@ int main(int argc, char** argv) {
     const uint16_t five_v = zero - probe.volts_dac_code(5);
     int failures = 0;
     int32_t worst = 0; int worst_shape = -1, worst_n = 0;
-    for (int shape = 0; shape <= OSC_SHAPE_FM; ++shape) {
+    for (int shape = 0; shape < kOscShapeLast; ++shape) {
       for (uint8_t n = 1; n <= 4; ++n) {
         for (uint8_t i = 0; i < 4; ++i) voices[i].Init();
         audio.Init(true);
@@ -305,7 +305,7 @@ int main(int argc, char** argv) {
     }
     printf("%s %d shapes x 4 voice counts x 7 timbres x drone stay inside the 10 Vpp span"
            "  [worst %d of %u codes, %d left, shape %d at %d voice%s]\n",
-           failures ? "FAIL" : "PASS", OSC_SHAPE_FM + 1, worst, five_v,
+           failures ? "FAIL" : "PASS", kOscShapeLast, worst, five_v,
            five_v - worst, worst_shape, worst_n, worst_n == 1 ? "" : "s");
     return failures ? 1 : 0;
   }

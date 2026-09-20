@@ -29,7 +29,7 @@ int main() {
   const int16_t pitch = 60 << 7;   // middle C
   printf("%-18s %8s %8s %8s %8s   %s\n",
          "shape","warp(-32768)","warp(-16384)","warp(0)","warp(+16383)","verdict");
-  for (int s = 0; s <= OSC_SHAPE_FM; ++s) {
+  for (int s = 0; s < kOscShapeLast; ++s) {
     osc.set_shape(static_cast<OscillatorShape>(s));
     int32_t wn2 = osc.WarpTimbre(-32768, static_cast<OscillatorShape>(s), pitch);
     int32_t wn1 = osc.WarpTimbre(-16384, static_cast<OscillatorShape>(s), pitch);
