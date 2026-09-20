@@ -943,12 +943,16 @@ void Oscillator::RenderAudioRatePWM(int16_t* input_samples, int16_t* audio_mix) 
   uint32_t previous_offset_phase = previous_offset_phase_;
   RENDER_MODULATED(
     modulator_phase += modulator_phase_increment;
-    // A full-scale sine times a full-scale timbre is a quarter turn, which the
-    // shallowest ratio takes whole and every other one takes a share of.
+    // A full-scale sine times a full-scale timbre is a quarter turn; doubled,
+    // the shallowest ratio sweeps the width across the WHOLE period, which is
+    // what full scale on this control should mean. Every other ratio takes a
+    // share of that.
     int32_t swing = (sine(modulator_phase) * timbre) >> depth_shift;
     // Conditional multiplication by 3/4 to approximate 1/sqrt(2)
     if (depth_shift_halfbit) swing -= swing >> 2;
-    uint32_t width = 0x80000000 + static_cast<uint32_t>(swing);
+    // * 2 and not << 1: the value is signed, and shifting a negative left is
+    // undefined. Same instruction.
+    uint32_t width = 0x80000000 + static_cast<uint32_t>(swing * 2);
     uint32_t offset_phase = phase - width;
     int32_t offset_phase_increment =
         static_cast<int32_t>(offset_phase - previous_offset_phase);

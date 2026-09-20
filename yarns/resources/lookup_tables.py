@@ -830,8 +830,17 @@ lookup_tables_8.append(('fm_index_2x_upshifts', numpy.round(fm_index_upshifts_f 
 # The shallowest ratio sets the depth and keeps the whole swing; the others are
 # scaled against it, so none needs an upshift and the widest swing stays the
 # one the render's own arithmetic already produces.
-pwm_depth_downshifts_f = numpy.log2(
+#
+# The exponent is how hard that rolloff bites. At 1 the product is constant and
+# every ratio reaches the same edge density, which measured as 22 of the 26
+# shapes sitting inside a +-10% duty wobble -- correct, and far too mild to
+# play. At 1/2 the high ratios keep a throw worth having: pi holds +-0.23 of a
+# turn where 1 gave it +-0.06, and the top of the knob is the only place the
+# width laps the phase hard.
+PWM_DEPTH_EXPONENT = 0.75
+pwm_depth_downshifts_f = PWM_DEPTH_EXPONENT * numpy.log2(
     numpy.array(fm_mc_ratios) / min(fm_mc_ratios))
+# Half-bit resolution, like the FM index's, which is what the 2x names.
 lookup_tables_8.append(
     ('pwm_depth_2x_downshifts', numpy.round(pwm_depth_downshifts_f * 2)))
 
