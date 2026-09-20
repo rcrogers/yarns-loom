@@ -819,6 +819,22 @@ fm_index_scales = numpy.array([FM_INDEX_SCALING_BASE / r for r in fm_mc_ratios])
 fm_index_upshifts_f = numpy.log2(fm_index_scales)
 lookup_tables_8.append(('fm_index_2x_upshifts', numpy.round(fm_index_upshifts_f * 2)))
 
+# PWM DEPTH falls as the ratio rises, for the reason the FM index does. The
+# width's peak motion is depth * 2*pi * f_m and the carrier's is f_c, so a
+# depth held flat across the ratios puts every high one past the point where
+# the width outruns the phase while the knob is barely open -- measured at
+# 2*pi, the sweep is saturated within its first fifth and the rest of the
+# control does nothing. Scaling by 1/ratio holds that product constant, so the
+# top of the knob means the same thing at every ratio.
+#
+# The shallowest ratio sets the depth and keeps the whole swing; the others are
+# scaled against it, so none needs an upshift and the widest swing stays the
+# one the render's own arithmetic already produces.
+pwm_depth_downshifts_f = numpy.log2(
+    numpy.array(fm_mc_ratios) / min(fm_mc_ratios))
+lookup_tables_8.append(
+    ('pwm_depth_2x_downshifts', numpy.round(pwm_depth_downshifts_f * 2)))
+
 
 clock_ratio_ticks = []
 clock_ratio_names = []

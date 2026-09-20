@@ -132,6 +132,7 @@ extern const uint32_t lut_oscillator_increments[];
 extern const uint32_t lut_euclidean[];
 extern const int8_t lut_expo_slope_shift[];
 extern const int8_t lut_fm_index_2x_upshifts[];
+extern const int8_t lut_pwm_depth_2x_downshifts[];
 extern const uint16_t chr_characters[];
 extern const uint16_t chr_blinking_characters[];
 #define STR_DUMMY 0  // dummy
@@ -281,6 +282,8 @@ extern const uint16_t chr_blinking_characters[];
 #define LUT_EXPO_SLOPE_SHIFT_SIZE 16
 #define LUT_FM_INDEX_2X_UPSHIFTS 1
 #define LUT_FM_INDEX_2X_UPSHIFTS_SIZE 26
+#define LUT_PWM_DEPTH_2X_DOWNSHIFTS 2
+#define LUT_PWM_DEPTH_2X_DOWNSHIFTS_SIZE 26
 #define CHR_CHARACTERS 0
 #define CHR_CHARACTERS_SIZE 256
 #define CHR_BLINKING_CHARACTERS 1

@@ -932,15 +932,23 @@ void Oscillator::RenderFM(int16_t* input_samples, int16_t* audio_mix) {
 // The level is the comparison, which is exact. The saw pair is here for the
 // edges alone.
 void Oscillator::RenderAudioRatePWM(int16_t* input_samples, int16_t* audio_mix) {
-  int16_t interval = lut_fm_modulator_intervals[shape_ - kOscShapeAudioRatePwm];
+  uint8_t pwm_shape = shape_ - kOscShapeAudioRatePwm;
+  int16_t interval = lut_fm_modulator_intervals[pwm_shape];
   uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
+
+  // Hold the width's motion against the carrier's equal across the ratios
+  uint8_t depth_2x_downshift = lut_pwm_depth_2x_downshifts[pwm_shape];
+  uint8_t depth_shift = depth_2x_downshift >> 1;
+  bool depth_shift_halfbit = depth_2x_downshift & 1;
   uint32_t previous_offset_phase = previous_offset_phase_;
   RENDER_MODULATED(
     modulator_phase += modulator_phase_increment;
-    // A full-scale sine times a full-scale timbre is a quarter turn, so the
-    // width sweeps a quarter of the period either side of half.
-    uint32_t width =
-        0x80000000 + static_cast<uint32_t>(sine(modulator_phase) * timbre);
+    // A full-scale sine times a full-scale timbre is a quarter turn, which the
+    // shallowest ratio takes whole and every other one takes a share of.
+    int32_t swing = (sine(modulator_phase) * timbre) >> depth_shift;
+    // Conditional multiplication by 3/4 to approximate 1/sqrt(2)
+    if (depth_shift_halfbit) swing -= swing >> 2;
+    uint32_t width = 0x80000000 + static_cast<uint32_t>(swing);
     uint32_t offset_phase = phase - width;
     int32_t offset_phase_increment =
         static_cast<int32_t>(offset_phase - previous_offset_phase);

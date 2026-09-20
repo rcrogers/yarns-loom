@@ -2944,11 +2944,21 @@ const int8_t lut_fm_index_2x_upshifts[] = {
       11,      9,      7,      5,
        4,      6,
 };
+const int8_t lut_pwm_depth_2x_downshifts[] = {
+       1,      3,      4,      5,
+       6,      3,      4,      5,
+       3,      4,      3,      3,
+       3,      4,      4,      3,
+       4,      4,      3,      0,
+       1,      2,      4,      6,
+       7,      5,
+};
 
 
 const int8_t* const lookup_table_8_table[] = {
   lut_expo_slope_shift,
   lut_fm_index_2x_upshifts,
+  lut_pwm_depth_2x_downshifts,
 };
 
 const uint16_t chr_characters[] = {
