@@ -669,7 +669,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Timbre: cutoff frequency of the digital filter, relative to the note's pitch
 - Shapes: low-pass, peaking, band-pass, high-pass
 
-#### `|⟍CZ` Phase distortion, resonant saw
+#### `│╲CZ` Phase distortion, resonant saw
 - Timbre: cutoff frequency of the digital filter, relative to the note's pitch
 - Shapes: low-pass, peaking, band-pass, high-pass
 
@@ -679,7 +679,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
     - Pulse and saw freeze in place after completing a cycle, resetting at the next period
     - Sine returns to zero after completing a cycle, resuming motion at the next period
 
-#### `|⟍┌┐` Saw-pulse morph
+#### `│╲┌┐` Saw-pulse morph
 - Timbre: morph from saw to pulse
 
 #### `-$` Hard sync
