@@ -1080,12 +1080,16 @@ static inline int32_t SoftLimit(
   return (below + ((above - below) * (index & 0xff) >> 8)) * scale_u15 >> 15;
 }
 
-// The lowest note WHISTLE and PING put their resonance on. Below it the pitch
-// term below is not fitted, so the resonance stays here.
-static const int32_t kResonatorLowestPitch = 30 << 7;
-static inline int32_t ResonantPitch(int16_t pitch) {
-  return pitch < kResonatorLowestPitch ? kResonatorLowestPitch : pitch;
-}
+// Where the pitch term below reads zero octaves, and so the level it hands
+// back is the whole of level_into_knee_u15. It only ever ATTENUATES -- the
+// octaves are floored at zero and spent as a right shift -- so notes under it
+// are handed the same level as it, and it sits low enough that few are.
+//
+// How low is bounded by the knee, not by taste: moving it down an octave costs
+// the knee half an octave of level to keep every note above it unchanged, and
+// the knee is u15. From 18800 that reaches MIDI 10.8, so MIDI 12 is the floor
+// of what the mechanism can express.
+static const int32_t kWhistleTiltReferencePitch = 12 << 7;
 // The resonator's gain at resonance rises as 1/sqrt(damp), and rises again
 // with pitch, by 2.85 dB an octave.
 //
@@ -1103,8 +1107,9 @@ static int32_t WhistleStateToOutput(
   // How far into the curve the signal is driven, which is the level: noise
   // visits its peak rarely, and everything under it is unspent until something
   // bends the peak.
-  const int32_t level_into_knee_u15 = 18800;
-  int32_t octaves_q16 = (pitch - kResonatorLowestPitch) * 65536 / (12 * 128);
+  const int32_t level_into_knee_u15 = 31618;
+  int32_t octaves_q16 =
+      (pitch - kWhistleTiltReferencePitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * pitch_correction_numerator
       / pitch_correction_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
@@ -1123,8 +1128,7 @@ static int32_t WhistleStateToOutput(
 
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  const int32_t resonant_pitch = ResonantPitch(pitch_);
-  svf.RenderInitCutoff(SVF::CutoffFromFreq(resonant_pitch));
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   // sqrt(damp / reference), bounded at both ends by the constants it reads:
   // the excitation is scaled by it going in and the output by its reciprocal
   // coming out. It reads the damp the block opens on, where the filter below
@@ -1153,7 +1157,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   }
   previous_damp_drive_u15_ = damp_drive_u15;
   const int32_t state_to_output_q15 = WhistleStateToOutput(
-      resonant_pitch, incoherent_scale_u15_, damp_drive_u15);
+      pitch_, incoherent_scale_u15_, damp_drive_u15);
   const int32_t state_into_curve_q15 =
       StateIntoCurve(state_to_output_q15, coherent_scale_codes_u16_);
   // The headroom comes off the drive rather than the state, so the state keeps
@@ -1184,7 +1188,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
 // to carry energy at the note.
 void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInitCutoff(SVF::CutoffFromFreq(ResonantPitch(pitch_)));
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   // The low-pass passes the exciter's DC, so once the ring dies away its state
   // sits at the excitation's own level -- a thump under a percussive envelope,
   // a standing offset under a sustained one. The band-pass rejects the DC.
