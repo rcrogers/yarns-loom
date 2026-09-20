@@ -92,8 +92,10 @@ int g_sweep_only = -1;   // -1 = every sweep
 // PANEL SEMANTICS. The timbre buffer a shape reads is the WARPED value, and
 // several warps INVERT -- WHISTLE's TIMBRE 0 is the WIDEST damp, which is the
 // LOWEST Q. A sweep indexed by the raw buffer is therefore indexed by damp and
-// not by the knob, and reads backwards. With warp=1 the held value is put
-// through the shape's OWN WarpTimbre first, so `timbre=` means the knob.
+// not by the knob, and reads backwards. With warp=1 the value is put through
+// the shape's OWN WarpTimbre first, so `timbre=` means the knob -- a SWEPT one
+// as much as a held one, since Voice warps before a render ever sees the value
+// and an unwarped sweep walks values the firmware cannot produce.
 //   - the shape's own function, never a copy of its arithmetic here.
 bool g_warp_timbre = false;
 
@@ -200,13 +202,13 @@ uint32_t HashShape(int shape, bool dump) {
         const long step = b * kAudioBlockSize + i;
         int from, to;
         SweepRange(sweep, &from, &to);
-        timbre_gain[i] = g_hold_timbre
-            ? (g_warp_timbre
-                 ? osc.WarpTimbre(static_cast<int16_t>(g_held_timbre),
-                                  static_cast<OscillatorShape>(shape))
-                 : static_cast<int16_t>(g_held_timbre))
+        const int16_t raw_timbre = g_hold_timbre
+            ? static_cast<int16_t>(g_held_timbre)
             : static_cast<int16_t>(
                 from + (to - from) * step / (g_blocks * kAudioBlockSize));
+        timbre_gain[i] = g_warp_timbre
+            ? osc.WarpTimbre(raw_timbre, static_cast<OscillatorShape>(shape))
+            : raw_timbre;
         timbre_gain[i + kAudioBlockSize] =
             GainAt(gain_profile, step, g_blocks * kAudioBlockSize);
       }
