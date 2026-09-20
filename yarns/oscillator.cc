@@ -449,9 +449,7 @@ void Oscillator::Render(int16_t* audio_mix) {
   gain_envelope_.RenderSamples(
     gain_samples, static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16));
 
-  uint8_t fn_index = shape_;
-  CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
-  RenderFn fn = fn_table_[fn_index];
+  RenderFn fn = render_fn(shape_);
   (this->*fn)(input_samples, audio_mix);
 }
 

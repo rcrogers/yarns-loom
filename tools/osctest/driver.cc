@@ -210,7 +210,7 @@ uint32_t HashShape(int shape, bool dump) {
         timbre_gain[i + kAudioBlockSize] =
             GainAt(gain_profile, step, g_blocks * kAudioBlockSize);
       }
-      (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);
+      (osc.*Oscillator::render_fn(shape))(timbre_gain, mix);
       for (size_t i = 0; i < kAudioBlockSize; ++i) {
         hash = Fnv(hash, mix[i]);
         if (g_collect_slot >= 0 && g_collect_index < kCollected) {

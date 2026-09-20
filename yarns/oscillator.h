@@ -286,7 +286,15 @@ class Oscillator {
   void Render(int16_t* audio_mix);
 
   static RenderFn fn_table_[];
-  
+
+  // Which render a shape uses. The table stops at OSC_SHAPE_FM and the shape
+  // does not, so reading it by shape is out of bounds and this is the only way
+  // to ask.
+  static inline RenderFn render_fn(uint8_t shape) {
+    CONSTRAIN(shape, 0, OSC_SHAPE_FM);
+    return fn_table_[shape];
+  }
+
  private:
   void RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix);
   void RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix);
