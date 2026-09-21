@@ -43,8 +43,14 @@ using namespace stmlib;
 
 namespace yarns {
 
+// Which of the four outputs a caller takes. notch and hp are formed and
+// consumed inside one call -- notch feeds hp, hp feeds the band-pass step -- so
+// neither is state, and naming the output is what lets the one asked for be
+// returned rather than stored.
+enum SvfOutput { SVF_LP, SVF_BP, SVF_NOTCH, SVF_HP };
+
 struct SVF {
-  int32_t bp, lp, notch, hp;
+  int32_t bp, lp;
   // The remainder of the shift that puts each wide product back in the state's
   // units -- what integer division by 2^14 or 2^15 leaves behind. Named for the
   // product each one belongs to: the damping term subtracted to form notch, and
@@ -58,7 +64,7 @@ struct SVF {
   int32_t lp_step_remainder_u15, bp_step_remainder_u15;
 
   void Init() {
-    bp = lp = notch = hp = 0;
+    bp = lp = 0;
     damping_term_remainder_u14 =
         lp_step_remainder_u15 = bp_step_remainder_u15 = 0;
   }
@@ -85,15 +91,8 @@ struct SVF {
   // 3468 counts, for ever. The MAGNITUDE only ever rises, so it always crosses,
   // and bp's sign put back on it always opposes bp. Ring times are within 1.2%
   // either way.
-  //
-  // Notch and hp are not state. Each is formed and consumed inside one call --
-  // notch feeds hp, hp feeds the band-pass step -- and neither is read on the
-  // next. They are members only because the NOISE shapes take their output from
-  // them, so kKeepNotchAndHp says whether this caller is one of those. A caller
-  // that is not stores two fewer words a sample, which is worth having in a
-  // loop that is already 37% memory traffic.
-  template<bool kKeepNotchAndHp, bool kMustReachSilence>
-  inline void ProcessInto(int32_t in, int16_t cutoff_u15, int16_t damp_u1_14) {
+  template<SvfOutput kOutput, bool kMustReachSilence>
+  inline int32_t Process(int32_t in, int16_t cutoff_u15, int16_t damp_u1_14) {
     int32_t this_notch;
     if (kMustReachSilence) {
       const int32_t magnitude_q16_14 =
@@ -113,10 +112,9 @@ struct SVF {
     int32_t bp_moved_q15_15 = cutoff_u15 * this_hp + bp_step_remainder_u15;
     bp_step_remainder_u15 = bp_moved_q15_15 & ((1 << 15) - 1);
     bp = Clip16(bp + (bp_moved_q15_15 >> 15));
-    if (kKeepNotchAndHp) { notch = this_notch; hp = this_hp; }
-  }
-  inline void Process(int32_t in, int16_t cutoff_u15, int16_t damp_u1_14) {
-    ProcessInto<true, false>(in, cutoff_u15, damp_u1_14);
+    if (kOutput == SVF_NOTCH) return this_notch;
+    if (kOutput == SVF_HP) return this_hp;
+    return kOutput == SVF_LP ? lp : bp;
   }
 
   static inline int16_t CutoffFromFreq(int16_t freq_u15) {

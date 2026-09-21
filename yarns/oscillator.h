@@ -61,21 +61,19 @@ class StateVariableFilter : public SVF {
   void RenderInitCutoff(int16_t cutoff_u15);
 
   // Cutoff per sample, damping interpolated from a resonance set once a block.
-  // kKeepNotchAndHp is the caller's: only a shape that reads notch or hp pays
-  // to store them.
-  template<bool kKeepNotchAndHp>
-  inline void RenderSample(int32_t in, int16_t cutoff_u15) {
+  template<SvfOutput kOutput>
+  inline int32_t RenderSample(int32_t in, int16_t cutoff_u15) {
     damp.Tick();
-    ProcessInto<kKeepNotchAndHp, false>(in, cutoff_u15, damp.value());
+    return Process<kOutput, false>(in, cutoff_u15, damp.value());
   }
   // The mirror: damping per sample, cutoff interpolated toward the pitch's.
   // kMustReachSilence, because these shapes spend the gain envelope on the
   // excitation rather than on the output: a ring that stops short of zero is a
   // tone that never ends.
-  template<bool kKeepNotchAndHp>
-  inline void RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
+  template<SvfOutput kOutput>
+  inline int32_t RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
     cutoff.Tick();
-    ProcessInto<kKeepNotchAndHp, true>(in, cutoff.value(), damp_u1_14);
+    return Process<kOutput, true>(in, cutoff.value(), damp_u1_14);
   }
 
  private:

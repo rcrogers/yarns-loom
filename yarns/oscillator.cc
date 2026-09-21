@@ -627,8 +627,7 @@ void Oscillator::RenderLPPulse(int16_t* input_samples, int16_t* audio_mix) {
     bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
-    svf.RenderSample<false>(this_sample, timbre);
-    this_sample = svf.lp;
+    this_sample = svf.RenderSample<SVF_LP>(this_sample, timbre);
   )
   svf_ = svf;
 }
@@ -640,8 +639,7 @@ void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
     bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_SAW(phase, phase_increment) }
     next_sample += phase >> 17;
-    svf.RenderSample<false>(this_sample, timbre);
-    this_sample = svf.lp;
+    this_sample = svf.RenderSample<SVF_LP>(this_sample, timbre);
   )
   svf_ = svf;
 }
@@ -1176,9 +1174,9 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     int32_t excitation =
         static_cast<int16_t>(noise_state >> 16) * gain >> 15;
     excitation = excitation * damp_drive_u15 >> 15;
-    svf.RenderSampleAtPitch<false>(excitation, timbre);
+    const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(excitation, timbre);
     const int32_t state_in_curve = stmlib::Clip16(
-        svf.bp * drive_into_curve_q12 >> (15 - kDriveHeadroomBits));
+        state * drive_into_curve_q12 >> (15 - kDriveHeadroomBits));
     this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
   noise_state_ = noise_state;
@@ -1209,20 +1207,20 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // dies away its state sits at the excitation's own level -- a thump under a
   // percussive envelope, a standing offset under a sustained one. bp and hp
   // reject it.
-#define PING_LOOP(KEEP, STATE) \
+#define PING_LOOP(OUTPUT) \
   RENDER_CORE(this_sample, \
     const int16_t gain = input_samples[kAudioBlockSize]; \
     /* The resonant step response overshoots its input, so the excitation is */ \
     /* halved to leave room for the overshoot. */ \
-    svf.RenderSampleAtPitch<KEEP>(gain >> 1, timbre); \
-    const int32_t state_in_curve = (STATE) * state_into_curve_q12 >> 12; \
+    const int32_t state = svf.RenderSampleAtPitch<OUTPUT>(gain >> 1, timbre); \
+    const int32_t state_in_curve = state * state_into_curve_q12 >> 12; \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
   )
   switch (shape_) {
-    case OSC_SHAPE_PING_LP: { PING_LOOP(false, svf.lp) } break;
-    case OSC_SHAPE_PING_BP: { PING_LOOP(false, svf.bp) } break;
-    case OSC_SHAPE_PING_HP: { PING_LOOP(true, svf.hp) } break;
+    case OSC_SHAPE_PING_LP: { PING_LOOP(SVF_LP) } break;
+    case OSC_SHAPE_PING_BP: { PING_LOOP(SVF_BP) } break;
+    case OSC_SHAPE_PING_HP: { PING_LOOP(SVF_HP) } break;
     default: break;
   }
 #undef PING_LOOP
@@ -1266,21 +1264,20 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
   // along with it.
   uint32_t block_noise_state = noise_state_;
   // Which output the shape takes is fixed for the block, so it picks the loop
-  // rather than being asked inside it, and the two that read neither notch nor
-  // hp do not pay to store them.
-#define NOISE_LOOP(KEEP, STATE) \
+  // rather than being asked inside it.
+#define NOISE_LOOP(OUTPUT) \
   RENDER_WITH_GAIN_AMPLIFYING_OUTPUT( \
     block_noise_state = NextXorshift32(block_noise_state); \
-    svf.RenderSample<KEEP>( \
+    const int32_t state = svf.RenderSample<OUTPUT>( \
         static_cast<int16_t>(block_noise_state >> 16), timbre); \
     this_sample = SoftLimit( \
-        curve, (STATE) * kNoiseStateIntoCurve_q12 >> 12, kEnvelopeSampleMax); \
+        curve, state * kNoiseStateIntoCurve_q12 >> 12, kEnvelopeSampleMax); \
   )
   switch (shape_) {
-    case OSC_SHAPE_NOISE_LP: { NOISE_LOOP(false, svf.lp) } break;
-    case OSC_SHAPE_NOISE_BP: { NOISE_LOOP(false, svf.bp) } break;
-    case OSC_SHAPE_NOISE_NOTCH: { NOISE_LOOP(true,  svf.notch) } break;
-    case OSC_SHAPE_NOISE_HP: { NOISE_LOOP(true,  svf.hp) } break;
+    case OSC_SHAPE_NOISE_NOTCH: { NOISE_LOOP(SVF_NOTCH) } break;
+    case OSC_SHAPE_NOISE_LP: { NOISE_LOOP(SVF_LP) } break;
+    case OSC_SHAPE_NOISE_BP: { NOISE_LOOP(SVF_BP) } break;
+    case OSC_SHAPE_NOISE_HP: { NOISE_LOOP(SVF_HP) } break;
     default: break;
   }
 #undef NOISE_LOOP
