@@ -980,35 +980,38 @@ class Part {
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = kC4) const;
   const SequencerStep BuildSeqStep(uint8_t step_index) const;
 
+  // Set and Get address these three as one byte array from midi_, so they
+  // stay together, in this order.
   MidiSettings midi_;
   VoicingSettings voicing_;
   SequencerSettings seq_;
-  
+
+  // The rest widest alignment first, so nothing is left as a hole.
   Voice* voice_[kNumMaxVoicesPerPart];
   int8_t* custom_pitch_table_;
+  int32_t step_counter_;
+  Arpeggiator arpeggiator_;
+  FastSyncedLFO swing_lfo_;
+  looper::Deck looper_;
+
+  uint16_t gate_length_counter_[kNumMaxVoicesPerPart];
+
   uint8_t num_voices_;
   bool polychained_;
+  bool hold_pedal_engaged_;
+  uint8_t cyclic_allocation_note_counter_;
+  bool seq_recording_;
+  bool seq_overdubbing_;
+  uint8_t seq_rec_step_;
+  bool seq_overwrite_;
+  bool has_siblings_;
+  uint8_t active_note_[kNumMaxVoicesPerPart]; // Tracks active note for each voice
 
   HeldKeys manual_keys_;
   HeldKeys arp_keys_;
-  bool hold_pedal_engaged_;
-
   stmlib::NoteStack<kNoteStackSize> generated_notes_;  // by sequencer or arpeggiator.
   stmlib::NoteStack<kNoteStackSize> mono_allocator_;
   stmlib::VoiceAllocator<kNumMaxVoicesPerPart * 2> poly_allocator_;
-  uint8_t active_note_[kNumMaxVoicesPerPart]; // Tracks active note for each voice
-  uint8_t cyclic_allocation_note_counter_;
-  
-  Arpeggiator arpeggiator_;
-  
-  bool seq_recording_;
-  bool seq_overdubbing_;
-  int32_t step_counter_;
-  uint8_t seq_rec_step_;
-  bool seq_overwrite_;
-  
-  looper::Deck looper_;
-  FastSyncedLFO swing_lfo_;
 
   // Tracks which looper note (if any) is currently being recorded by a given
   // held key. Used to a) find and conclude that looper note again when a
@@ -1021,10 +1024,6 @@ class Part {
 
   // Post-transpose
   uint8_t output_pitch_for_looper_note_[looper::kMaxNotes];
-
-  uint16_t gate_length_counter_[kNumMaxVoicesPerPart];
-  
-  bool has_siblings_;
   
   DISALLOW_COPY_AND_ASSIGN(Part);
 };
