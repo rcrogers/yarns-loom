@@ -658,7 +658,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
 - The gain envelope is used as a direct DC input to ping the filter, instead of amplifying the oscillator's output
-- Shapes: low-pass, band-pass
+- Shapes: low-pass, band-pass, high-pass
 
 #### `-◝` Analog wave into state-variable filter
 - Timbre: cutoff frequency of the low-pass SVF, relative to the note's pitch
