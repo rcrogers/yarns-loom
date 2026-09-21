@@ -245,13 +245,13 @@ class Ui {
     HandlerFn on_click;
     PrintFn refresh_display;
     UiMode next_mode;
-    int8_t* incremented_variable;
+    int8_t Ui::* incremented_variable;
     int8_t min_value;
     int8_t max_value;
   };
   
   static const Command commands_[MAIN_MENU_LAST];
-  static Mode modes_[UI_MODE_LAST];
+  static const Mode modes_[UI_MODE_LAST];
   
   stmlib::EventQueue<32> queue_;
   

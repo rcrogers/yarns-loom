@@ -61,20 +61,19 @@ class StateVariableFilter : public SVF {
   void RenderInitCutoff(int16_t cutoff_u15);
 
   // Cutoff per sample, damping interpolated from a resonance set once a block.
-  // kKeepNotchAndHp is the caller's: only a shape that reads notch or hp pays
-  // to store them.
-  template<bool kKeepNotchAndHp>
-  inline void RenderSample(int32_t in, int16_t cutoff_u15) {
+  template<SvfOutput kOutput>
+  inline int32_t RenderSample(int32_t in, int16_t cutoff_u15) {
     damp.Tick();
-    ProcessInto<kKeepNotchAndHp, false>(in, cutoff_u15, damp.value());
+    return Process<kOutput, false>(in, cutoff_u15, damp.value());
   }
   // The mirror: damping per sample, cutoff interpolated toward the pitch's.
-  // WHISTLE and PING read only bp and lp, so notch and hp need not be stored --
-  // and theirs are the two outputs the gain envelope does not multiply, so a
-  // ring that stops short of zero is a tone that never ends.
-  inline void RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
+  // kMustReachSilence, because these shapes spend the gain envelope on the
+  // excitation rather than on the output: a ring that stops short of zero is a
+  // tone that never ends.
+  template<SvfOutput kOutput>
+  inline int32_t RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
     cutoff.Tick();
-    ProcessInto<false, true>(in, cutoff.value(), damp_u1_14);
+    return Process<kOutput, true>(in, cutoff.value(), damp_u1_14);
   }
 
  private:
@@ -95,6 +94,7 @@ enum OscillatorShape {
   OSC_SHAPE_WHISTLE,
   OSC_SHAPE_PING_LP,
   OSC_SHAPE_PING_BP,
+  OSC_SHAPE_PING_HP,
   OSC_SHAPE_LP_PULSE,
   OSC_SHAPE_LP_SAW,
   OSC_SHAPE_CZ_PULSE_LP,
@@ -223,8 +223,7 @@ class Oscillator {
   // envelope to it, and set_shape rescales a held note between two of them.
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
     const bool spends_gain_before_the_filter =
-        shape == OSC_SHAPE_WHISTLE || shape == OSC_SHAPE_PING_BP ||
-        shape == OSC_SHAPE_PING_LP;
+        shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_HP;
     return spends_gain_before_the_filter
         ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
   }
@@ -285,7 +284,7 @@ class Oscillator {
 
   void Render(int16_t* audio_mix);
 
-  static RenderFn fn_table_[];
+  static const RenderFn fn_table_[];
   
  private:
   void RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix);
@@ -351,35 +350,37 @@ class Oscillator {
     return ((phase >> 15) ^ (phase >> 31 ? 0xffff : 0x0000)) - 0x8000;
   }
 
-  OscillatorShape shape_;
+  // Widest members first: there is one oscillator per voice, and a mixed order
+  // leaves a hole wherever a narrow member precedes a wide one.
   Envelope gain_envelope_, timbre_envelope_;
-  int16_t raw_timbre_bias_;
-  uint16_t raw_gain_bias_;
-  int16_t pitch_;
-
-  // Calculated from shape, cached to avoid conditionals during render
-  uint8_t transfer_carrier_;
-  uint8_t transfer_function_;
-  uint32_t transfer_bias_;
-  uint8_t transfer_crest_factor_;
-  uint8_t transfer_gain_shift_;
+  StateVariableFilter svf_;
+  PhaseDistortionSquareModulator pd_square_;
 
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t modulator_phase_;
-  bool high_;
-
-  StateVariableFilter svf_;
-  PhaseDistortionSquareModulator pd_square_;
-  
+  uint32_t noise_state_;
   int32_t next_sample_;
   // The drive the filter state was last normalised by, so a drive that moves
   // can rescale what the filter still holds.
   int32_t previous_damp_drive_u15_;
-  uint32_t noise_state_;
+  // transfer_*: calculated from shape, cached to avoid conditionals during
+  // render. The rest of the set is a byte each, below.
+  uint32_t transfer_bias_;
+
+  int16_t raw_timbre_bias_;
+  uint16_t raw_gain_bias_;
+  int16_t pitch_;
   uint16_t coherent_scale_codes_u16_;
   uint16_t coherent_scale_u15_;
   uint16_t incoherent_scale_u15_;
+
+  OscillatorShape shape_;
+  bool high_;
+  uint8_t transfer_carrier_;
+  uint8_t transfer_function_;
+  uint8_t transfer_crest_factor_;
+  uint8_t transfer_gain_shift_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);

@@ -65,8 +65,6 @@ int main() {
           // derives from that state is then tested at one end of its range.
           osc.svf_.bp = INT16_MAX;
           osc.svf_.lp = INT16_MAX;
-          osc.svf_.notch = INT16_MAX;
-          osc.svf_.hp = INT16_MAX;
           // Several blocks, so state carried between them is exercised too.
           for (int b = 0; b < 6; ++b) {
             int16_t timbre_gain[2 * kAudioBlockSize];

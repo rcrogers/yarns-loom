@@ -150,15 +150,17 @@ enum SettingIndex {
   SETTING_LAST,
 };
 
+// Widest members first: the table is 84 entries, and the holes a mixed order
+// leaves cost four bytes of flash each.
 struct Setting {
-  const char short_name[3];
   const char* const name;
-  SettingDomain domain;
+  const char* const* values;
   uint16_t address[2];
-  SettingUnit unit;
   int16_t min_value;
   int16_t max_value;
-  const char* const* values;
+  const char short_name[3];
+  SettingDomain domain;
+  SettingUnit unit;
   uint8_t part_cc;
   uint8_t remote_control_cc;
 };
