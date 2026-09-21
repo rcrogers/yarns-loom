@@ -652,12 +652,12 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `WH` Whistle: enveloped noise into tuned state-variable filter
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
-- The [gain envelope](#modulation-destinations-for-envelope-output) is used as an amplifier on the filter's noise input, instead of as an oscillator output amplifier
+- The [gain envelope](#modulation-destinations-for-envelope-output) amplifies the filter's noise input, instead of amplifying the oscillator's output
 
 #### `P-` Ping: direct envelope signal into tuned state-variable filter
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
-- The gain envelope is used as a direct DC input to the filter, instead of as an oscillator output amplifier
+- The gain envelope is used as a direct DC input to ping the filter, instead of amplifying the oscillator's output
 - Shapes: low-pass, band-pass
 
 #### `-◝` Analog wave into state-variable filter
@@ -669,7 +669,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Timbre: cutoff frequency of the digital filter, relative to the note's pitch
 - Shapes: low-pass, peaking, band-pass, high-pass
 
-#### `|⟍CZ` Phase distortion, resonant saw
+#### `│╲CZ` Phase distortion, resonant saw
 - Timbre: cutoff frequency of the digital filter, relative to the note's pitch
 - Shapes: low-pass, peaking, band-pass, high-pass
 
@@ -679,7 +679,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
     - Pulse and saw freeze in place after completing a cycle, resetting at the next period
     - Sine returns to zero after completing a cycle, resuming motion at the next period
 
-#### `|⟍┌┐` Saw-pulse morph
+#### `│╲┌┐` Saw-pulse morph
 - Timbre: morph from saw to pulse
 
 #### `-$` Hard sync
