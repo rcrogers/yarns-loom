@@ -481,19 +481,23 @@ class CVOutput {
  private:
   uint16_t NoteToDacCode(int32_t note) const;
 
-  Voice* dc_voices_[kNumMaxVoicesPerPart];  // dc_voices_[0] is primary, others for paraphonic envelope
-  Voice* audio_voices_[kNumMaxVoicesPerPart];
+  // Narrowest first, each width filling whole words so nothing is left as a
+  // hole: Thumb's short loads reach bytes only in the first 32 bytes, halfwords
+  // in the first 64 and words in the first 128.
   uint8_t num_dc_voices_;
   uint8_t num_audio_voices_;
   DCRole dc_role_;
-
-  int32_t note_;
-  uint16_t dac_code_;
   bool dirty_;  // Set to true when the calibration settings have changed.
+
+  uint16_t dac_code_;
   uint16_t zero_dac_code_;
-  uint16_t calibrated_dac_code_[kNumOctaves];
-  Envelope envelope_;
   int16_t envelope_bias_;
+  uint16_t calibrated_dac_code_[kNumOctaves];
+
+  Voice* dc_voices_[kNumMaxVoicesPerPart];  // dc_voices_[0] is primary, others for paraphonic envelope
+  Voice* audio_voices_[kNumMaxVoicesPerPart];
+  int32_t note_;
+  Envelope envelope_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };

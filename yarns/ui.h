@@ -244,8 +244,8 @@ class Ui {
     HandlerFn on_increment;
     HandlerFn on_click;
     PrintFn refresh_display;
-    UiMode next_mode;
     int8_t Ui::* incremented_variable;
+    UiMode next_mode;
     int8_t min_value;
     int8_t max_value;
   };
