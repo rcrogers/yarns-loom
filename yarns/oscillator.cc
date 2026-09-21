@@ -105,7 +105,7 @@ enum TransferCurve {
 };
 
 /* static */
-Oscillator::RenderFn Oscillator::fn_table_[] = {
+const Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,

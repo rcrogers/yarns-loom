@@ -79,7 +79,7 @@ void Voice::Init() {
 }
 
 /* static */
-CVOutput::DCFn CVOutput::dc_fn_table_[] = {
+const CVOutput::DCFn CVOutput::dc_fn_table_[] = {
   &CVOutput::pitch_dac_code,
   &CVOutput::velocity_dac_code,
   &CVOutput::aux_cv_dac_code,

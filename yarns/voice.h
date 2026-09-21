@@ -309,7 +309,7 @@ class CVOutput {
   ~CVOutput() { }
 
   typedef uint16_t (CVOutput::*DCFn)();
-  static DCFn dc_fn_table_[];
+  static const DCFn dc_fn_table_[];
 
   void Init(bool reset_calibration);
 

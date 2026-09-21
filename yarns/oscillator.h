@@ -284,7 +284,7 @@ class Oscillator {
 
   void Render(int16_t* audio_mix);
 
-  static RenderFn fn_table_[];
+  static const RenderFn fn_table_[];
   
  private:
   void RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix);
