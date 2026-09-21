@@ -654,7 +654,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Note pitch controls the cutoff frequency of the SVF
 - The [gain envelope](#modulation-destinations-for-envelope-output) is used as an amplifier on the filter's noise input, instead of as an oscillator output amplifier
 
-#### `/\-` Ping: direct envelope signal into tuned state-variable filter
+#### `P-` Ping: direct envelope signal into tuned state-variable filter
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
 - The gain envelope is used as a direct DC input to the filter, instead of as an oscillator output amplifier
