@@ -935,73 +935,67 @@ void Oscillator::RenderAudioRatePWM(int16_t* input_samples, int16_t* audio_mix) 
   uint8_t pwm_shape = shape_ - kOscShapeAudioRatePwm;
   int16_t interval = lut_fm_modulator_intervals[pwm_shape];
   uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
-
-  // The offset saw carries a direction only while its own motion stays under
-  // half a turn, and that motion is the swing's, which the modulator's
-  // increment sets the rate of. So the NOTE caps the depth whatever the ratio
-  // asked for: `clz` is log2 of the increment, and the product reaches a
-  // quarter turn before any shift, so the room is 33 - log2(2*pi) - log2(the
-  // increment) bits.
-  //
-  // clz - 2, NOT clz - 1: `clz` brackets the log rather than giving it, and
-  // only the far end of that bracket is safe at every increment. The near end
-  // reads a whole bit too generous, which at MIDI 108 is the difference
-  // between an offset saw inside Nyquist and one past it.
-  //
-  // A max, not an assignment: a modulator already past Nyquist has no room at
-  // all, and the subtraction is signed so it can say so.
-  const int widest_2x_upshift =
-      std::max(0, (__builtin_clz(modulator_phase_increment) - 2) * 2);
-  const uint8_t depth_2x_upshift = std::min(
-      static_cast<int>(lut_pwm_depth_2x_upshifts[pwm_shape]), widest_2x_upshift);
-  uint8_t depth_shift = depth_2x_upshift >> 1;
-  bool depth_shift_halfbit = depth_2x_upshift & 1;
-  uint32_t previous_offset_phase = previous_offset_phase_;
+  uint32_t previous_first = previous_offset_phase_;
+  uint32_t previous_second = previous_second_phase_;
   RENDER_MODULATED(
     modulator_phase += modulator_phase_increment;
-    // Formed UNSIGNED and left to wrap: only the fraction of a turn reaches
-    // the output, and every turn it wraps through is an edge of the offset
-    // saw, which is corrected like any other.
-    // Conditional multiplication by 1.5 to approximate sqrt(2), taken while
-    // the value is still SIGNED: the halving is an arithmetic shift, and the
-    // unsigned form of a negative swing would halve into a huge positive.
+    // TWO pulses a period, a half turn apart, their widths in ANTIPHASE. Each
+    // width stays inside its own turn, so the four edges exist at every depth
+    // and none is ever born -- which is the whole point: a count that cannot
+    // change cannot step.
     int32_t swing = sine(modulator_phase) * timbre;
-    if (depth_shift_halfbit) swing += swing >> 1;
-    uint32_t width = 0x80000000 + (static_cast<uint32_t>(swing) << depth_shift);
-    uint32_t offset_phase = phase - width;
-    int32_t offset_phase_increment =
-        static_cast<int32_t>(offset_phase - previous_offset_phase);
+    uint32_t first_width = 0x40000000 + static_cast<uint32_t>(swing);
+    uint32_t second_width = 0x40000000 - static_cast<uint32_t>(swing);
+    uint32_t half = phase - 0x80000000;
+    uint32_t first = phase - first_width;
+    uint32_t second = half - second_width;
 
+    // The two edges the carrier owns: a half turn apart, and neither moves.
     if (PhaseWrapped(phase, phase_increment)) {
       uint32_t t = EdgeTime(phase, phase_increment);
-      this_sample -= ThisBlepSample(t);
-      next_sample -= NextBlepSample(t);
+      this_sample += ThisBlepSample(t); next_sample += NextBlepSample(t);
     }
-    if (offset_phase_increment >= 0) {
-      if (PhaseWrapped(offset_phase, offset_phase_increment)) {
-        uint32_t t = EdgeTime(offset_phase, offset_phase_increment);
-        this_sample += ThisBlepSample(t);
-        next_sample += NextBlepSample(t);
+    if (PhaseWrapped(half, phase_increment)) {
+      uint32_t t = EdgeTime(half, phase_increment);
+      this_sample += ThisBlepSample(t); next_sample += NextBlepSample(t);
+    }
+    // The two the widths move, each read from its own signed motion.
+    int32_t first_increment = static_cast<int32_t>(first - previous_first);
+    if (first_increment >= 0) {
+      if (PhaseWrapped(first, first_increment)) {
+        uint32_t t = EdgeTime(first, first_increment);
+        this_sample -= ThisBlepSample(t); next_sample -= NextBlepSample(t);
       }
     } else {
-      // Travelling backwards, so the wrap is an underflow: it happened if the
-      // step was longer than the distance to zero, and the phase past it is
-      // measured the other way round.
-      uint32_t distance = 0 - static_cast<uint32_t>(offset_phase_increment);
-      if (previous_offset_phase < distance) {
-        uint32_t t = EdgeTime(0 - offset_phase, distance);
-        this_sample -= ThisBlepSample(t);
-        next_sample -= NextBlepSample(t);
+      uint32_t distance = 0 - static_cast<uint32_t>(first_increment);
+      if (previous_first < distance) {
+        uint32_t t = EdgeTime(0 - first, distance);
+        this_sample += ThisBlepSample(t); next_sample += NextBlepSample(t);
       }
     }
-    previous_offset_phase = offset_phase;
+    int32_t second_increment = static_cast<int32_t>(second - previous_second);
+    if (second_increment >= 0) {
+      if (PhaseWrapped(second, second_increment)) {
+        uint32_t t = EdgeTime(second, second_increment);
+        this_sample -= ThisBlepSample(t); next_sample -= NextBlepSample(t);
+      }
+    } else {
+      uint32_t distance = 0 - static_cast<uint32_t>(second_increment);
+      if (previous_second < distance) {
+        uint32_t t = EdgeTime(0 - second, distance);
+        this_sample += ThisBlepSample(t); next_sample += NextBlepSample(t);
+      }
+    }
+    previous_first = first;
+    previous_second = second;
 
-    next_sample += phase < width ? 0 : 0x7fff;
+    next_sample += (phase < first_width || half < second_width) ? 0x7fff : 0;
     // * 2 and not << 1: the value is signed and negative below 16384,
     // and shifting a negative left is undefined. Same instruction.
     this_sample = (this_sample - 16384) * 2;
   )
-  previous_offset_phase_ = previous_offset_phase;
+  previous_offset_phase_ = previous_first;
+  previous_second_phase_ = previous_second;
 }
 
 void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix) {

@@ -181,6 +181,7 @@ class Oscillator {
     // integrator survived Init and a re-Init inherited the old note's.
     modulator_phase_ = 0;
     previous_offset_phase_ = 0;
+    previous_second_phase_ = 0;
     pd_square_.integrator = 0;
     pd_square_.polarity = false;
     high_ = false;
@@ -395,6 +396,7 @@ class Oscillator {
   // measured against. Derived from the carrier and the width rather than
   // accumulated, so it cannot drift out of `phase - width`.
   uint32_t previous_offset_phase_;
+  uint32_t previous_second_phase_;
   bool high_;
 
   StateVariableFilter svf_;
