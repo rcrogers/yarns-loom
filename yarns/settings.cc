@@ -527,24 +527,10 @@ const Setting Settings::settings_[] = {
     "TU", SETTING_DOMAIN_PART, SETTING_UNIT_ENUMERATION,
     27, 18,
   },
-  {
-    "", NULL,
-    { 0, 0 }, 0, 0,
-    "", SETTING_DOMAIN_MULTI, SETTING_UNIT_UINT8,
-    0xff, 0xff,
-  },
-  {
-    "", NULL,
-    { 0, 0 }, 0, 0,
-    "", SETTING_DOMAIN_MULTI, SETTING_UNIT_UINT8,
-    0xff, 0xff,
-  },
-  {
-    "", NULL,
-    { 0, 0 }, 0, 0,
-    "", SETTING_DOMAIN_MULTI, SETTING_UNIT_UINT8,
-    0xff, 0xff,
-  },
+  // Removed: trigger duration, scale, shape (superseded by envelope CV out)
+  { "", NULL, { 0, 0 }, 0, 0, "", SETTING_DOMAIN_MULTI, SETTING_UNIT_UINT8, 0xff, 0xff },
+  { "", NULL, { 0, 0 }, 0, 0, "", SETTING_DOMAIN_MULTI, SETTING_UNIT_UINT8, 0xff, 0xff },
+  { "", NULL, { 0, 0 }, 0, 0, "", SETTING_DOMAIN_MULTI, SETTING_UNIT_UINT8, 0xff, 0xff },
   {
     "CV OUT", voicing_aux_cv_values,
     { PART_VOICING_AUX_CV, 0 }, 0, MOD_AUX_LAST - 1,
