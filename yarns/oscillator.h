@@ -350,35 +350,37 @@ class Oscillator {
     return ((phase >> 15) ^ (phase >> 31 ? 0xffff : 0x0000)) - 0x8000;
   }
 
-  OscillatorShape shape_;
+  // Widest members first: there is one oscillator per voice, and a mixed order
+  // leaves a hole wherever a narrow member precedes a wide one.
   Envelope gain_envelope_, timbre_envelope_;
-  int16_t raw_timbre_bias_;
-  uint16_t raw_gain_bias_;
-  int16_t pitch_;
-
-  // Calculated from shape, cached to avoid conditionals during render
-  uint8_t transfer_carrier_;
-  uint8_t transfer_function_;
-  uint32_t transfer_bias_;
-  uint8_t transfer_crest_factor_;
-  uint8_t transfer_gain_shift_;
+  StateVariableFilter svf_;
+  PhaseDistortionSquareModulator pd_square_;
 
   uint32_t phase_;
   uint32_t phase_increment_;
   uint32_t modulator_phase_;
-  bool high_;
-
-  StateVariableFilter svf_;
-  PhaseDistortionSquareModulator pd_square_;
-  
+  uint32_t noise_state_;
   int32_t next_sample_;
   // The drive the filter state was last normalised by, so a drive that moves
   // can rescale what the filter still holds.
   int32_t previous_damp_drive_u15_;
-  uint32_t noise_state_;
+  // transfer_*: calculated from shape, cached to avoid conditionals during
+  // render. The rest of the set is a byte each, below.
+  uint32_t transfer_bias_;
+
+  int16_t raw_timbre_bias_;
+  uint16_t raw_gain_bias_;
+  int16_t pitch_;
   uint16_t coherent_scale_codes_u16_;
   uint16_t coherent_scale_u15_;
   uint16_t incoherent_scale_u15_;
+
+  OscillatorShape shape_;
+  bool high_;
+  uint8_t transfer_carrier_;
+  uint8_t transfer_function_;
+  uint8_t transfer_crest_factor_;
+  uint8_t transfer_gain_shift_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);
