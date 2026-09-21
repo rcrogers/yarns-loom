@@ -247,58 +247,52 @@ class Voice {
         + (VibratoPitch_q15_16() & 0xffff);
   }
 
-  FastSyncedLFO lfos_[LFO_ROLE_LAST];
-  Oscillator oscillator_;
-  ADSR adsr_;
+  // Narrowest first, each width filling whole words, so every scalar sits
+  // inside the reach of Thumb's short loads; the embedded objects follow,
+  // smallest first.
+  bool gate_;
+  // Sets whether this voice can control a paraphonic CV envelope's tremolo
+  bool is_highest_priority_;
+  bool portamento_exponential_shape_;
+  uint8_t mod_velocity_;
+  uint8_t pitch_bend_range_;
+  uint8_t vibrato_range_;
+  uint8_t vibrato_mod_;
+  uint8_t oscillator_mode_;
+  uint8_t aux_cv_source_;
+  uint8_t aux_cv_source_2_;
+  uint8_t refresh_counter_;
+  LFOShape lfo_shapes_[LFO_ROLE_LAST];
+
+  int16_t mod_pitch_bend_;
+  // This counter is used to artificially create a 750µs (3-systick) dip at LOW
+  // level when the gate is currently HIGH and a new note arrive with a
+  // retrigger command. This happens with note-stealing; or when sending a MIDI
+  // sequence with overlapping notes.
+  uint16_t retrigger_delay_;
+  uint16_t trigger_pulse_;
+  uint16_t tremolo_mod_target_;
+  uint16_t tremolo_mod_current_;
+  uint16_t timbre_mod_lfo_target_;
+  uint16_t timbre_mod_lfo_current_;
+  uint16_t timbre_init_target_;
+  uint16_t timbre_init_current_;
+  uint16_t mod_aux_[MOD_AUX_LAST];
 
   int32_t note_source_;
   int32_t note_target_;
   int32_t note_portamento_;
   int32_t note_;
   int32_t tuning_;
-  bool gate_;
-
-  // Sets whether this voice can control a paraphonic CV envelope's tremolo
-  bool is_highest_priority_;
-
-  int16_t mod_pitch_bend_;
-  uint16_t mod_aux_[MOD_AUX_LAST];
-  uint8_t mod_velocity_;
-  
-  uint8_t pitch_bend_range_;
-  uint8_t vibrato_range_;
-  uint8_t vibrato_mod_;
-  
-  uint8_t oscillator_mode_;
-  LFOShape lfo_shapes_[LFO_ROLE_LAST];
-  uint8_t aux_cv_source_;
-  uint8_t aux_cv_source_2_;
-  
   uint32_t portamento_phase_;
   uint32_t portamento_phase_increment_;
-  bool portamento_exponential_shape_;
-  
-  // This counter is used to artificially create a 750µs (3-systick) dip at LOW
-  // level when the gate is currently HIGH and a new note arrive with a
-  // retrigger command. This happens with note-stealing; or when sending a MIDI
-  // sequence with overlapping notes.
-  uint16_t retrigger_delay_;
-  
-  uint16_t trigger_pulse_;
-
-  uint8_t refresh_counter_;
-  Interpolator<kRefreshHzToLfoSampleHzRatioBits> timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
-
-  uint16_t tremolo_mod_target_;
-  uint16_t tremolo_mod_current_;
-
-  uint16_t timbre_mod_lfo_target_;
-  uint16_t timbre_mod_lfo_current_;
-  uint16_t timbre_init_target_;
-  uint16_t timbre_init_current_;
-
   CVOutput* audio_output_;
   CVOutput* dc_outputs_[DC_LAST];
+
+  ADSR adsr_;
+  Interpolator<kRefreshHzToLfoSampleHzRatioBits> timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
+  FastSyncedLFO lfos_[LFO_ROLE_LAST];
+  Oscillator oscillator_;
 
   DISALLOW_COPY_AND_ASSIGN(Voice);
 };
