@@ -350,23 +350,17 @@ class Oscillator {
     return ((phase >> 15) ^ (phase >> 31 ? 0xffff : 0x0000)) - 0x8000;
   }
 
-  // Widest members first: there is one oscillator per voice, and a mixed order
-  // leaves a hole wherever a narrow member precedes a wide one.
-  Envelope gain_envelope_, timbre_envelope_;
-  StateVariableFilter svf_;
-  PhaseDistortionSquareModulator pd_square_;
-
-  uint32_t phase_;
-  uint32_t phase_increment_;
-  uint32_t modulator_phase_;
-  uint32_t noise_state_;
-  int32_t next_sample_;
-  // The drive the filter state was last normalised by, so a drive that moves
-  // can rescale what the filter still holds.
-  int32_t previous_damp_drive_u15_;
+  // Narrowest first, so the byte and halfword fields sit inside the reach of
+  // Thumb's short loads: bytes in the first 32, halfwords the first 64, words
+  // the first 128.
+  OscillatorShape shape_;
+  bool high_;
   // transfer_*: calculated from shape, cached to avoid conditionals during
-  // render. The rest of the set is a byte each, below.
-  uint32_t transfer_bias_;
+  // render.
+  uint8_t transfer_carrier_;
+  uint8_t transfer_function_;
+  uint8_t transfer_crest_factor_;
+  uint8_t transfer_gain_shift_;
 
   int16_t raw_timbre_bias_;
   uint16_t raw_gain_bias_;
@@ -375,12 +369,19 @@ class Oscillator {
   uint16_t coherent_scale_u15_;
   uint16_t incoherent_scale_u15_;
 
-  OscillatorShape shape_;
-  bool high_;
-  uint8_t transfer_carrier_;
-  uint8_t transfer_function_;
-  uint8_t transfer_crest_factor_;
-  uint8_t transfer_gain_shift_;
+  uint32_t transfer_bias_;
+  uint32_t phase_;
+  uint32_t phase_increment_;
+  uint32_t modulator_phase_;
+  uint32_t noise_state_;
+  int32_t next_sample_;
+  // The drive the filter state was last normalised by, so a drive that moves
+  // can rescale what the filter still holds.
+  int32_t previous_damp_drive_u15_;
+
+  PhaseDistortionSquareModulator pd_square_;
+  StateVariableFilter svf_;
+  Envelope gain_envelope_, timbre_envelope_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);

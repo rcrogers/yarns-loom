@@ -103,74 +103,74 @@ const Ui::Mode Ui::modes_[] = {
   // UI_MODE_PARAMETER_SELECT
   { &Ui::OnIncrementParameterSelect, &Ui::OnClick,
     &Ui::PrintParameterName,
-    UI_MODE_PARAMETER_EDIT,
-    NULL, 0, 0 },
+    NULL,
+    UI_MODE_PARAMETER_EDIT, 0, 0 },
   
   // UI_MODE_PARAMETER_EDIT
   { &Ui::OnIncrementParameterEdit, &Ui::OnClick,
     &Ui::PrintParameterValue,
-    UI_MODE_PARAMETER_SELECT,
-    NULL, 0, 0 },
+    NULL,
+    UI_MODE_PARAMETER_SELECT, 0, 0 },
   
   // UI_MODE_MAIN_MENU
   { &Ui::OnIncrement, &Ui::OnClickMainMenu,
     &Ui::PrintCommandName,
-    UI_MODE_MAIN_MENU,
-    &Ui::command_index_, 0, MAIN_MENU_LAST - 1 },
+    &Ui::command_index_,
+    UI_MODE_MAIN_MENU, 0, MAIN_MENU_LAST - 1 },
   
   // UI_MODE_LOAD_SELECT_PROGRAM
   { &Ui::OnIncrement, &Ui::OnClickLoadSave,
     &Ui::PrintProgramNumber,
-    UI_MODE_MAIN_MENU,
-    &Ui::program_index_, 0, kNumPrograms },
+    &Ui::program_index_,
+    UI_MODE_MAIN_MENU, 0, kNumPrograms },
   
   // UI_MODE_SAVE_SELECT_PROGRAM
   { &Ui::OnIncrement, &Ui::OnClickLoadSave,
     &Ui::PrintProgramNumber,
-    UI_MODE_MAIN_MENU,
-    &Ui::program_index_, 0, kNumPrograms },
+    &Ui::program_index_,
+    UI_MODE_MAIN_MENU, 0, kNumPrograms },
   
   // UI_MODE_SWAP_SELECT_PART
   { &Ui::OnIncrement, &Ui::OnClickSwapPart,
     &Ui::PrintSwapPart,
-    UI_MODE_PARAMETER_SELECT,
-    &Ui::swap_part_index_, 0, kNumParts - 1 },
+    &Ui::swap_part_index_,
+    UI_MODE_PARAMETER_SELECT, 0, kNumParts - 1 },
 
   // UI_MODE_CALIBRATION_SELECT_VOICE
   { &Ui::OnIncrement, &Ui::OnClickCalibrationSelectVoice,
     &Ui::PrintCalibrationVoiceNumber,
-    UI_MODE_CALIBRATION_SELECT_VOICE,
-    &Ui::calibration_voice_, 0, kNumCVOutputs },
+    &Ui::calibration_voice_,
+    UI_MODE_CALIBRATION_SELECT_VOICE, 0, kNumCVOutputs },
   
   // UI_MODE_CALIBRATION_SELECT_NOTE
   { &Ui::OnIncrement, &Ui::OnClickCalibrationSelectNote,
     &Ui::PrintCalibrationNote,
-    UI_MODE_CALIBRATION_SELECT_NOTE,
-    &Ui::calibration_note_, 0, kNumOctaves },
+    &Ui::calibration_note_,
+    UI_MODE_CALIBRATION_SELECT_NOTE, 0, kNumOctaves },
   
   // UI_MODE_CALIBRATION_ADJUST_LEVEL
   { &Ui::OnIncrementCalibrationAdjustment, &Ui::OnClick,
     &Ui::PrintCalibrationNote,
-    UI_MODE_CALIBRATION_SELECT_NOTE,
-    NULL, 0, 0 },
+    NULL,
+    UI_MODE_CALIBRATION_SELECT_NOTE, 0, 0 },
 
   // UI_MODE_PUSH_IT_SELECT_NOTE
   { &Ui::OnIncrementPushItNote, &Ui::OnClick,
     &Ui::PrintPushItNote,
-    UI_MODE_PARAMETER_SELECT,
-    NULL, 0, 127 },
+    NULL,
+    UI_MODE_PARAMETER_SELECT, 0, 127 },
 
   // UI_MODE_LEARNING
   { &Ui::OnIncrement, &Ui::OnClickLearning,
     &Ui::PrintLearning,
-    UI_MODE_PARAMETER_SELECT,
-    NULL, 0, 127 },
+    NULL,
+    UI_MODE_PARAMETER_SELECT, 0, 127 },
     
   // UI_MODE_FACTORY_TESTING
   { &Ui::OnIncrementFactoryTesting, &Ui::OnClickFactoryTesting,
     &Ui::PrintFactoryTesting,
-    UI_MODE_PARAMETER_SELECT,
-    &Ui::factory_testing_number_, 0, 99 },
+    &Ui::factory_testing_number_,
+    UI_MODE_PARAMETER_SELECT, 0, 99 },
 };
 
 void Ui::Init() {

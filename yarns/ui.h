@@ -244,8 +244,8 @@ class Ui {
     HandlerFn on_increment;
     HandlerFn on_click;
     PrintFn refresh_display;
-    UiMode next_mode;
     int8_t Ui::* incremented_variable;
+    UiMode next_mode;
     int8_t min_value;
     int8_t max_value;
   };
@@ -253,39 +253,14 @@ class Ui {
   static const Command commands_[MAIN_MENU_LAST];
   static const Mode modes_[UI_MODE_LAST];
   
-  stmlib::EventQueue<32> queue_;
-  
-  Display display_;
-  Encoder encoder_;
-  Switches switches_;
-  char buffer_[32];
-  
-  bool rec_long_press_event_sent_;
-  uint32_t rec_press_time_;
-  bool start_stop_long_press_event_sent_;
-  uint32_t start_stop_press_time_;
-  bool tap_tempo_long_press_event_sent_;
-  uint32_t tap_tempo_press_time_;
-  bool encoder_long_press_event_sent_;
-  uint32_t encoder_press_time_;
-  uint32_t encoder_last_increment_ms_;
-  int8_t encoder_last_increment_sign_; // -1, 0, +1; 0 = no prior increment
-  uint8_t encoder_fast_run_; // Accumulated turn speed, leaky
-  
+  // Scalars first, narrowest first, so the fields the UI reads on every event
+  // sit inside the reach of Thumb's short loads; the queue and the display,
+  // reached through their own methods, go last.
   UiMode mode_;
   UiMode previous_mode_;
-
   Splash splash_;
-  Setting const* splash_setting_def_;
   uint8_t splash_part_;
   bool refresh_was_automatic_;
-  
-  Menu setup_menu_;
-  Menu oscillator_menu_;
-  Menu envelope_menu_;
-  Menu live_menu_;
-  Menu* current_menu_;
-
   uint8_t active_part_;
   int8_t command_index_;
   int8_t calibration_voice_;
@@ -294,19 +269,41 @@ class Ui {
   int8_t swap_part_index_;
   int8_t active_program_;
   bool push_it_;
-  int16_t push_it_note_;
   bool recording_mode_is_displaying_pitch_;
-
-  int16_t editing_setting_value_;
-  
   UiFactoryTestingDisplay factory_testing_display_;
   int8_t factory_testing_number_;
+  bool rec_long_press_event_sent_;
+  bool start_stop_long_press_event_sent_;
+  bool tap_tempo_long_press_event_sent_;
+  bool encoder_long_press_event_sent_;
+  int8_t encoder_last_increment_sign_; // -1, 0, +1; 0 = no prior increment
+  uint8_t encoder_fast_run_; // Accumulated turn speed, leaky
+  bool tap_tempo_resolved_;
+  Encoder encoder_;
+  Switches switches_;
+
+  int16_t push_it_note_;
+  int16_t editing_setting_value_;
   uint16_t factory_testing_leds_counter_;
-  
+  Menu setup_menu_;
+  Menu oscillator_menu_;
+  Menu envelope_menu_;
+  Menu live_menu_;
+
+  uint32_t rec_press_time_;
+  uint32_t start_stop_press_time_;
+  uint32_t tap_tempo_press_time_;
+  uint32_t encoder_press_time_;
+  uint32_t encoder_last_increment_ms_;
   uint32_t tap_tempo_sum_;
   uint32_t tap_tempo_count_;
-  bool tap_tempo_resolved_;
   uint32_t previous_tap_time_;
+  Setting const* splash_setting_def_;
+  Menu* current_menu_;
+
+  char buffer_[32];
+  Display display_;
+  stmlib::EventQueue<32> queue_;
   
   DISALLOW_COPY_AND_ASSIGN(Ui);
 };

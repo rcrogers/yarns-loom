@@ -1194,21 +1194,29 @@ class Multi {
   void AllocateParts();
   void SpreadLFOs(int8_t spread, FastSyncedLFO** base_lfo, uint8_t num_lfos, bool force_phase);
   
+  // settings_ leads, so its fields sit inside the reach of Thumb's short
+  // loads; the flags and counters read everywhere fill the rest of the first
+  // 32 bytes, where a byte is still in reach, and nothing after them is left
+  // as a hole but the one halfword's.
   MultiSettings settings_;
-  
+
   bool running_;
   bool started_by_keyboard_;
   bool recording_;
   uint8_t recording_part_;
-  
-  InternalClock internal_clock_;
   uint8_t internal_clock_ticks_;
-  
+  bool can_advance_lfos_;
+  uint8_t stop_count_down_;
+  uint8_t num_active_parts_;
+
   // The 0-based index of the last received Clock event, ignoring division and
   // offset.  At 240 BPM * 24 PPQN = 96 Hz, this overflows after 259 days
   int32_t clock_input_ticks_;
+  // 1:1 with divided ticks, but can free-run without the clock
+  int32_t backup_clock_lfo_ticks_;
+  uint16_t reset_pulse_counter_;
 
-  bool can_advance_lfos_;
+  InternalClock internal_clock_;
 
   // While the clock is running, the backup LFO syncs to the clock's phase/freq,
   // and while the clock is stopped, the backup LFO continues free-running based
@@ -1218,14 +1226,6 @@ class Multi {
   // update their frequency to reflect setting changes, retaining this frequency
   // through the next Start to minimize sync error.
   FastSyncedLFO backup_clock_lfo_;
-  // 1:1 with divided ticks, but can free-run without the clock
-  int32_t backup_clock_lfo_ticks_;
-
-  uint8_t stop_count_down_;
-  
-  uint16_t reset_pulse_counter_;
-  
-  uint8_t num_active_parts_;
 
   // "Virtual knobs" to track the accumulated result of CCs in relative mode.
   //

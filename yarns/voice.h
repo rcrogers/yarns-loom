@@ -247,58 +247,52 @@ class Voice {
         + (VibratoPitch_q15_16() & 0xffff);
   }
 
-  FastSyncedLFO lfos_[LFO_ROLE_LAST];
-  Oscillator oscillator_;
-  ADSR adsr_;
+  // Narrowest first, each width filling whole words, so every scalar sits
+  // inside the reach of Thumb's short loads; the embedded objects follow,
+  // smallest first.
+  bool gate_;
+  // Sets whether this voice can control a paraphonic CV envelope's tremolo
+  bool is_highest_priority_;
+  bool portamento_exponential_shape_;
+  uint8_t mod_velocity_;
+  uint8_t pitch_bend_range_;
+  uint8_t vibrato_range_;
+  uint8_t vibrato_mod_;
+  uint8_t oscillator_mode_;
+  uint8_t aux_cv_source_;
+  uint8_t aux_cv_source_2_;
+  uint8_t refresh_counter_;
+  LFOShape lfo_shapes_[LFO_ROLE_LAST];
+
+  int16_t mod_pitch_bend_;
+  // This counter is used to artificially create a 750µs (3-systick) dip at LOW
+  // level when the gate is currently HIGH and a new note arrive with a
+  // retrigger command. This happens with note-stealing; or when sending a MIDI
+  // sequence with overlapping notes.
+  uint16_t retrigger_delay_;
+  uint16_t trigger_pulse_;
+  uint16_t tremolo_mod_target_;
+  uint16_t tremolo_mod_current_;
+  uint16_t timbre_mod_lfo_target_;
+  uint16_t timbre_mod_lfo_current_;
+  uint16_t timbre_init_target_;
+  uint16_t timbre_init_current_;
+  uint16_t mod_aux_[MOD_AUX_LAST];
 
   int32_t note_source_;
   int32_t note_target_;
   int32_t note_portamento_;
   int32_t note_;
   int32_t tuning_;
-  bool gate_;
-
-  // Sets whether this voice can control a paraphonic CV envelope's tremolo
-  bool is_highest_priority_;
-
-  int16_t mod_pitch_bend_;
-  uint16_t mod_aux_[MOD_AUX_LAST];
-  uint8_t mod_velocity_;
-  
-  uint8_t pitch_bend_range_;
-  uint8_t vibrato_range_;
-  uint8_t vibrato_mod_;
-  
-  uint8_t oscillator_mode_;
-  LFOShape lfo_shapes_[LFO_ROLE_LAST];
-  uint8_t aux_cv_source_;
-  uint8_t aux_cv_source_2_;
-  
   uint32_t portamento_phase_;
   uint32_t portamento_phase_increment_;
-  bool portamento_exponential_shape_;
-  
-  // This counter is used to artificially create a 750µs (3-systick) dip at LOW
-  // level when the gate is currently HIGH and a new note arrive with a
-  // retrigger command. This happens with note-stealing; or when sending a MIDI
-  // sequence with overlapping notes.
-  uint16_t retrigger_delay_;
-  
-  uint16_t trigger_pulse_;
-
-  uint8_t refresh_counter_;
-  Interpolator<kRefreshHzToLfoSampleHzRatioBits> timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
-
-  uint16_t tremolo_mod_target_;
-  uint16_t tremolo_mod_current_;
-
-  uint16_t timbre_mod_lfo_target_;
-  uint16_t timbre_mod_lfo_current_;
-  uint16_t timbre_init_target_;
-  uint16_t timbre_init_current_;
-
   CVOutput* audio_output_;
   CVOutput* dc_outputs_[DC_LAST];
+
+  ADSR adsr_;
+  Interpolator<kRefreshHzToLfoSampleHzRatioBits> timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
+  FastSyncedLFO lfos_[LFO_ROLE_LAST];
+  Oscillator oscillator_;
 
   DISALLOW_COPY_AND_ASSIGN(Voice);
 };
@@ -481,19 +475,23 @@ class CVOutput {
  private:
   uint16_t NoteToDacCode(int32_t note) const;
 
-  Voice* dc_voices_[kNumMaxVoicesPerPart];  // dc_voices_[0] is primary, others for paraphonic envelope
-  Voice* audio_voices_[kNumMaxVoicesPerPart];
+  // Narrowest first, each width filling whole words so nothing is left as a
+  // hole: Thumb's short loads reach bytes only in the first 32 bytes, halfwords
+  // in the first 64 and words in the first 128.
   uint8_t num_dc_voices_;
   uint8_t num_audio_voices_;
   DCRole dc_role_;
-
-  int32_t note_;
-  uint16_t dac_code_;
   bool dirty_;  // Set to true when the calibration settings have changed.
+
+  uint16_t dac_code_;
   uint16_t zero_dac_code_;
-  uint16_t calibrated_dac_code_[kNumOctaves];
-  Envelope envelope_;
   int16_t envelope_bias_;
+  uint16_t calibrated_dac_code_[kNumOctaves];
+
+  Voice* dc_voices_[kNumMaxVoicesPerPart];  // dc_voices_[0] is primary, others for paraphonic envelope
+  Voice* audio_voices_[kNumMaxVoicesPerPart];
+  int32_t note_;
+  Envelope envelope_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };
