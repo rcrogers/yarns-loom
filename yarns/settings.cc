@@ -126,7 +126,6 @@ const char* const voicing_oscillator_shape_values[] = {
   "*^ NOISE BAND-PASS SVF",
   "*\xA1 NOISE HIGH-PASS SVF",
   "WH WHISTLE",
-  "P\xA2 NOTCH PING",
   "P\xA0 LOW-PASS PING",
   "P^ BAND-PASS PING",
   "P\xA1 HIGH-PASS PING",

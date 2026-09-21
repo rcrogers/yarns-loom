@@ -114,7 +114,6 @@ Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderPing,
   &Oscillator::RenderPing,
   &Oscillator::RenderPing,
-  &Oscillator::RenderPing,
   &Oscillator::RenderLPPulse,
   &Oscillator::RenderLPSaw,
   &Oscillator::RenderPhaseDistortionPulse,
@@ -1196,7 +1195,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
       (kEnvelopeSampleMax << 12) / INT16_MAX;
   // A ring only touches its peak briefly, so the drive goes past unity and
   // leaves the curve to compress what goes over: 3.0 to 5.4 dB of what
-  // kPingDriveMultiple asks for survives it, across the four outputs and the
+  // kPingDriveMultiple asks for survives it, across the three outputs and the
   // keyboard.
   const int32_t kPingDriveMultiple = 2;
   const int32_t state_to_output_q12 = kUnityStateToOutput_q12
@@ -1206,10 +1205,10 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t state_into_curve_q12 =
       StateIntoCurve(state_to_output_q12, coherent_scale_codes_u16_);
   const int32_t scale_u15 = coherent_scale_u15_;
-  // The exciter carries the gain envelope's DC, which lp and notch pass: once
-  // the ring dies away their state sits at the excitation's own level -- a
-  // thump under a percussive envelope, a standing offset under a sustained one.
-  // bp and hp reject it.
+  // The exciter carries the gain envelope's DC, which lp passes: once the ring
+  // dies away its state sits at the excitation's own level -- a thump under a
+  // percussive envelope, a standing offset under a sustained one. bp and hp
+  // reject it.
 #define PING_LOOP(KEEP, STATE) \
   RENDER_CORE(this_sample, \
     const int16_t gain = input_samples[kAudioBlockSize]; \
@@ -1223,8 +1222,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   switch (shape_) {
     case OSC_SHAPE_PING_LP: { PING_LOOP(false, svf.lp) } break;
     case OSC_SHAPE_PING_BP: { PING_LOOP(false, svf.bp) } break;
-    case OSC_SHAPE_PING_NOTCH: { PING_LOOP(true,  svf.notch) } break;
-    case OSC_SHAPE_PING_HP: { PING_LOOP(true,  svf.hp) } break;
+    case OSC_SHAPE_PING_HP: { PING_LOOP(true, svf.hp) } break;
     default: break;
   }
 #undef PING_LOOP

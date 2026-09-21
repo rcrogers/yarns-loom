@@ -137,9 +137,9 @@ int main(int argc, char** argv) {
   const bool verbose = argc > 1 && !strcmp(argv[1], "verbose");
   int failures = 0;
   printf("  %-24s %8s %28s\n", "shape", "worst", "at");
-  // NOTCH and HIGH-PASS PING pass the exciter above the note at unity, and the
-  // exciter is a chiff -- broadband, so the bound has nothing to say about
-  // them. They read 80x and 88x, which is what that looks like.
+  // HIGH-PASS PING passes the exciter above the note at unity, and the exciter
+  // is a chiff -- broadband, so the bound has nothing to say about it. It reads
+  // 88x, which is what that looks like.
   const int narrowband[] = {
     OSC_SHAPE_WHISTLE, OSC_SHAPE_PING_BP, OSC_SHAPE_PING_LP };
   for (size_t si = 0; si < sizeof(narrowband) / sizeof(*narrowband); ++si) {
