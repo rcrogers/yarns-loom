@@ -69,12 +69,13 @@ class StateVariableFilter : public SVF {
     ProcessInto<kKeepNotchAndHp, false>(in, cutoff_u15, damp.value());
   }
   // The mirror: damping per sample, cutoff interpolated toward the pitch's.
-  // WHISTLE and PING read only bp and lp, so notch and hp need not be stored --
-  // and theirs are the two outputs the gain envelope does not multiply, so a
-  // ring that stops short of zero is a tone that never ends.
+  // kMustReachSilence, because these shapes spend the gain envelope on the
+  // excitation rather than on the output: a ring that stops short of zero is a
+  // tone that never ends.
+  template<bool kKeepNotchAndHp>
   inline void RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
     cutoff.Tick();
-    ProcessInto<false, true>(in, cutoff.value(), damp_u1_14);
+    ProcessInto<kKeepNotchAndHp, true>(in, cutoff.value(), damp_u1_14);
   }
 
  private:
@@ -93,8 +94,10 @@ enum OscillatorShape {
   OSC_SHAPE_NOISE_BP,
   OSC_SHAPE_NOISE_HP,
   OSC_SHAPE_WHISTLE,
+  OSC_SHAPE_PING_NOTCH,
   OSC_SHAPE_PING_LP,
   OSC_SHAPE_PING_BP,
+  OSC_SHAPE_PING_HP,
   OSC_SHAPE_LP_PULSE,
   OSC_SHAPE_LP_SAW,
   OSC_SHAPE_CZ_PULSE_LP,
@@ -223,8 +226,7 @@ class Oscillator {
   // envelope to it, and set_shape rescales a held note between two of them.
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
     const bool spends_gain_before_the_filter =
-        shape == OSC_SHAPE_WHISTLE || shape == OSC_SHAPE_PING_BP ||
-        shape == OSC_SHAPE_PING_LP;
+        shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_HP;
     return spends_gain_before_the_filter
         ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
   }
