@@ -177,6 +177,13 @@ class Envelope {
   void AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff);
 
 
+  // The two byte-sized fields lead, so they share one word rather than each
+  // leaving a hole before the next, and sit inside the reach of Thumb's
+  // byte loads.
+  EnvelopeStage stage_;
+  // How many of chiff_draws_' fields are unspent.
+  uint8_t chiff_draws_left_;
+
   ADSR* adsr_;
 
   int32_t note_target_q30_[ENV_NUM_STAGES];
@@ -185,8 +192,6 @@ class Envelope {
   // No overshoot: the slope is pre-scaled by the block size.
   // Not cleared by a note, so bias motion stays smooth across one.
   int32_t bias_q31_;
-
-  EnvelopeStage stage_;
 
   // Nonzero for timed stages (attack/decay/release); doubles as the source
   // of the stage's nominal sample count. Zero for hold stages
@@ -202,10 +207,9 @@ class Envelope {
   // stage moves; it costs an exp2 table interpolation.
   int32_t stage_slew_rate_q31_;
 
-  // The current draw word and how many of its fields are unspent. The word IS
-  // the xorshift state, and both carry across runs.
+  // The current draw word. It IS the xorshift state, and it and
+  // chiff_draws_left_ carry across runs.
   uint32_t chiff_draws_;
-  uint8_t chiff_draws_left_;
 
   // DURATION is a time-based modulation of AMOUNT: the whole decay is this one
   // quantity falling to zero.
