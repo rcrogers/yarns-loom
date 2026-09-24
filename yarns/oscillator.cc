@@ -710,7 +710,10 @@ void Oscillator::RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix)
     // -25 dB over the rest of its range.
     const uint32_t widest_flat = (UINT32_MAX - phase_increment) >> 1;
     if (pw > widest_flat) pw = widest_flat;
-    uint32_t saw_width = UINT32_MAX - (pw << 1); // 0-100% width of up-ramp
+    // The slope divides by the width's high half, so the region must end where
+    // that half does: the ramp's last 65536 phase units would otherwise divide
+    // to more than full scale. The remainder joins the flat that follows.
+    uint32_t saw_width = (UINT32_MAX - (pw << 1)) & 0xffff0000; // 0-100% width of up-ramp
 
     bool self_reset = PhaseWrapped(phase, phase_increment);
     // One edge, the fall at the wrap: the ramp's two corners are slope breaks,
