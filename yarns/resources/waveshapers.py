@@ -39,6 +39,14 @@ violent_overdrive = numpy.tanh(32.0 * x)
 # overdrive = numpy.tanh(5.0 * x)
 # moderate_overdrive = numpy.tanh(2.0 * x)
 
+# A LIMITER, not an overdrive: out = ceiling * tanh(in / ceiling), which is
+# unity gain at zero and asymptotic to the ceiling. k pairs with the HEADROOM
+# the caller drives at -- k / tanh(k) == headroom makes the small-signal gain
+# exactly 1 -- so k = 4 is the curve for a caller whose domain reaches 4x its
+# ceiling. Beside violent_overdrive's tanh(32x), which saturates by 0.125 of
+# full scale and is a distortion rather than a limit.
+soft_limit = numpy.tanh(4.0 * x)
+
 # Wavefolder curves from the first version
 # tri_fold = numpy.abs(4.0 * x - numpy.round(4.0 * x)) * numpy.sign(x)
 # sine_fold = numpy.sin(5 * numpy.pi * x)
@@ -61,5 +69,6 @@ violent_overdrive = numpy.tanh(32.0 * x)
 
 # waveshapers.append(('moderate_overdrive', scale(moderate_overdrive)))
 waveshapers.append(('violent_overdrive', scale(violent_overdrive)))
+waveshapers.append(('soft_limit', scale(soft_limit)))
 # waveshapers.append(('sine_fold', scale(sine_fold, center=False)))
 # waveshapers.append(('tri_fold', scale(tri_fold)))

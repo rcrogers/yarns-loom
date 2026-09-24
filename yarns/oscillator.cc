@@ -34,6 +34,7 @@
 #include "stmlib/dsp/dsp.h"
 
 #include "yarns/resources.h"
+#include "yarns/utils.h"
 
 namespace yarns {
 
@@ -43,29 +44,87 @@ static const size_t kNumZones = 15;
 
 static const uint16_t kPitchTableStart = 116 * 128;
 static const uint16_t kOctave = 12 * 128;
+// SYNC's modulator frequency, as a multiple of the carrier's: _q3_12, so up
+// to 8x. The span TIMBRE asks for is 2.67 octaves, or 6.35x.
+static const int kSyncRatioFractionalBits = 12;
+// CZ's modulator frequency, as a multiple of the carrier's: _u5_10 on the
+// timbre channel, whose 15 bits the envelope guarantees non-negative, so up to
+// 32x. The map asks for 80x and is held to this, which is what bounds the
+// modulator below MIDI 72. Resolution is 3.5 cents at every pitch.
+static const int kCzRatioFractionalBits = 10;
+
+// The phase-distortion accumulator keeps 1 - 2^-this of itself every sample,
+// which bounds at 2^this a DC gain an ideal integrator leaves unbounded -- its
+// input carries a small pitch-dependent offset that would otherwise accumulate
+// without limit. A 28 Hz corner at this value, and the LARGEST shift the render
+// uses: it takes less than this as the note rises, never more.
+static const int kPdLeakyIntegratorShift = 8;
+// The widest damp the resonator shapes ask for: the format's own largest, which
+// is Chamberlin's fully damped end. u1.14 holds 1.99994, or Q 0.50002, against
+// a theoretical floor of Q 0.5 -- one LSB short of the whole useful range.
+static const uint32_t kWhistleDampMax_u1_14 = 32767;
+// Halvings of damp across TIMBRE, which is what takes the map to zero: the
+// widest damp shifted right this many times is nothing, and a damp of nothing is
+// a lossless resonator -- self-oscillation, which the timbre envelope sweeps
+// THROUGH at its peak rather than parking on.
+//
+// Sized to the 15-bit timbre SIGNAL, not to the 7-bit TIMBRE INIT knob. The knob
+// is one coarse contributor to that signal, and sizing the map to it would spend
+// the top of the range on values the envelope and the LFO can already reach.
+static const uint32_t kWhistleQOctaves = kEnvelopeSampleBits;
+
+// WHISTLE's drive law is a separate quantity from the map above, and it is
+// bounded where the map is not: the drive is a reciprocal at the output, so the
+// map's zero would divide by it.
+//   - the REFERENCE is the damp at which the drive is unity. It must be at
+//     least the widest the warp can ask for, or the drive exceeds one at the
+//     wide end and amplifies the excitation into the filter.
+//   - the FLOOR is where the drive stops following the map, and it is stated as
+//     the MAKE-UP's ceiling because that is the quantity that matters: the
+//     make-up is 1/drive, and an unbounded one reached 50x on the timbre
+//     envelope's slew and amplified whatever was still in the filter. A cap of
+//     2^this is a floor of reference >> 2*this.
+static const uint32_t kWhistleDriveReference_u1_14 = kWhistleDampMax_u1_14;
+static const uint32_t kWhistleDriveMakeUpBits = 4;
+static const uint32_t kWhistleDriveFloor_u1_14 =
+    kWhistleDampMax_u1_14 >> (2 * kWhistleDriveMakeUpBits);
+// The audio sample's peak: the magnitude the transfer gain is derived
+// against, and the width the fold knee is scaled in.
+static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
 static const uint32_t kTransferPeakPhase = 1u << (32 - 2);
 // Biased variants add a DC bias (after amplification) to shift the operating
 // point on the transfer function, creating asymmetric harmonic content.
 static const uint32_t kTransferAsymmetricBias = kTransferPeakPhase / 2;  // 1/8 cycle -- max asymmetry
+// Order of the carrier and transfer curves within the transfer shape enum.
+enum TransferCurve {
+  TRANSFER_CURVE_TRI,
+  TRANSFER_CURVE_SINE,
+  TRANSFER_CURVE_EXP
+};
 
 /* static */
-Oscillator::RenderFn Oscillator::fn_table_[] = {
+const Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderPhaseDistortionPulse,
-  &Oscillator::RenderPhaseDistortionPulse,
-  &Oscillator::RenderPhaseDistortionPulse,
-  &Oscillator::RenderPhaseDistortionPulse,
-  &Oscillator::RenderPhaseDistortionSaw,
-  &Oscillator::RenderPhaseDistortionSaw,
-  &Oscillator::RenderPhaseDistortionSaw,
-  &Oscillator::RenderPhaseDistortionSaw,
+  &Oscillator::RenderWhistle,
+  &Oscillator::RenderPing,
+  &Oscillator::RenderPing,
+  &Oscillator::RenderPing,
   &Oscillator::RenderLPPulse,
   &Oscillator::RenderLPSaw,
+  &Oscillator::RenderPhaseDistortionPulse,
+  &Oscillator::RenderPhaseDistortionPulse,
+  &Oscillator::RenderPhaseDistortionPulse,
+  &Oscillator::RenderPhaseDistortionPulse,
+  &Oscillator::RenderPhaseDistortionSaw,
+  &Oscillator::RenderPhaseDistortionSaw,
+  &Oscillator::RenderPhaseDistortionSaw,
+  &Oscillator::RenderPhaseDistortionSaw,
+  &Oscillator::RenderVariableSine,
   &Oscillator::RenderVariablePulse,
   &Oscillator::RenderVariableSaw,
   &Oscillator::RenderSawPulseMorph,
@@ -107,29 +166,79 @@ STATIC_ASSERT(
 void StateVariableFilter::Init() {
   SVF::Init();
   damp.Init();
+  cutoff.Init();
 }
 
-void StateVariableFilter::RenderInit(int16_t resonance_q_0_15) {
-  damp.SetTarget(DampFromResonance(resonance_q_0_15));
+void StateVariableFilter::RenderInitDamp(int16_t damp_u1_14) {
+  damp.SetTarget(damp_u1_14);
   damp.ComputeSlope();
 }
 
-void Oscillator::Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias) {
+void StateVariableFilter::RenderInitCutoff(int16_t cutoff_u15) {
+  cutoff.SetTarget(cutoff_u15);
+  cutoff.ComputeSlope();
+}
+
+void Oscillator::Refresh(int16_t pitch, uint16_t pitch_frac,
+                         int16_t timbre_bias, uint16_t gain_bias) {
   pitch_ = pitch;
   // if (shape_ >= OSC_SHAPE_FM) {
   //   pitch_ += lut_fm_carrier_corrections[shape_ - OSC_SHAPE_FM];
   // }
   CONSTRAIN(pitch_, 0, kHighestNote - 1);
   phase_increment_ = ComputePhaseIncrement(pitch_);
+  // A pitch unit is a factor 2^(1/1536), and pitch_frac is a 16-bit fraction of
+  // one -- linearised, which over a fraction of 1/128 of a semitone is exact to
+  // well under a count. 7573 is 256 * 65536 * (2^(1/1536) - 1). Refresh runs
+  // once a block, so the wide multiply keeps every bit for nothing.
+  phase_increment_ += static_cast<uint32_t>(
+      (static_cast<uint64_t>(phase_increment_ >> 16) * 7573 * pitch_frac) >> 24);
   raw_gain_bias_ = gain_bias;
   raw_timbre_bias_ = timbre_bias;
+}
+
+// The per-sample timbre is signed: NoteOn warps the destination, so a negative
+// TIMBRE MOD ENVELOPE puts one below zero. A map that reads it as an absolute
+// position -- a width, a cutoff, a damp -- answers its bottom there.
+//
+// A shape whose parameter is continuous through zero, a depth or an offset,
+// does not take this.
+static inline int16_t TimbreAtOrAboveZero(int16_t timbre) {
+  return timbre < 0 ? 0 : timbre;
+}
+
+// Damp from a resonance control, geometrically: every shape whose resonance is
+// variable reads this one map, so the control means the same thing in all of
+// them. The widest damp shifted right kWhistleQOctaves times is nothing, and
+// nothing is a lossless resonator -- the top of the control self-oscillates.
+//
+// The shift spreads the octaves over 2^kEnvelopeSampleBits and the domain is one
+// short of that, so the last unit would land a hair inside the final octave and
+// never reach zero. The correction is that shortfall.
+static int16_t DampFromResonance(int32_t resonance_u15) {
+  // Below the bottom of the map is the widest setting: the cast wraps a negative
+  // value into a shift of 65527, which lands on the same zero the TOP means, at
+  // the opposite end from where it was asked for.
+  if (resonance_u15 < 0) resonance_u15 = 0;
+  const uint32_t octaves_q16 =
+      ((static_cast<uint32_t>(resonance_u15) * kWhistleQOctaves)
+          << (16 - kEnvelopeSampleBits))
+      + (static_cast<uint32_t>(resonance_u15) >> 10);
+  const int32_t damp = static_cast<int32_t>(kWhistleDampMax_u1_14 * // 2^-octaves
+      Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16);
+  return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
 }
 
 int16_t Oscillator::WarpTimbre(
     int16_t timbre, OscillatorShape shape, int16_t pitch) const {
   // Limit cutoff range for filtered noise
   if (shape >= OSC_SHAPE_NOISE_NOTCH && shape <= OSC_SHAPE_NOISE_HP) {
-    int32_t cutoff_freq = 0x1000 + (timbre >> 1); // 1/8..5/8
+    // Off the bottom below timbre -8192, where 1/8 of the range has been
+    // subtracted away and the frequency goes negative -- which CutoffFromFreq
+    // then shifts left into its table index, so the cutoff lands wherever the
+    // wrap puts it. A negative TIMBRE MOD ENVELOPE reaches it: NoteOn warps the
+    // destination, which is only constrained to int16.
+    int32_t cutoff_freq = 0x1000 + (TimbreAtOrAboveZero(timbre) >> 1); // 1/8..5/8
     return SVF::CutoffFromFreq(cutoff_freq);
   }
 
@@ -142,33 +251,77 @@ int16_t Oscillator::WarpTimbre(
 
   // Phase distortion modulator tracks pitch
   if (shape >= OSC_SHAPE_CZ_PULSE_LP && shape <= OSC_SHAPE_CZ_SAW_HP) {
-    int16_t timbre_offset = timbre - 2048;
+    // int32, because timbre - 2048 leaves int16 below timbre -30720 and wraps
+    // positive there: the modulator jumps a whole map's width the wrong way,
+    // which a negative TIMBRE MOD ENVELOPE reaches. Widening keeps the sweep
+    // monotone instead of clamping it, because this map already runs below the
+    // carrier at low timbre -- the knob's own bottom is pitch - 648 -- so
+    // continuing down is what the control means.
+    int32_t timbre_offset = timbre - 2048;
     int32_t shifted_pitch = pitch + (timbre_offset >> 2) + (timbre_offset >> 4) + (timbre_offset >> 8);
     if (shifted_pitch >= kHighestNote) shifted_pitch = kHighestNote - 1;
-    return ComputePhaseIncrement(shifted_pitch) >> (32 - 15);
+    // The ratio is taken against a playable carrier, and the pitch handed in
+    // need not be one.
+    int32_t carrier_pitch = pitch;
+    CONSTRAIN(carrier_pitch, 0, kHighestNote - 1);
+    const uint32_t carrier =
+        ComputePhaseIncrement(static_cast<int16_t>(carrier_pitch));
+    const uint32_t modulator = ComputePhaseIncrement(
+        static_cast<int16_t>(shifted_pitch));
+    int32_t ratio = static_cast<int32_t>(DivU64ByU32(
+        modulator >> (32 - kCzRatioFractionalBits),
+        modulator << kCzRatioFractionalBits,
+        carrier));
+    CONSTRAIN(ratio, 0, kEnvelopeSampleMax);
+    return static_cast<int16_t>(ratio);
   }
 
   // Sync modulator tracks pitch
   if (shape >= OSC_SHAPE_SYNC_SINE && shape <= OSC_SHAPE_SYNC_SAW) {
     int32_t modulator_pitch = pitch + (timbre >> 3);
     CONSTRAIN(modulator_pitch, 0, kHighestNote - 1);
-    return ComputePhaseIncrement(modulator_pitch) >> (32 - 15);
+    // How many times the master's frequency, rather than the frequency itself.
+    // A frequency has to cover the whole audible range in fifteen bits, so its
+    // steps are worth 1/32768 of the top of that range wherever the note sits
+    // -- at a low note that is a third of a semitone. A multiple only has to
+    // cover this shape's own span, so one step is worth the same fraction of a
+    // semitone at every pitch.
+    const uint64_t scaled =
+        static_cast<uint64_t>(ComputePhaseIncrement(modulator_pitch))
+            << kSyncRatioFractionalBits;
+    return static_cast<int16_t>(DivU64ByU32(
+        static_cast<uint32_t>(scaled >> 32), static_cast<uint32_t>(scaled),
+        ComputePhaseIncrement(pitch)));
+  }
+
+  // TIMBRE is Q: the cutoff tracks the note, so the control tightens the ring
+  // instead of moving it. Carried as DAMP, geometrically, which is what lets
+  // the top of the control reach zero -- the shift runs out of bits before the
+  // exponential runs out of range, and zero damp is a lossless resonator.
+  if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_HP) {
+    return DampFromResonance(timbre);
   }
 
   if (
     shape == OSC_SHAPE_EXP_SINE ||
-    (shape >= OSC_SHAPE_SINE_THRU_SINE && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
+    (shape >= OSC_SHAPE_TRI_THRU_TRI && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
     shape >= OSC_SHAPE_FM
   ) {
+    // Below zero is the bottom of the fold, which is no fold. Two things go
+    // wrong without this: one path returns the timbre unchanged, so a negative
+    // reaches the transfer render and is shifted left there as a value its own
+    // name calls unsigned; and `knee + timbre` reaches ZERO at timbre == -knee,
+    // which is a signed divide by zero.
+    timbre = TimbreAtOrAboveZero(timbre);
     // Soft-knee compression: unity gain at low timbre, asymptotes to
     // pitch-dependent ceiling.  f(t) = knee * t / (knee + t), computed as
     // t - t^2/(knee + t) to avoid 32-bit overflow.
     //
     // Crest factor compensates for carrier/transfer steepness:
-    // sine=1, tri=2 (derivative discontinuities), expo=3 (peak slope).
+    // tri=2 (derivative discontinuities), sine=1, expo=3 (peak slope).
     // Combined factor is carrier * transfer.
     uint8_t crest_factor;
-    if (shape >= OSC_SHAPE_SINE_THRU_SINE &&
+    if (shape >= OSC_SHAPE_TRI_THRU_TRI &&
         shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
       crest_factor = transfer_crest_factor_;
     } else if (shape == OSC_SHAPE_EXP_SINE) {
@@ -178,12 +331,39 @@ int16_t Oscillator::WarpTimbre(
     }
     uint32_t max_folds = 0x80000000u / ComputePhaseIncrement(pitch) / crest_factor;
     if (max_folds > 0x80000u) return timbre;
-    int32_t knee = static_cast<int32_t>(max_folds << (15 - kTransferMaxGainBits));
+    int32_t knee = static_cast<int32_t>(max_folds << (kSamplePeakBits - kTransferMaxGainBits));
     if (knee <= 0) return 0;
     return timbre - (timbre * timbre / (knee + timbre));
   }
 
   return timbre;
+}
+
+const uint32_t kPhaseResetSaw[] = {
+  0, // Low-pass: -cos
+  0x40000000, // Peaking: sin
+  0x40000000, // Band-pass: sin
+  0x80000000, // High-pass: cos
+};
+
+const uint32_t kPhaseResetPulse[] = {
+  0x40000000,
+  0x80000000,
+  0x40000000,
+  0x80000000,
+};
+
+// What the wrap steps by. The window runs to zero before each reset and is full
+// after it, so the reset phase decides the jump alone -- evaluated from the
+// same expressions the loops use, at a full window, so the two cannot drift.
+static int32_t WrapStep(int32_t reset_carrier, bool signed_arm) {
+  // Unsigned for the same reason the low-pass arm is: the product is
+  // 65535 * 65535 at the corner, which does not fit int32.
+  return signed_arm
+      ? (UINT16_MAX * reset_carrier) >> 16
+      : static_cast<int32_t>(
+            (static_cast<uint32_t>(UINT16_MAX) *
+             static_cast<uint32_t>(reset_carrier + 32768)) >> 16);
 }
 
 void Oscillator::set_shape(OscillatorShape new_shape) {
@@ -197,13 +377,18 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   int32_t new_scale = WarpTimbre(midpoint_timbre, new_shape);
   timbre_envelope_.Rescale(new_scale, old_scale);
 
+  // The scale moves when the new shape sums its voices differently, and a
+  // held note should change shape without changing loudness.
+  gain_envelope_.Rescale(gain_envelope_peak_codes_u16(new_shape),
+                         gain_envelope_peak_codes_u16(shape_));
+
   shape_ = new_shape;
 
   transfer_crest_factor_ = 1;
-  if (new_shape >= OSC_SHAPE_SINE_THRU_SINE &&
+  if (new_shape >= OSC_SHAPE_TRI_THRU_TRI &&
       new_shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
-    static const uint8_t slope_factor[] = {1, 2, 3}; // sine, tri, expo
-    uint8_t index = new_shape - OSC_SHAPE_SINE_THRU_SINE;
+    static const uint8_t slope_factor[] = {2, 1, 3}; // tri, sine, expo
+    uint8_t index = new_shape - OSC_SHAPE_TRI_THRU_TRI;
     transfer_carrier_ = index % 3;
     transfer_function_ = index / 6;
     transfer_bias_ = (index % 6) >= 3 ? kTransferAsymmetricBias : 0;
@@ -211,8 +396,9 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
         * slope_factor[transfer_function_];
     // Halve max transfer gain when triangle is involved (carrier or transfer)
     // to compensate for its derivative discontinuities.
-    transfer_gain_shift_ = (transfer_carrier_ == 1 || transfer_function_ == 1)
-        ? 1 : 0;
+    transfer_gain_shift_ =
+        (transfer_carrier_ == TRANSFER_CURVE_TRI ||
+         transfer_function_ == TRANSFER_CURVE_TRI) ? 1 : 0;
   }
 }
 
@@ -235,52 +421,85 @@ uint32_t Oscillator::ComputePhaseIncrement(int16_t midi_pitch) const {
       (static_cast<int32_t>(b - a) * (ref_pitch & 0xf) >> 4);
   if (num_shifts > 0) phase_increment >>= num_shifts;
   else if (num_shifts < 0) {
-    num_shifts = std::min(__builtin_clzl(phase_increment), static_cast<int>(-num_shifts));
+    // __builtin_clz, NOT clzl: identical on target, where long is 32 bits,
+    // but clzl reads 32 too many on an LP64 host and the harnesses run there.
+    num_shifts = std::min(__builtin_clz(phase_increment), static_cast<int>(-num_shifts));
     phase_increment <<= num_shifts;
   }
   return phase_increment;
 }
 
-// Hot-path audio render. The three 128B sample buffers below are kept as
-// stack locals (not static) because stack-local access is measurably
-// faster in this tight loop across 4 simultaneously-triggered paraphonic
-// voices. The resulting 388B frame, plus the rest of the render call
-// chain, requires a stack reservation larger than the original 512B;
-// see yarns/stack_budget.h for the cumulative-stack accounting and
-// compile-time budget check.
+// Both envelopes are evaluated up-front into stack buffers, then the wave
+// render reads gain per sample and multiply-accumulates into audio_mix. The
+// buffers are stack locals.
 void Oscillator::Render(int16_t* audio_mix) {
-  int16_t timbre_samples[kAudioBlockSize] = {0};
+  // Skipping zero-init: both buffers are fully overwritten by the
+  // envelope renders below.
+  // Timbre at [p], gain at [p + kAudioBlockSize]: one pointer walks both, and
+  // every register held here is one the shape cannot have.
+  int16_t timbre_gain[2 * kAudioBlockSize];
+  // The shapes are handed the WHOLE array and index the gain half off it, so
+  // what they take is input_samples, not either half by itself.
+  int16_t* input_samples = &timbre_gain[0];
+  int16_t* gain_samples = &timbre_gain[kAudioBlockSize];
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
-  timbre_envelope_.RenderSamples(timbre_samples, timbre_bias << 16);
+  timbre_envelope_.RenderSamples(
+    input_samples, static_cast<int32_t>(static_cast<uint32_t>(timbre_bias) << 16));
+
+  int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
+  gain_envelope_.RenderSamples(
+    gain_samples, static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16));
 
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
-  int16_t audio_samples[kAudioBlockSize] = {0};
-  (this->*fn)(timbre_samples, audio_samples);
-
-  int16_t gain_samples[kAudioBlockSize] = {0};
-  int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
-  gain_envelope_.RenderSamples(gain_samples, gain_bias << 16);
-
-  q15_multiply_accumulate<kAudioBlockSize>(gain_samples, audio_samples, audio_mix);
+  (this->*fn)(input_samples, audio_mix);
 }
 
-#define RENDER_CORE(...) \
-  int16_t next_sample = next_sample_; \
+// Gain is read at input_samples[kAudioBlockSize], which is why there is no
+// second parameter for it.
+//
+// Per-sample MAC into audio_mix: mix[i] += (this_sample * gain[i]) >> 15.
+// The product shift folds into ARM's barrel-shifted ADD operand
+// (add r, mix, prod, asr #15).
+// The scaffolding every shape shares: the BLEP carry, the timbre read, and the
+// single walk down both halves. The caller supplies mix_term because shapes
+// differ in where they spend the gain envelope -- those that amplify their
+// output by it take the wrapper below, and the resonators spend it on the way
+// into what rings, so theirs is this_sample as it stands.
+#define RENDER_CORE(mix_term, ...) \
+  int32_t next_sample = next_sample_; \
   for (size_t size = kAudioBlockSize; size--;) { \
-    int16_t timbre = *timbre_samples++; \
-    int16_t this_sample = next_sample; \
+    int16_t timbre = input_samples[0]; \
+    int32_t this_sample = next_sample; \
     next_sample = 0; \
     __VA_ARGS__ \
-    *audio_samples++ = this_sample; \
+    /* Wide through the body: a band-limited edge overshoots the step it \
+       corrects, and the correction's two halves only cancel that step if \
+       neither wraps. Both mix terms are 16 bits -- the resonators' is \
+       this_sample itself, and this_sample * gain >> 15 is at most \
+       this_sample -- so it narrows here, saturating. */ \
+    CONSTRAIN(this_sample, -32768, 32767) \
+    int32_t mixed = (mix_term); \
+    ++input_samples; \
+    *audio_mix = static_cast<int16_t>(*audio_mix + mixed); \
+    ++audio_mix; \
   } \
   next_sample_ = next_sample; \
+
+// Declared after the body so it sits against the mix term that spends it:
+// hoisted to the top of the loop it is live across every shape's body, which
+// costs 96 bytes across thirteen of them and buys nothing.
+#define RENDER_WITH_GAIN_AMPLIFYING_OUTPUT(...) \
+  RENDER_CORE( \
+    (static_cast<int32_t>(this_sample) * gain) >> 15, \
+    __VA_ARGS__ \
+    const int16_t gain = input_samples[kAudioBlockSize];) \
 
 #define RENDER_PERIODIC(...) \
   uint32_t phase = phase_; \
   uint32_t phase_increment = phase_increment_; \
-  RENDER_CORE( \
+  RENDER_WITH_GAIN_AMPLIFYING_OUTPUT( \
     phase += phase_increment; \
     __VA_ARGS__ \
   ) \
@@ -293,17 +512,44 @@ void Oscillator::Render(int16_t* audio_mix) {
   RENDER_PERIODIC(__VA_ARGS__); \
   modulator_phase_ = modulator_phase; \
 
+// True on the sample a phase accumulator wrapped, which happens at a rate of
+// phase_increment / 2^32. tools/osc_cycles.py locates these by source line and
+// charges what they guard at that rate.
+static inline bool PhaseWrapped(uint32_t phase, uint32_t phase_increment) {
+  return phase < phase_increment;
+}
+
+// How far into this sample the edge fell, in 0..65535: the phase past the edge
+// against the phase one sample covers.
+//
+// The fast form divides by the increment's high half, which rounds to zero for
+// a modulator advancing less than 65536 phase units a sample -- reachable when
+// a negative TIMBRE MOD ENVELOPE collapses the sync ratio while the follower
+// sits within one increment of its wrap. UDIV answers zero for a zero divisor,
+// which lands a half-scale BLEP where none belongs. Below the threshold the
+// division runs at full width: the numerator is under one increment there, so
+// the shift has room, and a zero increment takes the same arm as an edge a
+// whole sample old.
+static inline uint32_t EdgeTime(
+    uint32_t phase_past_edge, uint32_t phase_increment) {
+  if (phase_increment >= (1 << 16)) {
+    return phase_past_edge / (phase_increment >> 16);
+  }
+  if (phase_past_edge >= phase_increment) return UINT16_MAX;
+  return (phase_past_edge << 16) / phase_increment;
+}
+
 #define EDGES_SAW(ph, ph_incr) \
   if (!self_reset) break; \
   self_reset = false; \
-  uint32_t t = ph / (ph_incr >> 16); \
+  uint32_t t = EdgeTime(ph, ph_incr); \
   this_sample -= ThisBlepSample(t); \
   next_sample -= NextBlepSample(t); \
 
 #define EDGES_PULSE(ph, ph_incr) \
   if (!high_) { \
     if (ph < pw) break; \
-    uint32_t t = (ph - pw) / (ph_incr >> 16); \
+    uint32_t t = EdgeTime(ph - pw, ph_incr); \
     this_sample += ThisBlepSample(t); \
     next_sample += NextBlepSample(t); \
     high_ = true; \
@@ -311,22 +557,44 @@ void Oscillator::Render(int16_t* audio_mix) {
   if (high_) { \
     if (!self_reset) break; \
     self_reset = false; \
-    uint32_t t = ph / (ph_incr >> 16); \
+    uint32_t t = EdgeTime(ph, ph_incr); \
     this_sample -= ThisBlepSample(t); \
     next_sample -= NextBlepSample(t); \
     high_ = false; \
   }
 
+// The carrier is what carries the fraction, so a gliding note moves the
+// modulator with it. The clamp is the range in envelope.h and nothing else:
+// every value in it must produce a product this width holds.
 #define SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE \
-  uint32_t modulator_phase_increment = timbre << (32 - 15);
+  uint32_t modulator_phase_increment = carrier_increment_u22 * \
+      static_cast<uint32_t>( \
+          static_cast<uint32_t>(timbre) < widest_ratio_u5_10 \
+              ? static_cast<uint32_t>(timbre) : widest_ratio_u5_10);
+
+// The carrier scaled to pair with a raw ratio, and the widest ratio whose
+// product with it still fits. Both fall out of the width; how high the
+// modulator may go is a question about sound, and WarpTimbre answers it.
+#define SET_CZ_RATIO_LIMITS \
+  const uint32_t carrier_increment_u22 = \
+      phase_increment_ >> kCzRatioFractionalBits; \
+  const uint32_t widest_ratio_u5_10 = carrier_increment_u22 \
+      ? UINT32_MAX / carrier_increment_u22 : UINT32_MAX;
+
+// SYNC's timbre is a multiple of the carrier's frequency, so the modulator's
+// increment is the carrier's scaled by it.
+#define SET_MODULATOR_PHASE_INCREMENT_FROM_RATIO \
+  uint32_t modulator_phase_increment = static_cast<uint32_t>( \
+      (static_cast<uint64_t>(phase_increment) * \
+       static_cast<uint32_t>(timbre)) >> kSyncRatioFractionalBits);
 
 #define SYNC(discontinuity_code, edges_code, extra_transition_code) \
   bool sync_reset = false; \
   bool self_reset = false; \
   bool transition_during_reset = false; \
   uint32_t reset_time = 0; \
-  SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE; \
-  if (phase < phase_increment) { \
+  SET_MODULATOR_PHASE_INCREMENT_FROM_RATIO; \
+  if (PhaseWrapped(phase, phase_increment)) { \
     sync_reset = true; \
     reset_time = FractionU32(phase, phase_increment) >> 16; \
     uint32_t modulator_phase_at_reset = modulator_phase + \
@@ -339,64 +607,93 @@ void Oscillator::Render(int16_t* audio_mix) {
     next_sample += discontinuity * NextBlepSample(reset_time) >> 15; \
   } \
   modulator_phase += modulator_phase_increment; \
-  self_reset = modulator_phase < modulator_phase_increment; \
+  self_reset = PhaseWrapped(modulator_phase, modulator_phase_increment); \
   /* Block additional BLEP if modulator was reset by master alone */ \
   bool reset_by_master_only = sync_reset && !transition_during_reset; \
-  while (!reset_by_master_only) { \
-    edges_code; \
+  /* HOISTED BY HAND, because -fno-move-loop-invariants means GCC will not:
+   * nothing in edges_code writes reset_by_master_only, so the test was
+   * loop-invariant and re-run every edge, and the value had to stay live
+   * across a body that already spills. The loop only ever leaves by break,
+   * so guarding it is the same program. */ \
+  if (!reset_by_master_only) { \
+    while (true) { \
+      edges_code; \
+    } \
   } \
   if (sync_reset) { \
     modulator_phase = reset_time * (modulator_phase_increment >> 16); \
     high_ = false; \
   } \
 
-void Oscillator::RenderLPPulse(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderLPPulse(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInit(0x7fff);
+  svf.RenderInitDamp(126); // Q 130: a sharp peak, 19x the saw's
   uint32_t pw = 0x80000000;
   RENDER_PERIODIC(
-    bool self_reset = phase < phase_increment;
+    bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_PULSE(phase, phase_increment) }
     next_sample += phase < pw ? 0 : 0x7fff;
-    svf.RenderSample(this_sample, timbre);
-    this_sample = svf.lp;
+    this_sample = svf.RenderSample<SVF_LP>(this_sample, timbre);
   )
   svf_ = svf;
 }
 
-void Oscillator::RenderLPSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderLPSaw(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInit(0x6000);
+  svf.RenderInitDamp(2391); // Q 6.9: a gentle one, against the pulse's 130
   RENDER_PERIODIC(
-    bool self_reset = phase < phase_increment;
+    bool self_reset = PhaseWrapped(phase, phase_increment);
     while (true) { EDGES_SAW(phase, phase_increment) }
     next_sample += phase >> 17;
-    svf.RenderSample(this_sample, timbre);
-    this_sample = svf.lp;
+    this_sample = svf.RenderSample<SVF_LP>(this_sample, timbre);
   )
   svf_ = svf;
 }
 
-void Oscillator::RenderVariablePulse(int16_t* timbre_samples, int16_t* audio_samples) {
+// One cycle compressed into `width` of the period, then held at the value the
+// cycle ends on, which for a sine is zero. Nothing is discontinuous at either
+// end, so there is no edge to BLEP: what TIMBRE sweeps is a formant over the
+// silence.
+void Oscillator::RenderVariableSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
-    timbre = timbre + (timbre >> 1); // 3/4
-    uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo, timbre)) << 15; // 50-0%
-    bool self_reset = phase < phase_increment;
-    while (true) { EDGES_PULSE(phase, phase_increment) }
-    next_sample += phase < pw ? 0 : 0x7fff;
-    this_sample = (this_sample - 0x4000) << 1;
+    // The formant sits at 1/width the fundamental, which is what the knob
+    // chooses. Squared, so the onset is gentle: the bottom quarter of the knob
+    // stays within 12% of a plain sine. Half the table puts the top at 8.4x,
+    // under Nyquist to MIDI 100.
+    timbre = TimbreAtOrAboveZero(timbre);
+    uint16_t index = static_cast<uint16_t>(timbre * timbre >> 15);
+    uint16_t width = UINT16_MAX - Interpolate88(lut_env_expo_u16, index); // 100-12%
+    // A width of zero fails the compare rather than reaching the divide.
+    this_sample = (phase >> 16) < width ? sine((phase / width) << 16) : 0;
   )
 }
 
-void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
-    bool self_reset = phase < phase_increment;
-    while (true) { EDGES_SAW(phase, phase_increment) }
+    timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1); // 3/4
-    uint16_t saw_width = UINT16_MAX - Interpolate88(lut_env_expo, timbre); // 100-0%
+    uint32_t pw = (UINT16_MAX - Interpolate88(lut_env_expo_u16, timbre)) << 15; // 50-0%
+    bool self_reset = PhaseWrapped(phase, phase_increment);
+    while (true) { EDGES_PULSE(phase, phase_increment) }
+    next_sample += phase < pw ? 0 : 0x7fff;
+    // * 2 and not << 1: the value is signed and negative below 0x4000,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 0x4000) * 2;
+  )
+}
+
+void Oscillator::RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix) {
+  RENDER_PERIODIC(
+    bool self_reset = PhaseWrapped(phase, phase_increment);
+    while (true) { EDGES_SAW(phase, phase_increment) }
+    timbre = TimbreAtOrAboveZero(timbre);
+    timbre = timbre + (timbre >> 1); // 3/4
+    uint16_t saw_width = UINT16_MAX - Interpolate88(lut_env_expo_u16, timbre); // 100-0%
     if ((phase >> 16) < saw_width) next_sample += (phase / saw_width) >> 1;
     else next_sample += 0x7fff;
-    this_sample = (this_sample - 0x4000) << 1;
+    // * 2 and not << 1: the value is signed and negative below 0x4000,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 0x4000) * 2;
   )
 }
 
@@ -404,27 +701,42 @@ void Oscillator::RenderVariableSaw(int16_t* timbre_samples, int16_t* audio_sampl
 // flats + slope of up-ramp
 //
 // ⟋|⟋| -> _/‾|_/‾| -> _|‾|_|‾|
-void Oscillator::RenderSawPulseMorph(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     // Prevent saw from reaching an infinitely steep rise, else we'd have to
     // clumsily transition into a BLEP of what is now a rising pulse edge
+    timbre = TimbreAtOrAboveZero(timbre);
     timbre = timbre + (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + (timbre >> 4); // 31/32
 
     // Exponential timbre curve, biased high
-    uint32_t pw = Interpolate88(lut_env_expo, timbre) << 15; // 0-50% width of each flat part
-    uint32_t saw_width = UINT32_MAX - (pw << 1); // 0-100% width of up-ramp
+    uint32_t pw = Interpolate88(lut_env_expo_u16, timbre) << 15; // 0-50% width of each flat part
+    // The ramp may not rise in less than a sample. Below that it is a step, and
+    // the BLEP below corrects the falling edge only -- at MIDI 97 the top of
+    // the knob rose in 0.14 samples and the shape aliased at -4.1 dB against
+    // -25 dB over the rest of its range.
+    const uint32_t widest_flat = (UINT32_MAX - phase_increment) >> 1;
+    if (pw > widest_flat) pw = widest_flat;
+    // The slope divides by the width's high half, so the region must end where
+    // that half does: the ramp's last 65536 phase units would otherwise divide
+    // to more than full scale. The remainder joins the flat that follows.
+    uint32_t saw_width = (UINT32_MAX - (pw << 1)) & 0xffff0000; // 0-100% width of up-ramp
 
-    bool self_reset = phase < phase_increment;
-    // BLEP falling pulse edge only
-    while (self_reset) { EDGES_PULSE(phase, phase_increment) }
+    bool self_reset = PhaseWrapped(phase, phase_increment);
+    // One edge, the fall at the wrap: the ramp's two corners are slope breaks,
+    // which need no step correction. EDGES_PULSE was inert here -- its rising
+    // arm broke on `phase < pw` at every wrap, and where pw is zero its two
+    // corrections cancelled -- so this shape was not band-limited at all.
+    while (true) { EDGES_SAW(phase, phase_increment) }
     if (phase < pw) next_sample += 0;
     else if (phase < pw + saw_width) next_sample += ((phase - pw) / (saw_width >> 16)) >> 1;
     else next_sample += 0x7fff;
-    this_sample = (this_sample - 0x4000) << 1;
+    // * 2 and not << 1: the value is signed and negative below 0x4000,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 0x4000) * 2;
   )
 }
 
-void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSyncSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       sine(0) - sine(modulator_phase_at_reset),
@@ -432,11 +744,13 @@ void Oscillator::RenderSyncSine(int16_t* timbre_samples, int16_t* audio_samples)
       false // No extra transition
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
-    this_sample = sine(modulator_phase);
+    // Accumulate, do not assign: this_sample arrives holding the BLEP residual
+    // SYNC wrote a line ago. Only a shape with no discontinuity may assign.
+    next_sample += sine(modulator_phase);
   )
 }
 
-void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix) {
   uint32_t pw = 0x80000000;
   RENDER_MODULATED(
     SYNC(
@@ -445,11 +759,13 @@ void Oscillator::RenderSyncPulse(int16_t* timbre_samples, int16_t* audio_samples
       !high_ && modulator_phase_at_reset >= pw
     );
     next_sample += modulator_phase < pw ? 0 : 32767;
-    this_sample = (this_sample - 16384) << 1;
+    // * 2 and not << 1: the value is signed and negative below 16384,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 16384) * 2;
   )
 }
 
-void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSyncTriangle(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       triangle(0) - triangle(modulator_phase_at_reset),
@@ -457,11 +773,11 @@ void Oscillator::RenderSyncTriangle(int16_t* timbre_samples, int16_t* audio_samp
       false // No extra transition
     );
     (void) transition_during_reset; (void) sync_reset; (void) self_reset;
-    this_sample = triangle(modulator_phase);
+    next_sample += triangle(modulator_phase);
   )
 }
 
-void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_MODULATED(
     SYNC(
       0 - (modulator_phase_at_reset >> 17),
@@ -469,11 +785,13 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
       false // No extra transition
     );
     next_sample += modulator_phase >> 17;
-    this_sample = (this_sample - 16384) << 1;
+    // * 2 and not << 1: the value is signed and negative below 16384,
+    // and shifting a negative left is undefined. Same instruction.
+    this_sample = (this_sample - 16384) * 2;
   )
 }
 
-// void Oscillator::RenderFoldTriangle(int16_t* timbre_samples, int16_t* audio_samples) {
+// void Oscillator::RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix) {
 //   RENDER_PERIODIC(
 //     this_sample = triangle(phase);
 //     this_sample = this_sample * timbre >> 15;
@@ -481,7 +799,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
 //   )
 // }
 
-// void Oscillator::RenderFoldSine(int16_t* timbre_samples, int16_t* audio_samples) {
+// void Oscillator::RenderFoldSine(int16_t* input_samples, int16_t* audio_mix) {
 //   RENDER_PERIODIC(
 //     this_sample = sine(phase);
 //     this_sample = this_sample * timbre >> 15;
@@ -489,7 +807,7 @@ void Oscillator::RenderSyncSaw(int16_t* timbre_samples, int16_t* audio_samples) 
 //   )
 // }
 
-void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderTanhSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     this_sample = sine(phase);
     int16_t baseline = this_sample >> 6;
@@ -498,7 +816,7 @@ void Oscillator::RenderTanhSine(int16_t* timbre_samples, int16_t* audio_samples)
   )
 }
 
-void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderExponentialSine(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff; // Use top 7/8
     int16_t sine_sample = sine(phase);
@@ -513,7 +831,6 @@ void Oscillator::RenderExponentialSine(int16_t* timbre_samples, int16_t* audio_s
 }
 
 
-static const int kSampleBits = 15; // int16_t peak ≈ 2^15
 
 
 // Transfer waveshaping: input sample is amplified and used as phase for a
@@ -534,7 +851,7 @@ inline uint32_t amplify_for_transfer(
   //   2^15 * min_gain * 2^4 = 2^30 - bias
   //   min_gain = (2^30 - bias) >> 19
   int32_t min_gain =
-      (kTransferPeakPhase - bias) >> (kSampleBits + kTransferMaxGainBits);
+      (kTransferPeakPhase - bias) >> (kSamplePeakBits + kTransferMaxGainBits);
 
   int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
 
@@ -544,39 +861,53 @@ inline uint32_t amplify_for_transfer(
   return amped_sample + bias;
 }
 
-void Oscillator::RenderTransfer(int16_t* timbre_samples, int16_t* audio_samples) {
-  uint8_t carrier_index = transfer_carrier_;
-  uint8_t transfer_index = transfer_function_;
+void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
+  const uint8_t carrier_index = transfer_carrier_;
+  const uint8_t transfer_index = transfer_function_;
   uint32_t bias = transfer_bias_;
   uint8_t gain_shift = transfer_gain_shift_;
-  // int16_t prev_raw = prev_transfer_raw_;
-  // int16_t prev_avg = prev_transfer_avg_;
-  // Cascaded boxcar (triangular window {1/4, 1/2, 1/4}) anti-aliasing:
-  // double null at Nyquist, -6dB at Nyquist/2.
-  RENDER_PERIODIC(
-    switch (carrier_index) {
-      case 0: this_sample = sine(phase); break;
-      case 1: this_sample = triangle(phase); break;
-      case 2: this_sample = expo(phase); break;
-    }
-    uint32_t transfer_phase =
-        amplify_for_transfer(this_sample, timbre >> gain_shift, bias);
-    switch (transfer_index) {
-      case 0: this_sample = sine(transfer_phase); break;
-      case 1: this_sample = triangle(transfer_phase); break;
-      case 2: this_sample = expo(transfer_phase); break;
-    }
-    // int16_t raw = this_sample;
-    // int16_t avg = (raw + prev_raw) >> 1;
-    // this_sample = (avg + prev_avg) >> 1;
-    // prev_raw = raw;
-    // prev_avg = avg;
+  // The shape is fixed for the whole block, so the choice is made here and the
+  // loop carries no dispatch. It used to switch twice per sample on indices set
+  // before the loop, which fragmented the body into basic blocks joined by
+  // taken branches.
+  //
+  // Sine and expo are the same code with a different quadrant table, so that
+  // choice is a pointer. Triangle is separate code, so the specialisation is
+  // 2x2: one loop per (carrier is triangle?, transfer is triangle?).
+  // Both indices come from `% 3` and `/ 6`, so neither can leave [0, 2].
+  const uint16_t* carrier_table =
+      carrier_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
+  const uint16_t* transfer_table =
+      transfer_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
+
+#define TRANSFER_LOOP(CARRIER, TRANSFER) \
+  RENDER_PERIODIC( \
+    this_sample = CARRIER; \
+    uint32_t transfer_phase = \
+        amplify_for_transfer(this_sample, timbre >> gain_shift, bias); \
+    this_sample = TRANSFER; \
   )
-  // prev_transfer_raw_ = prev_raw;
-  // prev_transfer_avg_ = prev_avg;
+
+  if (carrier_index == TRANSFER_CURVE_TRI) {
+    if (transfer_index == TRANSFER_CURVE_TRI) {
+      TRANSFER_LOOP(triangle(phase), triangle(transfer_phase))
+    } else {
+      TRANSFER_LOOP(triangle(phase),
+                    quadrant_lookup(transfer_table, transfer_phase))
+    }
+  } else {
+    if (transfer_index == TRANSFER_CURVE_TRI) {
+      TRANSFER_LOOP(quadrant_lookup(carrier_table, phase),
+                    triangle(transfer_phase))
+    } else {
+      TRANSFER_LOOP(quadrant_lookup(carrier_table, phase),
+                    quadrant_lookup(transfer_table, transfer_phase))
+    }
+  }
+#undef TRANSFER_LOOP
 }
 
-void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderFM(int16_t* input_samples, int16_t* audio_mix) {
   uint8_t fm_shape = shape_ - OSC_SHAPE_FM;
   int16_t interval = lut_fm_modulator_intervals[fm_shape];
   uint32_t modulator_phase_increment = ComputePhaseIncrement(pitch_ + interval);
@@ -597,22 +928,34 @@ void Oscillator::RenderFM(int16_t* timbre_samples, int16_t* audio_samples) {
   )
 }
 
-const uint32_t kPhaseResetSaw[] = {
-  0, // Low-pass: -cos
-  0x40000000, // Peaking: sin
-  0x40000000, // Band-pass: sin
-  0x80000000, // High-pass: cos
-};
-
-const uint32_t kPhaseResetPulse[] = {
-  0x40000000,
-  0x80000000,
-  0x40000000,
-  0x80000000,
-};
-
-void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix) {
+  // Forces GCC to keep the table's address in a register, which it otherwise
+  // reloads every sample. Worth two cycles a sample here.
+  const uint16_t* sine_table = lut_sine_quadrant_u16;
+  asm volatile ("" : "+r"(sine_table));
+  SET_CZ_RATIO_LIMITS
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_PULSE_LP;
+  const bool output_is_pulse = filter_type & 2;
+  // The step belongs to the pulse. The integrator turns a step in its input into
+  // a change of slope, so the low-pass output steps by none of it and the
+  // peaking output by half -- and half is zero here, since peaking resets at a
+  // half turn, where the sine is zero. High-pass resets there too.
+  const int32_t wrap_step = output_is_pulse
+      ? WrapStep(sine(kPhaseResetPulse[filter_type]), true) : 0;
+  // The accumulator's 1/f gain lifts whatever sits nearest DC, and what sits
+  // there is a harmonic past Nyquist folded back -- so the corner follows the
+  // note, which attenuates hardest exactly where the lift is greatest. `clz` is
+  // log2 of the increment, landing the corner between f0/3.3 and f0/4.7; the
+  // spread is the shift moving a whole octave at a time.
+  //
+  // A min, not an assignment: a larger shift is a lower corner, and `clz`
+  // exceeds kPdLeakyIntegratorShift below MIDI 48, which would put the corner
+  // under the 28 Hz that constant sets.
+  //   - it cannot reach zero, where the accumulator would keep none of itself
+  //     and stop integrating: the increment cannot reach 2^31, so `clz` is at
+  //     least 1.
+  const int leaky_integrator_shift =
+      std::min(__builtin_clz(phase_increment_), kPdLeakyIntegratorShift);
   int32_t integrator = pd_square_.integrator;
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
@@ -620,16 +963,33 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* au
     if ((phase << 1) < (phase_increment << 1)) {
       pd_square_.polarity = !pd_square_.polarity;
       modulator_phase = kPhaseResetPulse[filter_type];
+      // The window resets twice a period, so the edge is timed against the
+      // doubled phase the test above uses. The polarity has just flipped, and
+      // it decides which way this reset jumps.
+      const uint32_t t = EdgeTime(phase << 1, phase_increment << 1);
+      const int32_t step = pd_square_.polarity ? -wrap_step : wrap_step;
+      this_sample += ThisBlepSample(t) * step >> 16;
+      next_sample += NextBlepSample(t) * step >> 16;
     }
-    int16_t carrier = sine(modulator_phase);
+    int16_t carrier = quadrant_lookup(sine_table, modulator_phase);
     uint16_t window = ~(phase >> 15); // Double saw
     int16_t pulse = (carrier * window) >> 16;
     if (pd_square_.polarity) pulse = -pulse;
     uint16_t integrator_gain = modulator_phase_increment >> 16; // Orig 14
-    integrator += (pulse * integrator_gain) >> 14; // Orig 16
+    // An ideal integrator has infinite gain at DC, and its input is not quite
+    // zero-mean: the two half-periods hold different numbers of samples, so the
+    // polarity flip cannot cancel them exactly, and an unbounded integrator
+    // accumulates the difference without limit. The leak caps the DC gain at
+    // 2^kPdLeakyIntegratorShift -- a 28 Hz corner, below every note but the
+    // lowest few.
+    //
+    // Rounded, not truncated: an arithmetic shift is a floor, which biases a
+    // zero-mean signal by exactly half a count every sample.
+    integrator -= integrator >> leaky_integrator_shift;
+    integrator += (pulse * integrator_gain + (1 << 13)) >> 14; // Orig 16
     CLIP(integrator)
     int16_t output;
-    if (filter_type & 2) { // Band- or high-pass
+    if (output_is_pulse) {
       output = pulse;
     } else {
       // TODO HP is 2dB above LP, which is 2dB above PK
@@ -638,32 +998,245 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* timbre_samples, int16_t* au
         output = (pulse + integrator) >> 1;
       }
     }
-    this_sample = output;
+    // A sample ahead, like the saw below and every other BLEP shape here: the
+    // correction is split across this_sample and next_sample and only lands on
+    // the edge if the waveform is delayed to match.
+    next_sample += output;
   )
   pd_square_.integrator = integrator;
 }
 
-void Oscillator::RenderPhaseDistortionSaw(int16_t* timbre_samples, int16_t* audio_samples) {
+void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix) {
+  SET_CZ_RATIO_LIMITS
   uint8_t filter_type = shape_ - OSC_SHAPE_CZ_SAW_LP;
+  // Band- and high-pass take the signed arm; the other two carry a DC pedestal.
+  // Which arm it is decides both the output and the size of the wrap's step.
+  const bool signed_arm = filter_type & 2;
+  const int32_t wrap_step =
+      WrapStep(sine(kPhaseResetSaw[filter_type]), signed_arm);
   RENDER_MODULATED(
     SET_MODULATOR_PHASE_INCREMENT_FROM_TIMBRE;
     modulator_phase += modulator_phase_increment;
-    if (phase < phase_increment) {
+    if (PhaseWrapped(phase, phase_increment)) {
       modulator_phase = kPhaseResetSaw[filter_type];
+      // Added, not subtracted: this ramp falls and the wrap steps UP.
+      const uint32_t t = EdgeTime(phase, phase_increment);
+      this_sample += ThisBlepSample(t) * wrap_step >> 16;
+      next_sample += NextBlepSample(t) * wrap_step >> 16;
     }
     int16_t carrier = sine(modulator_phase);
     uint16_t window = ~(phase >> 16); // Saw
     int16_t output;
-    if (filter_type & 2) { // Band- or high-pass
+    if (signed_arm) {
       output = (window * carrier) >> 16;
     } else {
-      output = (window * (carrier + 32768) >> 16) - 32768;
+      // Unsigned: the product needs all 32 bits, and signed overflow is
+      // undefined. carrier is biased into range and the bias taken off after.
+      output = (static_cast<uint32_t>(window) * (carrier + 32768) >> 16) - 32768;
     }
-    this_sample = output;
+    // Written a sample ahead, and emitted next time round. The correction above
+    // is split across this_sample and next_sample, so it only lands on the edge
+    // if the waveform is delayed the same way every other BLEP shape here
+    // delays it. Assigning this_sample instead put the two halves a sample away
+    // from the step and made the aliasing worse, not better.
+    next_sample += output;
   )
 }
 
-void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples) {
+// Below this the cutoff coefficient stops tracking and the resonance is the
+// only pitch the shape has: at MIDI 24 the peak sits at 43.9 Hz for a note of
+// 32.7.
+// The soft limiter's curve reaches this many times the scale, so an excursion of
+// up to that much is compressed instead of clipped. The curve is tanh(k*x)
+// with k equal to this, which is what makes its gain 1 for small signals, so
+// changing one means changing the other. yarns/resources/waveshapers.py
+// generates the table.
+static const int32_t kSoftLimitHeadroom = 4;
+// GCC re-materialises the table's address where it is read -- once per entry,
+// so twice a sample inside SoftLimit. The blackbox pins it to a register
+// instead, and SoftLimit takes it as a parameter so this can be the caller's.
+//
+// Where to call it is measured, not free. Above the loop it holds a register
+// across everything else in there: WHISTLE is 68 cycles a sample hoisted and 74
+// at the call site, and PING is 64 at the call site and 74 hoisted.
+static inline const int16_t* SoftLimitTableAsRegister() {
+  const int16_t* curve = ws_soft_limit;
+  asm volatile ("" : "+r"(curve));
+  return curve;
+}
+
+// The curve's domain: the state scaled so the loudest one the shape can make
+// lands at the top of the table. In whatever Q state_to_output is in -- the
+// product leaves int32 for WHISTLE's, so it is taken 64 bits wide.
+static int32_t StateIntoCurve(int32_t state_to_output, int32_t scale) {
+  return static_cast<int32_t>(DivU64ByU32(
+      stmlib::MulU32(static_cast<uint32_t>(state_to_output), INT16_MAX),
+      static_cast<uint32_t>(state_to_output) * INT16_MAX,
+      static_cast<uint32_t>(scale) * kSoftLimitHeadroom));
+}
+
+static inline int32_t SoftLimit(
+    const int16_t* curve, int32_t state_in_curve, int32_t scale_u15) {
+  const uint16_t index = static_cast<uint16_t>(state_in_curve + 32768);
+  // Interpolate88's body, off ONE pointer and without its narrowing return.
+  // The result lies between two entries of a table that fits int16, so the
+  // narrowing cannot bite, and it costs a round trip through the stack in the
+  // sample loop.
+  const int16_t* entry = &curve[index >> 8];
+  const int32_t below = entry[0];
+  const int32_t above = entry[1];
+  return (below + ((above - below) * (index & 0xff) >> 8)) * scale_u15 >> 15;
+}
+
+// Where the pitch term below reads zero octaves, and so the level it hands
+// back is the whole of level_into_knee_u15. It only ever ATTENUATES -- the
+// octaves are floored at zero and spent as a right shift -- so notes under it
+// are handed the same level as it, and it sits low enough that few are.
+//
+// How low is bounded by the knee, not by taste: moving it down an octave costs
+// the knee half an octave of level to keep every note above it unchanged, and
+// the knee is u15. From 18800 that reaches MIDI 10.8, so MIDI 12 is the floor
+// of what the mechanism can express.
+static const int32_t kWhistleTiltReferencePitch = 12 << 7;
+// The resonator's gain at resonance rises as 1/sqrt(damp), and rises again
+// with pitch, by 2.85 dB an octave.
+//
+// The damp term is corrected at the input, by scaling the excitation, which
+// moves the filter state and leaves the level alone. The pitch term is
+// corrected here at the output, which moves the level and leaves the state
+// alone -- so the state still rails above MIDI 84, where that term is
+// largest.
+static int32_t WhistleStateToOutput(
+    int32_t pitch, int32_t scale_u15,
+    int32_t damp_drive_u15) {
+  // Holds rms flat to MIDI 84.
+  const int32_t pitch_correction_numerator = 1;
+  const int32_t pitch_correction_denominator = 2;
+  // How far into the curve the signal is driven, which is the level: noise
+  // visits its peak rarely, and everything under it is unspent until something
+  // bends the peak.
+  const int32_t level_into_knee_u15 = 31618;
+  int32_t octaves_q16 =
+      (pitch - kWhistleTiltReferencePitch) * 65536 / (12 * 128);
+  octaves_q16 = octaves_q16 * pitch_correction_numerator
+      / pitch_correction_denominator;
+  if (octaves_q16 < 0) octaves_q16 = 0;
+  int32_t level_u15 = level_into_knee_u15 *
+      (Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 1) >> 15;
+  int32_t whole_octaves = octaves_q16 >> 16;
+  const int32_t level_at_pitch_u15 =
+      whole_octaves >= 20
+          ? 0
+          : ((level_u15 >> whole_octaves) * scale_u15 >> 15);
+  return damp_drive_u15
+      ? static_cast<int32_t>(
+            (static_cast<uint32_t>(level_at_pitch_u15) << 15) / damp_drive_u15)
+      : level_at_pitch_u15;
+}
+
+void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
+  StateVariableFilter svf = svf_;
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
+  // sqrt(damp / reference), bounded at both ends by the constants it reads:
+  // the excitation is scaled by it going in and the output by its reciprocal
+  // coming out. It reads the damp the block opens on, where the filter below
+  // reads a new one every sample -- a fast-moving TIMBRE makes the two differ.
+  uint32_t damp_at_block_start_u1_14 = static_cast<uint32_t>(
+      input_samples[0] > 0 ? input_samples[0] : 0);
+  if (damp_at_block_start_u1_14 < kWhistleDriveFloor_u1_14) {
+    damp_at_block_start_u1_14 = kWhistleDriveFloor_u1_14;
+  }
+  if (damp_at_block_start_u1_14 > kWhistleDriveReference_u1_14) {
+    damp_at_block_start_u1_14 = kWhistleDriveReference_u1_14;
+  }
+  const int32_t damp_drive_u15 = IntegerSqrt(
+      (damp_at_block_start_u1_14 << 15) / kWhistleDriveReference_u1_14 * 32768u);
+  // The state is held in units of the drive, so a drive that moves leaves what
+  // is already in the filter in the old ones, where the output's reciprocal no
+  // longer cancels what produced it.
+  if (previous_damp_drive_u15_ > 0 && damp_drive_u15 != previous_damp_drive_u15_) {
+    // The rescale can carry the state 16x past int16, and the next cutoff * bp
+    // then reaches 2.27e9 at MIDI 108. A state it puts out of range is one the
+    // filter would have railed at had the drive been there all along.
+    svf.bp = stmlib::Clip16(static_cast<int32_t>(svf.bp) * damp_drive_u15
+        / previous_damp_drive_u15_);
+    svf.lp = stmlib::Clip16(static_cast<int32_t>(svf.lp) * damp_drive_u15
+        / previous_damp_drive_u15_);
+  }
+  previous_damp_drive_u15_ = damp_drive_u15;
+  const int32_t state_to_output_q15 = WhistleStateToOutput(
+      pitch_, incoherent_scale_u15_, damp_drive_u15);
+  const int32_t state_into_curve_q15 =
+      StateIntoCurve(state_to_output_q15, coherent_scale_codes_u16_);
+  // The headroom comes off the drive rather than the state, so the state keeps
+  // every bit the filter carried for it.
+  const int32_t kDriveHeadroomBits = 3;
+  const int32_t drive_into_curve_q12 =
+      state_into_curve_q15 >> kDriveHeadroomBits;
+  const int32_t scale_u15 = coherent_scale_u15_;
+  const int16_t* curve = SoftLimitTableAsRegister();
+  uint32_t noise_state = noise_state_;
+  RENDER_CORE(this_sample,
+    const int16_t gain = input_samples[kAudioBlockSize];
+    // Noise of its own, because a whistle sustains and the chiff decays.
+    noise_state = NextXorshift32(noise_state);
+    int32_t excitation =
+        static_cast<int16_t>(noise_state >> 16) * gain >> 15;
+    excitation = excitation * damp_drive_u15 >> 15;
+    const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(excitation, timbre);
+    const int32_t state_in_curve = stmlib::Clip16(
+        state * drive_into_curve_q12 >> (15 - kDriveHeadroomBits));
+    this_sample = SoftLimit(curve, state_in_curve, scale_u15);
+  )
+  noise_state_ = noise_state;
+  svf_ = svf;
+}
+
+// Above ~MIDI 63 the ring needs EXCITER AMOUNT: a bare envelope is too smooth
+// to carry energy at the note.
+void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
+  StateVariableFilter svf = svf_;
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
+  // The ratio of the two peaks, so it follows either one if it moves.
+  const int32_t kUnityStateToOutput_q12 =
+      (kEnvelopeSampleMax << 12) / INT16_MAX;
+  // A ring only touches its peak briefly, so the drive goes past unity and
+  // leaves the curve to compress what goes over: 3.0 to 5.4 dB of what
+  // kPingDriveMultiple asks for survives it, across the three outputs and the
+  // keyboard.
+  const int32_t kPingDriveMultiple = 2;
+  const int32_t state_to_output_q12 = kUnityStateToOutput_q12
+      * kPingDriveMultiple * coherent_scale_u15_ >> 15;
+  STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom,
+                ping_drive_leaves_curve);
+  const int32_t state_into_curve_q12 =
+      StateIntoCurve(state_to_output_q12, coherent_scale_codes_u16_);
+  const int32_t scale_u15 = coherent_scale_u15_;
+  // The exciter carries the gain envelope's DC, which lp passes: once the ring
+  // dies away its state sits at the excitation's own level -- a thump under a
+  // percussive envelope, a standing offset under a sustained one. bp and hp
+  // reject it.
+#define PING_LOOP(OUTPUT) \
+  RENDER_CORE(this_sample, \
+    const int16_t gain = input_samples[kAudioBlockSize]; \
+    /* The resonant step response overshoots its input, so the excitation is */ \
+    /* halved to leave room for the overshoot. */ \
+    const int32_t state = svf.RenderSampleAtPitch<OUTPUT>(gain >> 1, timbre); \
+    const int32_t state_in_curve = state * state_into_curve_q12 >> 12; \
+    const int16_t* curve = SoftLimitTableAsRegister(); \
+    this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
+  )
+  switch (shape_) {
+    case OSC_SHAPE_PING_LP: { PING_LOOP(SVF_LP) } break;
+    case OSC_SHAPE_PING_BP: { PING_LOOP(SVF_BP) } break;
+    case OSC_SHAPE_PING_HP: { PING_LOOP(SVF_HP) } break;
+    default: break;
+  }
+#undef PING_LOOP
+  svf_ = svf;
+}
+
+void Oscillator::RenderDiracComb(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC(
     int32_t zone_14 = pitch_ + ((32767 - timbre) >> 3);
     uint16_t crossfade = zone_14 << 6; // Ignore highest 4 bits
@@ -677,25 +1250,47 @@ void Oscillator::RenderDiracComb(int16_t* timbre_samples, int16_t* audio_samples
   )
 }
 
-void Oscillator::RenderFilteredNoise(int16_t* timbre_samples, int16_t* audio_samples) {
+// The state into the soft limiter. Unity is 1/kSoftLimitHeadroom, the curve's
+// small-signal gain; half again past that holds the level the hard clip used to
+// produce, within 0.7 dB at every cutoff and every note.
+//
+// The stopband is what bounds the multiple. The curve's products are harmonics
+// of what the filter passed, so they land where it is meant to be quiet, and a
+// dark low-pass is where they stand highest above the signal: measured worst at
+// 10.8 dB into 200 Hz-1 kHz at an eighth of the cutoff range, against 4.6 dB at
+// unity and 19.2 dB at twice this.
+static const int32_t kNoiseStateIntoCurve_q12 =
+    3 * 4096 / (2 * kSoftLimitHeadroom);
+
+void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInit(pitch_ << 1);
-  OscillatorShape shape = shape_;
-  // int32_t scale = Interpolate824(lut_svf_scale, pitch_ << 18);
-  // int32_t gain_correction = cutoff > scale ? scale * 32767 / cutoff : 32767;
-  RENDER_CORE(
-    svf.RenderSample(Random::GetSample(), timbre);
-    switch (shape) {
-      case OSC_SHAPE_NOISE_LP: this_sample = svf.lp; break;
-      case OSC_SHAPE_NOISE_NOTCH: this_sample = svf.notch; break;
-      case OSC_SHAPE_NOISE_BP: this_sample = svf.bp; break;
-      case OSC_SHAPE_NOISE_HP: this_sample = svf.hp; break;
-      default: break;
-    }
-    // CLIP(this_sample);
-    // result = result * gain_correction >> 15;
-    // result = Interpolate88(ws_moderate_overdrive, result + 32768);
+  // The keyboard is this shape's resonance control, and it reads the shared
+  // map, so the top of the keyboard self-oscillates.
+  svf.RenderInitDamp(DampFromResonance(pitch_ << 1));
+  const int16_t* curve = SoftLimitTableAsRegister();
+  // Its own stream, held in a register: stmlib::Random keeps its state in a
+  // static, and drawing from the shared one moves every other consumer's draws
+  // along with it.
+  uint32_t block_noise_state = noise_state_;
+  // Which output the shape takes is fixed for the block, so it picks the loop
+  // rather than being asked inside it.
+#define NOISE_LOOP(OUTPUT) \
+  RENDER_WITH_GAIN_AMPLIFYING_OUTPUT( \
+    block_noise_state = NextXorshift32(block_noise_state); \
+    const int32_t state = svf.RenderSample<OUTPUT>( \
+        static_cast<int16_t>(block_noise_state >> 16), timbre); \
+    this_sample = SoftLimit( \
+        curve, state * kNoiseStateIntoCurve_q12 >> 12, kEnvelopeSampleMax); \
   )
+  switch (shape_) {
+    case OSC_SHAPE_NOISE_NOTCH: { NOISE_LOOP(SVF_NOTCH) } break;
+    case OSC_SHAPE_NOISE_LP: { NOISE_LOOP(SVF_LP) } break;
+    case OSC_SHAPE_NOISE_BP: { NOISE_LOOP(SVF_BP) } break;
+    case OSC_SHAPE_NOISE_HP: { NOISE_LOOP(SVF_HP) } break;
+    default: break;
+  }
+#undef NOISE_LOOP
+  noise_state_ = block_noise_state;
   svf_ = svf;
 }
 

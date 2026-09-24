@@ -140,21 +140,27 @@ enum SettingIndex {
   SETTING_REMOTE_CONTROL_CHANNEL,
   SETTING_VOICING_TUNING_FACTOR,
   SETTING_VOICING_PORTAMENTO_MOD_VELOCITY,
+  SETTING_VOICING_CHIFF_AMOUNT,
+  SETTING_VOICING_CHIFF_AMOUNT_MOD_VELOCITY,
+  SETTING_VOICING_CHIFF_DURATION,
+  SETTING_VOICING_CHIFF_DURATION_MOD_VELOCITY,
 
   // NB: Add new settings here. These values are wire format identifiers
   // in tagged sysex — inserting in the middle breaks saved data.
   SETTING_LAST,
 };
 
+// Widest members first: the table is 84 entries, and the holes a mixed order
+// leaves cost four bytes of flash each.
 struct Setting {
-  const char short_name[3];
   const char* const name;
-  SettingDomain domain;
+  const char* const* values;
   uint16_t address[2];
-  SettingUnit unit;
   int16_t min_value;
   int16_t max_value;
-  const char* const* values;
+  const char short_name[3];
+  SettingDomain domain;
+  SettingUnit unit;
   uint8_t part_cc;
   uint8_t remote_control_cc;
 };

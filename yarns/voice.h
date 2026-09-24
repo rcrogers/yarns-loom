@@ -37,6 +37,7 @@
 #include "yarns/interpolator.h"
 #include "yarns/synced_lfo.h"
 #include "yarns/part.h"
+#include "yarns/utils.h"
 
 namespace yarns {
 
@@ -71,6 +72,15 @@ enum ModAux {
   MOD_AUX_LAST
 };
 
+// envelope_, reachable only on the is_envelope() path.
+const uint8_t kEnvelopesPerCVOutput = 1;
+
+// The most audio voices any layout sounds at once, which is what a CPU budget
+// multiplies a shape's per-sample cost by. multi.h folds the layout map and
+// static-asserts this equals it; multi.h cannot declare it because envelope.h
+// and the tools both need it without pulling multi.h in.
+const uint8_t kMaxAudioVoices = 6;
+
 // A role used by a CV output when it is not acting as an audio oscillator
 enum DCRole {
   DC_PITCH,
@@ -101,7 +111,8 @@ class Voice {
   void NoteOn(
     int16_t note, uint8_t velocity, uint8_t portamento,
     int8_t portamento_mod_velocity, bool trigger,
-    ADSR& adsr, int16_t timbre_envelope_target
+    ADSR& adsr, int16_t timbre_envelope_target,
+    uint32_t chiff_amount_q30, uint32_t chiff_audible_samples
   );
   void NoteOff(bool force = false);
   void ControlChange(uint8_t controller, uint8_t value);
@@ -134,14 +145,12 @@ class Voice {
   
   inline int32_t note() const { return note_; }
   inline uint8_t velocity() const { return mod_velocity_; }
-  inline uint16_t mod_aux(ModAux s) const { return mod_aux_[s]; }
   inline uint16_t aux_cv_16bit() const { return mod_aux_[aux_cv_source_]; }
   inline uint16_t aux_cv_2_16bit() const { return mod_aux_[aux_cv_source_2_]; }
   inline uint8_t aux_cv() const { return aux_cv_16bit() >> 8; }
   inline uint8_t aux_cv_2() const { return aux_cv_2_16bit() >> 8; }
   
   inline bool gate_on() const { return gate_; }
-  inline bool is_highest_priority() const { return is_highest_priority_; }
   inline void set_highest_priority(bool v) { is_highest_priority_ = v; }
 
   inline bool gate() const { return gate_ && !retrigger_delay_; }
@@ -158,7 +167,7 @@ class Voice {
   inline void set_timbre_init(uint8_t n) {
     timbre_init_target_ = n << (16 - 7); }
   inline void set_timbre_mod_lfo(uint8_t n) {
-    timbre_mod_lfo_target_ = UINT16_MAX - lut_env_expo[((127 - n) << 1)];
+    timbre_mod_lfo_target_ = UINT16_MAX - lut_env_expo_u16[((127 - n) << 1)];
   }
   
   inline void set_tuning(int8_t coarse, int8_t fine) {
@@ -205,64 +214,85 @@ class Voice {
   // against, keeping the timbre-bias bump consistent (a held bend or active
   // vibrato would otherwise reappear as a per-note chirp).
   inline int32_t ApplyPitchMods(int32_t note) const {
-    note += static_cast<int32_t>(mod_pitch_bend_ - 8192) * pitch_bend_range_ >> 6;
+    note += PitchBend64ths() >> 6;
     note += tuning_;
-    note += pitch_lfo_interpolator_.value();
+    note += VibratoPitch_q15_16() >> 16;
     return note;
   }
 
-  FastSyncedLFO lfos_[LFO_ROLE_LAST];
-  Oscillator oscillator_;
-  ADSR adsr_;
+  // In 64ths of a pitch unit, which is the precision the range multiply earns
+  // and the shift above throws away.
+  inline int32_t PitchBend64ths() const {
+    return static_cast<int32_t>(mod_pitch_bend_ - 8192) * pitch_bend_range_;
+  }
+
+  // The vibrato's pitch offset, scaled straight off the interpolator that
+  // already carries the LFO to sixteen fractional bits. A second interpolator
+  // targeting WHOLE pitch units used to stand here, and at VB=10 its target had
+  // ten values against that one's 13778: the pitch sat on one of them for half a
+  // second at a slow LFO rate and then jumped, which is the whole of the stepping
+  // the CZ shapes make audible.
+  //
+  // Split either side of the range multiply so the product stays in int32: the
+  // interpolator reaches +-16256 whole units and the range reaches 12.
+  inline int32_t VibratoPitch_q15_16() const {
+    return (scaled_vibrato_lfo_interpolator_.value_q15_16() >> 4)
+        * vibrato_range_ >> 4;
+  }
+
+  // What ApplyPitchMods leaves below a whole pitch unit. Under two, since
+  // tuning contributes none -- it is whole units already.
+  inline uint32_t PitchModsRemainder_u1_16() const {
+    return ((PitchBend64ths() & 63) << 10)
+        + (VibratoPitch_q15_16() & 0xffff);
+  }
+
+  // Narrowest first, each width filling whole words, so every scalar sits
+  // inside the reach of Thumb's short loads; the embedded objects follow,
+  // smallest first.
+  bool gate_;
+  // Sets whether this voice can control a paraphonic CV envelope's tremolo
+  bool is_highest_priority_;
+  bool portamento_exponential_shape_;
+  uint8_t mod_velocity_;
+  uint8_t pitch_bend_range_;
+  uint8_t vibrato_range_;
+  uint8_t vibrato_mod_;
+  uint8_t oscillator_mode_;
+  uint8_t aux_cv_source_;
+  uint8_t aux_cv_source_2_;
+  uint8_t refresh_counter_;
+  LFOShape lfo_shapes_[LFO_ROLE_LAST];
+
+  int16_t mod_pitch_bend_;
+  // This counter is used to artificially create a 750µs (3-systick) dip at LOW
+  // level when the gate is currently HIGH and a new note arrive with a
+  // retrigger command. This happens with note-stealing; or when sending a MIDI
+  // sequence with overlapping notes.
+  uint16_t retrigger_delay_;
+  uint16_t trigger_pulse_;
+  uint16_t tremolo_mod_target_;
+  uint16_t tremolo_mod_current_;
+  uint16_t timbre_mod_lfo_target_;
+  uint16_t timbre_mod_lfo_current_;
+  uint16_t timbre_init_target_;
+  uint16_t timbre_init_current_;
+  uint16_t mod_aux_[MOD_AUX_LAST];
 
   int32_t note_source_;
   int32_t note_target_;
   int32_t note_portamento_;
   int32_t note_;
   int32_t tuning_;
-  bool gate_;
-
-  // Sets whether this voice can control a paraphonic CV envelope's tremolo
-  bool is_highest_priority_;
-
-  int16_t mod_pitch_bend_;
-  uint16_t mod_aux_[MOD_AUX_LAST];
-  uint8_t mod_velocity_;
-  
-  uint8_t pitch_bend_range_;
-  uint8_t vibrato_range_;
-  uint8_t vibrato_mod_;
-  
-  uint8_t oscillator_mode_;
-  LFOShape lfo_shapes_[LFO_ROLE_LAST];
-  uint8_t aux_cv_source_;
-  uint8_t aux_cv_source_2_;
-  
   uint32_t portamento_phase_;
   uint32_t portamento_phase_increment_;
-  bool portamento_exponential_shape_;
-  
-  // This counter is used to artificially create a 750µs (3-systick) dip at LOW
-  // level when the gate is currently HIGH and a new note arrive with a
-  // retrigger command. This happens with note-stealing; or when sending a MIDI
-  // sequence with overlapping notes.
-  uint16_t retrigger_delay_;
-  
-  uint16_t trigger_pulse_;
-
-  uint8_t refresh_counter_;
-  Interpolator<kRefreshHzToLfoSampleHzRatioBits> pitch_lfo_interpolator_, timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
-
-  uint16_t tremolo_mod_target_;
-  uint16_t tremolo_mod_current_;
-
-  uint16_t timbre_mod_lfo_target_;
-  uint16_t timbre_mod_lfo_current_;
-  uint16_t timbre_init_target_;
-  uint16_t timbre_init_current_;
-
   CVOutput* audio_output_;
   CVOutput* dc_outputs_[DC_LAST];
+
+  ADSR adsr_;
+  Interpolator<kRefreshHzToLfoSampleHzRatioBits> timbre_lfo_interpolator_, amplitude_lfo_interpolator_, scaled_vibrato_lfo_interpolator_;
+  FastSyncedLFO lfos_[LFO_ROLE_LAST];
+  Oscillator oscillator_;
 
   DISALLOW_COPY_AND_ASSIGN(Voice);
 };
@@ -273,7 +303,7 @@ class CVOutput {
   ~CVOutput() { }
 
   typedef uint16_t (CVOutput::*DCFn)();
-  static DCFn dc_fn_table_[];
+  static const DCFn dc_fn_table_[];
 
   void Init(bool reset_calibration);
 
@@ -291,11 +321,46 @@ class CVOutput {
     num_audio_voices_ = num_audio;
     zero_dac_code_ = volts_dac_code(0);
     envelope_.Init(zero_dac_code_ >> 1);
-    uint16_t scale = volts_dac_code(0) - volts_dac_code(5); // 5Vpp
-    scale /= num_audio_voices_;
+    // 10 Vpp, +/-5 V about the 0 V code, which is what a Eurorack audio output
+    // is expected to swing. Named as twice the 5 V span because the calibration
+    // table stops at -3 V and cannot be asked for -5 V directly.
+    //
+    // AND THAT IS ALL THE CODE THERE IS. 0 V is code 39187 with 5133 codes per
+    // volt, so -5 V is code 64852 of 65535: 683 codes, 0.13 V, before the code
+    // WRAPS and the output jumps to the opposite rail. The mix accumulator is
+    // an int16 holding that code and cannot carry an excursion past it, so
+    // nothing downstream may exceed its share of this span.
+    const uint16_t span_pp_codes_u16 =
+        (volts_dac_code(0) - volts_dac_code(5)) * 2;
+    // Halved here, where the span stops being one: everything past this point
+    // is an amplitude, so nothing downstream has to know the difference.
+    const uint16_t scale_codes_u16 = span_pp_codes_u16 >> 1;
+    // WHAT ONE VOICE MAY SPEND, so that the voices summed reach the span's
+    // amplitude. An nth each: periodic voices line their peaks up sooner or
+    // later, so n of them reach n times one.
+    //
+    // A shape whose voices are UNCORRELATED adds in power instead, reaching
+    // only sqrt(n) times one, and an nth leaves it 6 dB under at four voices.
+    // The geometric mean of the whole and the nth is what it may spend --
+    // full/sqrt(n) -- and it must then cap its own peak at the nth, since n
+    // peaks that do align would otherwise leave the span.
+    //
+    // Only WHISTLE takes it, and CREST is why rather than correlation: the
+    // trade is peak headroom for level, so it pays only where the signal
+    // visits its peak rarely. WHISTLE's crest is 3.8 to 5.3. The four NOISE
+    // shapes are uncorrelated too and do lose the same 6 dB, but they drive
+    // full-scale noise into a limiter and come out at crest 1.35 -- MEASURED,
+    // capping them at the nth while driving to full/sqrt(n) returns 1.69 dB of
+    // the 6.02 and clips 70% of samples to do it. There is no headroom there
+    // to trade.
+    const uint16_t coherent_scale_codes_u16 =
+        scale_codes_u16 / num_audio_voices_;
+    const uint16_t incoherent_scale_codes_u16 = static_cast<uint16_t>(
+        IntegerSqrt(static_cast<uint32_t>(scale_codes_u16)
+                    * coherent_scale_codes_u16));
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
       Voice* audio_voice = audio_voices_[i] = dc_voices_[0] + i;
-      audio_voice->oscillator()->Init(scale);
+      audio_voice->oscillator()->Init(coherent_scale_codes_u16, incoherent_scale_codes_u16);
       audio_voice->set_audio_output(this);
     }
   }
@@ -328,8 +393,14 @@ class CVOutput {
   inline bool sounding() const {
     return envelope_.stage() != ENV_STAGE_DEAD;
   }
-  inline void NoteOn(ADSR& adsr) {
-    envelope_.NoteOn(adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1);
+  inline void NoteOn(
+      ADSR& adsr, uint32_t chiff_amount_q30, uint32_t chiff_audible_samples) {
+    // The range runs DOWNWARD -- DAC codes fall as volts rise -- and the
+    // output range is the only bound: this envelope drives one CV output on its
+    // own, so there is nothing for it to share with.
+    envelope_.NoteOn(
+      adsr, volts_dac_code(0) >> 1, volts_dac_code(7) >> 1, kEnvelopeSampleMax,
+      chiff_amount_q30, chiff_audible_samples);
   }
   inline void NoteOff(bool force = false) {
     if (!force) {
@@ -349,7 +420,7 @@ class CVOutput {
     return volts_dac_code(0) - envelope_value();
   }
   inline uint16_t envelope_value() {
-    int32_t value = (envelope_bias_ + envelope_.value()) << 1;
+    int32_t value = (envelope_bias_ + envelope_.value_without_bias()) << 1;
     CONSTRAIN(value, 0, UINT16_MAX);
     return value;
    }
@@ -404,19 +475,23 @@ class CVOutput {
  private:
   uint16_t NoteToDacCode(int32_t note) const;
 
-  Voice* dc_voices_[kNumMaxVoicesPerPart];  // dc_voices_[0] is primary, others for paraphonic envelope
-  Voice* audio_voices_[kNumMaxVoicesPerPart];
+  // Narrowest first, each width filling whole words so nothing is left as a
+  // hole: Thumb's short loads reach bytes only in the first 32 bytes, halfwords
+  // in the first 64 and words in the first 128.
   uint8_t num_dc_voices_;
   uint8_t num_audio_voices_;
   DCRole dc_role_;
-
-  int32_t note_;
-  uint16_t dac_code_;
   bool dirty_;  // Set to true when the calibration settings have changed.
+
+  uint16_t dac_code_;
   uint16_t zero_dac_code_;
-  uint16_t calibrated_dac_code_[kNumOctaves];
-  Envelope envelope_;
   int16_t envelope_bias_;
+  uint16_t calibrated_dac_code_[kNumOctaves];
+
+  Voice* dc_voices_[kNumMaxVoicesPerPart];  // dc_voices_[0] is primary, others for paraphonic envelope
+  Voice* audio_voices_[kNumMaxVoicesPerPart];
+  int32_t note_;
+  Envelope envelope_;
 
   DISALLOW_COPY_AND_ASSIGN(CVOutput);
 };

@@ -61,15 +61,14 @@ extern const int8_t* const lookup_table_8_table[];
 extern const uint16_t* const char_table[];
 
 extern const char str_dummy[];
-extern const uint16_t lut_env_expo[];
-extern const uint16_t lut_sine_quadrant[];
-extern const uint16_t lut_expo_quadrant[];
+extern const uint16_t lut_env_expo_u16[];
+extern const uint16_t lut_expo2_neg_u16[];
+extern const uint16_t lut_sine_quadrant_u16[];
+extern const uint16_t lut_expo_quadrant_u16[];
 extern const uint16_t lut_arpeggiator_patterns[];
 extern const uint16_t lut_consonance[];
 extern const uint16_t lut_clock_ratio_ticks[];
-extern const uint16_t lut_svf_cutoff[];
-extern const uint16_t lut_svf_damp[];
-extern const uint16_t lut_svf_scale[];
+extern const uint16_t lut_svf_cutoff_u15[];
 extern const int16_t lut_scale_pythagorean[];
 extern const int16_t lut_scale_1_4_eb[];
 extern const int16_t lut_scale_1_4_e[];
@@ -123,33 +122,34 @@ extern const int16_t wav_bandlimited_comb_12[];
 extern const int16_t wav_bandlimited_comb_13[];
 extern const int16_t wav_bandlimited_comb_14[];
 extern const int16_t ws_violent_overdrive[];
+extern const int16_t ws_soft_limit[];
 extern const uint32_t lut_lfo_increments[];
 extern const uint32_t lut_portamento_increments[];
 extern const uint32_t lut_envelope_phase_increments[];
+extern const uint32_t lut_chiff_phase_increments[];
 extern const uint32_t lut_oscillator_increments[];
 extern const uint32_t lut_euclidean[];
 extern const int8_t lut_expo_slope_shift[];
 extern const int8_t lut_fm_index_2x_upshifts[];
 extern const uint16_t chr_characters[];
+extern const uint16_t chr_blinking_characters[];
 #define STR_DUMMY 0  // dummy
-#define LUT_ENV_EXPO 0
-#define LUT_ENV_EXPO_SIZE 257
-#define LUT_SINE_QUADRANT 1
-#define LUT_SINE_QUADRANT_SIZE 257
-#define LUT_EXPO_QUADRANT 2
-#define LUT_EXPO_QUADRANT_SIZE 257
-#define LUT_ARPEGGIATOR_PATTERNS 3
+#define LUT_ENV_EXPO_U16 0
+#define LUT_ENV_EXPO_U16_SIZE 257
+#define LUT_EXPO2_NEG_U16 1
+#define LUT_EXPO2_NEG_U16_SIZE 257
+#define LUT_SINE_QUADRANT_U16 2
+#define LUT_SINE_QUADRANT_U16_SIZE 257
+#define LUT_EXPO_QUADRANT_U16 3
+#define LUT_EXPO_QUADRANT_U16_SIZE 257
+#define LUT_ARPEGGIATOR_PATTERNS 4
 #define LUT_ARPEGGIATOR_PATTERNS_SIZE 23
-#define LUT_CONSONANCE 4
+#define LUT_CONSONANCE 5
 #define LUT_CONSONANCE_SIZE 1536
-#define LUT_CLOCK_RATIO_TICKS 5
+#define LUT_CLOCK_RATIO_TICKS 6
 #define LUT_CLOCK_RATIO_TICKS_SIZE 32
-#define LUT_SVF_CUTOFF 6
-#define LUT_SVF_CUTOFF_SIZE 257
-#define LUT_SVF_DAMP 7
-#define LUT_SVF_DAMP_SIZE 257
-#define LUT_SVF_SCALE 8
-#define LUT_SVF_SCALE_SIZE 257
+#define LUT_SVF_CUTOFF_U15 7
+#define LUT_SVF_CUTOFF_U15_SIZE 257
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12
 #define LUT_SCALE_1_4_EB 1
@@ -260,15 +260,19 @@ extern const uint16_t chr_characters[];
 #define WAV_BANDLIMITED_COMB_14_SIZE 257
 #define WS_VIOLENT_OVERDRIVE 0
 #define WS_VIOLENT_OVERDRIVE_SIZE 257
+#define WS_SOFT_LIMIT 1
+#define WS_SOFT_LIMIT_SIZE 257
 #define LUT_LFO_INCREMENTS 0
 #define LUT_LFO_INCREMENTS_SIZE 64
 #define LUT_PORTAMENTO_INCREMENTS 1
 #define LUT_PORTAMENTO_INCREMENTS_SIZE 65
 #define LUT_ENVELOPE_PHASE_INCREMENTS 2
 #define LUT_ENVELOPE_PHASE_INCREMENTS_SIZE 129
-#define LUT_OSCILLATOR_INCREMENTS 3
+#define LUT_CHIFF_PHASE_INCREMENTS 3
+#define LUT_CHIFF_PHASE_INCREMENTS_SIZE 129
+#define LUT_OSCILLATOR_INCREMENTS 4
 #define LUT_OSCILLATOR_INCREMENTS_SIZE 97
-#define LUT_EUCLIDEAN 4
+#define LUT_EUCLIDEAN 5
 #define LUT_EUCLIDEAN_SIZE 1024
 #define LUT_EXPO_SLOPE_SHIFT 0
 #define LUT_EXPO_SLOPE_SHIFT_SIZE 16
@@ -276,6 +280,8 @@ extern const uint16_t chr_characters[];
 #define LUT_FM_INDEX_2X_UPSHIFTS_SIZE 26
 #define CHR_CHARACTERS 0
 #define CHR_CHARACTERS_SIZE 256
+#define CHR_BLINKING_CHARACTERS 1
+#define CHR_BLINKING_CHARACTERS_SIZE 5
 
 }  // namespace yarns
 
