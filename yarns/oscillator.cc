@@ -468,12 +468,18 @@ void Oscillator::Render(int16_t* audio_mix) {
 // output by it take the wrapper below, and the resonators spend it on the way
 // into what rings, so theirs is this_sample as it stands.
 #define RENDER_CORE(mix_term, ...) \
-  int16_t next_sample = next_sample_; \
+  int32_t next_sample = next_sample_; \
   for (size_t size = kAudioBlockSize; size--;) { \
     int16_t timbre = input_samples[0]; \
-    int16_t this_sample = next_sample; \
+    int32_t this_sample = next_sample; \
     next_sample = 0; \
     __VA_ARGS__ \
+    /* Wide through the body: a band-limited edge overshoots the step it \
+       corrects, and the correction's two halves only cancel that step if \
+       neither wraps. Both mix terms are 16 bits -- the resonators' is \
+       this_sample itself, and this_sample * gain >> 15 is at most \
+       this_sample -- so it narrows here, saturating. */ \
+    CONSTRAIN(this_sample, -32768, 32767) \
     int32_t mixed = (mix_term); \
     ++input_samples; \
     *audio_mix = static_cast<int16_t>(*audio_mix + mixed); \
