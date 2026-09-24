@@ -968,8 +968,8 @@ void Oscillator::RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* aud
       // it decides which way this reset jumps.
       const uint32_t t = EdgeTime(phase << 1, phase_increment << 1);
       const int32_t step = pd_square_.polarity ? -wrap_step : wrap_step;
-      this_sample += ThisBlepSample(t) * step >> 16;
-      next_sample += NextBlepSample(t) * step >> 16;
+      this_sample += ThisBlepSample(t) * step >> 15;
+      next_sample += NextBlepSample(t) * step >> 15;
     }
     int16_t carrier = quadrant_lookup(sine_table, modulator_phase);
     uint16_t window = ~(phase >> 15); // Double saw
@@ -1021,8 +1021,8 @@ void Oscillator::RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio
       modulator_phase = kPhaseResetSaw[filter_type];
       // Added, not subtracted: this ramp falls and the wrap steps UP.
       const uint32_t t = EdgeTime(phase, phase_increment);
-      this_sample += ThisBlepSample(t) * wrap_step >> 16;
-      next_sample += NextBlepSample(t) * wrap_step >> 16;
+      this_sample += ThisBlepSample(t) * wrap_step >> 15;
+      next_sample += NextBlepSample(t) * wrap_step >> 15;
     }
     int16_t carrier = sine(modulator_phase);
     uint16_t window = ~(phase >> 16); // Saw

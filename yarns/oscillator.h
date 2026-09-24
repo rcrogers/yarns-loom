@@ -312,6 +312,9 @@ class Oscillator {
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
+  // Two-point polyBLEP residuals, at half the step they correct: a caller
+  // carrying its own step multiplies by it and shifts 15, and a full-scale
+  // step takes them as they stand.
   inline int32_t ThisBlepSample(uint32_t t) const {
     if (t > 65535) {
       t = 65535;
