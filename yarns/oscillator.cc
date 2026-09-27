@@ -1134,6 +1134,34 @@ static inline double Triangle(double u) {  // slope 1 through 0, peak 1 at u = 1
   if (p < 0) p += 4;
   return p < 2 ? p - 1 : 3 - p;
 }
+// 5: RenderTransfer's expo quadrant, 1 - (1 - x)^3 mirrored to a period,
+// its input scaled for a small-signal slope of 1 like the others: it rises to
+// 1 at u = 3 and folds back.
+static inline double ExpoFold(double u) {
+  double p = fmod(u / 12.0, 1.0);
+  if (p < 0) p += 1;
+  const double q = p * 4;
+  const int quadrant = static_cast<int>(q);
+  const double x = q - quadrant;
+  const double rise = 1 - (1 - x) * (1 - x) * (1 - x);
+  const double fall = 1 - x * x * x;
+  return quadrant == 0 ? rise : quadrant == 1 ? fall
+      : quadrant == 2 ? -rise : -fall;
+}
+// PRE_SHAPER shapes the excitation before the resonator: 1 tanh, 2 sine fold,
+// 3 expo fold, at PRE_DRIVE_Q8/256 unities per 8192 counts, normalised back
+// to a small-signal gain of 1.
+static int g_pre_shaper = getenv("PRE_SHAPER") ? atoi(getenv("PRE_SHAPER")) : 0;
+static double g_pre_drive =
+    getenv("PRE_DRIVE_Q8") ? atoi(getenv("PRE_DRIVE_Q8")) / 256.0 : 1;
+static inline int32_t PreShape(int32_t excitation_q15_14) {
+  if (!g_pre_shaper) return excitation_q15_14;
+  const double unit = 8192.0 * (1 << 14) / g_pre_drive;
+  const double u = excitation_q15_14 / unit;
+  const double y = g_pre_shaper == 1 ? tanh(u)
+      : g_pre_shaper == 2 ? sin(u) : ExpoFold(u);
+  return static_cast<int32_t>(y * unit);
+}
 // IN_LOOP_SAT=k100 saturates the resonator's bp every sample, inside the loop,
 // at k100/100 curve unities: bp = K tanh(bp / K). The drive into the curve
 // names K in state units.
@@ -1145,6 +1173,7 @@ static inline void InLoopSaturate(int32_t* bp_q15_14, int32_t drive_q32) {
 }
 #else
 static inline void InLoopSaturate(int32_t*, int32_t) { }
+static inline int32_t PreShape(int32_t excitation_q15_14) { return excitation_q15_14; }
 #endif
 static inline int32_t SoftLimit(
     const int16_t* curve, int32_t state_in_curve, int32_t scale_u15);
@@ -1154,7 +1183,11 @@ static inline int32_t ResonatorShape(
   if (g_shaper) {
     const double u = curve_input / 8192.0;
     const double b = g_shaper >= 3 ? g_shaper_bias : 0;
-    const double y = (g_shaper == 1 || g_shaper == 3)
+    // 6: linear, held to the ceiling -- no shaping, for a source that makes
+    // its own harmonics.
+    const double y = g_shaper == 6 ? (u > 1 ? 1 : u < -1 ? -1 : u)
+        : g_shaper == 5 ? ExpoFold(u)
+        : (g_shaper == 1 || g_shaper == 3)
         ? sin(u + b) - sin(b) : Triangle(u + b) - Triangle(b);
     return static_cast<int32_t>(y * scale_u15);
   }
@@ -1413,7 +1446,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
         >> (15 - ResonatorState::kFractionalBits))
         + JetFeedback(state.bp_q15_14, gain, timbre);
     const int32_t state_q15_14 = svf.RenderSampleAtPitch<SVF_BP>(
-        &state, excitation_q15_14, timbre);
+        &state, PreShape(excitation_q15_14), timbre);
     InLoopSaturate(&state.bp_q15_14, drive_into_curve_q32);
     this_sample = ResonatorShape(curve, g_multi
         ? static_cast<int32_t>(MultiWhistle(this, pitch_, gain, timbre,
@@ -1461,7 +1494,8 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     /* The resonant step response overshoots its input, so the excitation is */ \
     /* halved to leave room for the overshoot. */ \
     const int32_t state_q15_14 = svf.RenderSampleAtPitch<OUTPUT>( \
-        &state, (gain >> 1) * (1 << ResonatorState::kFractionalBits), timbre); \
+        &state, PreShape((gain >> 1) * (1 << ResonatorState::kFractionalBits)), \
+        timbre); \
     InLoopSaturate(&state.bp_q15_14, state_into_curve_q32); \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = ResonatorShape(curve, MulHighS( \
