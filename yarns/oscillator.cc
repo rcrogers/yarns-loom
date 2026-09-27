@@ -45,6 +45,9 @@ static int g_force_drive = getenv("WHISTLE_FORCE_DRIVE") ? 1 : 0;
 // WHISTLE_NO_MAKEUP=1 drops the output's 1/damp_drive, to measure how much of a
 // ring WHISTLE did not drive itself is that make-up.
 static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
+#else
+static const int g_force_drive = 0;
+static const int g_no_makeup = 0;
 #endif
 
 #include "stmlib/utils/dsp.h"
