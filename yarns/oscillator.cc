@@ -46,21 +46,16 @@ static int g_force_drive = getenv("WHISTLE_FORCE_DRIVE") ? 1 : 0;
 // ring WHISTLE did not drive itself is that make-up.
 static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
 // CURVE_DRIVE_Q8=n scales how hard WHISTLE and PING drive the soft limiter,
-// 256 = stock: to hear saturation apart from everything else a ring carries.
+// 256 = as built: to hear saturation apart from everything else a ring
+// carries. The product is taken wide so a scale past 256 cannot wrap it.
 static int g_curve_drive_q8 =
     getenv("CURVE_DRIVE_Q8") ? atoi(getenv("CURVE_DRIVE_Q8")) : 256;
-// CURVE_DRIVE_SHIFT=k drives the curve 2^k past stock by shifting the product
-// k bits less, in 32 bits: the form firmware would take.
-static int g_curve_drive_shift =
-    getenv("CURVE_DRIVE_SHIFT") ? atoi(getenv("CURVE_DRIVE_SHIFT")) : 0;
-#define TEST_CLIP16(x) stmlib::Clip16(x)
+#define TEST_CURVE_DRIVE(x) ((x) * g_curve_drive_q8 >> 8)
 #define TEST_WIDE(x) static_cast<int64_t>(x)
 #else
-static const int g_curve_drive_shift = 0;
 static const int g_force_drive = 0;
 static const int g_no_makeup = 0;
-static const int g_curve_drive_q8 = 256;
-#define TEST_CLIP16(x) (x)
+#define TEST_CURVE_DRIVE(x) (x)
 #define TEST_WIDE(x) (x)
 #endif
 
@@ -1222,7 +1217,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // every bit the filter carried for it.
   const int32_t kDriveHeadroomBits = 3;
   const int32_t drive_into_curve_q12 =
-      (state_into_curve_q15 >> kDriveHeadroomBits) * g_curve_drive_q8 >> 8;
+      TEST_CURVE_DRIVE(state_into_curve_q15 >> kDriveHeadroomBits);
   const int32_t scale_u15 = coherent_scale_u15_;
   const int16_t* curve = SoftLimitTableAsRegister();
   uint32_t noise_state = noise_state_;
@@ -1235,11 +1230,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
             (g_force_drive ? 32767 : gain) >> 15;
     excitation = excitation * damp_drive_u15 >> 15;
     const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(excitation, timbre);
-    const int32_t state_in_curve = g_curve_drive_shift
-        ? stmlib::Clip16(state * drive_into_curve_q12
-              >> (15 - kDriveHeadroomBits - g_curve_drive_shift))
-        : stmlib::Clip16(static_cast<int32_t>(
-              TEST_WIDE(state) * drive_into_curve_q12 >> (15 - kDriveHeadroomBits)));
+    const int32_t state_in_curve = stmlib::Clip16(static_cast<int32_t>(
+        TEST_WIDE(state) * drive_into_curve_q12 >> (15 - kDriveHeadroomBits)));
     this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
   noise_state_ = noise_state;
@@ -1259,18 +1251,16 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // The ratio of the two peaks, so it follows either one if it moves.
   const int32_t kUnityStateToOutput_q12 =
       (kEnvelopeSampleMax << 12) / INT16_MAX;
-  // A ring only touches its peak briefly, so the drive goes past unity and
-  // leaves the curve to compress what goes over: 3.0 to 5.4 dB of what
-  // kPingDriveMultiple asks for survives it, across the three outputs and the
-  // keyboard.
-  const int32_t kPingDriveMultiple = 2;
-  const int32_t state_to_output_q12 = kUnityStateToOutput_q12
-      * kPingDriveMultiple * coherent_scale_u15_ >> 15;
-  STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom,
-                ping_drive_leaves_curve);
-  const int32_t state_into_curve_q12 =
-      StateIntoCurve(state_to_output_q12, coherent_scale_codes_u16_)
-          * g_curve_drive_q8 >> 8;
+  // A full-peak ring drives the curve this many times past unity, well past
+  // its end: saturation holds the ring at the ceiling and brightens its onset,
+  // and a lower envelope peak walks it back into the curve. Taken after the
+  // curve's scale, so the drive is u3.12 and s0.15 times it stays under 2^30.
+  const int32_t kPingDriveMultiple = 32;
+  STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom << 3,
+                ping_drive_fits_its_bits);
+  const int32_t state_into_curve_q12 = TEST_CURVE_DRIVE(StateIntoCurve(
+      kUnityStateToOutput_q12 * coherent_scale_u15_ >> 15,
+      coherent_scale_codes_u16_) * kPingDriveMultiple);
   const int32_t scale_u15 = coherent_scale_u15_;
   // The exciter carries the gain envelope's DC, which lp passes: once the ring
   // dies away its state sits at the excitation's own level -- a thump under a
@@ -1282,8 +1272,9 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     /* The resonant step response overshoots its input, so the excitation is */ \
     /* halved to leave room for the overshoot. */ \
     const int32_t state = svf.RenderSampleAtPitch<OUTPUT>(gain >> 1, timbre); \
-    const int32_t state_in_curve = \
-        TEST_CLIP16(state * state_into_curve_q12 >> (12 - g_curve_drive_shift)); \
+    /* Past the curve's end, so held to the table's domain. */ \
+    const int32_t state_in_curve = stmlib::Clip16(static_cast<int32_t>( \
+        TEST_WIDE(state) * state_into_curve_q12 >> 12)); \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
   )
