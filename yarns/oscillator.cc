@@ -48,6 +48,19 @@ static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
 // WHISTLE_HALF_MAKEUP=1 spends the square root of the make-up at the output,
 // flattening how much louder a tighter Q comes out, with the state untouched.
 static int g_half_makeup = getenv("WHISTLE_HALF_MAKEUP") ? 1 : 0;
+// WHISTLE_LIMIT_MODE / WHISTLE_LIMIT_SHIFT=s move WHISTLE's limiting inside
+// the resonator, from the sample before, in curve units:
+//   1: damping += bp^2 >> s
+//   2: damping += (bp^2 + lp^2) >> s -- a ring holds this nearly constant
+//   3: excitation *= 1 - min((bp^2 + lp^2) >> s, 1) -- Q untouched
+//   4: as 3, once a block, by WHISTLE_LIMIT_LAW with x = (bp^2 + lp^2) >> s
+//      as a fraction of 2^15: 1 = 1 - x, 2 = 1/(1 + x), 3 = 1/sqrt(1 + x)
+static int g_limit_law =
+    getenv("WHISTLE_LIMIT_LAW") ? atoi(getenv("WHISTLE_LIMIT_LAW")) : 1;
+static int g_limit_mode =
+    getenv("WHISTLE_LIMIT_MODE") ? atoi(getenv("WHISTLE_LIMIT_MODE")) : 0;
+static int g_limit_shift =
+    getenv("WHISTLE_LIMIT_SHIFT") ? atoi(getenv("WHISTLE_LIMIT_SHIFT")) : 16;
 // CURVE_DRIVE_Q8=n scales how hard WHISTLE and PING drive the soft limiter,
 // 256 = as built: to hear saturation apart from everything else a ring
 // carries. The product is taken wide so a scale past 256 cannot wrap it.
@@ -59,6 +72,8 @@ static int g_curve_drive_q8 =
 static const int g_force_drive = 0;
 static const int g_no_makeup = 0;
 static const int g_half_makeup = 0;
+static const int g_limit_mode = 0;
+static const int g_limit_shift = 16;
 #define TEST_CURVE_DRIVE(x) (x)
 #define TEST_WIDE(x) (x)
 #endif
@@ -1240,7 +1255,25 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       TEST_CURVE_DRIVE(state_into_curve_q15 >> kDriveHeadroomBits);
   const int32_t scale_u15 = coherent_scale_u15_;
   const int16_t* curve = SoftLimitTableAsRegister();
+  int32_t excitation_drive_u15 = damp_drive_u15;
+#ifdef TEST
+  if (g_limit_mode == 4) {
+    const double bp_in_curve = stmlib::Clip16(static_cast<int32_t>(
+        TEST_WIDE(svf.bp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
+    const double lp_in_curve = stmlib::Clip16(static_cast<int32_t>(
+        TEST_WIDE(svf.lp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
+    const double x = (bp_in_curve * bp_in_curve + lp_in_curve * lp_in_curve)
+        / __builtin_ldexp(1.0, g_limit_shift) / 32768.0;
+    double g = g_limit_law == 1 ? (x < 1 ? 1 - x : 0)
+        : g_limit_law == 2 ? 1 / (1 + x) : 1 / __builtin_sqrt(1 + x);
+    excitation_drive_u15 = static_cast<int32_t>(damp_drive_u15 * g);
+  }
+#endif
   uint32_t noise_state = noise_state_;
+  int32_t previous_bp_in_curve = stmlib::Clip16(static_cast<int32_t>(
+      TEST_WIDE(svf.bp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
+  int32_t previous_lp_in_curve = stmlib::Clip16(static_cast<int32_t>(
+      TEST_WIDE(svf.lp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
   RENDER_CORE(this_sample,
     const int16_t gain = input_samples[kAudioBlockSize];
     // Noise of its own, because a whistle sustains and the chiff decays.
@@ -1248,10 +1281,29 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     int32_t excitation =
         static_cast<int16_t>(noise_state >> 16) *
             (g_force_drive ? 32767 : gain) >> 15;
-    excitation = excitation * damp_drive_u15 >> 15;
-    const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(excitation, timbre);
+    excitation = excitation * excitation_drive_u15 >> 15;
+    int32_t damp = timbre;
+    if (g_limit_mode && g_limit_mode < 4) {
+      const uint32_t bp_squared = static_cast<uint32_t>(
+          previous_bp_in_curve * previous_bp_in_curve);
+      const uint32_t energy = bp_squared + static_cast<uint32_t>(
+          previous_lp_in_curve * previous_lp_in_curve);
+      if (g_limit_mode == 1) damp += bp_squared >> g_limit_shift;
+      if (g_limit_mode == 2) damp += energy >> g_limit_shift;
+      if (damp > 32767) damp = 32767;
+      if (g_limit_mode == 3) {
+        uint32_t throttle_u15 = energy >> g_limit_shift;
+        if (throttle_u15 > 32768) throttle_u15 = 32768;
+        excitation = excitation * static_cast<int32_t>(32768 - throttle_u15) >> 15;
+      }
+    }
+    const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(
+        excitation, static_cast<int16_t>(damp));
     const int32_t state_in_curve = stmlib::Clip16(static_cast<int32_t>(
         TEST_WIDE(state) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
+    previous_bp_in_curve = state_in_curve;
+    previous_lp_in_curve = stmlib::Clip16(static_cast<int32_t>(
+        TEST_WIDE(svf.lp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
     this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
   noise_state_ = noise_state;
