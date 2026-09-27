@@ -478,6 +478,16 @@ void Oscillator::Render(int16_t* audio_mix) {
   gain_envelope_.RenderSamples(
     gain_samples, static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16));
 
+#ifdef TEST
+  // GAIN_PROBE=n prints every gain sample of the first n blocks rendered.
+  static int gain_probe_blocks =
+      getenv("GAIN_PROBE") ? atoi(getenv("GAIN_PROBE")) : 0;
+  if (gain_probe_blocks > 0) {
+    --gain_probe_blocks;
+    for (size_t i = 0; i < kAudioBlockSize; ++i)
+      fprintf(stderr, "%d\n", gain_samples[i]);
+  }
+#endif
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
   RenderFn fn = fn_table_[fn_index];
@@ -1230,6 +1240,11 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
 // to carry energy at the note.
 void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
+#ifdef TEST
+  if (g_svf_probe && (g_svf_probe_n++ % g_svf_probe) == 0)
+    fprintf(stderr, "PING bp=%ld lp=%ld gain0=%d\n",
+            (long) svf.bp, (long) svf.lp, (int) input_samples[kAudioBlockSize]);
+#endif
   svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   // The ratio of the two peaks, so it follows either one if it moves.
   const int32_t kUnityStateToOutput_q12 =

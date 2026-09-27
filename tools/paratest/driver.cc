@@ -76,6 +76,7 @@ struct Part {
     for (int i = 0; i < n; ++i) voices[i].set_shape(s);
   }
   uint32_t attack_inc = 0, decay_inc = 0;   // 0 = take the setting's LUT entry
+  uint16_t peak = 65535;
   void NoteOn(const int* pitches, int16_t timbre, int attack, int decay,
               uint16_t sustain, uint32_t chiff, uint32_t chiff_samples) {
     // timbre here is raw_max_timbre: TIMBRE ENV MOD, a signed offset from the
@@ -84,7 +85,7 @@ struct Part {
     if (chiff > (1u << 30)) chiff = 1u << 30;
     for (int i = 0; i < n; ++i) {
       ADSR a;
-      a.peak_u16 = 65535; a.sustain_u16 = sustain;
+      a.peak_u16 = peak; a.sustain_u16 = sustain;
       a.attack_u32 = attack_inc ? attack_inc : EnvIncrement(attack);
       a.decay_u32 = decay_inc ? decay_inc : EnvIncrement(decay);
       a.release_u32 = decay_inc ? decay_inc : EnvIncrement(decay);
@@ -219,6 +220,7 @@ int main(int argc, char** argv) {
     int pit[8]; Pitches(pit, n, pitch, unison);
     Part p; p.Init(n, OptInt(argc, argv, "alloc", n));
     p.solo = OptInt(argc, argv, "solo", -1);
+    p.peak = OptInt(argc, argv, "peak", 65535);
     p.attack_inc = attack_inc; p.decay_inc = decay_inc;
     // prime: a shape selected BEFORE `from`, so per-shape members a render
     // leaves behind are set the way a session leaves them. RenderWhistle's
