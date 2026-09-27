@@ -1208,11 +1208,16 @@ static double g_jet_target =
 static int g_jet_noise_q8 =
     getenv("JET_NOISE_Q8") ? atoi(getenv("JET_NOISE_Q8")) : 256;
 static double g_jet_k = 0;
+// JET_K_POW=p100: the saturation level follows the blowing pressure as
+// K * gain^(p100 / 100) -- a jet's flow rises with pressure. 0 = fixed K.
+static double g_jet_k_pow =
+    getenv("JET_K_POW") ? atoi(getenv("JET_K_POW")) / 100.0 : 0;
 static inline int32_t JetFeedback(int32_t bp_q15_14, int16_t gain, int16_t damp) {
   if (!g_jet_m) return 0;
-  const double m = gain / 32767.0 * g_jet_m;
-  return static_cast<int32_t>(
-      damp / 16384.0 * g_jet_k * tanh(m * bp_q15_14 / g_jet_k));
+  const double blow = gain / 32767.0;
+  const double m = blow * g_jet_m;
+  const double k = g_jet_k * pow(blow > 1e-6 ? blow : 1e-6, g_jet_k_pow);
+  return static_cast<int32_t>(damp / 16384.0 * k * tanh(m * bp_q15_14 / k));
 }
 static inline int32_t JetNoise(int32_t excitation) {
   return g_jet_m ? excitation * g_jet_noise_q8 >> 8 : excitation;
