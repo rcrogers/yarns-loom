@@ -54,7 +54,7 @@ struct Part {
   // Fixed, as the firmware holds them: Oscillator is not copyable.
   Oscillator voices[kMaxVoices];
   int n;
-  uint16_t coherent, incoherent;
+  uint16_t coherent, incoherent_scale_ratio_u2_14;
 
   // alloc is what the PART divides its span by -- every voice it can sound --
   // and n is how many are actually playing. A part holds its allotment whether
@@ -64,10 +64,10 @@ struct Part {
     wrapped = 0; railed = 0;
     n = voice_count;
     coherent = kScaleCodes / alloc;
-    incoherent = static_cast<uint16_t>(
-        IntegerSqrt(static_cast<uint32_t>(kScaleCodes) * coherent));
+    incoherent_scale_ratio_u2_14 = static_cast<uint16_t>(
+        IntegerSqrt(static_cast<uint32_t>(alloc) << (2 * 14)));
     // Each voice draws its own noise stream, as Oscillator::Init does per voice.
-    for (int i = 0; i < n; ++i) voices[i].Init(coherent, incoherent);
+    for (int i = 0; i < n; ++i) voices[i].Init(coherent, incoherent_scale_ratio_u2_14);
   }
   void NoteOff() {
     for (int i = 0; i < n; ++i) voices[i].NoteOff();

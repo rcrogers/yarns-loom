@@ -182,7 +182,7 @@ uint32_t HashShape(int shape, bool dump) {
             ? static_cast<int16_t>(g_pitch_only << 7) : kPitches[p]);
     // One voice, so its share of the output budget is the whole of it and the
     // two shares coincide.
-    osc.Init(kScale, kScale);
+    osc.Init(kScale, 1 << 14);
     osc.set_shape(static_cast<OscillatorShape>(shape));
     for (int b = 0; b < g_blocks; ++b) {
       // Once a block, which is where the render reads the increment: Voice

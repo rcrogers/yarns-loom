@@ -18,16 +18,16 @@
 using namespace yarns;
 int main() {
   Oscillator osc;
-  // The two amplitudes a voice is handed at one through four voices, derived
-  // as yarns/voice.h derives them: the span's amplitude over n where the
-  // voices add coherently, and the geometric mean of the whole and that where
-  // they add in power. tools/cvtest span prints the firmware's own.
+  // What a voice is handed at one through four voices, derived as
+  // yarns/voice.h derives them: the span's amplitude over n where the voices
+  // add coherently, and sqrt(n) as the incoherent scale's ratio to that.
+  // tools/cvtest span prints the firmware's own.
   const uint16_t kSpanAmplitudeCodes_u16 = 25665; // the output span's +/-5 V
   uint16_t scales[4][2];
   for (uint8_t n = 1; n <= 4; ++n) {
     scales[n - 1][0] = kSpanAmplitudeCodes_u16 / n;
-    scales[n - 1][1] = static_cast<uint16_t>(IntegerSqrt(
-        static_cast<uint32_t>(kSpanAmplitudeCodes_u16) * scales[n - 1][0]));
+    scales[n - 1][1] = static_cast<uint16_t>(
+        IntegerSqrt(static_cast<uint32_t>(n) << (2 * 14)));
   }
   osc.Init(scales[0][0], scales[0][1]);
   const int pitches[] = { 0, 24 << 7, 60 << 7, 108 << 7, (128 << 7) - 1 };

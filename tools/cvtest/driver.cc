@@ -126,7 +126,8 @@ int main(int argc, char** argv) {
     for (uint8_t n = 1; n <= 4; ++n) {
       const uint16_t full = five_v * 2;
       const uint16_t coh = full / n;
-      const uint16_t inc = (uint16_t) IntegerSqrt((uint32_t) full * coh);
+      const uint16_t inc = (uint16_t) (
+          (uint32_t) coh * IntegerSqrt((uint32_t) n << (2 * 14)) >> 14);
       // The envelope saturates at kEnvelopeSampleMax whatever peak it is given.
       const uint32_t gain = coh > kEnvelopeSampleMax ? kEnvelopeSampleMax : coh;
       printf("  %5u  %8u  %10u  %9u  %9.2f  %9.1f%%\n", n, coh, inc,

@@ -342,8 +342,8 @@ class CVOutput {
     // A shape whose voices are UNCORRELATED adds in power instead, reaching
     // only sqrt(n) times one, and an nth leaves it 6 dB under at four voices.
     // The geometric mean of the whole and the nth is what it may spend --
-    // full/sqrt(n) -- and it must then cap its own peak at the nth, since n
-    // peaks that do align would otherwise leave the span.
+    // full/sqrt(n), sqrt(n) times the nth -- and it must then cap its own peak
+    // at the nth, since n peaks that do align would otherwise leave the span.
     //
     // Only WHISTLE takes it, and CREST is why rather than correlation: the
     // trade is peak headroom for level, so it pays only where the signal
@@ -355,12 +355,17 @@ class CVOutput {
     // to trade.
     const uint16_t coherent_scale_codes_u16 =
         scale_codes_u16 / num_audio_voices_;
-    const uint16_t incoherent_scale_codes_u16 = static_cast<uint16_t>(
-        IntegerSqrt(static_cast<uint32_t>(scale_codes_u16)
-                    * coherent_scale_codes_u16));
+    STATIC_ASSERT(
+        (static_cast<uint32_t>(kNumMaxVoicesPerPart) << (2 * 14))
+            <= static_cast<uint32_t>(kIncoherentScaleRatioMax_u2_14)
+                * kIncoherentScaleRatioMax_u2_14,
+        incoherent_scale_ratio_in_range);
+    const uint16_t incoherent_scale_ratio_u2_14 = static_cast<uint16_t>(
+        IntegerSqrt(static_cast<uint32_t>(num_audio_voices_) << (2 * 14)));
     for (uint8_t i = 0; i < num_audio_voices_; ++i) {
       Voice* audio_voice = audio_voices_[i] = dc_voices_[0] + i;
-      audio_voice->oscillator()->Init(coherent_scale_codes_u16, incoherent_scale_codes_u16);
+      audio_voice->oscillator()->Init(
+          coherent_scale_codes_u16, incoherent_scale_ratio_u2_14);
       audio_voice->set_audio_output(this);
     }
   }

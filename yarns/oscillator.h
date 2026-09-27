@@ -51,6 +51,10 @@ static const uint16_t kHighestNote = 128 * 128;
 // gain_envelope_ and timbre_envelope_.
 const uint8_t kEnvelopesPerOscillator = 2;
 
+// The most the incoherent scale may exceed the coherent one by: WHISTLE's
+// curve drive carries this ratio and is held u3.12 on the strength of it.
+const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
+
 class StateVariableFilter : public SVF {
  public:
   void Init();
@@ -147,8 +151,10 @@ class Oscillator {
   Oscillator() { }
   ~Oscillator() { }
 
+  // incoherent_scale_ratio_u2_14: the incoherent scale over the coherent one,
+  // at most kIncoherentScaleRatioMax_u2_14.
   inline void Init(uint16_t coherent_scale_codes_u16,
-                   uint16_t incoherent_scale_codes_u16) {
+                   uint16_t incoherent_scale_ratio_u2_14) {
     coherent_scale_codes_u16_ = coherent_scale_codes_u16;
     // The same scales as a fraction of the sample's own full scale, which is
     // what a gain multiplies by. The incoherent one is kept in this form only:
@@ -156,7 +162,8 @@ class Oscillator {
     coherent_scale_u15_ = static_cast<uint16_t>(
         (static_cast<uint32_t>(coherent_scale_codes_u16_) << 15) / INT16_MAX);
     incoherent_scale_u15_ = static_cast<uint16_t>(
-        (static_cast<uint32_t>(incoherent_scale_codes_u16) << 15) / INT16_MAX);
+        (static_cast<uint32_t>(coherent_scale_u15_)
+            * incoherent_scale_ratio_u2_14) >> 14);
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
