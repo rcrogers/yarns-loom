@@ -45,9 +45,16 @@ static int g_force_drive = getenv("WHISTLE_FORCE_DRIVE") ? 1 : 0;
 // WHISTLE_NO_MAKEUP=1 drops the output's 1/damp_drive, to measure how much of a
 // ring WHISTLE did not drive itself is that make-up.
 static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
+// CURVE_DRIVE_Q8=n scales how hard WHISTLE and PING drive the soft limiter,
+// 256 = stock: to hear saturation apart from everything else a ring carries.
+static int g_curve_drive_q8 =
+    getenv("CURVE_DRIVE_Q8") ? atoi(getenv("CURVE_DRIVE_Q8")) : 256;
+#define TEST_CLIP16(x) stmlib::Clip16(x)
 #else
 static const int g_force_drive = 0;
 static const int g_no_makeup = 0;
+static const int g_curve_drive_q8 = 256;
+#define TEST_CLIP16(x) (x)
 #endif
 
 #include "stmlib/utils/dsp.h"
@@ -1198,7 +1205,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // every bit the filter carried for it.
   const int32_t kDriveHeadroomBits = 3;
   const int32_t drive_into_curve_q12 =
-      state_into_curve_q15 >> kDriveHeadroomBits;
+      (state_into_curve_q15 >> kDriveHeadroomBits) * g_curve_drive_q8 >> 8;
   const int32_t scale_u15 = coherent_scale_u15_;
   const int16_t* curve = SoftLimitTableAsRegister();
   uint32_t noise_state = noise_state_;
@@ -1237,7 +1244,8 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom,
                 ping_drive_leaves_curve);
   const int32_t state_into_curve_q12 =
-      StateIntoCurve(state_to_output_q12, coherent_scale_codes_u16_);
+      StateIntoCurve(state_to_output_q12, coherent_scale_codes_u16_)
+          * g_curve_drive_q8 >> 8;
   const int32_t scale_u15 = coherent_scale_u15_;
   // The exciter carries the gain envelope's DC, which lp passes: once the ring
   // dies away its state sits at the excitation's own level -- a thump under a
@@ -1249,7 +1257,8 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     /* The resonant step response overshoots its input, so the excitation is */ \
     /* halved to leave room for the overshoot. */ \
     const int32_t state = svf.RenderSampleAtPitch<OUTPUT>(gain >> 1, timbre); \
-    const int32_t state_in_curve = state * state_into_curve_q12 >> 12; \
+    const int32_t state_in_curve = \
+        TEST_CLIP16(state * state_into_curve_q12 >> 12); \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
   )
