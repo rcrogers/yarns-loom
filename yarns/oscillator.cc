@@ -45,6 +45,9 @@ static int g_force_drive = getenv("WHISTLE_FORCE_DRIVE") ? 1 : 0;
 // WHISTLE_NO_MAKEUP=1 drops the output's 1/damp_drive, to measure how much of a
 // ring WHISTLE did not drive itself is that make-up.
 static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
+// WHISTLE_HALF_MAKEUP=1 spends the square root of the make-up at the output,
+// flattening how much louder a tighter Q comes out, with the state untouched.
+static int g_half_makeup = getenv("WHISTLE_HALF_MAKEUP") ? 1 : 0;
 // CURVE_DRIVE_Q8=n scales how hard WHISTLE and PING drive the soft limiter,
 // 256 = as built: to hear saturation apart from everything else a ring
 // carries. The product is taken wide so a scale past 256 cannot wrap it.
@@ -55,6 +58,7 @@ static int g_curve_drive_q8 =
 #else
 static const int g_force_drive = 0;
 static const int g_no_makeup = 0;
+static const int g_half_makeup = 0;
 #define TEST_CURVE_DRIVE(x) (x)
 #define TEST_WIDE(x) (x)
 #endif
@@ -1217,7 +1221,10 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   }
   previous_damp_drive_u15_ = damp_drive_u15;
   const int32_t state_to_output_q15 = WhistleStateToOutput(
-      pitch_, incoherent_scale_u15_, g_no_makeup ? 0 : damp_drive_u15);
+      pitch_, incoherent_scale_u15_, g_no_makeup ? 0
+          : g_half_makeup ? static_cast<int32_t>(IntegerSqrt(
+                static_cast<uint32_t>(damp_drive_u15) << 15))
+          : damp_drive_u15);
   const int32_t state_into_curve_q15 =
       StateIntoCurve(state_to_output_q15, coherent_scale_codes_u16_);
   // state_into_curve is u3.15: the rms-to-peak ratio and the make-up it
