@@ -1146,13 +1146,20 @@ static const int32_t kWhistleTiltReferencePitch = 12 << 7;
 // corrected here at the output, which moves the level and leaves the state
 // alone -- so the state still rails above MIDI 84, where that term is
 // largest.
+// The curve is driven 2^this past the level WhistleStateToOutput names: the
+// tone saturates, which steadies its amplitude, brightens it and shortens its
+// rise, and a released note rings on from the ceiling. Spent in the shift that
+// brings the product back to the curve's scale, as fractional bits the product
+// does not keep.
+static const int32_t kWhistleCurveDriveBits = 4;
+
 static int32_t WhistleStateToOutput(
     int32_t pitch, int32_t scale_u15,
     int32_t damp_drive_u15) {
   // Holds rms flat to MIDI 84.
   const int32_t pitch_correction_numerator = 1;
   const int32_t pitch_correction_denominator = 2;
-  // How far into the curve the signal is driven, which is the level: noise
+  // How far into the curve's knee the level law puts the signal: noise
   // visits its peak rarely, and everything under it is unspent until something
   // bends the peak.
   const int32_t level_into_knee_u15 = 31618;
@@ -1213,9 +1220,15 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
       pitch_, incoherent_scale_u15_, g_no_makeup ? 0 : damp_drive_u15);
   const int32_t state_into_curve_q15 =
       StateIntoCurve(state_to_output_q15, coherent_scale_codes_u16_);
-  // The headroom comes off the drive rather than the state, so the state keeps
-  // every bit the filter carried for it.
+  // state_into_curve is u3.15: the rms-to-peak ratio and the make-up it
+  // carries, over the curve's headroom, hold it under 8. Those integer bits come
+  // off the drive rather than the state, so the state keeps every bit the filter
+  // carried for it and s0.15 times the drive stays under 2^30.
   const int32_t kDriveHeadroomBits = 3;
+  STATIC_ASSERT(
+      (kIncoherentScaleRatioMax_u2_14 >> 14) * (1 << kWhistleDriveMakeUpBits)
+          <= kSoftLimitHeadroom << kDriveHeadroomBits,
+      whistle_drive_fits_its_bits);
   const int32_t drive_into_curve_q12 =
       TEST_CURVE_DRIVE(state_into_curve_q15 >> kDriveHeadroomBits);
   const int32_t scale_u15 = coherent_scale_u15_;
@@ -1231,7 +1244,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     excitation = excitation * damp_drive_u15 >> 15;
     const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(excitation, timbre);
     const int32_t state_in_curve = stmlib::Clip16(static_cast<int32_t>(
-        TEST_WIDE(state) * drive_into_curve_q12 >> (15 - kDriveHeadroomBits)));
+        TEST_WIDE(state) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
     this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
   noise_state_ = noise_state;
