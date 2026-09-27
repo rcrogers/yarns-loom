@@ -1117,6 +1117,51 @@ static inline const int16_t* SoftLimitTableAsRegister() {
   return curve;
 }
 
+// A resonator's output: the curve input through the soft limiter, held to the
+// table's domain because the drive takes it past the curve's end.
+#ifdef TEST
+}  // namespace yarns
+#include <cmath>
+namespace yarns {
+// RESONATOR_SHAPER picks the transfer instead, in units where 8192 is the
+// curve's unity: 1 sine fold, 2 triangle fold, 3/4 the same biased by
+// RESONATOR_BIAS_Q8 (256 = one unity) -- a bias's DC is taken back out.
+static int g_shaper = getenv("RESONATOR_SHAPER") ? atoi(getenv("RESONATOR_SHAPER")) : 0;
+static double g_shaper_bias =
+    getenv("RESONATOR_BIAS_Q8") ? atoi(getenv("RESONATOR_BIAS_Q8")) / 256.0 : 0.5;
+static inline double Triangle(double u) {  // slope 1 through 0, peak 1 at u = 1
+  double p = fmod(u + 1, 4);
+  if (p < 0) p += 4;
+  return p < 2 ? p - 1 : 3 - p;
+}
+// IN_LOOP_SAT=k100 saturates the resonator's bp every sample, inside the loop,
+// at k100/100 curve unities: bp = K tanh(bp / K). The drive into the curve
+// names K in state units.
+static double g_in_loop_sat = getenv("IN_LOOP_SAT") ? atoi(getenv("IN_LOOP_SAT")) / 100.0 : 0;
+static inline void InLoopSaturate(int32_t* bp_q15_14, int32_t drive_q32) {
+  if (!g_in_loop_sat) return;
+  const double k = g_in_loop_sat * 8192.0 * 4294967296.0 / drive_q32;
+  *bp_q15_14 = static_cast<int32_t>(k * tanh(*bp_q15_14 / k));
+}
+#else
+static inline void InLoopSaturate(int32_t*, int32_t) { }
+#endif
+static inline int32_t SoftLimit(
+    const int16_t* curve, int32_t state_in_curve, int32_t scale_u15);
+static inline int32_t ResonatorShape(
+    const int16_t* curve, int32_t curve_input, int32_t scale_u15) {
+#ifdef TEST
+  if (g_shaper) {
+    const double u = curve_input / 8192.0;
+    const double b = g_shaper >= 3 ? g_shaper_bias : 0;
+    const double y = (g_shaper == 1 || g_shaper == 3)
+        ? sin(u + b) - sin(b) : Triangle(u + b) - Triangle(b);
+    return static_cast<int32_t>(y * scale_u15);
+  }
+#endif
+  return SoftLimit(curve, stmlib::Clip16(curve_input), scale_u15);
+}
+
 // The curve's domain: the state scaled so the loudest one the shape can make
 // lands at the top of the table. In whatever Q state_to_output is in -- the
 // product leaves int32 for WHISTLE's, so it is taken 64 bits wide.
@@ -1222,7 +1267,48 @@ static inline int32_t JetFeedback(int32_t bp_q15_14, int16_t gain, int16_t damp)
 static inline int32_t JetNoise(int32_t excitation) {
   return g_jet_m ? excitation * g_jet_noise_q8 >> 8 : excitation;
 }
+// MULTI=n rings n resonators at harmonics of the note (MULTI_ODD=1: odd ones
+// only), floating point, each with the timbre's damping; the jet reads their
+// SUM, the bore's pressure, and the output is that sum. JET_* as above.
+static int g_multi = getenv("MULTI") ? atoi(getenv("MULTI")) : 0;
+static int g_multi_odd = getenv("MULTI_ODD") ? 1 : 0;
+// MULTI_DAMP_POW=p100: mode h damps at d * h^(p100/100), as a bore's upper
+// modes are lossier; mode h then self-oscillates only past m = h^p.
+static double g_multi_damp_pow =
+    getenv("MULTI_DAMP_POW") ? atoi(getenv("MULTI_DAMP_POW")) / 100.0 : 0;
+struct MultiSlot { const void* owner; double bp[5], lp[5]; };
+static MultiSlot g_multi_slots[8];
+static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain,
+    int16_t damp, int32_t noise_q15_14, int32_t drive_q32) {
+  MultiSlot* slot = 0;
+  for (int i = 0; i < 8 && !slot; ++i)
+    if (g_multi_slots[i].owner == owner) slot = &g_multi_slots[i];
+  for (int i = 0; i < 8 && !slot; ++i)
+    if (!g_multi_slots[i].owner) { slot = &g_multi_slots[i]; slot->owner = owner; }
+  const double f0 = 440.0 * pow(2.0, (pitch / 128.0 - 69) / 12);
+  const double d = damp / 16384.0;
+  double sum = 0;
+  for (int k = 0; k < g_multi; ++k) sum += slot->bp[k];
+  const double blow = gain / 32767.0;
+  const double kk = g_jet_k * pow(blow > 1e-6 ? blow : 1e-6, g_jet_k_pow);
+  const double jet = g_jet_m ? d * kk * tanh(blow * g_jet_m * sum / kk) : 0;
+  double out = 0;
+  for (int k = 0; k < g_multi; ++k) {
+    const double h = g_multi_odd ? 2 * k + 1 : k + 1;
+    if (h * f0 > 45000 / 6) continue;
+    const double c = 2 * sin(M_PI * h * f0 / 45000);
+    const double dk = d * pow(h, g_multi_damp_pow);
+    const double notch = noise_q15_14 + jet - (dk < 2 ? dk : 2) * slot->bp[k];
+    slot->lp[k] += c * slot->bp[k];
+    slot->bp[k] += c * (notch - slot->lp[k]);
+    out += slot->bp[k];
+  }
+  return out * static_cast<double>(drive_q32) / 4294967296.0;
+}
 #else
+static const int g_multi = 0;
+static inline double MultiWhistle(const void*, int16_t, int16_t, int16_t,
+    int32_t, int32_t) { return 0; }
 static inline int32_t JetFeedback(int32_t, int16_t, int16_t) { return 0; }
 static inline int32_t JetNoise(int32_t excitation) { return excitation; }
 #endif
@@ -1328,9 +1414,13 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
         + JetFeedback(state.bp_q15_14, gain, timbre);
     const int32_t state_q15_14 = svf.RenderSampleAtPitch<SVF_BP>(
         &state, excitation_q15_14, timbre);
-    const int32_t state_in_curve = stmlib::Clip16(MulHighS(
-        state_q15_14 + half_curve_unit_q15_14, drive_into_curve_q32));
-    this_sample = SoftLimit(curve, state_in_curve, scale_u15);
+    InLoopSaturate(&state.bp_q15_14, drive_into_curve_q32);
+    this_sample = ResonatorShape(curve, g_multi
+        ? static_cast<int32_t>(MultiWhistle(this, pitch_, gain, timbre,
+              excitation_q15_14 - JetFeedback(state.bp_q15_14, gain, timbre),
+              drive_into_curve_q32))
+        : MulHighS(state_q15_14 + half_curve_unit_q15_14, drive_into_curve_q32),
+        scale_u15);
   )
   state.Store(&svf);
   noise_state_ = noise_state;
@@ -1372,11 +1462,10 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     /* halved to leave room for the overshoot. */ \
     const int32_t state_q15_14 = svf.RenderSampleAtPitch<OUTPUT>( \
         &state, (gain >> 1) * (1 << ResonatorState::kFractionalBits), timbre); \
-    /* Past the curve's end, so held to the table's domain. */ \
-    const int32_t state_in_curve = stmlib::Clip16(MulHighS( \
-        state_q15_14 + half_curve_unit_q15_14, state_into_curve_q32)); \
+    InLoopSaturate(&state.bp_q15_14, state_into_curve_q32); \
     const int16_t* curve = SoftLimitTableAsRegister(); \
-    this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
+    this_sample = ResonatorShape(curve, MulHighS( \
+        state_q15_14 + half_curve_unit_q15_14, state_into_curve_q32), scale_u15); \
   )
   // Shifted so the product with a q15_14 state has the curve input as its
   // high word: one SMULL.
