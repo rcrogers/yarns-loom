@@ -1193,6 +1193,35 @@ static int32_t WhistleStateToOutput(
       : level_at_pitch_u15;
 }
 
+#ifdef TEST
+}  // namespace yarns
+#include <cmath>
+namespace yarns {
+// JET_M=m100 turns WHISTLE into a blown resonator: the excitation adds
+// d * K * tanh(m * bp / K), m = gain * m100 / 100, so the loop cancels the
+// damping at m = 1 at every Q and saturates at K. JET_TARGET is the overblown
+// amplitude in curve units (32768 = the curve's end); JET_NOISE_Q8 scales the
+// turbulence noise (256 = as built).
+static double g_jet_m = getenv("JET_M") ? atoi(getenv("JET_M")) / 100.0 : 0;
+static double g_jet_target =
+    getenv("JET_TARGET") ? atoi(getenv("JET_TARGET")) : 32768;
+static int g_jet_noise_q8 =
+    getenv("JET_NOISE_Q8") ? atoi(getenv("JET_NOISE_Q8")) : 256;
+static double g_jet_k = 0;
+static inline int32_t JetFeedback(int32_t bp_q15_14, int16_t gain, int16_t damp) {
+  if (!g_jet_m) return 0;
+  const double m = gain / 32767.0 * g_jet_m;
+  return static_cast<int32_t>(
+      damp / 16384.0 * g_jet_k * tanh(m * bp_q15_14 / g_jet_k));
+}
+static inline int32_t JetNoise(int32_t excitation) {
+  return g_jet_m ? excitation * g_jet_noise_q8 >> 8 : excitation;
+}
+#else
+static inline int32_t JetFeedback(int32_t, int16_t, int16_t) { return 0; }
+static inline int32_t JetNoise(int32_t excitation) { return excitation; }
+#endif
+
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
 #ifdef TEST
@@ -1262,6 +1291,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     double g = g_limit_law == 1 ? (x < 1 ? 1 - x : 0)
         : g_limit_law == 2 ? 1 / (1 + x) : 1 / __builtin_sqrt(1 + x);
     excitation_drive_u15 = static_cast<int32_t>(damp_drive_u15 * g);
+    if (getenv("WHISTLE_LIMIT_PROBE")) fprintf(stderr, "%.4f %.4f\n", x, g);
   }
 #endif
   // The drive shifted so the product with a q15_14 state has the curve input
@@ -1274,6 +1304,11 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t half_curve_unit_q15_14 = static_cast<int32_t>(
       (1u << 31) / static_cast<uint32_t>(drive_into_curve_q32));
   uint32_t noise_state = noise_state_;
+#ifdef TEST
+  // K in state units: 4/pi of it is the overblown amplitude, mapped to curve
+  // units by the output product (state * q12 / 2^22).
+  g_jet_k = g_jet_target / (4 / M_PI) / (drive_into_curve_q12 / 4194304.0);
+#endif
   ResonatorState state;
   state.Load(svf);
   RENDER_CORE(this_sample,
@@ -1283,8 +1318,9 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     int32_t excitation =
         static_cast<int16_t>(noise_state >> 16) *
             (g_force_drive ? 32767 : gain) >> 15;
-    const int32_t excitation_q15_14 = excitation * excitation_drive_u15
-        >> (15 - ResonatorState::kFractionalBits);
+    const int32_t excitation_q15_14 = JetNoise(excitation * excitation_drive_u15
+        >> (15 - ResonatorState::kFractionalBits))
+        + JetFeedback(state.bp_q15_14, gain, timbre);
     const int32_t state_q15_14 = svf.RenderSampleAtPitch<SVF_BP>(
         &state, excitation_q15_14, timbre);
     const int32_t state_in_curve = stmlib::Clip16(MulHighS(
