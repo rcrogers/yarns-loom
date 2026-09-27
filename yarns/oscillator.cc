@@ -29,6 +29,24 @@
 
 #include "yarns/oscillator.h"
 
+#ifdef TEST
+// SVF_PROBE=n reports the filter's state every nth render, for questions about
+// what is IN the filter rather than what reached the output. The resonators mute
+// their output with gain while still driving the filter, so a state that rings
+// is invisible from outside; this is how the charge was confirmed to be real.
+#include <cstdio>
+#include <cstdlib>
+static int g_svf_probe = getenv("SVF_PROBE") ? atoi(getenv("SVF_PROBE")) : 0;
+static long g_svf_probe_n = 0;
+// WHISTLE_FORCE_DRIVE=1 keeps WHISTLE's noise drive at full scale regardless of
+// gain, to separate two things that happen together at a shape switch: the noise
+// STOPPING, and the filter's coefficients changing meaning.
+static int g_force_drive = getenv("WHISTLE_FORCE_DRIVE") ? 1 : 0;
+// WHISTLE_NO_MAKEUP=1 drops the output's 1/damp_drive, to measure how much of a
+// ring WHISTLE did not drive itself is that make-up.
+static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
+#endif
+
 #include "stmlib/utils/dsp.h"
 #include "stmlib/utils/random.h"
 #include "stmlib/dsp/dsp.h"
@@ -1136,6 +1154,11 @@ static int32_t WhistleStateToOutput(
 
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
+#ifdef TEST
+  if (g_svf_probe && (g_svf_probe_n++ % g_svf_probe) == 0)
+    fprintf(stderr, "WHIST bp=%ld lp=%ld gain=%d\n",
+            (long) svf.bp, (long) svf.lp, (int) input_samples[kAudioBlockSize]);
+#endif
   svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   // sqrt(damp / reference), bounded at both ends by the constants it reads:
   // the excitation is scaled by it going in and the output by its reciprocal
@@ -1165,7 +1188,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   }
   previous_damp_drive_u15_ = damp_drive_u15;
   const int32_t state_to_output_q15 = WhistleStateToOutput(
-      pitch_, incoherent_scale_u15_, damp_drive_u15);
+      pitch_, incoherent_scale_u15_, g_no_makeup ? 0 : damp_drive_u15);
   const int32_t state_into_curve_q15 =
       StateIntoCurve(state_to_output_q15, coherent_scale_codes_u16_);
   // The headroom comes off the drive rather than the state, so the state keeps
@@ -1181,7 +1204,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     // Noise of its own, because a whistle sustains and the chiff decays.
     noise_state = NextXorshift32(noise_state);
     int32_t excitation =
-        static_cast<int16_t>(noise_state >> 16) * gain >> 15;
+        static_cast<int16_t>(noise_state >> 16) *
+            (g_force_drive ? 32767 : gain) >> 15;
     excitation = excitation * damp_drive_u15 >> 15;
     const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(excitation, timbre);
     const int32_t state_in_curve = stmlib::Clip16(
@@ -1282,6 +1306,11 @@ void Oscillator::RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix)
     this_sample = SoftLimit( \
         curve, state * kNoiseStateIntoCurve_q12 >> 12, kEnvelopeSampleMax); \
   )
+#ifdef TEST
+  if (g_svf_probe && (g_svf_probe_n++ % g_svf_probe) == 0)
+    fprintf(stderr, "NOISE bp=%ld lp=%ld cutoff=%d\n",
+            (long) svf.bp, (long) svf.lp, (int) input_samples[0]);
+#endif
   switch (shape_) {
     case OSC_SHAPE_NOISE_NOTCH: { NOISE_LOOP(SVF_NOTCH) } break;
     case OSC_SHAPE_NOISE_LP: { NOISE_LOOP(SVF_LP) } break;
