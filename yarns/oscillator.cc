@@ -49,9 +49,14 @@ static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
 // 256 = stock: to hear saturation apart from everything else a ring carries.
 static int g_curve_drive_q8 =
     getenv("CURVE_DRIVE_Q8") ? atoi(getenv("CURVE_DRIVE_Q8")) : 256;
+// CURVE_DRIVE_SHIFT=k drives the curve 2^k past stock by shifting the product
+// k bits less, in 32 bits: the form firmware would take.
+static int g_curve_drive_shift =
+    getenv("CURVE_DRIVE_SHIFT") ? atoi(getenv("CURVE_DRIVE_SHIFT")) : 0;
 #define TEST_CLIP16(x) stmlib::Clip16(x)
 #define TEST_WIDE(x) static_cast<int64_t>(x)
 #else
+static const int g_curve_drive_shift = 0;
 static const int g_force_drive = 0;
 static const int g_no_makeup = 0;
 static const int g_curve_drive_q8 = 256;
@@ -1230,8 +1235,11 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
             (g_force_drive ? 32767 : gain) >> 15;
     excitation = excitation * damp_drive_u15 >> 15;
     const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(excitation, timbre);
-    const int32_t state_in_curve = stmlib::Clip16(static_cast<int32_t>(
-        TEST_WIDE(state) * drive_into_curve_q12 >> (15 - kDriveHeadroomBits)));
+    const int32_t state_in_curve = g_curve_drive_shift
+        ? stmlib::Clip16(state * drive_into_curve_q12
+              >> (15 - kDriveHeadroomBits - g_curve_drive_shift))
+        : stmlib::Clip16(static_cast<int32_t>(
+              TEST_WIDE(state) * drive_into_curve_q12 >> (15 - kDriveHeadroomBits)));
     this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
   noise_state_ = noise_state;
@@ -1275,7 +1283,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     /* halved to leave room for the overshoot. */ \
     const int32_t state = svf.RenderSampleAtPitch<OUTPUT>(gain >> 1, timbre); \
     const int32_t state_in_curve = \
-        TEST_CLIP16(state * state_into_curve_q12 >> 12); \
+        TEST_CLIP16(state * state_into_curve_q12 >> (12 - g_curve_drive_shift)); \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
   )
