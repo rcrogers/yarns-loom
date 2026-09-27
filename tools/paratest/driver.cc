@@ -75,6 +75,9 @@ struct Part {
   void SetShape(OscillatorShape s) {
     for (int i = 0; i < n; ++i) voices[i].set_shape(s);
   }
+  // The envelope keeps a POINTER to its ADSR, as Voice holds its own adsr_, so
+  // these outlive NoteOn.
+  ADSR adsr[kMaxVoices];
   uint32_t attack_inc = 0, decay_inc = 0;   // 0 = take the setting's LUT entry
   uint16_t peak = 65535;
   void NoteOn(const int* pitches, int16_t timbre, int attack, int decay,
@@ -84,7 +87,7 @@ struct Part {
     // chiff is EXCITER AMOUNT as part.cc forms it, and part.cc clamps there.
     if (chiff > (1u << 30)) chiff = 1u << 30;
     for (int i = 0; i < n; ++i) {
-      ADSR a;
+      ADSR& a = adsr[i];
       a.peak_u16 = peak; a.sustain_u16 = sustain;
       a.attack_u32 = attack_inc ? attack_inc : EnvIncrement(attack);
       a.decay_u32 = decay_inc ? decay_inc : EnvIncrement(decay);

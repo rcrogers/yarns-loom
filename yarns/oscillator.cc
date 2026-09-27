@@ -50,11 +50,13 @@ static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
 static int g_curve_drive_q8 =
     getenv("CURVE_DRIVE_Q8") ? atoi(getenv("CURVE_DRIVE_Q8")) : 256;
 #define TEST_CLIP16(x) stmlib::Clip16(x)
+#define TEST_WIDE(x) static_cast<int64_t>(x)
 #else
 static const int g_force_drive = 0;
 static const int g_no_makeup = 0;
 static const int g_curve_drive_q8 = 256;
 #define TEST_CLIP16(x) (x)
+#define TEST_WIDE(x) (x)
 #endif
 
 #include "stmlib/utils/dsp.h"
@@ -1228,8 +1230,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
             (g_force_drive ? 32767 : gain) >> 15;
     excitation = excitation * damp_drive_u15 >> 15;
     const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(excitation, timbre);
-    const int32_t state_in_curve = stmlib::Clip16(
-        state * drive_into_curve_q12 >> (15 - kDriveHeadroomBits));
+    const int32_t state_in_curve = stmlib::Clip16(static_cast<int32_t>(
+        TEST_WIDE(state) * drive_into_curve_q12 >> (15 - kDriveHeadroomBits)));
     this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
   noise_state_ = noise_state;
