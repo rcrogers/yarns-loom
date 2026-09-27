@@ -48,13 +48,10 @@ static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
 // WHISTLE_HALF_MAKEUP=1 spends the square root of the make-up at the output,
 // flattening how much louder a tighter Q comes out, with the state untouched.
 static int g_half_makeup = getenv("WHISTLE_HALF_MAKEUP") ? 1 : 0;
-// WHISTLE_LIMIT_MODE / WHISTLE_LIMIT_SHIFT=s move WHISTLE's limiting inside
-// the resonator, from the sample before, in curve units:
-//   1: damping += bp^2 >> s
-//   2: damping += (bp^2 + lp^2) >> s -- a ring holds this nearly constant
-//   3: excitation *= 1 - min((bp^2 + lp^2) >> s, 1) -- Q untouched
-//   4: as 3, once a block, by WHISTLE_LIMIT_LAW with x = (bp^2 + lp^2) >> s
-//      as a fraction of 2^15: 1 = 1 - x, 2 = 1/(1 + x), 3 = 1/sqrt(1 + x)
+// WHISTLE_LIMIT_MODE=4 / WHISTLE_LIMIT_SHIFT=s throttle WHISTLE's excitation
+// once a block by the ring's energy in curve units, which leaves Q alone: by
+// WHISTLE_LIMIT_LAW with x = (bp^2 + lp^2) >> s as a fraction of 2^15,
+// 1 = 1 - x, 2 = 1/(1 + x), 3 = 1/sqrt(1 + x).
 static int g_limit_law =
     getenv("WHISTLE_LIMIT_LAW") ? atoi(getenv("WHISTLE_LIMIT_LAW")) : 1;
 static int g_limit_mode =
@@ -67,15 +64,11 @@ static int g_limit_shift =
 static int g_curve_drive_q8 =
     getenv("CURVE_DRIVE_Q8") ? atoi(getenv("CURVE_DRIVE_Q8")) : 256;
 #define TEST_CURVE_DRIVE(x) ((x) * g_curve_drive_q8 >> 8)
-#define TEST_WIDE(x) static_cast<int64_t>(x)
 #else
 static const int g_force_drive = 0;
 static const int g_no_makeup = 0;
 static const int g_half_makeup = 0;
-static const int g_limit_mode = 0;
-static const int g_limit_shift = 16;
 #define TEST_CURVE_DRIVE(x) (x)
-#define TEST_WIDE(x) (x)
 #endif
 
 #include "stmlib/utils/dsp.h"
@@ -1204,8 +1197,8 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
 #ifdef TEST
   if (g_svf_probe && (g_svf_probe_n++ % g_svf_probe) == 0)
-    fprintf(stderr, "WHIST bp=%ld lp=%ld gain=%d\n",
-            (long) svf.bp, (long) svf.lp, (int) input_samples[kAudioBlockSize]);
+    fprintf(stderr, "WHIST bp=%ld lp=%ld rem=%ld,%ld gain=%d\n",
+            (long) svf.bp, (long) svf.lp, (long) svf.bp_step_remainder_u15, (long) svf.lp_step_remainder_u15, (int) input_samples[kAudioBlockSize]);
 #endif
   svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   // sqrt(damp / reference), bounded at both ends by the constants it reads:
@@ -1259,9 +1252,11 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
 #ifdef TEST
   if (g_limit_mode == 4) {
     const double bp_in_curve = stmlib::Clip16(static_cast<int32_t>(
-        TEST_WIDE(svf.bp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
+        static_cast<int64_t>(svf.bp) * drive_into_curve_q12
+            >> (12 - kWhistleCurveDriveBits)));
     const double lp_in_curve = stmlib::Clip16(static_cast<int32_t>(
-        TEST_WIDE(svf.lp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
+        static_cast<int64_t>(svf.lp) * drive_into_curve_q12
+            >> (12 - kWhistleCurveDriveBits)));
     const double x = (bp_in_curve * bp_in_curve + lp_in_curve * lp_in_curve)
         / __builtin_ldexp(1.0, g_limit_shift) / 32768.0;
     double g = g_limit_law == 1 ? (x < 1 ? 1 - x : 0)
@@ -1269,11 +1264,18 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     excitation_drive_u15 = static_cast<int32_t>(damp_drive_u15 * g);
   }
 #endif
+  // The drive shifted so the product with a q15_14 state has the curve input
+  // as its high word: one SMULL.
+  const int32_t drive_into_curve_q32 = drive_into_curve_q12
+      << (32 - 12 + kWhistleCurveDriveBits - ResonatorState::kFractionalBits);
+  // Half a curve unit in the state's units, so the high word rounds rather than
+  // floors: a ring decayed to its last fraction of a count, or an lp stranded
+  // there, reads as zero.
+  const int32_t half_curve_unit_q15_14 = static_cast<int32_t>(
+      (1u << 31) / static_cast<uint32_t>(drive_into_curve_q32));
   uint32_t noise_state = noise_state_;
-  int32_t previous_bp_in_curve = stmlib::Clip16(static_cast<int32_t>(
-      TEST_WIDE(svf.bp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
-  int32_t previous_lp_in_curve = stmlib::Clip16(static_cast<int32_t>(
-      TEST_WIDE(svf.lp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
+  ResonatorState state;
+  state.Load(svf);
   RENDER_CORE(this_sample,
     const int16_t gain = input_samples[kAudioBlockSize];
     // Noise of its own, because a whistle sustains and the chiff decays.
@@ -1281,31 +1283,15 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     int32_t excitation =
         static_cast<int16_t>(noise_state >> 16) *
             (g_force_drive ? 32767 : gain) >> 15;
-    excitation = excitation * excitation_drive_u15 >> 15;
-    int32_t damp = timbre;
-    if (g_limit_mode && g_limit_mode < 4) {
-      const uint32_t bp_squared = static_cast<uint32_t>(
-          previous_bp_in_curve * previous_bp_in_curve);
-      const uint32_t energy = bp_squared + static_cast<uint32_t>(
-          previous_lp_in_curve * previous_lp_in_curve);
-      if (g_limit_mode == 1) damp += bp_squared >> g_limit_shift;
-      if (g_limit_mode == 2) damp += energy >> g_limit_shift;
-      if (damp > 32767) damp = 32767;
-      if (g_limit_mode == 3) {
-        uint32_t throttle_u15 = energy >> g_limit_shift;
-        if (throttle_u15 > 32768) throttle_u15 = 32768;
-        excitation = excitation * static_cast<int32_t>(32768 - throttle_u15) >> 15;
-      }
-    }
-    const int32_t state = svf.RenderSampleAtPitch<SVF_BP>(
-        excitation, static_cast<int16_t>(damp));
-    const int32_t state_in_curve = stmlib::Clip16(static_cast<int32_t>(
-        TEST_WIDE(state) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
-    previous_bp_in_curve = state_in_curve;
-    previous_lp_in_curve = stmlib::Clip16(static_cast<int32_t>(
-        TEST_WIDE(svf.lp) * drive_into_curve_q12 >> (12 - kWhistleCurveDriveBits)));
+    const int32_t excitation_q15_14 = excitation * excitation_drive_u15
+        >> (15 - ResonatorState::kFractionalBits);
+    const int32_t state_q15_14 = svf.RenderSampleAtPitch<SVF_BP>(
+        &state, excitation_q15_14, timbre);
+    const int32_t state_in_curve = stmlib::Clip16(MulHighS(
+        state_q15_14 + half_curve_unit_q15_14, drive_into_curve_q32));
     this_sample = SoftLimit(curve, state_in_curve, scale_u15);
   )
+  state.Store(&svf);
   noise_state_ = noise_state;
   svf_ = svf;
 }
@@ -1317,7 +1303,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
 #ifdef TEST
   if (g_svf_probe && (g_svf_probe_n++ % g_svf_probe) == 0)
     fprintf(stderr, "PING bp=%ld lp=%ld gain0=%d\n",
-            (long) svf.bp, (long) svf.lp, (int) input_samples[kAudioBlockSize]);
+            (long) svf.bp, (long) svf.lp, (long) svf.bp_step_remainder_u15, (long) svf.lp_step_remainder_u15, (int) input_samples[kAudioBlockSize]);
 #endif
   svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   // The ratio of the two peaks, so it follows either one if it moves.
@@ -1343,13 +1329,22 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     const int16_t gain = input_samples[kAudioBlockSize]; \
     /* The resonant step response overshoots its input, so the excitation is */ \
     /* halved to leave room for the overshoot. */ \
-    const int32_t state = svf.RenderSampleAtPitch<OUTPUT>(gain >> 1, timbre); \
+    const int32_t state_q15_14 = svf.RenderSampleAtPitch<OUTPUT>( \
+        &state, (gain >> 1) * (1 << ResonatorState::kFractionalBits), timbre); \
     /* Past the curve's end, so held to the table's domain. */ \
-    const int32_t state_in_curve = stmlib::Clip16(static_cast<int32_t>( \
-        TEST_WIDE(state) * state_into_curve_q12 >> 12)); \
+    const int32_t state_in_curve = stmlib::Clip16(MulHighS( \
+        state_q15_14 + half_curve_unit_q15_14, state_into_curve_q32)); \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = SoftLimit(curve, state_in_curve, scale_u15); \
   )
+  // Shifted so the product with a q15_14 state has the curve input as its
+  // high word: one SMULL.
+  const int32_t state_into_curve_q32 = state_into_curve_q12
+      << (32 - 12 - ResonatorState::kFractionalBits);
+  const int32_t half_curve_unit_q15_14 = static_cast<int32_t>(
+      (1u << 31) / static_cast<uint32_t>(state_into_curve_q32));
+  ResonatorState state;
+  state.Load(svf);
   switch (shape_) {
     case OSC_SHAPE_PING_LP: { PING_LOOP(SVF_LP) } break;
     case OSC_SHAPE_PING_BP: { PING_LOOP(SVF_BP) } break;
@@ -1357,6 +1352,7 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
     default: break;
   }
 #undef PING_LOOP
+  state.Store(&svf);
   svf_ = svf;
 }
 

@@ -68,16 +68,16 @@ class StateVariableFilter : public SVF {
   template<SvfOutput kOutput>
   inline int32_t RenderSample(int32_t in, int16_t cutoff_u15) {
     damp.Tick();
-    return Process<kOutput, false>(in, cutoff_u15, damp.value());
+    return Process<kOutput>(in, cutoff_u15, damp.value());
   }
-  // The mirror: damping per sample, cutoff interpolated toward the pitch's.
-  // kMustReachSilence, because these shapes spend the gain envelope on the
-  // excitation rather than on the output: a ring that stops short of zero is a
-  // tone that never ends.
+  // The mirror: damping per sample, cutoff interpolated toward the pitch's, on
+  // a resonator's own state.
   template<SvfOutput kOutput>
-  inline int32_t RenderSampleAtPitch(int32_t in, int16_t damp_u1_14) {
+  inline int32_t RenderSampleAtPitch(
+      ResonatorState* state, int32_t in_q15_14, int16_t damp_u1_14) {
     cutoff.Tick();
-    return Process<kOutput, true>(in, cutoff.value(), damp_u1_14);
+    return state->Process<kOutput>(
+        in_q15_14, cutoff.value_q15_16(), damp_u1_14);
   }
 
  private:
