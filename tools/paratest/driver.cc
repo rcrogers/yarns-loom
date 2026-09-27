@@ -208,8 +208,10 @@ int main(int argc, char** argv) {
   const int from = OptInt(argc, argv, "from", OSC_SHAPE_NOISE_HP);
   const int to = OptInt(argc, argv, "to", OSC_SHAPE_WHISTLE);
   // EXCITER AMOUNT as a fraction of its clamp, and DURATION as its setting.
-  const uint32_t exciter = static_cast<uint32_t>(
-      OptInt(argc, argv, "exciter", 0)) * ((1u << 30) / 127);
+  // exciter_q30 overrides exciter with the raw amount, for scaling it exactly.
+  const uint32_t exciter = OptInt(argc, argv, "exciter_q30", 0)
+      ? static_cast<uint32_t>(OptInt(argc, argv, "exciter_q30", 0))
+      : static_cast<uint32_t>(OptInt(argc, argv, "exciter", 0)) * ((1u << 30) / 127);
   const uint32_t exciter_samples = exciter ? ChiffAudibleSamples(Interpolate88(
       lut_chiff_phase_increments, OptInt(argc, argv, "exciter_dur", 40) << 8)) : 0;
 
@@ -232,7 +234,7 @@ int main(int argc, char** argv) {
       p.NoteOn(pit, te, attack, decay, sustain, exciter, exciter_samples);
       Run(&p, pit, timbre, OptInt(argc, argv, "prime_blocks", 200), NULL);
       p.NoteOff();
-      Run(&p, pit, timbre, 200, NULL);
+      Run(&p, pit, timbre, OptInt(argc, argv, "prime_settle", 200), NULL);
     }
     p.SetShape(static_cast<OscillatorShape>(switching ? from : to));
     // noteon=0 leaves the part SILENT: the gain envelope never leaves DEAD.
