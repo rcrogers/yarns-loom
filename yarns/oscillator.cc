@@ -1185,7 +1185,9 @@ static inline int32_t ResonatorShape(
     const double b = g_shaper >= 3 ? g_shaper_bias : 0;
     // 6: linear, held to the ceiling -- no shaping, for a source that makes
     // its own harmonics.
+    // 7: expo fold biased by RESONATOR_BIAS_Q8, like 3 for sine.
     const double y = g_shaper == 6 ? (u > 1 ? 1 : u < -1 ? -1 : u)
+        : g_shaper == 7 ? ExpoFold(u + g_shaper_bias) - ExpoFold(g_shaper_bias)
         : g_shaper == 5 ? ExpoFold(u)
         : (g_shaper == 1 || g_shaper == 3)
         ? sin(u + b) - sin(b) : Triangle(u + b) - Triangle(b);
@@ -1305,6 +1307,9 @@ static inline int32_t JetNoise(int32_t excitation) {
 // SUM, the bore's pressure, and the output is that sum. JET_* as above.
 static int g_multi = getenv("MULTI") ? atoi(getenv("MULTI")) : 0;
 static int g_multi_odd = getenv("MULTI_ODD") ? 1 : 0;
+// JET_LINEAR=1 drops the jet's tanh: d * m * sum, m held below 1 so the loop
+// only regenerates the breath and never self-oscillates.
+static int g_jet_linear = getenv("JET_LINEAR") ? 1 : 0;
 // MULTI_DAMP_POW=p100: mode h damps at d * h^(p100/100), as a bore's upper
 // modes are lossier; mode h then self-oscillates only past m = h^p.
 static double g_multi_damp_pow =
@@ -1324,7 +1329,10 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
   for (int k = 0; k < g_multi; ++k) sum += slot->bp[k];
   const double blow = gain / 32767.0;
   const double kk = g_jet_k * pow(blow > 1e-6 ? blow : 1e-6, g_jet_k_pow);
-  const double jet = g_jet_m ? d * kk * tanh(blow * g_jet_m * sum / kk) : 0;
+  const double m_linear = blow * g_jet_m < 0.95 ? blow * g_jet_m : 0.95;
+  const double jet = !g_jet_m ? 0
+      : g_jet_linear ? d * m_linear * sum
+      : d * kk * tanh(blow * g_jet_m * sum / kk);
   double out = 0;
   for (int k = 0; k < g_multi; ++k) {
     const double h = g_multi_odd ? 2 * k + 1 : k + 1;
