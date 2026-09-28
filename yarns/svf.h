@@ -203,6 +203,26 @@ struct ResonatorState {
     if (kOutput == SVF_HP) return hp_q15_14;
     return kOutput == SVF_LP ? lp_q15_14 : bp_q15_14;
   }
+
+  // Process without the damping term's remainder, for a mode damped hard
+  // enough that what it drops is below anything the output can show.
+  template<SvfOutput kOutput>
+  inline int32_t ProcessLossy(
+      int32_t in_q15_14, int32_t cutoff_q0_31, int16_t damp_u1_14) {
+    const uint32_t damp_u1_31 = static_cast<uint32_t>(damp_u1_14) << 17;
+    const uint32_t twice_bp_magnitude = static_cast<uint32_t>(
+        bp_q15_14 < 0 ? -bp_q15_14 : bp_q15_14) << 1;
+    const int32_t damping_term_q15_14 =
+        static_cast<int32_t>(MulHighU(twice_bp_magnitude, damp_u1_31));
+    const int32_t notch_q15_14 = ClipS(in_q15_14
+        - (bp_q15_14 < 0 ? -damping_term_q15_14 : damping_term_q15_14), 30);
+    lp_q15_14 = ClipS(lp_q15_14 + 2 * MulHighS(cutoff_q0_31, bp_q15_14), 30);
+    const int32_t hp_q15_14 = ClipS(notch_q15_14 - lp_q15_14, 30);
+    bp_q15_14 = ClipS(bp_q15_14 + 2 * MulHighS(cutoff_q0_31, hp_q15_14), 30);
+    if (kOutput == SVF_NOTCH) return notch_q15_14;
+    if (kOutput == SVF_HP) return hp_q15_14;
+    return kOutput == SVF_LP ? lp_q15_14 : bp_q15_14;
+  }
 };
 
 }  // namespace yarns

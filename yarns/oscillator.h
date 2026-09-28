@@ -44,6 +44,11 @@
 #include <cstring>
 #include <cstdio>
 
+// Scoping builds of WHISTLE as a blown resonator; 0 is the shipped render.
+#ifndef WHISTLE_VARIANT
+#define WHISTLE_VARIANT 0
+#endif
+
 namespace yarns {
 
 static const uint16_t kHighestNote = 128 * 128;
@@ -168,6 +173,9 @@ class Oscillator {
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
     svf_.Init();
+#if WHISTLE_VARIANT == 3
+    svf_mode2_.Init();
+#endif
     previous_damp_drive_u15_ = 0;
     // Its own stream, so that voices summed as independent noise are.
     noise_state_ = NextXorshift32Seed();
@@ -391,6 +399,9 @@ class Oscillator {
 
   PhaseDistortionSquareModulator pd_square_;
   StateVariableFilter svf_;
+#if WHISTLE_VARIANT == 3
+  SVF svf_mode2_;
+#endif
   Envelope gain_envelope_, timbre_envelope_;
 
  private:
