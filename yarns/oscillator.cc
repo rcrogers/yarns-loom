@@ -1191,7 +1191,11 @@ static inline int32_t ResonatorShape(
         : g_shaper == 5 ? ExpoFold(u)
         : (g_shaper == 1 || g_shaper == 3)
         ? sin(u + b) - sin(b) : Triangle(u + b) - Triangle(b);
-    return static_cast<int32_t>(y * scale_u15);
+    // A bias moves one swing past full scale: 1 + |f(b)|. Scaled back so the
+    // larger swing reaches the voice's ceiling and no further.
+    const double bias_swing = g_shaper == 3 ? 1 + fabs(sin(b))
+        : g_shaper == 7 ? 1 + fabs(ExpoFold(g_shaper_bias)) : 1;
+    return static_cast<int32_t>(y / bias_swing * scale_u15);
   }
 #endif
   return SoftLimit(curve, stmlib::Clip16(curve_input), scale_u15);
