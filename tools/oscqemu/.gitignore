@@ -1,0 +1,5 @@
+test.elf
+*.o
+qemu_out.txt
+qemu_hash.txt
+host_hash.txt

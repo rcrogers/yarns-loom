@@ -151,9 +151,9 @@ struct SequencerArpeggiatorResult { // Supports multiple return
 };
 
 struct PackedPart {
-  // 33 bits to spare per part: up to 29 from the last bitfield word's padding,
-  // plus 4 more if a new bitfield group is added (at the cost of 28 bits of
-  // word-alignment overhead).  Dense pitch encoding accounts for 24 of these.
+  // `make syx` reports the headroom; storage_manager.h derives it.  Dense pitch
+  // encoding below is why there is any: a byte per step would grow the part by
+  // 3 bytes, putting the multi over the flash page.
 
   // 128 MIDI notes + rest + tie
   typedef DenseArray<kNumSteps, SEQUENCER_STEP_TIE + 1> StepPitchDenseArray;
@@ -161,13 +161,26 @@ struct PackedPart {
   uint8_t dense_step_pitches[StepPitchDenseArray::kNumBytes];
   uint8_t step_velocity[kNumSteps];  // 7 bits velocity + 1 bit slide
 
+  // No index or count: Deck::Pack rotates the ring so the oldest note is
+  // first, and a zero velocity marks where the notes stop.
   looper::PackedNote looper_notes[looper::kMaxNotes];
-  unsigned int
-    looper_oldest_index : looper::kBitsNoteIndex,
-    looper_size         : looper::kBitsNoteIndex;
 
   static const uint8_t kTimbreBits = 7; // values free: 0
   static const uint8_t kLFOShapeBits = 3; // values free: 0
+
+  // What is left of the last byte once the bitfield run ends.  Named so that
+  // sizeof() accounts for every bit; narrow it when adding a field.  A macro
+  // because at zero the field must vanish -- zero-width bitfields are illegal.
+#ifndef PACKED_PART_EXTRA_FREE_BITS
+#define PACKED_PART_EXTRA_FREE_BITS 0 // Widened by the free-bits check
+#endif
+#define PACKED_PART_FREE_BITS (7 + PACKED_PART_EXTRA_FREE_BITS)
+#if PACKED_PART_FREE_BITS
+  #define PACKED_PART_FREE_FIELD , free_bits : PACKED_PART_FREE_BITS
+#else
+  #define PACKED_PART_FREE_FIELD
+#endif
+  static const uint8_t kFreeBits = PACKED_PART_FREE_BITS;
 
   signed int
     // MidiSettings
@@ -184,7 +197,9 @@ struct PackedPart {
     env_mod_decay : kTimbreBits,
     env_mod_sustain : kTimbreBits,
     env_mod_release : kTimbreBits,
-    portamento_mod_velocity : kTimbreBits;
+    portamento_mod_velocity : kTimbreBits,
+    chiff_amount_mod_velocity : kTimbreBits,
+    chiff_duration_mod_velocity : kTimbreBits;
 
   // MidiSettings
   unsigned int
@@ -216,7 +231,7 @@ struct PackedPart {
     aux_cv_2 : 4, // values free: 0
     tuning_factor : 4, // values free: 2
     oscillator_mode : 2, // values free: 1
-    oscillator_shape : 7, // Breaking: 1 bit unused, values unused: 77
+    oscillator_shape : 7, // values free: 56 (72 needed, so 6 bits will not do)
     tremolo_mod : kTimbreBits,
     vibrato_shape : kLFOShapeBits,
     timbre_lfo_shape : kLFOShapeBits,
@@ -226,7 +241,9 @@ struct PackedPart {
     env_init_attack : kTimbreBits,
     env_init_decay : kTimbreBits,
     env_init_sustain : kTimbreBits,
-    env_init_release : kTimbreBits;
+    env_init_release : kTimbreBits,
+    chiff_amount : kTimbreBits,
+    chiff_duration : kTimbreBits;
 
   // SequencerSettings
   unsigned int
@@ -240,9 +257,14 @@ struct PackedPart {
     step_offset : 5, // values free: 2 (see kNumSteps)
     num_steps : 5, // values free: 1
     clock_quantization : 1,
-    loop_length : 3; // values free: 0
+    loop_length : 3 // values free: 0
+    PACKED_PART_FREE_FIELD;
 
 }__attribute__((packed));
+
+#undef PACKED_PART_FREE_FIELD
+#undef PACKED_PART_FREE_BITS
+#undef PACKED_PART_EXTRA_FREE_BITS
 
 struct MidiSettings {
   uint8_t channel;
@@ -256,7 +278,6 @@ struct MidiSettings {
   uint8_t play_mode;
   uint8_t input_response;
   uint8_t sustain_polarity;
-  uint8_t padding[5];
 
   void Pack(PackedPart& packed) const {
     packed.channel = channel;
@@ -327,6 +348,10 @@ struct VoicingSettings {
   int8_t env_mod_sustain;
   int8_t env_mod_release;
   int8_t portamento_mod_velocity;
+  uint8_t chiff_amount;
+  uint8_t chiff_duration;
+  int8_t chiff_amount_mod_velocity;
+  int8_t chiff_duration_mod_velocity;
 
   void Pack(PackedPart& packed) const {
     packed.allocation_mode = allocation_mode;
@@ -367,6 +392,10 @@ struct VoicingSettings {
     packed.env_mod_sustain = env_mod_sustain;
     packed.env_mod_release = env_mod_release;
     packed.portamento_mod_velocity = portamento_mod_velocity;
+    packed.chiff_amount = chiff_amount;
+    packed.chiff_duration = chiff_duration;
+    packed.chiff_amount_mod_velocity = chiff_amount_mod_velocity;
+    packed.chiff_duration_mod_velocity = chiff_duration_mod_velocity;
   }
 
   void Unpack(PackedPart& packed) {
@@ -408,6 +437,10 @@ struct VoicingSettings {
     env_mod_sustain = packed.env_mod_sustain;
     env_mod_release = packed.env_mod_release;
     portamento_mod_velocity = packed.portamento_mod_velocity;
+    chiff_amount = packed.chiff_amount;
+    chiff_duration = packed.chiff_duration;
+    chiff_amount_mod_velocity = packed.chiff_amount_mod_velocity;
+    chiff_duration_mod_velocity = packed.chiff_duration_mod_velocity;
   }
 
 };
@@ -464,6 +497,10 @@ enum PartSetting {
   PART_VOICING_ENV_MOD_SUSTAIN,
   PART_VOICING_ENV_MOD_RELEASE,
   PART_VOICING_PORTAMENTO_MOD_VELOCITY,
+  PART_VOICING_CHIFF_AMOUNT,
+  PART_VOICING_CHIFF_DURATION,
+  PART_VOICING_CHIFF_AMOUNT_MOD_VELOCITY,
+  PART_VOICING_CHIFF_DURATION_MOD_VELOCITY,
   PART_VOICING_LAST = PART_VOICING_ALLOCATION_MODE + sizeof(VoicingSettings) - 1,
   PART_SEQUENCER_CLOCK_DIVISION,
   PART_SEQUENCER_GATE_LENGTH,
@@ -491,10 +528,8 @@ struct SequencerSettings {
   uint8_t num_steps;
   uint8_t clock_quantization;
   uint8_t loop_length;
-  uint8_t padding_fields[5];
 
   SequencerStep step[kNumSteps];
-  uint8_t padding_steps[2];
 
   void Pack(PackedPart& packed) const {
     std::fill(
@@ -547,6 +582,26 @@ struct SequencerSettings {
     return kC4;
   }
 };
+
+// Part::Get and Part::Set walk midi_, voicing_ and seq_ as a single run of
+// bytes, using PART_* offsets that sizeof() alone decides. That holds only
+// while each struct packs flush against the next, so none of them may want
+// alignment -- which stays true as long as their members are all bytes. A
+// wider member would silently insert a gap and slide every later setting's
+// address off its field.
+template<typename T> struct FlushPacked { char first; T rest; };
+STATIC_ASSERT(
+  sizeof(FlushPacked<MidiSettings>) == 1 + sizeof(MidiSettings),
+  midi_settings_would_leave_a_gap
+);
+STATIC_ASSERT(
+  sizeof(FlushPacked<VoicingSettings>) == 1 + sizeof(VoicingSettings),
+  voicing_settings_would_leave_a_gap
+);
+STATIC_ASSERT(
+  sizeof(FlushPacked<SequencerSettings>) == 1 + sizeof(SequencerSettings),
+  sequencer_settings_would_leave_a_gap
+);
 
 struct HeldKeys {
 
@@ -837,10 +892,6 @@ class Part {
   }
   inline bool cc_thru() const { return midi_.out_mode != MIDI_OUT_MODE_OFF; }
   
-  inline bool has_velocity_filtering() {
-    return midi_.min_velocity != 0 || midi_.max_velocity != 127;
-  }
-
   inline uint8_t FindVoiceForNote(uint8_t note) const {
     for (uint8_t i = 0; i < num_voices_; ++i) {
       if (active_note_[i] == note) {
@@ -893,9 +944,10 @@ class Part {
   inline uint8_t recording_step() const { return seq_rec_step_; }
   inline uint8_t playing_step() const { return step_counter_ % seq_.num_steps; }
   inline uint8_t num_steps() const { return seq_.num_steps; }
-  inline void increment_recording_step_index(uint8_t n) {
-    seq_rec_step_ += n;
-    seq_rec_step_ = stmlib::modulo(seq_rec_step_, overdubbing() ? seq_.num_steps : kNumSteps);
+  inline void increment_recording_step_index(int32_t n) {
+    int32_t modulus = overdubbing() ? seq_.num_steps : kNumSteps;
+    seq_rec_step_ = stmlib::modulo(
+      static_cast<int32_t>(seq_rec_step_) + n, modulus);
   }
 
   void Pack(PackedPart& packed) const;
@@ -928,35 +980,38 @@ class Part {
   uint8_t ApplySequencerInputResponse(int16_t pitch, int8_t root_pitch = kC4) const;
   const SequencerStep BuildSeqStep(uint8_t step_index) const;
 
+  // Set and Get address these three as one byte array from midi_, so they
+  // stay together, in this order.
   MidiSettings midi_;
   VoicingSettings voicing_;
   SequencerSettings seq_;
-  
+
+  // The rest widest alignment first, so nothing is left as a hole.
   Voice* voice_[kNumMaxVoicesPerPart];
   int8_t* custom_pitch_table_;
+  int32_t step_counter_;
+  Arpeggiator arpeggiator_;
+  FastSyncedLFO swing_lfo_;
+  looper::Deck looper_;
+
+  uint16_t gate_length_counter_[kNumMaxVoicesPerPart];
+
   uint8_t num_voices_;
   bool polychained_;
+  bool hold_pedal_engaged_;
+  uint8_t cyclic_allocation_note_counter_;
+  bool seq_recording_;
+  bool seq_overdubbing_;
+  uint8_t seq_rec_step_;
+  bool seq_overwrite_;
+  bool has_siblings_;
+  uint8_t active_note_[kNumMaxVoicesPerPart]; // Tracks active note for each voice
 
   HeldKeys manual_keys_;
   HeldKeys arp_keys_;
-  bool hold_pedal_engaged_;
-
   stmlib::NoteStack<kNoteStackSize> generated_notes_;  // by sequencer or arpeggiator.
   stmlib::NoteStack<kNoteStackSize> mono_allocator_;
   stmlib::VoiceAllocator<kNumMaxVoicesPerPart * 2> poly_allocator_;
-  uint8_t active_note_[kNumMaxVoicesPerPart]; // Tracks active note for each voice
-  uint8_t cyclic_allocation_note_counter_;
-  
-  Arpeggiator arpeggiator_;
-  
-  bool seq_recording_;
-  bool seq_overdubbing_;
-  int32_t step_counter_;
-  uint8_t seq_rec_step_;
-  bool seq_overwrite_;
-  
-  looper::Deck looper_;
-  FastSyncedLFO swing_lfo_;
 
   // Tracks which looper note (if any) is currently being recorded by a given
   // held key. Used to a) find and conclude that looper note again when a
@@ -969,13 +1024,7 @@ class Part {
 
   // Post-transpose
   uint8_t output_pitch_for_looper_note_[looper::kMaxNotes];
-
-  uint16_t gate_length_counter_[kNumMaxVoicesPerPart];
   
-  bool has_siblings_;
-  
-  bool multi_is_recording_;
-
   DISALLOW_COPY_AND_ASSIGN(Part);
 };
 
