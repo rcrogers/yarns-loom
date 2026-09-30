@@ -1330,7 +1330,11 @@ static double g_bow_xmax =
 static double g_bow_pressure =
     getenv("BOW_PRESSURE100") ? atoi(getenv("BOW_PRESSURE100")) / 100.0 : 1;
 static int g_bow_out_lp = getenv("BOW_OUT") ? !strcmp(getenv("BOW_OUT"), "lp") : 0;
-struct MultiSlot { const void* owner; double bp[5], lp[5]; };
+// EXCITER_TAP=1 outputs the exciter instead of the modes: the bow's friction
+// or the jet's flow, divided by P * d (or d) so its level does not follow the
+// coupling, through a 20 Hz DC blocker. The modes then only keep the time.
+static int g_exciter_tap = getenv("EXCITER_TAP") ? 1 : 0;
+struct MultiSlot { const void* owner; double bp[5], lp[5], dc_x, dc_y; };
 static MultiSlot g_multi_slots[8];
 static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain,
     int16_t damp, int32_t noise_q15_14, int32_t drive_q32) {
@@ -1354,6 +1358,16 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
       : g_jet_linear ? d * m_linear * sum
       : d * kk * tanh(blow * g_jet_m * sum / kk);
   double out = 0;
+  if (g_exciter_tap) {
+    const double exciter = g_bow
+        ? g_jet_k * (4 / M_PI) * slip * exp(0.5 - 0.5 * slip * slip)
+        : kk * tanh(blow * g_jet_m * sum / kk);
+    // One-pole DC blocker, 20 Hz at 45 kHz.
+    const double y = exciter - slot->dc_x + 0.99721 * slot->dc_y;
+    slot->dc_x = exciter;
+    slot->dc_y = y;
+    out = y;
+  }
   for (int k = 0; k < g_multi; ++k) {
     const double h = g_multi_odd ? 2 * k + 1 : k + 1;
     if (h * f0 > 45000 / 6) continue;
@@ -1362,7 +1376,7 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
     const double notch = noise_q15_14 + jet - (dk < 2 ? dk : 2) * slot->bp[k];
     slot->lp[k] += c * slot->bp[k];
     slot->bp[k] += c * (notch - slot->lp[k]);
-    out += g_bow_out_lp ? slot->lp[k] : slot->bp[k];
+    if (!g_exciter_tap) out += g_bow_out_lp ? slot->lp[k] : slot->bp[k];
   }
   return out * static_cast<double>(drive_q32) / 4294967296.0;
 }
