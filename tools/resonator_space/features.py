@@ -73,7 +73,7 @@ def features(x, midi, key_up, steady=0.3):
     harmonic_total = power[harmonic_mask].sum()
     out["hnr"] = 10 * np.log10(harmonic_total / max(total - harmonic_total, 1e-30))
     out["H"] = list(10 * np.log10(harmonics / max(harmonics[0], 1e-30) + 1e-30))
-    out["centroid"] = float((np.arange(1, 13) * harmonics).sum() / harmonics.sum())
+    out["centroid"] = float((np.arange(1, len(harmonics) + 1) * harmonics).sum() / harmonics.sum())
     out["even_odd"] = 10 * np.log10(harmonics[1::2].sum() / max(harmonics[2::2].sum(), 1e-30))
     out["h1_share"] = float(harmonics[0] / harmonics.sum())
     # Strongest partial away from every harmonic, against the strongest harmonic.

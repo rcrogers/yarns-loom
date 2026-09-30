@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
     if (!eq) { fprintf(stderr, "bad arg %s\n", argv[i]); return 1; }
     g_args[std::string(argv[i], eq - argv[i])] = eq + 1;
   }
-  const double fs = 45000;
+  const double fs = Arg("fs", 45000);
   const double midi = Arg("midi", 69);
   const double f0 = 440 * pow(2, (midi - 69) / 12);
   const double c = 2 * sin(M_PI * f0 / fs);
@@ -126,7 +126,8 @@ int main(int argc, char** argv) {
     bp += c * (notch - lp);
     double o;
     if (tap == "fb") {
-      o = feedback_tap - dc_x + 0.99721 * dc_y;  // one-pole DC blocker, 20 Hz
+      // One-pole DC blocker, 20 Hz.
+      o = feedback_tap - dc_x + exp(-2 * M_PI * 20 / fs) * dc_y;
       dc_x = feedback_tap;
       dc_y = o;
     } else {
