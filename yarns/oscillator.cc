@@ -1330,6 +1330,11 @@ static double g_bow_xmax =
 static double g_bow_pressure =
     getenv("BOW_PRESSURE100") ? atoi(getenv("BOW_PRESSURE100")) / 100.0 : 1;
 static int g_bow_out_lp = getenv("BOW_OUT") ? !strcmp(getenv("BOW_OUT"), "lp") : 0;
+// BOW_D_REF=d_u1_14 couples the bow with that fixed damping in place of the
+// timbre's d, so the loop gain rises with Q; BOW_D_PROBE=1 prints d per sample.
+static double g_bow_d_ref =
+    getenv("BOW_D_REF") ? atoi(getenv("BOW_D_REF")) / 16384.0 : 0;
+static int g_bow_d_probe = getenv("BOW_D_PROBE") ? 1 : 0;
 // EXCITER_TAP=1 outputs the exciter instead of the modes: the bow's friction
 // or the jet's flow, divided by P * d (or d) so its level does not follow the
 // coupling, through a 20 Hz DC blocker. The modes then only keep the time.
@@ -1345,6 +1350,8 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
     if (!g_multi_slots[i].owner) { slot = &g_multi_slots[i]; slot->owner = owner; }
   const double f0 = 440.0 * pow(2.0, (pitch / 128.0 - 69) / 12);
   const double d = damp / 16384.0;
+  if (g_bow_d_probe) fprintf(stderr, "d=%g\n", d);
+  const double bow_d = g_bow_d_ref ? g_bow_d_ref : d;
   double sum = 0;
   for (int k = 0; k < g_multi; ++k) sum += slot->bp[k];
   const double blow = gain / 32767.0;
@@ -1353,7 +1360,7 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
   const double v0 = g_jet_k * (4 / M_PI) / 2;
   const double slip = (blow * g_bow_xmax * v0 - sum) / v0;
   const double jet = g_bow
-      ? g_bow_pressure * d * g_jet_k * (4 / M_PI) * slip * exp(0.5 - 0.5 * slip * slip)
+      ? g_bow_pressure * bow_d * g_jet_k * (4 / M_PI) * slip * exp(0.5 - 0.5 * slip * slip)
       : !g_jet_m ? 0
       : g_jet_linear ? d * m_linear * sum
       : d * kk * tanh(blow * g_jet_m * sum / kk);
