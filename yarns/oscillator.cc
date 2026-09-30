@@ -1366,8 +1366,11 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
       : d * kk * tanh(blow * g_jet_m * sum / kk);
   double out = 0;
   if (g_exciter_tap) {
+    // The bow's term less its value at rest, so a gain step moves no DC.
+    const double rest = blow * g_bow_xmax;
     const double exciter = g_bow
-        ? g_jet_k * (4 / M_PI) * slip * exp(0.5 - 0.5 * slip * slip)
+        ? g_jet_k * (4 / M_PI) * (slip * exp(0.5 - 0.5 * slip * slip)
+              - rest * exp(0.5 - 0.5 * rest * rest))
         : kk * tanh(blow * g_jet_m * sum / kk);
     // One-pole DC blocker, 20 Hz at 45 kHz.
     const double y = exciter - slot->dc_x + 0.99721 * slot->dc_y;
