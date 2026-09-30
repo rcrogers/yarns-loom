@@ -1318,6 +1318,18 @@ static int g_jet_linear = getenv("JET_LINEAR") ? 1 : 0;
 // modes are lossier; mode h then self-oscillates only past m = h^p.
 static double g_multi_damp_pow =
     getenv("MULTI_DAMP_POW") ? atoi(getenv("MULTI_DAMP_POW")) / 100.0 : 0;
+// BOW=1 swaps the jet for bow friction: F = P * d * A0 * phi((vb - v) / v0),
+// phi(x) = x exp(1/2 - x^2/2), which peaks at 1 when the slip is v0 and falls
+// past it -- the falling side is what pumps. v is the modes' summed velocity
+// (bp), A0 the JET_TARGET amplitude in state units, v0 = A0 / 2, vb = blow *
+// BOW_XMAX100/100 * v0, P = BOW_PRESSURE100/100. BOW_OUT=lp takes the output
+// from lp (displacement) rather than bp (velocity).
+static int g_bow = getenv("BOW") ? 1 : 0;
+static double g_bow_xmax =
+    getenv("BOW_XMAX100") ? atoi(getenv("BOW_XMAX100")) / 100.0 : 3;
+static double g_bow_pressure =
+    getenv("BOW_PRESSURE100") ? atoi(getenv("BOW_PRESSURE100")) / 100.0 : 1;
+static int g_bow_out_lp = getenv("BOW_OUT") ? !strcmp(getenv("BOW_OUT"), "lp") : 0;
 struct MultiSlot { const void* owner; double bp[5], lp[5]; };
 static MultiSlot g_multi_slots[8];
 static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain,
@@ -1334,7 +1346,11 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
   const double blow = gain / 32767.0;
   const double kk = g_jet_k * pow(blow > 1e-6 ? blow : 1e-6, g_jet_k_pow);
   const double m_linear = blow * g_jet_m < 0.95 ? blow * g_jet_m : 0.95;
-  const double jet = !g_jet_m ? 0
+  const double v0 = g_jet_k * (4 / M_PI) / 2;
+  const double slip = (blow * g_bow_xmax * v0 - sum) / v0;
+  const double jet = g_bow
+      ? g_bow_pressure * d * g_jet_k * (4 / M_PI) * slip * exp(0.5 - 0.5 * slip * slip)
+      : !g_jet_m ? 0
       : g_jet_linear ? d * m_linear * sum
       : d * kk * tanh(blow * g_jet_m * sum / kk);
   double out = 0;
@@ -1346,7 +1362,7 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
     const double notch = noise_q15_14 + jet - (dk < 2 ? dk : 2) * slot->bp[k];
     slot->lp[k] += c * slot->bp[k];
     slot->bp[k] += c * (notch - slot->lp[k]);
-    out += slot->bp[k];
+    out += g_bow_out_lp ? slot->lp[k] : slot->bp[k];
   }
   return out * static_cast<double>(drive_q32) / 4294967296.0;
 }
