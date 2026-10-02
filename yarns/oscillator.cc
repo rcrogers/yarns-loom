@@ -501,6 +501,12 @@ void Oscillator::Render(int16_t* audio_mix) {
     for (size_t i = 0; i < kAudioBlockSize; ++i)
       fprintf(stderr, "%d\n", gain_samples[i]);
   }
+  // CTL_DUMP=1 prints every sample's timbre and gain, as the shape reads them.
+  static const bool ctl_dump = getenv("CTL_DUMP") != NULL;
+  if (ctl_dump) {
+    for (size_t i = 0; i < kAudioBlockSize; ++i)
+      fprintf(stderr, "%d %d\n", input_samples[i], gain_samples[i]);
+  }
 #endif
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);

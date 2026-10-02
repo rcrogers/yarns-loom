@@ -231,10 +231,14 @@ int main(int argc, char** argv) {
     // leaves behind are set the way a session leaves them. RenderWhistle's
     // previous_damp_drive_u15_ is the one that matters -- it is 0 until
     // WHISTLE has run once, and until then the state rescale is skipped.
+    // prime_note=0 primes without a note: Refresh still settles the timbre
+    // bias the note's TIMBRE ENV MOD is warped against, and the envelopes stay
+    // at rest, so the note starts from zero.
     const int prime = OptInt(argc, argv, "prime", -1);
     if (prime >= 0) {
       p.SetShape(static_cast<OscillatorShape>(prime));
-      p.NoteOn(pit, te, attack, decay, sustain, exciter, exciter_samples);
+      if (OptInt(argc, argv, "prime_note", 1))
+        p.NoteOn(pit, te, attack, decay, sustain, exciter, exciter_samples);
       Run(&p, pit, timbre, OptInt(argc, argv, "prime_blocks", 200), NULL);
       p.NoteOff();
       Run(&p, pit, timbre, OptInt(argc, argv, "prime_settle", 200), NULL);
