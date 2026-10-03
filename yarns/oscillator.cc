@@ -1424,57 +1424,84 @@ static const int16_t kLoopDamp_u1_14 = 173;
 static const int32_t kLoopGain_q15 = 42598;
 // Input noise of 2^-this loop units at full gain.
 static const int32_t kLoopNoiseBits = 7;
-// One loop unit of gain straight into the filter at full gain.
-static const int32_t kLoopDirectShift = kLoopUnitShift_q15_14 - 15;
-// The DC blocker's pole, 1 - 2^-15 * this: 20 Hz at 45 kHz.
-static const int32_t kLoopDcBlockerLeak_q15 = 91;
+// The direct term's unit, which the noise rides on in the same product: one
+// loop unit at full gain.
+static const int32_t kLoopDirectBits = kLoopUnitShift_q15_14 - 15;
+static const int32_t kLoopDirect = 1 << kLoopDirectBits;
+// A signed 32-bit draw shifted to 2^-kLoopNoiseBits of the direct unit.
+static const int32_t kLoopNoiseShift = 31 - kLoopDirectBits + kLoopNoiseBits;
+// The DC blocker's running mean forgets 2^-this a sample: 28 Hz at 45 kHz.
+static const int32_t kLoopDcBlockerShift = 8;
 
-static inline int32_t LoopTanh(const int16_t* curve, int32_t x) {
-  const uint16_t index = static_cast<uint16_t>(stmlib::Clip16(x) + 32768);
+// tanh of x - 32768, x held to the table's span: the bias lets one USAT do
+// the clip.
+static inline int32_t LoopTanh(const int16_t* curve, int32_t biased_x) {
+  const uint32_t index = stmlib::ClipU16(biased_x);
   const int16_t* entry = &curve[index >> 8];
-  return entry[0] + ((entry[1] - entry[0]) * (index & 0xff) >> 8);
+  return entry[0] + ((entry[1] - entry[0]) * static_cast<int32_t>(index & 0xff) >> 8);
+}
+
+// bp to tanh's argument, 1.3 / (gain * sech^2(offset)), as the multiplier whose
+// product with a q15_14 state has the argument in its high word. Held at
+// INT32_MAX below the gain where every argument it makes is past the table.
+static int32_t LoopArgumentMultiplier(int32_t gain, int32_t tanh_offset) {
+  const int32_t sech_squared_q15 = 32768 - (tanh_offset * tanh_offset >> 15);
+  const uint32_t divisor = static_cast<uint32_t>(gain * sech_squared_q15 >> 15);
+  const uint64_t numerator = static_cast<uint64_t>(kLoopGain_q15)
+      << (32 - ResonatorState::kFractionalBits);
+  if (divisor <= numerator / INT32_MAX) return INT32_MAX;
+  return static_cast<int32_t>(DivU64ByU32(
+      static_cast<uint32_t>(numerator >> 32), static_cast<uint32_t>(numerator),
+      divisor));
 }
 
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
-  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
   ResonatorState state;
   state.Load(svf);
+  const int32_t cutoff_q0_31 =
+      static_cast<int32_t>(SVF::CutoffFromFreq(pitch_)) << 16;
+  const int32_t damp_q0_31 =
+      static_cast<int32_t>(kLoopDamp_u1_14) << (31 - 14);
   const int16_t* curve = SoftLimitTableAsRegister();
-  const int32_t scale_u15 = coherent_scale_u15_;
+
+  // Once a block, from the TIMBRE and gain it opens on.
+  const int32_t biased_offset = (input_samples[0] >> 1) + 32768;
+  const int32_t tanh_offset = LoopTanh(curve, biased_offset);
+  const int32_t multiplier =
+      LoopArgumentMultiplier(input_samples[kAudioBlockSize], tanh_offset);
+
   uint32_t noise_state = noise_state_;
-  int32_t tap_previous = loop_tap_previous_;
-  int32_t output_q8 = loop_output_q8_;
+  int32_t tap_mean_q8 = loop_tap_mean_q8_;
+  int32_t bp_q15_14 = state.bp_q15_14, lp_q15_14 = state.lp_q15_14;
   RENDER_CORE(this_sample,
+    (void) timbre;  // read once a block, above
     const int32_t gain = input_samples[kAudioBlockSize];
-    const int32_t offset = timbre >> 1;
-    const int32_t tanh_offset = LoopTanh(curve, offset);
-    const int32_t sech_squared_q15 = 32768 - (tanh_offset * tanh_offset >> 15);
-    // bp / (gain * sech^2): the feedback scale divided back out of the state.
-    int32_t divisor = gain * sech_squared_q15 >> 15;
-    if (divisor < 1) divisor = 1;
-    const int32_t bp_counts = stmlib::Clip16(state.bp_q15_14 >> 14);
-    const int32_t shaped = LoopTanh(
-        curve, offset + bp_counts * kLoopGain_q15 / divisor);
+    // tanh less its value at rest: what the loop feeds back and what it
+    // outputs, scaled by gain.
+    const int32_t shaped = gain * (LoopTanh(
+        curve, biased_offset + MulHighS(bp_q15_14, multiplier)) - tanh_offset);
     noise_state = NextXorshift32(noise_state);
-    const int32_t noise = static_cast<int16_t>(noise_state >> 16) * gain >> 15;
-    const int32_t in_q15_14 =
-        (noise << (kLoopDirectShift - kLoopNoiseBits))
-        + (gain << kLoopDirectShift)
-        + ((gain * shaped >> 15) * kLoopDamp_u1_14
-            >> (15 + 14 - kLoopUnitShift_q15_14));
-    svf.RenderSampleAtPitch<SVF_BP>(&state, in_q15_14, kLoopDamp_u1_14);
-    // The feedback scale times tanh less its value at rest, at half scale.
-    const int32_t tap = gain * (shaped - tanh_offset) >> 16;
-    output_q8 += ((tap - tap_previous) << 8)
-        - (output_q8 * kLoopDcBlockerLeak_q15 >> 15);
-    tap_previous = tap;
-    this_sample = stmlib::Clip16(output_q8 >> 8) * scale_u15 >> 15;
+    const int32_t excitation_q15_14 =
+        gain * (kLoopDirect + (static_cast<int32_t>(noise_state) >> kLoopNoiseShift));
+    // Chamberlin, signed and unclipped: the loop bounds the state, and the
+    // output is gated by gain, so a ring need not decay to exactly nothing.
+    // The feedback and the damping share d: d * (feedback - bp), the feedback
+    // shifted from shaped's units to the state's.
+    lp_q15_14 += 2 * MulHighS(cutoff_q0_31, bp_q15_14);
+    bp_q15_14 += 2 * MulHighS(cutoff_q0_31, excitation_q15_14 - lp_q15_14
+        - 2 * MulHighS(damp_q0_31, bp_q15_14
+            - (shaped >> (15 + 15 - kLoopUnitShift_q15_14))));
+    // At half scale, less its running mean.
+    const int32_t tap = shaped >> 16;
+    tap_mean_q8 += tap - (tap_mean_q8 >> kLoopDcBlockerShift);
+    this_sample = tap - (tap_mean_q8 >> kLoopDcBlockerShift);
   )
+  state.bp_q15_14 = bp_q15_14;
+  state.lp_q15_14 = lp_q15_14;
   state.Store(&svf);
   noise_state_ = noise_state;
-  loop_tap_previous_ = tap_previous;
-  loop_output_q8_ = output_q8;
+  loop_tap_mean_q8_ = tap_mean_q8;
   svf_ = svf;
 }
 #else

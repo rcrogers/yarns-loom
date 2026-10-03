@@ -177,7 +177,7 @@ class Oscillator {
     svf_mode2_.Init();
 #endif
 #if WHISTLE_VARIANT == 4
-    loop_tap_previous_ = loop_output_q8_ = 0;
+    loop_tap_mean_q8_ = 0;
 #endif
     previous_damp_drive_u15_ = 0;
     // Its own stream, so that voices summed as independent noise are.
@@ -240,8 +240,14 @@ class Oscillator {
   // One function because two callers need the same answer: NoteOn sets the
   // envelope to it, and set_shape rescales a held note between two of them.
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
+#if WHISTLE_VARIANT == 4
+    // The loop is homogeneous in gain, so the envelope can carry the share.
+    const bool spends_gain_before_the_filter =
+        shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP;
+#else
     const bool spends_gain_before_the_filter =
         shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_HP;
+#endif
     return spends_gain_before_the_filter
         ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
   }
@@ -406,10 +412,8 @@ class Oscillator {
   SVF svf_mode2_;
 #endif
 #if WHISTLE_VARIANT == 4
-  // The loop's output DC blocker: its last input, and its output with 8 more
-  // fractional bits.
-  int32_t loop_tap_previous_;
-  int32_t loop_output_q8_;
+  // The loop's output DC blocker: the tap's running mean, 2^8 times over.
+  int32_t loop_tap_mean_q8_;
 #endif
   Envelope gain_envelope_, timbre_envelope_;
 
