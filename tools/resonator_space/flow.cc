@@ -39,6 +39,14 @@ static double Shape(int shaper, double x) {
     default: return x;
   }
 }
+// First-order antiderivative antialiasing of tanh: the mean of tanh over the
+// segment from the previous input to this one, via log cosh.
+static double LogCosh(double x) { return fabs(x) + log1p(exp(-2 * fabs(x))) - M_LN2; }
+static double TanhAntialiased(double x, double x_previous) {
+  const double dx = x - x_previous;
+  return fabs(dx) < 1e-9 ? tanh(0.5 * (x + x_previous))
+                         : (LogCosh(x) - LogCosh(x_previous)) / dx;
+}
 // none: no feedback path at all.
 static int ShaperIndex(const std::string& name) {
   const char* names[] = { "linear", "tanh", "phi", "algebraic", "atan", "cubic" };
@@ -137,6 +145,9 @@ int main(int argc, char** argv) {
   const std::string out_stage = ArgS("out", "lin");
   const double drive = Arg("drive", 1);
   unsigned noise_state = static_cast<unsigned>(Arg("seed", 1)) * 2654435761u | 1;
+  // adaa=1: the tanh shaper antialiased (TanhAntialiased).
+  const bool antialiased = Arg("adaa", 0) != 0;
+  if (antialiased && shaper != 1) { fprintf(stderr, "adaa needs shaper=tanh\n"); return 1; }
 
   // ctl=PATH: float32 pairs (d, G) per sample, the firmware's own controls,
   // in place of the envelope and d above. The upper-case parameters are specs
@@ -172,7 +183,7 @@ int main(int argc, char** argv) {
   const int length = has_controls ? static_cast<int>(controls.size() / 2)
                                   : static_cast<int>(duration * fs);
   std::vector<float> out(length);
-  double bp = 0, lp = 0, dc_x = 0, dc_y = 0, level_at_key_up = 0;
+  double bp = 0, lp = 0, dc_x = 0, dc_y = 0, level_at_key_up = 0, x_previous = 0;
   for (int i = 0; i < length; ++i) {
     const double t = i / fs;
     const double g = has_controls ? controls[2 * i + 1] : env.Value(t, &level_at_key_up);
@@ -205,7 +216,8 @@ int main(int argc, char** argv) {
       // leaves the filter to ring down rather than dividing by it.
       const double scale_now = has_scale ? std::max(Eval(spec_scale, g, u, d), 1e-6) : scale;
       const double x = off + in_gain * bp / scale_now;
-      const double y = Shape(shaper, x);
+      const double y = antialiased ? TanhAntialiased(x, x_previous) : Shape(shaper, x);
+      x_previous = x;
       feedback = out_gain * d_c * scale_now * y;
       feedback_tap = scale_now * (y - Shape(shaper, off));
     }
