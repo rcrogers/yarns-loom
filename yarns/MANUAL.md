@@ -654,6 +654,14 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Note pitch controls the cutoff frequency of the SVF
 - The [gain envelope](#modulation-destinations-for-envelope-output) amplifies the filter's noise input, instead of amplifying the oscillator's output
 
+#### `WH` Whistle: tuned state-variable filter fed back through a saturating stage
+- Timbre: from a pure tone through brighter, brassier tones with even harmonics, up to a square-like tone
+- Note pitch controls the tuning of the filter
+- The [gain envelope](#modulation-destinations-for-envelope-output) both strikes the filter and sets the level of the feedback, instead of amplifying the oscillator's output
+    - A fast attack strikes the note so it sounds at once; a slower attack lets it swell in
+    - At higher timbre settings, an attack of a few milliseconds gives a brassy, even-harmonic onset
+    - A fast release brightens the tone as it fades
+
 #### `P-` Ping: direct envelope signal into tuned state-variable filter
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF

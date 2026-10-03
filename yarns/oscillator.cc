@@ -153,6 +153,7 @@ const Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderWind,
+  &Oscillator::RenderWhistle,
   &Oscillator::RenderPing,
   &Oscillator::RenderPing,
   &Oscillator::RenderPing,
@@ -340,11 +341,9 @@ int16_t Oscillator::WarpTimbre(
   // instead of moving it. Carried as DAMP, geometrically, which is what lets
   // the top of the control reach zero -- the shift runs out of bits before the
   // exponential runs out of range, and zero damp is a lossless resonator.
-#if WHISTLE_VARIANT == 4
-  // TIMBRE is the loop's offset, linear: RenderWind halves it into the
+  // TIMBRE is WHISTLE's loop offset, linear: RenderWhistle halves it into the
   // table's units.
-  if (shape == OSC_SHAPE_WIND) return TimbreAtOrAboveZero(timbre);
-#endif
+  if (shape == OSC_SHAPE_WHISTLE) return TimbreAtOrAboveZero(timbre);
   if (shape >= OSC_SHAPE_WIND && shape <= OSC_SHAPE_PING_HP) {
     return DampFromResonance(timbre);
   }
@@ -1260,7 +1259,6 @@ static const int32_t kWindTiltReferencePitch = 12 << 7;
 // does not keep.
 static const int32_t kWindCurveDriveBits = 4;
 
-#if WHISTLE_VARIANT != 4
 static int32_t WindStateToOutput(
     int32_t pitch, int32_t scale_u15,
     int32_t damp_drive_u15) {
@@ -1288,7 +1286,6 @@ static int32_t WindStateToOutput(
             (static_cast<uint32_t>(level_at_pitch_u15) << 15) / damp_drive_u15)
       : level_at_pitch_u15;
 }
-#endif
 
 #ifdef TEST
 }  // namespace yarns
@@ -1411,7 +1408,6 @@ static inline int32_t JetFeedback(int32_t, int16_t, int16_t) { return 0; }
 static inline int32_t JetNoise(int32_t excitation) { return excitation; }
 #endif
 
-#if WHISTLE_VARIANT == 4
 // WHISTLE as a self-excited loop: the band-pass fed back through tanh, biased
 // by TIMBRE. One loop unit is 2^kLoopUnitBits state counts and also the tanh
 // table's argument unit, which is tanh(4 x) over int16.
@@ -1455,7 +1451,7 @@ static int32_t LoopArgumentMultiplier(int32_t gain, int32_t tanh_offset) {
       divisor));
 }
 
-void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
+void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   ResonatorState state;
   state.Load(svf);
@@ -1504,7 +1500,7 @@ void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
   loop_tap_mean_q8_ = tap_mean_q8;
   svf_ = svf;
 }
-#else
+
 void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
 #ifdef TEST
@@ -1618,7 +1614,6 @@ void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
   noise_state_ = noise_state;
   svf_ = svf;
 }
-#endif
 
 // Above ~MIDI 63 the ring needs EXCITER AMOUNT: a bare envelope is too smooth
 // to carry energy at the note.

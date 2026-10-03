@@ -44,11 +44,6 @@
 #include <cstring>
 #include <cstdio>
 
-// 4 renders WHISTLE as a self-excited loop; 0 is the shipped render.
-#ifndef WHISTLE_VARIANT
-#define WHISTLE_VARIANT 0
-#endif
-
 namespace yarns {
 
 static const uint16_t kHighestNote = 128 * 128;
@@ -59,6 +54,12 @@ const uint8_t kEnvelopesPerOscillator = 2;
 // The most the incoherent scale may exceed the coherent one by: WIND's
 // curve drive carries this ratio and is held u3.12 on the strength of it.
 const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
+
+// WHISTLE's output is its tap, gain * (tanh - tanh(offset)) / 2, less the tap's
+// running mean. Taken at another offset, that mean leaves the output up to
+// (2 + tanh(offset_max)) / 2 of the gain, so the gain peaks the reciprocal of
+// that under the share: 2 / (2 + tanh(2)).
+const uint16_t kWhistlePeakHeadroom_u15 = 22111;
 
 class StateVariableFilter : public SVF {
  public:
@@ -101,6 +102,7 @@ enum OscillatorShape {
   OSC_SHAPE_NOISE_BP,
   OSC_SHAPE_NOISE_HP,
   OSC_SHAPE_WIND,
+  OSC_SHAPE_WHISTLE,
   OSC_SHAPE_PING_LP,
   OSC_SHAPE_PING_BP,
   OSC_SHAPE_PING_HP,
@@ -173,9 +175,7 @@ class Oscillator {
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
     svf_.Init();
-#if WHISTLE_VARIANT == 4
     loop_tap_mean_q8_ = 0;
-#endif
     previous_damp_drive_u15_ = 0;
     // Its own stream, so that voices summed as independent noise are.
     noise_state_ = NextXorshift32Seed();
@@ -237,14 +237,15 @@ class Oscillator {
   // One function because two callers need the same answer: NoteOn sets the
   // envelope to it, and set_shape rescales a held note between two of them.
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
-#if WHISTLE_VARIANT == 4
-    // The loop is homogeneous in gain, so the envelope can carry the share.
-    const bool spends_gain_before_the_filter =
-        shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP;
-#else
-    const bool spends_gain_before_the_filter =
-        shape >= OSC_SHAPE_WIND && shape <= OSC_SHAPE_PING_HP;
-#endif
+    // WHISTLE spends its gain before the filter too, but its loop is
+    // homogeneous in gain, so the envelope can carry the share -- under the
+    // headroom its DC blocker needs.
+    if (shape == OSC_SHAPE_WHISTLE) {
+      return static_cast<uint16_t>(
+          coherent_scale_codes_u16_ * kWhistlePeakHeadroom_u15 >> 15);
+    }
+    const bool spends_gain_before_the_filter = shape == OSC_SHAPE_WIND
+        || (shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP);
     return spends_gain_before_the_filter
         ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
   }
@@ -322,6 +323,7 @@ class Oscillator {
   void RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix);
   void RenderWind(int16_t* input_samples, int16_t* audio_mix);
+  void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
   void RenderPing(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldSine(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix);
@@ -405,10 +407,8 @@ class Oscillator {
 
   PhaseDistortionSquareModulator pd_square_;
   StateVariableFilter svf_;
-#if WHISTLE_VARIANT == 4
-  // The loop's output DC blocker: the tap's running mean, 2^8 times over.
+  // WHISTLE's output DC blocker: the tap's running mean, 2^8 times over.
   int32_t loop_tap_mean_q8_;
-#endif
   Envelope gain_envelope_, timbre_envelope_;
 
  private:
