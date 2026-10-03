@@ -44,7 +44,7 @@
 #include <cstring>
 #include <cstdio>
 
-// Scoping builds of WHISTLE as a blown resonator; 0 is the shipped render.
+// 4 renders WHISTLE as a self-excited loop; 0 is the shipped render.
 #ifndef WHISTLE_VARIANT
 #define WHISTLE_VARIANT 0
 #endif
@@ -173,9 +173,6 @@ class Oscillator {
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
     svf_.Init();
-#if WHISTLE_VARIANT == 3
-    svf_mode2_.Init();
-#endif
 #if WHISTLE_VARIANT == 4
     loop_tap_mean_q8_ = 0;
 #endif
@@ -408,9 +405,6 @@ class Oscillator {
 
   PhaseDistortionSquareModulator pd_square_;
   StateVariableFilter svf_;
-#if WHISTLE_VARIANT == 3
-  SVF svf_mode2_;
-#endif
 #if WHISTLE_VARIANT == 4
   // The loop's output DC blocker: the tap's running mean, 2^8 times over.
   int32_t loop_tap_mean_q8_;

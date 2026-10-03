@@ -1594,108 +1594,6 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
 #endif
   ResonatorState state;
   state.Load(svf);
-#if WHISTLE_VARIANT
-  // SCOPING VARIANTS: a blown resonator, linear out. The breath is 1/32 of the
-  // shipped noise; m = 4 * gain, the loop cancelling the damping at m = 1.
-  const int32_t kBreathShift = 5;
-  const int32_t breath_drive_u15 = excitation_drive_u15 >> kBreathShift;
-  // m, and everything made of it, once a block from the gain it opens on.
-  // Cutoff and damping too, once a block: pitch and TIMBRE move in 1.4 ms steps.
-  const int32_t cutoff_q0_31 =
-      static_cast<int32_t>(SVF::CutoffFromFreq(pitch_)) << 16;
-  const int32_t block_gain = input_samples[kAudioBlockSize];
-  // The breath's level for the block: noise, so a step every 1.4 ms is inaudible.
-  const int32_t breath_gain_u15 = block_gain * breath_drive_u15 >> 15;
-  const int32_t block_damp = input_samples[0] > 0 ? input_samples[0] : 0;
-#if WHISTLE_VARIANT != 2
-  const int32_t kLoopGainBits = 2;
-  // m held under 1 by the variants without a tanh: 0.95 in u0.15.
-  const int32_t kLinearLoopGainMax_u0_15 = 31130;
-  int32_t loop_gain_max_u0_15 = kLinearLoopGainMax_u0_15;
-#if WHISTLE_VARIANT == 3
-  ResonatorState mode2;
-  mode2.Load(svf_mode2_);
-  const int32_t mode2_cutoff_q0_31 =
-      static_cast<int32_t>(SVF::CutoffFromFreq(pitch_ + (12 << 7))) << 16;
-  // The octave damps 2^2 as fast: a bore's upper modes are lossier -- held
-  // inside Chamberlin's bound, c^2 + 2 c d < 4, which a high octave's cutoff
-  // otherwise crosses. In u1.14 against a u15 cutoff: (4 * 2^30 - c^2) / (4 c),
-  // less 1/16.
-  int32_t mode2_damp = block_damp << 2;
-  const int64_t c_u15 = mode2_cutoff_q0_31 >> 16;
-  const int32_t mode2_damp_max = static_cast<int32_t>(
-      ((4ll << 30) - c_u15 * c_u15) / (4 * c_u15) * 15 / 16);
-  if (mode2_damp > mode2_damp_max) mode2_damp = mode2_damp_max;
-  if (mode2_damp > 32767) mode2_damp = 32767;
-  // Two modes share the loop, and where their bands overlap it gains
-  // m (1 + d / d2): the cap comes down by d2 / (d2 + d).
-  loop_gain_max_u0_15 = static_cast<int32_t>(
-      static_cast<int64_t>(kLinearLoopGainMax_u0_15) * mode2_damp
-          / (mode2_damp + block_damp + 1));
-#endif
-  int32_t loop_gain_u0_15 = block_gain << kLoopGainBits;
-  if (loop_gain_u0_15 > loop_gain_max_u0_15) {
-    loop_gain_u0_15 = loop_gain_max_u0_15;
-  }
-  (void) curve;
-#endif
-#if WHISTLE_VARIANT == 1
-  // One mode: linear feedback is exactly damping scaled by 1 - m.
-  const int16_t loop_damp = static_cast<int16_t>(
-      block_damp - (block_damp * loop_gain_u0_15 >> 15));
-#endif
-#if WHISTLE_VARIANT == 2
-  // K: the jet's saturation, in state units, set so the overblown tone's
-  // amplitude (4/pi K) is half the curve input's full scale. 355/452 ~ pi/4.
-  const int32_t k_q15_14 = static_cast<int32_t>(
-      (static_cast<uint64_t>(16384) << 32) * 355 / 452
-          / static_cast<uint32_t>(drive_into_curve_q32));
-  // tanh's argument in the table's units, m * bp / K * 8192 = gain * bp / K:
-  // the high word of bp * (gain * 2^32 / K). K is over 2^21 in state units,
-  // so the multiplier fits.
-  const int32_t tanh_multiplier = static_cast<int32_t>(
-      (static_cast<uint64_t>(block_gain) << 32) / static_cast<uint32_t>(k_q15_14));
-  // d * K for the block.
-  const int32_t damp_k_q15_14 = MulHighS(block_damp << 15, k_q15_14) << 2;
-#endif
-#if WHISTLE_VARIANT == 3
-  const int32_t feedback_multiplier = (block_damp * loop_gain_u0_15 >> 15) << 16;
-#endif
-  RENDER_CORE(this_sample,
-    noise_state = NextXorshift32(noise_state);
-    const int32_t breath_q15_14 = static_cast<int16_t>(noise_state >> 16)
-        * breath_gain_u15 >> (15 - ResonatorState::kFractionalBits);
-    (void) timbre;  // the damping is the block's
-#if WHISTLE_VARIANT == 1
-    // One mode: linear feedback is exactly damping scaled by 1 - m.
-    const int32_t sum_q15_14 =
-        state.Process<SVF_BP>(breath_q15_14, cutoff_q0_31, loop_damp);
-#elif WHISTLE_VARIANT == 2
-    const int32_t tanh_argument =
-        stmlib::Clip16(MulHighS(state.bp_q15_14, tanh_multiplier));
-    // The nearest entry: the jet's steps are 1/64 of the table's span.
-    const int32_t tanh_u15 = curve[(tanh_argument + 32768 + 128) >> 8];
-    const int32_t jet_q15_14 = MulHighS(tanh_u15 << 16, damp_k_q15_14) << 2;
-    const int32_t sum_q15_14 = state.Process<SVF_BP>(
-        breath_q15_14 + jet_q15_14, cutoff_q0_31, static_cast<int16_t>(block_damp));
-#elif WHISTLE_VARIANT == 3
-    const int32_t feedback_q15_14 = 4 * MulHighS(
-        state.bp_q15_14 + mode2.bp_q15_14, feedback_multiplier);
-    const int32_t in_q15_14 = breath_q15_14 + feedback_q15_14;
-    const int32_t sum_q15_14 =
-        state.Process<SVF_BP>(in_q15_14, cutoff_q0_31,
-                              static_cast<int16_t>(block_damp))
-        + mode2.Process<SVF_BP>(in_q15_14, mode2_cutoff_q0_31,
-                                static_cast<int16_t>(mode2_damp));
-#endif
-    this_sample = stmlib::Clip16(MulHighS(
-        sum_q15_14 + half_curve_unit_q15_14, drive_into_curve_q32))
-        * scale_u15 >> 15;
-  )
-#if WHISTLE_VARIANT == 3
-  mode2.Store(&svf_mode2_);
-#endif
-#else
   RENDER_CORE(this_sample,
     const int16_t gain = input_samples[kAudioBlockSize];
     // Noise of its own, because a whistle sustains and the chiff decays.
@@ -1716,7 +1614,6 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
         : MulHighS(state_q15_14 + half_curve_unit_q15_14, drive_into_curve_q32),
         scale_u15);
   )
-#endif
   state.Store(&svf);
   noise_state_ = noise_state;
   svf_ = svf;
