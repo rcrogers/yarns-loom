@@ -144,7 +144,8 @@ int main(int argc, char** argv) {
   // filter's damping, N the input noise amount, L the small-signal loop gain
   // (the input gain becomes L / S'(offset), the output gain 1), OFF the
   // offset, VCA a gain after the output stage, DRIVE the output drive, SCALE
-  // the feedback scale.
+  // the feedback scale, DIRECT a coefficient on the gain fed straight into the
+  // filter.
   std::vector<float> controls;
   if (g_args.count("ctl")) {
     FILE* cf = fopen(ArgS("ctl", "").c_str(), "rb");
@@ -161,10 +162,12 @@ int main(int argc, char** argv) {
   const bool has_spec_d = g_args.count("D") || has_controls;
   const bool has_n = g_args.count("N"), has_l = g_args.count("L"),
       has_off = g_args.count("OFF"), has_vca = g_args.count("VCA"),
-      has_drive = g_args.count("DRIVE"), has_scale = g_args.count("SCALE");
+      has_drive = g_args.count("DRIVE"), has_scale = g_args.count("SCALE"),
+      has_direct = g_args.count("DIRECT");
   const Spec spec_n = ParseSpec(ArgS("N", "0")), spec_l = ParseSpec(ArgS("L", "0")),
       spec_off = ParseSpec(ArgS("OFF", "0")), spec_vca = ParseSpec(ArgS("VCA", "1")),
-      spec_drive = ParseSpec(ArgS("DRIVE", "1")), spec_scale = ParseSpec(ArgS("SCALE", "1"));
+      spec_drive = ParseSpec(ArgS("DRIVE", "1")), spec_scale = ParseSpec(ArgS("SCALE", "1")),
+      spec_direct = ParseSpec(ArgS("DIRECT", "0"));
 
   const int length = has_controls ? static_cast<int>(controls.size() / 2)
                                   : static_cast<int>(duration * fs);
@@ -206,7 +209,10 @@ int main(int argc, char** argv) {
       feedback = out_gain * d_c * scale_now * y;
       feedback_tap = scale_now * (y - Shape(shaper, off));
     }
-    const double notch = in_noise + feedback - std::min(d, 2.0) * bp;
+    // DIRECT: the gain itself into the filter, as PING takes it -- its steps
+    // and the exciter riding on it reach the filter as signal.
+    const double direct = has_direct ? Eval(spec_direct, g, u, d) * g : 0;
+    const double notch = in_noise + direct + feedback - std::min(d, 2.0) * bp;
     lp += c * bp;
     bp += c * (notch - lp);
     double o;
