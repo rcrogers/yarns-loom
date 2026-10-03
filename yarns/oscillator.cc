@@ -1414,10 +1414,15 @@ static inline int32_t JetNoise(int32_t excitation) { return excitation; }
 static const int32_t kLoopUnitBits = 13;
 static const int32_t kLoopUnitShift_q15_14 =
     kLoopUnitBits + ResonatorState::kFractionalBits;
-// Q 95.
-static const int16_t kLoopDamp_u1_14 = 173;
-// The loop gain for a small signal: 1.3 / sech^2(offset) on the way into tanh.
-static const int32_t kLoopGain_q15 = 42598;
+// Q 25.
+static const int16_t kLoopDamp_u1_14 = 655;
+// The loop gain for a small signal, which the offset's sech^2 is divided back
+// out of on the way into tanh: from the bottom of the offset to the top, so
+// the bottom stays a sine and the top squares off.
+static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
+static const int32_t kLoopGainTop_q15 = 81920;  // 2.5
+// The offset's range in the tanh table's units: TIMBRE halved.
+static const int32_t kLoopOffsetBits = kEnvelopeSampleBits - 1;
 // Input noise of 2^-this loop units at full gain.
 static const int32_t kLoopNoiseBits = 7;
 // The direct term's unit, which the noise rides on in the same product: one
@@ -1428,7 +1433,7 @@ static const int32_t kLoopDirect = 1 << kLoopDirectBits;
 static const int32_t kLoopNoiseShift = 31 - kLoopDirectBits + kLoopNoiseBits;
 // What d's product drops off its operand first, so that any int32 times d
 // fits 32 bits.
-static const int32_t kLoopDampPreShift = 8;
+static const int32_t kLoopDampPreShift = 10;
 STATIC_ASSERT((INT32_MAX >> kLoopDampPreShift) * kLoopDamp_u1_14 <= INT32_MAX,
               loop_damp_product_fits);
 // The multiplier's ends are held to at least 2^-this of the block's larger gain.
@@ -1444,15 +1449,21 @@ static inline int32_t LoopTanh(const int16_t* curve, int32_t biased_x) {
   return entry[0] + ((entry[1] - entry[0]) * static_cast<int32_t>(index & 0xff) >> 8);
 }
 
-// bp to tanh's argument, 1.3 / (gain * sech^2(offset)), as the multiplier whose
-// product with a q15_14 state has the argument in its high word. Held at
+// bp to tanh's argument, loop gain / (gain * sech^2(offset)), as the multiplier
+// whose product with a q15_14 state has the argument in its high word. Held at
 // INT32_MAX below the gain where every argument it makes is past the table.
-static int32_t LoopArgumentMultiplier(int32_t gain, int32_t tanh_offset) {
+static int32_t LoopArgumentMultiplier(
+    int32_t gain, int32_t tanh_offset, int32_t loop_gain_q15) {
   const int32_t sech_squared_q15 = 32768 - (tanh_offset * tanh_offset >> 15);
   const uint32_t divisor = static_cast<uint32_t>(gain * sech_squared_q15 >> 15);
-  const uint64_t numerator = static_cast<uint64_t>(kLoopGain_q15)
-      << (32 - ResonatorState::kFractionalBits);
-  if (divisor <= numerator / INT32_MAX) return INT32_MAX;
+  const int32_t numerator_shift = 32 - ResonatorState::kFractionalBits;
+  const uint64_t numerator =
+      static_cast<uint64_t>(loop_gain_q15) << numerator_shift;
+  // The quotient fits below 2^31 exactly when the divisor exceeds
+  // numerator / 2^31.
+  if (divisor <= static_cast<uint32_t>(loop_gain_q15) >> (31 - numerator_shift)) {
+    return INT32_MAX;
+  }
   return static_cast<int32_t>(DivU64ByU32(
       static_cast<uint32_t>(numerator >> 32), static_cast<uint32_t>(numerator),
       divisor));
@@ -1474,13 +1485,16 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // note that opens on a gain near nothing does not saturate the block.
   const int32_t biased_offset = (input_samples[0] >> 1) + 32768;
   const int32_t tanh_offset = LoopTanh(curve, biased_offset);
+  const int32_t loop_gain_q15 = kLoopGainBottom_q15
+      + ((kLoopGainTop_q15 - kLoopGainBottom_q15) * (biased_offset - 32768)
+          >> kLoopOffsetBits);
   const int32_t first_gain = input_samples[kAudioBlockSize];
   const int32_t last_gain = input_samples[2 * kAudioBlockSize - 1];
   const int32_t gain_floor = std::max(first_gain, last_gain) >> kLoopRampGuardBits;
   int32_t multiplier = LoopArgumentMultiplier(
-      std::max(first_gain, gain_floor), tanh_offset);
+      std::max(first_gain, gain_floor), tanh_offset, loop_gain_q15);
   const int32_t multiplier_slope = (LoopArgumentMultiplier(
-      std::max(last_gain, gain_floor), tanh_offset) - multiplier)
+      std::max(last_gain, gain_floor), tanh_offset, loop_gain_q15) - multiplier)
       / static_cast<int32_t>(kAudioBlockSize - 1);
 
   uint32_t noise_state = noise_state_;
