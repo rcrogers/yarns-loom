@@ -176,6 +176,9 @@ class Oscillator {
 #if WHISTLE_VARIANT == 3
     svf_mode2_.Init();
 #endif
+#if WHISTLE_VARIANT == 4
+    loop_tap_previous_ = loop_output_q8_ = 0;
+#endif
     previous_damp_drive_u15_ = 0;
     // Its own stream, so that voices summed as independent noise are.
     noise_state_ = NextXorshift32Seed();
@@ -401,6 +404,12 @@ class Oscillator {
   StateVariableFilter svf_;
 #if WHISTLE_VARIANT == 3
   SVF svf_mode2_;
+#endif
+#if WHISTLE_VARIANT == 4
+  // The loop's output DC blocker: its last input, and its output with 8 more
+  // fractional bits.
+  int32_t loop_tap_previous_;
+  int32_t loop_output_q8_;
 #endif
   Envelope gain_envelope_, timbre_envelope_;
 

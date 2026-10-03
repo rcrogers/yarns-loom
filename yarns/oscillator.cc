@@ -340,6 +340,11 @@ int16_t Oscillator::WarpTimbre(
   // instead of moving it. Carried as DAMP, geometrically, which is what lets
   // the top of the control reach zero -- the shift runs out of bits before the
   // exponential runs out of range, and zero damp is a lossless resonator.
+#if WHISTLE_VARIANT == 4
+  // TIMBRE is the loop's offset, linear: RenderWhistle halves it into the
+  // table's units.
+  if (shape == OSC_SHAPE_WHISTLE) return TimbreAtOrAboveZero(timbre);
+#endif
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_HP) {
     return DampFromResonance(timbre);
   }
@@ -1255,6 +1260,7 @@ static const int32_t kWhistleTiltReferencePitch = 12 << 7;
 // does not keep.
 static const int32_t kWhistleCurveDriveBits = 4;
 
+#if WHISTLE_VARIANT != 4
 static int32_t WhistleStateToOutput(
     int32_t pitch, int32_t scale_u15,
     int32_t damp_drive_u15) {
@@ -1282,6 +1288,7 @@ static int32_t WhistleStateToOutput(
             (static_cast<uint32_t>(level_at_pitch_u15) << 15) / damp_drive_u15)
       : level_at_pitch_u15;
 }
+#endif
 
 #ifdef TEST
 }  // namespace yarns
@@ -1404,6 +1411,73 @@ static inline int32_t JetFeedback(int32_t, int16_t, int16_t) { return 0; }
 static inline int32_t JetNoise(int32_t excitation) { return excitation; }
 #endif
 
+#if WHISTLE_VARIANT == 4
+// WHISTLE as a self-excited loop: the band-pass fed back through tanh, biased
+// by TIMBRE. One loop unit is 2^kLoopUnitBits state counts and also the tanh
+// table's argument unit, which is tanh(4 x) over int16.
+static const int32_t kLoopUnitBits = 13;
+static const int32_t kLoopUnitShift_q15_14 =
+    kLoopUnitBits + ResonatorState::kFractionalBits;
+// Q 95.
+static const int16_t kLoopDamp_u1_14 = 173;
+// The loop gain for a small signal: 1.3 / sech^2(offset) on the way into tanh.
+static const int32_t kLoopGain_q15 = 42598;
+// Input noise of 2^-this loop units at full gain.
+static const int32_t kLoopNoiseBits = 7;
+// One loop unit of gain straight into the filter at full gain.
+static const int32_t kLoopDirectShift = kLoopUnitShift_q15_14 - 15;
+// The DC blocker's pole, 1 - 2^-15 * this: 20 Hz at 45 kHz.
+static const int32_t kLoopDcBlockerLeak_q15 = 91;
+
+static inline int32_t LoopTanh(const int16_t* curve, int32_t x) {
+  const uint16_t index = static_cast<uint16_t>(stmlib::Clip16(x) + 32768);
+  const int16_t* entry = &curve[index >> 8];
+  return entry[0] + ((entry[1] - entry[0]) * (index & 0xff) >> 8);
+}
+
+void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
+  StateVariableFilter svf = svf_;
+  svf.RenderInitCutoff(SVF::CutoffFromFreq(pitch_));
+  ResonatorState state;
+  state.Load(svf);
+  const int16_t* curve = SoftLimitTableAsRegister();
+  const int32_t scale_u15 = coherent_scale_u15_;
+  uint32_t noise_state = noise_state_;
+  int32_t tap_previous = loop_tap_previous_;
+  int32_t output_q8 = loop_output_q8_;
+  RENDER_CORE(this_sample,
+    const int32_t gain = input_samples[kAudioBlockSize];
+    const int32_t offset = timbre >> 1;
+    const int32_t tanh_offset = LoopTanh(curve, offset);
+    const int32_t sech_squared_q15 = 32768 - (tanh_offset * tanh_offset >> 15);
+    // bp / (gain * sech^2): the feedback scale divided back out of the state.
+    int32_t divisor = gain * sech_squared_q15 >> 15;
+    if (divisor < 1) divisor = 1;
+    const int32_t bp_counts = stmlib::Clip16(state.bp_q15_14 >> 14);
+    const int32_t shaped = LoopTanh(
+        curve, offset + bp_counts * kLoopGain_q15 / divisor);
+    noise_state = NextXorshift32(noise_state);
+    const int32_t noise = static_cast<int16_t>(noise_state >> 16) * gain >> 15;
+    const int32_t in_q15_14 =
+        (noise << (kLoopDirectShift - kLoopNoiseBits))
+        + (gain << kLoopDirectShift)
+        + ((gain * shaped >> 15) * kLoopDamp_u1_14
+            >> (15 + 14 - kLoopUnitShift_q15_14));
+    svf.RenderSampleAtPitch<SVF_BP>(&state, in_q15_14, kLoopDamp_u1_14);
+    // The feedback scale times tanh less its value at rest, at half scale.
+    const int32_t tap = gain * (shaped - tanh_offset) >> 16;
+    output_q8 += ((tap - tap_previous) << 8)
+        - (output_q8 * kLoopDcBlockerLeak_q15 >> 15);
+    tap_previous = tap;
+    this_sample = stmlib::Clip16(output_q8 >> 8) * scale_u15 >> 15;
+  )
+  state.Store(&svf);
+  noise_state_ = noise_state;
+  loop_tap_previous_ = tap_previous;
+  loop_output_q8_ = output_q8;
+  svf_ = svf;
+}
+#else
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
 #ifdef TEST
@@ -1620,6 +1694,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   noise_state_ = noise_state;
   svf_ = svf;
 }
+#endif
 
 // Above ~MIDI 63 the ring needs EXCITER AMOUNT: a bare envelope is too smooth
 // to carry energy at the note.
