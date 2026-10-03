@@ -1426,6 +1426,13 @@ static const int32_t kLoopDirectBits = kLoopUnitShift_q15_14 - 15;
 static const int32_t kLoopDirect = 1 << kLoopDirectBits;
 // A signed 32-bit draw shifted to 2^-kLoopNoiseBits of the direct unit.
 static const int32_t kLoopNoiseShift = 31 - kLoopDirectBits + kLoopNoiseBits;
+// What d's product drops off its operand first, so that any int32 times d
+// fits 32 bits.
+static const int32_t kLoopDampPreShift = 8;
+STATIC_ASSERT((INT32_MAX >> kLoopDampPreShift) * kLoopDamp_u1_14 <= INT32_MAX,
+              loop_damp_product_fits);
+// The multiplier's ends are held to at least 2^-this of the block's larger gain.
+static const int32_t kLoopRampGuardBits = 2;
 // The DC blocker's running mean forgets 2^-this a sample: 28 Hz at 45 kHz.
 static const int32_t kLoopDcBlockerShift = 8;
 
@@ -1457,15 +1464,24 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   state.Load(svf);
   const int32_t cutoff_q0_31 =
       static_cast<int32_t>(SVF::CutoffFromFreq(pitch_)) << 16;
-  const int32_t damp_q0_31 =
-      static_cast<int32_t>(kLoopDamp_u1_14) << (31 - 14);
   const int16_t* curve = SoftLimitTableAsRegister();
 
-  // Once a block, from the TIMBRE and gain it opens on.
+  // The offset once a block, from the TIMBRE the block opens on. The
+  // multiplier walks between its values at the block's two ends, because
+  // gain cancels out of the loop only where the multiplier tracks it: a block's
+  // worth of mismatch amplitude-modulates a rising note at the block rate.
+  // Each end is held to at least 2^-kLoopRampGuardBits of the larger, so a
+  // note that opens on a gain near nothing does not saturate the block.
   const int32_t biased_offset = (input_samples[0] >> 1) + 32768;
   const int32_t tanh_offset = LoopTanh(curve, biased_offset);
-  const int32_t multiplier =
-      LoopArgumentMultiplier(input_samples[kAudioBlockSize], tanh_offset);
+  const int32_t first_gain = input_samples[kAudioBlockSize];
+  const int32_t last_gain = input_samples[2 * kAudioBlockSize - 1];
+  const int32_t gain_floor = std::max(first_gain, last_gain) >> kLoopRampGuardBits;
+  int32_t multiplier = LoopArgumentMultiplier(
+      std::max(first_gain, gain_floor), tanh_offset);
+  const int32_t multiplier_slope = (LoopArgumentMultiplier(
+      std::max(last_gain, gain_floor), tanh_offset) - multiplier)
+      / static_cast<int32_t>(kAudioBlockSize - 1);
 
   uint32_t noise_state = noise_state_;
   int32_t tap_mean_q8 = loop_tap_mean_q8_;
@@ -1485,13 +1501,16 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
     // The feedback and the damping share d: d * (feedback - bp), the feedback
     // shifted from shaped's units to the state's.
     lp_q15_14 += 2 * MulHighS(cutoff_q0_31, bp_q15_14);
+    const int32_t damped_q15_14 =
+        bp_q15_14 - (shaped >> (15 + 15 - kLoopUnitShift_q15_14));
     bp_q15_14 += 2 * MulHighS(cutoff_q0_31, excitation_q15_14 - lp_q15_14
-        - 2 * MulHighS(damp_q0_31, bp_q15_14
-            - (shaped >> (15 + 15 - kLoopUnitShift_q15_14))));
+        - ((damped_q15_14 >> kLoopDampPreShift) * kLoopDamp_u1_14
+            >> (14 - kLoopDampPreShift)));
     // At half scale, less its running mean.
     const int32_t tap = shaped >> 16;
     tap_mean_q8 += tap - (tap_mean_q8 >> kLoopDcBlockerShift);
     this_sample = tap - (tap_mean_q8 >> kLoopDcBlockerShift);
+    multiplier += multiplier_slope;
   )
   state.bp_q15_14 = bp_q15_14;
   state.lp_q15_14 = lp_q15_14;
