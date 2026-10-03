@@ -33,6 +33,7 @@
 # tools/pathcost.py, the same code cycles.py prices the envelope with, so the
 # two tools finally share one cost model. `sum` is still reported beside it:
 # the gap between them IS the branchiness, and it is worth seeing.
+import math
 import os
 import re
 import sys
@@ -106,14 +107,28 @@ FRAME_HZ = source_int('yarns/drivers/dac.h', r'kFrameHz\s*=\s*(\d+)', int)
 BLOCK_SAMPLES = 1 << source_int('yarns/drivers/dac.h',
                                 r'kAudioBlockSizeBits\s*=\s*(\d+)', int)
 EDGES_PER_PERIOD = 2
-# THE SYNC MODULATOR RUNS FASTER THAN THE NOTE. Its increment is
-# `phase_increment * timbre >> kSyncRatioFractionalBits`, so at full timbre it
-# is a multiple of the master's, and everything guarded by ITS wrap is paid at
-# that higher rate. Read the shift out of the source rather than restate it.
-SYNC_RATIO_BITS = source_int('yarns/oscillator.cc',
-                             r'kSyncRatioFractionalBits\s*=\s*(\d+)', int)
+# A MODULATOR RUNS ABOVE THE NOTE, BUT NEVER ABOVE THE TOP NOTE. WarpTimbre
+# raises each family's modulator pitch by a TIMBRE span and clamps it to
+# kHighestNote - 1, so what a modulator's wrap guards is paid at the rate of the
+# note plus that span, and at the top of the keyboard at the top note's rate.
+# Spans in semitones at full timbre, read out of WarpTimbre.
 TIMBRE_MAX = 32767
-MAX_SYNC_RATIO = TIMBRE_MAX / float(1 << SYNC_RATIO_BITS)
+SYNC_SPAN = source_int('yarns/oscillator.cc',
+                       r'modulator_pitch = pitch \+ \(timbre >> (\d+)\)',
+                       lambda s: (TIMBRE_MAX >> int(s)) / 128.0)
+CZ_SPAN = source_int(
+    'yarns/oscillator.cc',
+    r'timbre_offset = timbre - (\d+);\s*int32_t shifted_pitch = pitch '
+    r'\+ \(timbre_offset >> (\d+)\) \+ \(timbre_offset >> (\d+)\) '
+    r'\+ \(timbre_offset >> (\d+)\)',
+    lambda o, *s: sum((TIMBRE_MAX - int(o)) >> int(b) for b in s) / 128.0)
+# And the CZ ratio is held to kEnvelopeSampleMax in u5.10, which is the nearer
+# bound.
+CZ_SPAN = min(CZ_SPAN, 12 * math.log(
+    TIMBRE_MAX / float(1 << source_int('yarns/oscillator.cc',
+                                       r'kCzRatioFractionalBits\s*=\s*(\d+)', int)), 2))
+# Unlisted modulated shapes are charged as though the modulator sat at the top.
+MODULATOR_SPANS = (('Sync', SYNC_SPAN), ('PhaseDistortion', CZ_SPAN))
 # The line PhaseWrapped is defined on: every guard inlines to it, which is how a
 # region that is paid once a PERIOD is told from one paid once a SAMPLE.
 # THE WHOLE FUNCTION'S SPAN, not the line of its `return`: GCC attributes an
@@ -144,6 +159,12 @@ MIDDLE_C_MIDI = 60
 
 def edges_per_sample(midi):
   return 440.0 * 2 ** ((midi - 69) / 12.0) / FRAME_HZ * EDGES_PER_PERIOD
+
+
+def modulator_midi(short, midi):
+  span = next((s for prefix, s in MODULATOR_SPANS if short.startswith('Render' + prefix)),
+              HIGHEST_MIDI)
+  return min(midi + span, HIGHEST_MIDI)
 
 
 EDGES_PER_SAMPLE = edges_per_sample(HIGHEST_MIDI)
@@ -263,10 +284,7 @@ for name, body in functions.items():
     per_sample = blocks - nested
     cycles = pathcost.longest_path(
         graph, call_cost, entry=header, restrict=per_sample)
-    # A MODULATED SHAPE WRAPS FASTER THAN ITS NOTE, so everything a wrap guards
-    # is paid at the modulator's rate, not the master's.
-    ratio = (MAX_SYNC_RATIO if 'RENDER_MODULATED' in SHAPE_BODIES.get(short, '')
-             else 1.0)
+    modulated = 'RENDER_MODULATED' in SHAPE_BODIES.get(short, '')
     regions = wrap_guarded_regions(graph, per_sample)
     region_zero = [(a, a, 0) for body in regions for leader in body
                    for a, _ in graph.blocks[leader]]
@@ -285,10 +303,11 @@ for name, body in functions.items():
     rare_cycles = cycles - base
 
     def at(midi):
-      # Charged at the rate the FASTEST accumulator wraps, which for a sync
+      # Charged at the rate the FASTEST accumulator wraps, which for a modulated
       # shape is the modulator's. Conservative: it over-charges a region the
       # slower master guards, and a budget should err that way.
-      return base + min(edges_per_sample(midi) * ratio, 1.0) * rare_cycles
+      rate_midi = modulator_midi(short, midi) if modulated else midi
+      return base + min(edges_per_sample(rate_midi), 1.0) * rare_cycles
 
     effective, effective_c4 = at(HIGHEST_MIDI), at(MIDDLE_C_MIDI)
     total = sum(pathcost.instruction_cycles(text)
@@ -361,10 +380,13 @@ print('  Cycles a sample, cheapest case to dearest. floor = a sample where')
 print('  nothing wrapped; ceil = the dearest way through one. The middle two charge the')
 print('  gap between them at the rate a wrap falls at that pitch: %.3f a sample'
       % edges_per_sample(HIGHEST_MIDI))
-print('  at MIDI %d and %.3f at middle C, times the modulator ratio (up to %.0fx)'
-      % (HIGHEST_MIDI, edges_per_sample(MIDDLE_C_MIDI), MAX_SYNC_RATIO))
-print('  on a modulated shape, capped at one. That over-charges a region the')
-print('  slower master guards, which is the direction a budget should err.')
+print('  at MIDI %d and %.3f at middle C. A modulated shape is charged at its'
+      % (HIGHEST_MIDI, edges_per_sample(MIDDLE_C_MIDI)))
+print('  modulator\'s pitch -- the note plus its TIMBRE span (SYNC %.1f, CZ %.1f'
+      % (SYNC_SPAN, CZ_SPAN))
+print('  semitones), clamped to MIDI %d as WarpTimbre clamps it. That over-charges'
+      % HIGHEST_MIDI)
+print('  a region the slower master guards, which is the direction a budget should err.')
 print('  Assumes the gap is all wrap-guarded: a shape with a genuinely even')
 print('  branch has its floor under-counted, and none here has one.')
 print('  A Cortex-M3 timing table, so an estimate. Good for DELTAS.')
