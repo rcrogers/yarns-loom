@@ -345,9 +345,9 @@ class CVOutput {
     // full/sqrt(n), sqrt(n) times the nth -- and it must then cap its own peak
     // at the nth, since n peaks that do align would otherwise leave the span.
     //
-    // Only WHISTLE takes it, and CREST is why rather than correlation: the
+    // Only WIND takes it, and CREST is why rather than correlation: the
     // trade is peak headroom for level, so it pays only where the signal
-    // visits its peak rarely. WHISTLE's crest is 3.8 to 5.3. The four NOISE
+    // visits its peak rarely. WIND's crest is 3.8 to 5.3. The four NOISE
     // shapes are uncorrelated too and do lose the same 6 dB, but they drive
     // full-scale noise into a limiter and come out at crest 1.35 -- MEASURED,
     // capping them at the nth while driving to full/sqrt(n) returns 1.69 dB of

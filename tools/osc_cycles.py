@@ -28,7 +28,7 @@
 #
 # THE LONGEST PATH, NOT THE SUM OF THE BLOCKS. This used to add up every
 # instruction in the loop body, so a shape was charged for both arms of every
-# if -- WHISTLE read 68.2% that way, and four voices of it plus the envelope
+# if -- WIND read 68.2% that way, and four voices of it plus the envelope
 # read over 100% for a build that runs. It now walks the CFG with
 # tools/pathcost.py, the same code cycles.py prices the envelope with, so the
 # two tools finally share one cost model. `sum` is still reported beside it:

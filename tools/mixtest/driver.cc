@@ -18,7 +18,7 @@
 //
 // WHAT IT CANNOT DO: bound a NOISE peak. Those grow as sqrt(2 ln N) with how
 // long you listen, so a passing run says the shape is inside its share over
-// THIS run, not for ever. WHISTLE is the one shape whose bound is arithmetic
+// THIS run, not for ever. WIND is the one shape whose bound is arithmetic
 // rather than statistical -- it caps bp against its share in the render -- and
 // that is why the cap stays.
 //
@@ -60,7 +60,7 @@ const int kPitches[] = { 24, 48, 60, 84, 108 };
 const int kTimbres[] = { 0, 8192, 16384, 32767 };
 const int kChiffAmounts[] = { 0, 64, 127 };
 // The panel knob, which sets where a shape's map starts before the envelope
-// moves it. WHISTLE's level spans 24 dB across this.
+// moves it. WIND's level spans 24 dB across this.
 const int kKnobs[] = { 0, 64, 127 };
 // Long enough for the strike and the ring after it; the shapes that break the
 // contract do it at the onset.

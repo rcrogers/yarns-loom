@@ -1,5 +1,5 @@
 // THE WARP ON ITS OWN, because it is where the faults have been. Three so far:
-// WHISTLE's shift underflowed for a negative timbre and answered a filter with
+// WIND's shift underflowed for a negative timbre and answered a filter with
 // no loss in it (15dd7115); the NOISE branch let the cutoff go negative and
 // CutoffFromFreq shifted it into its table index; the soft-knee branch returned
 // a negative unchanged and the transfer render shifted it as an unsigned.

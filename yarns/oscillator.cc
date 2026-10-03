@@ -38,27 +38,27 @@
 #include <cstdlib>
 static int g_svf_probe = getenv("SVF_PROBE") ? atoi(getenv("SVF_PROBE")) : 0;
 static long g_svf_probe_n = 0;
-// WHISTLE_FORCE_DRIVE=1 keeps WHISTLE's noise drive at full scale regardless of
+// WIND_FORCE_DRIVE=1 keeps WIND's noise drive at full scale regardless of
 // gain, to separate two things that happen together at a shape switch: the noise
 // STOPPING, and the filter's coefficients changing meaning.
-static int g_force_drive = getenv("WHISTLE_FORCE_DRIVE") ? 1 : 0;
-// WHISTLE_NO_MAKEUP=1 drops the output's 1/damp_drive, to measure how much of a
-// ring WHISTLE did not drive itself is that make-up.
-static int g_no_makeup = getenv("WHISTLE_NO_MAKEUP") ? 1 : 0;
-// WHISTLE_HALF_MAKEUP=1 spends the square root of the make-up at the output,
+static int g_force_drive = getenv("WIND_FORCE_DRIVE") ? 1 : 0;
+// WIND_NO_MAKEUP=1 drops the output's 1/damp_drive, to measure how much of a
+// ring WIND did not drive itself is that make-up.
+static int g_no_makeup = getenv("WIND_NO_MAKEUP") ? 1 : 0;
+// WIND_HALF_MAKEUP=1 spends the square root of the make-up at the output,
 // flattening how much louder a tighter Q comes out, with the state untouched.
-static int g_half_makeup = getenv("WHISTLE_HALF_MAKEUP") ? 1 : 0;
-// WHISTLE_LIMIT_MODE=4 / WHISTLE_LIMIT_SHIFT=s throttle WHISTLE's excitation
+static int g_half_makeup = getenv("WIND_HALF_MAKEUP") ? 1 : 0;
+// WIND_LIMIT_MODE=4 / WIND_LIMIT_SHIFT=s throttle WIND's excitation
 // once a block by the ring's energy in curve units, which leaves Q alone: by
-// WHISTLE_LIMIT_LAW with x = (bp^2 + lp^2) >> s as a fraction of 2^15,
+// WIND_LIMIT_LAW with x = (bp^2 + lp^2) >> s as a fraction of 2^15,
 // 1 = 1 - x, 2 = 1/(1 + x), 3 = 1/sqrt(1 + x).
 static int g_limit_law =
-    getenv("WHISTLE_LIMIT_LAW") ? atoi(getenv("WHISTLE_LIMIT_LAW")) : 1;
+    getenv("WIND_LIMIT_LAW") ? atoi(getenv("WIND_LIMIT_LAW")) : 1;
 static int g_limit_mode =
-    getenv("WHISTLE_LIMIT_MODE") ? atoi(getenv("WHISTLE_LIMIT_MODE")) : 0;
+    getenv("WIND_LIMIT_MODE") ? atoi(getenv("WIND_LIMIT_MODE")) : 0;
 static int g_limit_shift =
-    getenv("WHISTLE_LIMIT_SHIFT") ? atoi(getenv("WHISTLE_LIMIT_SHIFT")) : 16;
-// CURVE_DRIVE_Q8=n scales how hard WHISTLE and PING drive the soft limiter,
+    getenv("WIND_LIMIT_SHIFT") ? atoi(getenv("WIND_LIMIT_SHIFT")) : 16;
+// CURVE_DRIVE_Q8=n scales how hard WIND and PING drive the soft limiter,
 // 256 = as built: to hear saturation apart from everything else a ring
 // carries. The product is taken wide so a scale past 256 cannot wrap it.
 static int g_curve_drive_q8 =
@@ -104,7 +104,7 @@ static const int kPdLeakyIntegratorShift = 8;
 // The widest damp the resonator shapes ask for: the format's own largest, which
 // is Chamberlin's fully damped end. u1.14 holds 1.99994, or Q 0.50002, against
 // a theoretical floor of Q 0.5 -- one LSB short of the whole useful range.
-static const uint32_t kWhistleDampMax_u1_14 = 32767;
+static const uint32_t kResonatorDampMax_u1_14 = 32767;
 // Halvings of damp across TIMBRE, which is what takes the map to zero: the
 // widest damp shifted right this many times is nothing, and a damp of nothing is
 // a lossless resonator -- self-oscillation, which the timbre envelope sweeps
@@ -113,9 +113,9 @@ static const uint32_t kWhistleDampMax_u1_14 = 32767;
 // Sized to the 15-bit timbre SIGNAL, not to the 7-bit TIMBRE INIT knob. The knob
 // is one coarse contributor to that signal, and sizing the map to it would spend
 // the top of the range on values the envelope and the LFO can already reach.
-static const uint32_t kWhistleQOctaves = kEnvelopeSampleBits;
+static const uint32_t kResonatorQOctaves = kEnvelopeSampleBits;
 
-// WHISTLE's drive law is a separate quantity from the map above, and it is
+// WIND's drive law is a separate quantity from the map above, and it is
 // bounded where the map is not: the drive is a reciprocal at the output, so the
 // map's zero would divide by it.
 //   - the REFERENCE is the damp at which the drive is unity. It must be at
@@ -126,10 +126,10 @@ static const uint32_t kWhistleQOctaves = kEnvelopeSampleBits;
 //     make-up is 1/drive, and an unbounded one reached 50x on the timbre
 //     envelope's slew and amplified whatever was still in the filter. A cap of
 //     2^this is a floor of reference >> 2*this.
-static const uint32_t kWhistleDriveReference_u1_14 = kWhistleDampMax_u1_14;
-static const uint32_t kWhistleDriveMakeUpBits = 4;
-static const uint32_t kWhistleDriveFloor_u1_14 =
-    kWhistleDampMax_u1_14 >> (2 * kWhistleDriveMakeUpBits);
+static const uint32_t kWindDriveReference_u1_14 = kResonatorDampMax_u1_14;
+static const uint32_t kWindDriveMakeUpBits = 4;
+static const uint32_t kWindDriveFloor_u1_14 =
+    kResonatorDampMax_u1_14 >> (2 * kWindDriveMakeUpBits);
 // The audio sample's peak: the magnitude the transfer gain is derived
 // against, and the width the fold knee is scaled in.
 static const int kSamplePeakBits = 15;
@@ -152,7 +152,7 @@ const Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderWhistle,
+  &Oscillator::RenderWind,
   &Oscillator::RenderPing,
   &Oscillator::RenderPing,
   &Oscillator::RenderPing,
@@ -251,7 +251,7 @@ static inline int16_t TimbreAtOrAboveZero(int16_t timbre) {
 
 // Damp from a resonance control, geometrically: every shape whose resonance is
 // variable reads this one map, so the control means the same thing in all of
-// them. The widest damp shifted right kWhistleQOctaves times is nothing, and
+// them. The widest damp shifted right kResonatorQOctaves times is nothing, and
 // nothing is a lossless resonator -- the top of the control self-oscillates.
 //
 // The shift spreads the octaves over 2^kEnvelopeSampleBits and the domain is one
@@ -263,10 +263,10 @@ static int16_t DampFromResonance(int32_t resonance_u15) {
   // the opposite end from where it was asked for.
   if (resonance_u15 < 0) resonance_u15 = 0;
   const uint32_t octaves_q16 =
-      ((static_cast<uint32_t>(resonance_u15) * kWhistleQOctaves)
+      ((static_cast<uint32_t>(resonance_u15) * kResonatorQOctaves)
           << (16 - kEnvelopeSampleBits))
       + (static_cast<uint32_t>(resonance_u15) >> 10);
-  const int32_t damp = static_cast<int32_t>(kWhistleDampMax_u1_14 * // 2^-octaves
+  const int32_t damp = static_cast<int32_t>(kResonatorDampMax_u1_14 * // 2^-octaves
       Interpolate88(lut_expo2_neg_u16, octaves_q16 & 0xffff) >> 16);
   return static_cast<int16_t>(damp >> (octaves_q16 >> 16));
 }
@@ -341,11 +341,11 @@ int16_t Oscillator::WarpTimbre(
   // the top of the control reach zero -- the shift runs out of bits before the
   // exponential runs out of range, and zero damp is a lossless resonator.
 #if WHISTLE_VARIANT == 4
-  // TIMBRE is the loop's offset, linear: RenderWhistle halves it into the
+  // TIMBRE is the loop's offset, linear: RenderWind halves it into the
   // table's units.
-  if (shape == OSC_SHAPE_WHISTLE) return TimbreAtOrAboveZero(timbre);
+  if (shape == OSC_SHAPE_WIND) return TimbreAtOrAboveZero(timbre);
 #endif
-  if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_HP) {
+  if (shape >= OSC_SHAPE_WIND && shape <= OSC_SHAPE_PING_HP) {
     return DampFromResonance(timbre);
   }
 
@@ -1120,7 +1120,7 @@ static const int32_t kSoftLimitHeadroom = 4;
 // instead, and SoftLimit takes it as a parameter so this can be the caller's.
 //
 // Where to call it is measured, not free. Above the loop it holds a register
-// across everything else in there: WHISTLE is 68 cycles a sample hoisted and 74
+// across everything else in there: WIND is 68 cycles a sample hoisted and 74
 // at the call site, and PING is 64 at the call site and 74 hoisted.
 static inline const int16_t* SoftLimitTableAsRegister() {
   const int16_t* curve = ws_soft_limit;
@@ -1214,7 +1214,7 @@ static inline int32_t ResonatorShape(
 
 // The curve's domain: the state scaled so the loudest one the shape can make
 // lands at the top of the table. In whatever Q state_to_output is in -- the
-// product leaves int32 for WHISTLE's, so it is taken 64 bits wide.
+// product leaves int32 for WIND's, so it is taken 64 bits wide.
 static int32_t StateIntoCurve(int32_t state_to_output, int32_t scale) {
   return static_cast<int32_t>(DivU64ByU32(
       stmlib::MulU32(static_cast<uint32_t>(state_to_output), INT16_MAX),
@@ -1244,7 +1244,7 @@ static inline int32_t SoftLimit(
 // the knee half an octave of level to keep every note above it unchanged, and
 // the knee is u15. From 18800 that reaches MIDI 10.8, so MIDI 12 is the floor
 // of what the mechanism can express.
-static const int32_t kWhistleTiltReferencePitch = 12 << 7;
+static const int32_t kWindTiltReferencePitch = 12 << 7;
 // The resonator's gain at resonance rises as 1/sqrt(damp), and rises again
 // with pitch, by 2.85 dB an octave.
 //
@@ -1253,15 +1253,15 @@ static const int32_t kWhistleTiltReferencePitch = 12 << 7;
 // corrected here at the output, which moves the level and leaves the state
 // alone -- so the state still rails above MIDI 84, where that term is
 // largest.
-// The curve is driven 2^this past the level WhistleStateToOutput names: the
+// The curve is driven 2^this past the level WindStateToOutput names: the
 // tone saturates, which steadies its amplitude, brightens it and shortens its
 // rise, and a released note rings on from the ceiling. Spent in the shift that
 // brings the product back to the curve's scale, as fractional bits the product
 // does not keep.
-static const int32_t kWhistleCurveDriveBits = 4;
+static const int32_t kWindCurveDriveBits = 4;
 
 #if WHISTLE_VARIANT != 4
-static int32_t WhistleStateToOutput(
+static int32_t WindStateToOutput(
     int32_t pitch, int32_t scale_u15,
     int32_t damp_drive_u15) {
   // Holds rms flat to MIDI 84.
@@ -1272,7 +1272,7 @@ static int32_t WhistleStateToOutput(
   // bends the peak.
   const int32_t level_into_knee_u15 = 31618;
   int32_t octaves_q16 =
-      (pitch - kWhistleTiltReferencePitch) * 65536 / (12 * 128);
+      (pitch - kWindTiltReferencePitch) * 65536 / (12 * 128);
   octaves_q16 = octaves_q16 * pitch_correction_numerator
       / pitch_correction_denominator;
   if (octaves_q16 < 0) octaves_q16 = 0;
@@ -1294,7 +1294,7 @@ static int32_t WhistleStateToOutput(
 }  // namespace yarns
 #include <cmath>
 namespace yarns {
-// JET_M=m100 turns WHISTLE into a blown resonator: the excitation adds
+// JET_M=m100 turns WIND into a blown resonator: the excitation adds
 // d * K * tanh(m * bp / K), m = gain * m100 / 100, so the loop cancels the
 // damping at m = 1 at every Q and saturates at K. JET_TARGET is the overblown
 // amplitude in curve units (32768 = the curve's end); JET_NOISE_Q8 scales the
@@ -1354,7 +1354,7 @@ static int g_bow_d_probe = getenv("BOW_D_PROBE") ? 1 : 0;
 static int g_exciter_tap = getenv("EXCITER_TAP") ? 1 : 0;
 struct MultiSlot { const void* owner; double bp[5], lp[5], dc_x, dc_y; };
 static MultiSlot g_multi_slots[8];
-static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain,
+static inline double MultiWind(const void* owner, int16_t pitch, int16_t gain,
     int16_t damp, int32_t noise_q15_14, int32_t drive_q32) {
   MultiSlot* slot = 0;
   for (int i = 0; i < 8 && !slot; ++i)
@@ -1405,7 +1405,7 @@ static inline double MultiWhistle(const void* owner, int16_t pitch, int16_t gain
 }
 #else
 static const int g_multi = 0;
-static inline double MultiWhistle(const void*, int16_t, int16_t, int16_t,
+static inline double MultiWind(const void*, int16_t, int16_t, int16_t,
     int32_t, int32_t) { return 0; }
 static inline int32_t JetFeedback(int32_t, int16_t, int16_t) { return 0; }
 static inline int32_t JetNoise(int32_t excitation) { return excitation; }
@@ -1455,7 +1455,7 @@ static int32_t LoopArgumentMultiplier(int32_t gain, int32_t tanh_offset) {
       divisor));
 }
 
-void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
+void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   ResonatorState state;
   state.Load(svf);
@@ -1505,7 +1505,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   svf_ = svf;
 }
 #else
-void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
+void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
 #ifdef TEST
   if (g_svf_probe && (g_svf_probe_n++ % g_svf_probe) == 0)
@@ -1519,14 +1519,14 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // reads a new one every sample -- a fast-moving TIMBRE makes the two differ.
   uint32_t damp_at_block_start_u1_14 = static_cast<uint32_t>(
       input_samples[0] > 0 ? input_samples[0] : 0);
-  if (damp_at_block_start_u1_14 < kWhistleDriveFloor_u1_14) {
-    damp_at_block_start_u1_14 = kWhistleDriveFloor_u1_14;
+  if (damp_at_block_start_u1_14 < kWindDriveFloor_u1_14) {
+    damp_at_block_start_u1_14 = kWindDriveFloor_u1_14;
   }
-  if (damp_at_block_start_u1_14 > kWhistleDriveReference_u1_14) {
-    damp_at_block_start_u1_14 = kWhistleDriveReference_u1_14;
+  if (damp_at_block_start_u1_14 > kWindDriveReference_u1_14) {
+    damp_at_block_start_u1_14 = kWindDriveReference_u1_14;
   }
   const int32_t damp_drive_u15 = IntegerSqrt(
-      (damp_at_block_start_u1_14 << 15) / kWhistleDriveReference_u1_14 * 32768u);
+      (damp_at_block_start_u1_14 << 15) / kWindDriveReference_u1_14 * 32768u);
   // The state is held in units of the drive, so a drive that moves leaves what
   // is already in the filter in the old ones, where the output's reciprocal no
   // longer cancels what produced it.
@@ -1540,7 +1540,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
         / previous_damp_drive_u15_);
   }
   previous_damp_drive_u15_ = damp_drive_u15;
-  const int32_t state_to_output_q15 = WhistleStateToOutput(
+  const int32_t state_to_output_q15 = WindStateToOutput(
       pitch_, incoherent_scale_u15_, g_no_makeup ? 0
           : g_half_makeup ? static_cast<int32_t>(IntegerSqrt(
                 static_cast<uint32_t>(damp_drive_u15) << 15))
@@ -1553,9 +1553,9 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   // carried for it and s0.15 times the drive stays under 2^30.
   const int32_t kDriveHeadroomBits = 3;
   STATIC_ASSERT(
-      (kIncoherentScaleRatioMax_u2_14 >> 14) * (1 << kWhistleDriveMakeUpBits)
+      (kIncoherentScaleRatioMax_u2_14 >> 14) * (1 << kWindDriveMakeUpBits)
           <= kSoftLimitHeadroom << kDriveHeadroomBits,
-      whistle_drive_fits_its_bits);
+      wind_drive_fits_its_bits);
   const int32_t drive_into_curve_q12 =
       TEST_CURVE_DRIVE(state_into_curve_q15 >> kDriveHeadroomBits);
   const int32_t scale_u15 = coherent_scale_u15_;
@@ -1565,22 +1565,22 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   if (g_limit_mode == 4) {
     const double bp_in_curve = stmlib::Clip16(static_cast<int32_t>(
         static_cast<int64_t>(svf.bp) * drive_into_curve_q12
-            >> (12 - kWhistleCurveDriveBits)));
+            >> (12 - kWindCurveDriveBits)));
     const double lp_in_curve = stmlib::Clip16(static_cast<int32_t>(
         static_cast<int64_t>(svf.lp) * drive_into_curve_q12
-            >> (12 - kWhistleCurveDriveBits)));
+            >> (12 - kWindCurveDriveBits)));
     const double x = (bp_in_curve * bp_in_curve + lp_in_curve * lp_in_curve)
         / __builtin_ldexp(1.0, g_limit_shift) / 32768.0;
     double g = g_limit_law == 1 ? (x < 1 ? 1 - x : 0)
         : g_limit_law == 2 ? 1 / (1 + x) : 1 / __builtin_sqrt(1 + x);
     excitation_drive_u15 = static_cast<int32_t>(damp_drive_u15 * g);
-    if (getenv("WHISTLE_LIMIT_PROBE")) fprintf(stderr, "%.4f %.4f\n", x, g);
+    if (getenv("WIND_LIMIT_PROBE")) fprintf(stderr, "%.4f %.4f\n", x, g);
   }
 #endif
   // The drive shifted so the product with a q15_14 state has the curve input
   // as its high word: one SMULL.
   const int32_t drive_into_curve_q32 = drive_into_curve_q12
-      << (32 - 12 + kWhistleCurveDriveBits - ResonatorState::kFractionalBits);
+      << (32 - 12 + kWindCurveDriveBits - ResonatorState::kFractionalBits);
   // Half a curve unit in the state's units, so the high word rounds rather than
   // floors: a ring decayed to its last fraction of a count, or an lp stranded
   // there, reads as zero.
@@ -1596,7 +1596,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
   state.Load(svf);
   RENDER_CORE(this_sample,
     const int16_t gain = input_samples[kAudioBlockSize];
-    // Noise of its own, because a whistle sustains and the chiff decays.
+    // Noise of its own, because WIND sustains and the chiff decays.
     noise_state = NextXorshift32(noise_state);
     int32_t excitation =
         static_cast<int16_t>(noise_state >> 16) *
@@ -1609,7 +1609,7 @@ void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
         &state, PreShape(excitation_q15_14), timbre);
     InLoopSaturate(&state.bp_q15_14, drive_into_curve_q32);
     this_sample = ResonatorShape(curve, g_multi
-        ? static_cast<int32_t>(MultiWhistle(this, pitch_, gain, timbre,
+        ? static_cast<int32_t>(MultiWind(this, pitch_, gain, timbre,
               breath_q15_14, drive_into_curve_q32))
         : MulHighS(state_q15_14 + half_curve_unit_q15_14, drive_into_curve_q32),
         scale_u15);

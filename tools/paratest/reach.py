@@ -26,7 +26,7 @@ ROOT = "/Users/rcrogers/Repos/mutable-instruments/mutable-dev-environment/eurora
 RATE = 45000.0
 BLOCK = 64
 
-SHAPES = {4: "WHISTLE", 5: "PING_LP", 6: "PING_BP", 7: "PING_HP"}
+SHAPES = {4: "WIND", 5: "PING_LP", 6: "PING_BP", 7: "PING_HP"}
 
 def render(binary, **kw):
     args = [f"{ROOT}/tools/paratest/{binary}", "dump"]

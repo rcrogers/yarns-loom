@@ -57,7 +57,7 @@ const int kBlocks = 16;
 
 // DUMP-ONLY OVERRIDES. The `hash` mode never sets them, so the goldens see the
 // same 290 cases they always did. They exist because two open questions --
-// WHISTLE's hum at TIMBRE 0, and its settling time against Q -- both need ONE
+// WIND's hum at TIMBRE 0, and its settling time against Q -- both need ONE
 // pitch rendered LONG ENOUGH TO HAVE A SPECTRUM, and 16 blocks is 23 ms.
 //   - narrowband noise has no second-scale steady state at high Q. Read the
 //     whistle plan's "HOW TO MEASURE THIS SHAPE" before quoting a level off
@@ -90,7 +90,7 @@ int g_pitch_frac = 0;
 int g_pitch_quantum = 1;
 int g_sweep_only = -1;   // -1 = every sweep
 // PANEL SEMANTICS. The timbre buffer a shape reads is the WARPED value, and
-// several warps INVERT -- WHISTLE's TIMBRE 0 is the WIDEST damp, which is the
+// several warps INVERT -- WIND's TIMBRE 0 is the WIDEST damp, which is the
 // LOWEST Q. A sweep indexed by the raw buffer is therefore indexed by damp and
 // not by the knob, and reads backwards. With warp=1 the held value is put
 // through the shape's OWN WarpTimbre first, so `timbre=` means the knob.
@@ -160,7 +160,7 @@ int32_t PitchAt(int16_t base, int block) {
 uint32_t HashShape(int shape, bool dump) {
   uint32_t hash = 2166136261u;
   // Per shape, so a noise shape's hash does not depend on how many draws the
-  // shapes before it took -- BOTH streams. WHISTLE's noise comes from
+  // shapes before it took -- BOTH streams. WIND's noise comes from
   // NextXorshift32Seed, which Init consumes once per case and which nothing
   // reseeded, so its golden moved with its POSITION in the shape list: a
   // reorder that renders every shape identically still failed here.

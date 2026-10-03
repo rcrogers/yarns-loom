@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
   const uint32_t attack_inc = ai ? strtoul(ai, NULL, 0) : 0;
   const uint32_t decay_inc = di ? strtoul(di, NULL, 0) : 0;
   const int from = OptInt(argc, argv, "from", OSC_SHAPE_NOISE_HP);
-  const int to = OptInt(argc, argv, "to", OSC_SHAPE_WHISTLE);
+  const int to = OptInt(argc, argv, "to", OSC_SHAPE_WIND);
   // EXCITER AMOUNT as a fraction of its clamp, and DURATION as its setting.
   // exciter_q30 overrides exciter with the raw amount, for scaling it exactly.
   const uint32_t exciter = OptInt(argc, argv, "exciter_q30", 0)
@@ -228,9 +228,9 @@ int main(int argc, char** argv) {
     p.peak = OptInt(argc, argv, "peak", 65535);
     p.attack_inc = attack_inc; p.decay_inc = decay_inc;
     // prime: a shape selected BEFORE `from`, so per-shape members a render
-    // leaves behind are set the way a session leaves them. RenderWhistle's
+    // leaves behind are set the way a session leaves them. RenderWind's
     // previous_damp_drive_u15_ is the one that matters -- it is 0 until
-    // WHISTLE has run once, and until then the state rescale is skipped.
+    // WIND has run once, and until then the state rescale is skipped.
     // prime_note=0 primes without a note: Refresh still settles the timbre
     // bias the note's TIMBRE ENV MOD is warped against, and the envelopes stay
     // at rest, so the note starts from zero.

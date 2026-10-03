@@ -56,7 +56,7 @@ static const uint16_t kHighestNote = 128 * 128;
 // gain_envelope_ and timbre_envelope_.
 const uint8_t kEnvelopesPerOscillator = 2;
 
-// The most the incoherent scale may exceed the coherent one by: WHISTLE's
+// The most the incoherent scale may exceed the coherent one by: WIND's
 // curve drive carries this ratio and is held u3.12 on the strength of it.
 const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
 
@@ -100,7 +100,7 @@ enum OscillatorShape {
   OSC_SHAPE_NOISE_LP,
   OSC_SHAPE_NOISE_BP,
   OSC_SHAPE_NOISE_HP,
-  OSC_SHAPE_WHISTLE,
+  OSC_SHAPE_WIND,
   OSC_SHAPE_PING_LP,
   OSC_SHAPE_PING_BP,
   OSC_SHAPE_PING_HP,
@@ -163,7 +163,7 @@ class Oscillator {
     coherent_scale_codes_u16_ = coherent_scale_codes_u16;
     // The same scales as a fraction of the sample's own full scale, which is
     // what a gain multiplies by. The incoherent one is kept in this form only:
-    // WHISTLE's level law is its one reader.
+    // WIND's level law is its one reader.
     coherent_scale_u15_ = static_cast<uint16_t>(
         (static_cast<uint32_t>(coherent_scale_codes_u16_) << 15) / INT16_MAX);
     incoherent_scale_u15_ = static_cast<uint16_t>(
@@ -243,7 +243,7 @@ class Oscillator {
         shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP;
 #else
     const bool spends_gain_before_the_filter =
-        shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_HP;
+        shape >= OSC_SHAPE_WIND && shape <= OSC_SHAPE_PING_HP;
 #endif
     return spends_gain_before_the_filter
         ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
@@ -321,7 +321,7 @@ class Oscillator {
   void RenderSyncTriangle(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix);
-  void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
+  void RenderWind(int16_t* input_samples, int16_t* audio_mix);
   void RenderPing(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldSine(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix);

@@ -7,7 +7,7 @@
 // THE TIMBRE MOVES BETWEEN BLOCKS AND WITHIN THEM. A shape may derive a
 // per-block scale from it and hold state in units of that scale, so a constant
 // timbre exercises neither the derivation changing nor the state being carried
-// across the change -- which is where WHISTLE overflowed int32 undetected.
+// across the change -- which is where WIND overflowed int32 undetected.
 #define TEST 1
 #define private public
 #include "yarns/oscillator.h"
