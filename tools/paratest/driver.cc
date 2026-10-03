@@ -267,12 +267,14 @@ int main(int argc, char** argv) {
     // release_at: blocks into the capture at which the key is let go, so one
     // file holds the charge AND the ring it leaves behind.
     const int release_at = OptInt(argc, argv, "release_at", 0);
-    if (release_at > 0 && release_at < blocks) {
-      Run(&p, pit, timbre, release_at, &v);
-      p.NoteOff();
-      Run(&p, pit, timbre, blocks - release_at, &v);
-    } else {
-      Run(&p, pit, timbre, blocks, &v);
+    // timbre_end: the TIMBRE knob ramps linearly from timbre to this across
+    // the capture, a block at a time.
+    const int timbre_end = OptInt(argc, argv, "timbre_end", timbre);
+    for (int b = 0; b < blocks; ++b) {
+      if (b == release_at) p.NoteOff();
+      const int16_t t = static_cast<int16_t>(
+          timbre + (timbre_end - timbre) * b / (blocks > 1 ? blocks - 1 : 1));
+      Run(&p, pit, t, 1, &v);
     }
     for (size_t i = 0; i < v.size(); ++i) printf("%d\n", v[i]);
     if (p.railed)
