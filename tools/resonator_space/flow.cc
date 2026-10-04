@@ -188,7 +188,9 @@ int main(int argc, char** argv) {
   const int length = has_controls ? static_cast<int>(controls.size() / 2)
                                   : static_cast<int>(duration * fs);
   std::vector<float> out(length);
-  double bp = 0, lp = 0, dc_x = 0, dc_y = 0, level_at_key_up = 0, x_previous = 0;
+  double bp = 0, lp = 0, dc_x = 0, dc_y = 0, level_at_key_up = 0, x_previous = 0,
+      shaped_previous = 0;
+  const double slip_noise = Arg("slipn", 0);
   for (int i = 0; i < length; ++i) {
     const double t = i / fs;
     const double g = has_controls ? controls[2 * i + 1] : env.Value(t, &level_at_key_up);
@@ -221,8 +223,19 @@ int main(int argc, char** argv) {
       // leaves the filter to ring down rather than dividing by it.
       const double scale_now = has_scale ? std::max(Eval(spec_scale, g, u, d), 1e-6) : scale;
       const double x = off + in_gain * bp / scale_now;
-      const double y = antialiased ? TanhAntialiased(x, x_previous) : Shape(shaper, x);
+      const double shaped = antialiased ? TanhAntialiased(x, x_previous) : Shape(shaper, x);
       x_previous = x;
+      // SLIPN=k: noise on the shaper's output, k times how fast that output
+      // moves, so it bursts where the waveform jumps -- once a period.
+      double y = shaped;
+      if (slip_noise) {
+        noise_state ^= noise_state << 13;
+        noise_state ^= noise_state >> 17;
+        noise_state ^= noise_state << 5;
+        y += slip_noise * (static_cast<int>(noise_state) / 2147483648.0)
+            * fabs(shaped - shaped_previous);
+      }
+      shaped_previous = shaped;
       feedback = out_gain * d_c * scale_now * y;
       feedback_tap = scale_now * (y - Shape(shaper, off));
     }
