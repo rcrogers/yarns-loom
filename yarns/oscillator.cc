@@ -433,6 +433,13 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
 
   shape_ = new_shape;
 
+  // A silent voice takes up the new shape from rest. A noise shape keeps
+  // filtering noise behind its output gate, and a resonator gates its input
+  // rather than its output, so the old state would ring out of the new shape
+  // as a pluck from nothing. A sounding voice keeps its state: dropping it
+  // would cut the note.
+  if (!sounding()) ResetFilterState();
+
   transfer_crest_factor_ = 1;
   if (new_shape >= OSC_SHAPE_TRI_THRU_TRI &&
       new_shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {

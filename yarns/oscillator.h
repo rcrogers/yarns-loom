@@ -177,9 +177,7 @@ class Oscillator {
     raw_gain_bias_ = raw_timbre_bias_ = 0;
     gain_envelope_.Init(0);
     timbre_envelope_.Init(0);
-    svf_.Init();
-    loop_tap_mean_q8_ = 0;
-    previous_damp_drive_u15_ = 0;
+    ResetFilterState();
     // Its own stream, so that voices summed as independent noise are.
     noise_state_ = NextXorshift32Seed();
     pitch_ = 60 << 7;
@@ -230,6 +228,14 @@ class Oscillator {
   }
 
   void set_shape(OscillatorShape shape);
+
+  // The filter and loop state the filtered shapes carry between blocks, at
+  // rest.
+  inline void ResetFilterState() {
+    svf_.Init();
+    loop_tap_mean_q8_ = 0;
+    previous_damp_drive_u15_ = 0;
+  }
 
   // What the gain envelope runs at, which is not the same as what the shape is
   // worth. A shape that spends the gain BEFORE its filter drives an excitation
