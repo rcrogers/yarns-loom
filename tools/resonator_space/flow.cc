@@ -211,6 +211,7 @@ int main(int argc, char** argv) {
   const bool has_pnoise_spec = g_args.count("PNOISE") != 0;
   const Spec spec_pnoise = ParseSpec(ArgS("PNOISE", "0"));
   const double pressure_noise = Arg("pnoise", 0);
+  const bool pressure_on_ac = Arg("pnoiseac", 0) != 0;
   // pnoisehz: the jitter's low-pass corner; 0 leaves it white.
   const double pressure_jitter_hz = Arg("pnoisehz", 500);
   const double pressure_jitter_pole =
@@ -286,7 +287,12 @@ int main(int argc, char** argv) {
         const double amount = has_pnoise_spec ? Eval(spec_pnoise, g, u, d) : pressure_noise;
         pressure = 1 + amount * pressure_jitter;
       }
-      feedback = out_gain * d_c * scale_now * y * pressure;
+      // pnoiseac=1: the jitter on the feedback less its resting value only, as
+      // the firmware's loop feeds back the curve less its value at rest.
+      feedback = pressure_on_ac
+          ? out_gain * d_c * scale_now
+              * (Shape(shaper, off) + (y - Shape(shaper, off)) * pressure)
+          : out_gain * d_c * scale_now * y * pressure;
       feedback_tap = scale_now * ((slip_into_loop_only ? shaped : y) - Shape(shaper, off));
       if (tap_drive) {
         feedback_tap = scale_now
