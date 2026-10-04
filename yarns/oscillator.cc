@@ -1532,8 +1532,6 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   ResonatorState state;
   state.Load(svf);
-  const int32_t cutoff_q0_31 =
-      static_cast<int32_t>(SVF::CutoffFromFreq(pitch_)) << 16;
   const int16_t* curve = Loop::Curve();
 
   // The offset once a block, from the TIMBRE the block opens on. The
@@ -1543,6 +1541,7 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   // Each end is held to at least 2^-kLoopRampGuardBits of the larger, so a
   // note that opens on a gain near nothing does not saturate the block.
   const int32_t half_timbre = input_samples[0] >> 1;
+  const int32_t cutoff_q0_31 = SVF::CutoffFromFreq_q0_31(pitch_);
   const int32_t biased_offset =
       (half_timbre * Loop::kOffsetTop_q15 >> 15) + 32768;
   const int32_t rest = LoopCurve(curve, biased_offset);

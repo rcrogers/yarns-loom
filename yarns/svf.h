@@ -106,6 +106,16 @@ struct SVF {
     int16_t cutoff_u15 = Interpolate824(lut_svf_cutoff_u15, index);
     return cutoff_u15;
   }
+  // The same, keeping the interpolation's 16 bits of fraction: u0.31, for a
+  // filter that runs on 32-bit coefficients. A whole u15 step is 3.4 cents at
+  // A2, so the int16 cutoff can only tune a low note that coarsely.
+  static inline int32_t CutoffFromFreq_q0_31(int16_t freq_u15) {
+    const uint32_t index = freq_u15 << (32 - 15);
+    const uint32_t below = lut_svf_cutoff_u15[index >> 24];
+    const uint32_t above = lut_svf_cutoff_u15[(index >> 24) + 1];
+    return static_cast<int32_t>(
+        (below << 16) + (above - below) * ((index >> 8) & 0xffff));
+  }
 };
 
 // The high word of a 32x32 product: one SMULL or UMULL. Written out because
