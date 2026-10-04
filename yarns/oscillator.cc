@@ -1252,12 +1252,13 @@ static const int32_t kWhistleTiltReferencePitch = 12 << 7;
 // corrected here at the output, which moves the level and leaves the state
 // alone -- so the state still rails above MIDI 84, where that term is
 // largest.
-// The curve is driven 2^this past the level WhistleStateToOutput names: the
-// tone saturates, which steadies its amplitude, brightens it and shortens its
-// rise, and a released note rings on from the ceiling. Spent in the shift that
-// brings the product back to the curve's scale, as fractional bits the product
-// does not keep.
-static const int32_t kWhistleCurveDriveBits = 4;
+// The curve is driven 2^this past the level WhistleStateToOutput names. Zero:
+// WHISTLE stays clean, the curve only catching peaks, and the loop shapes carry
+// the saturated sounds. Each bit spent here would saturate the tone further --
+// steadier amplitude, brighter, a shorter rise -- in the shift that brings the
+// product back to the curve's scale, as fractional bits the product does not
+// keep.
+static const int32_t kWhistleCurveDriveBits = 0;
 
 static int32_t WhistleStateToOutput(
     int32_t pitch, int32_t scale_u15,
