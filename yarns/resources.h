@@ -123,6 +123,7 @@ extern const int16_t wav_bandlimited_comb_13[];
 extern const int16_t wav_bandlimited_comb_14[];
 extern const int16_t ws_violent_overdrive[];
 extern const int16_t ws_soft_limit[];
+extern const int16_t ws_fold_back[];
 extern const uint32_t lut_lfo_increments[];
 extern const uint32_t lut_portamento_increments[];
 extern const uint32_t lut_envelope_phase_increments[];
@@ -262,6 +263,8 @@ extern const uint16_t chr_blinking_characters[];
 #define WS_VIOLENT_OVERDRIVE_SIZE 257
 #define WS_SOFT_LIMIT 1
 #define WS_SOFT_LIMIT_SIZE 257
+#define WS_FOLD_BACK 2
+#define WS_FOLD_BACK_SIZE 257
 #define LUT_LFO_INCREMENTS 0
 #define LUT_LFO_INCREMENTS_SIZE 64
 #define LUT_PORTAMENTO_INCREMENTS 1

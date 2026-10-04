@@ -55,11 +55,13 @@ const uint8_t kEnvelopesPerOscillator = 2;
 // curve drive carries this ratio and is held u3.12 on the strength of it.
 const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
 
-// WIND's output is its tap, gain * (tanh - tanh(offset)) / 2, less the tap's
-// running mean. Taken at another offset, that mean leaves the output up to
-// (2 + tanh(offset_max)) / 2 of the gain, so the gain peaks the reciprocal of
-// that under the share: 2 / (2 + tanh(2)).
+// A loop shape's output is its tap, gain * (curve - curve(offset)) / 2, less
+// the tap's running mean. Taken at another offset, that mean leaves the output
+// up to (2 + curve(offset_max)) / 2 of the gain, so the gain peaks the
+// reciprocal of that under the share: 2 / (2 + tanh(2)) for WIND, and
+// 2 / (2 + fold_back(0.8)) for BOWED, whose curve also spans -1..1.
 const uint16_t kWindPeakHeadroom_u15 = 22111;
+const uint16_t kBowedPeakHeadroom_u15 = 22157;
 
 class StateVariableFilter : public SVF {
  public:
@@ -103,6 +105,7 @@ enum OscillatorShape {
   OSC_SHAPE_NOISE_HP,
   OSC_SHAPE_WHISTLE,
   OSC_SHAPE_WIND,
+  OSC_SHAPE_BOWED,
   OSC_SHAPE_PING_LP,
   OSC_SHAPE_PING_BP,
   OSC_SHAPE_PING_HP,
@@ -237,12 +240,14 @@ class Oscillator {
   // One function because two callers need the same answer: NoteOn sets the
   // envelope to it, and set_shape rescales a held note between two of them.
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
-    // WIND spends its gain before the filter too, but its loop is
+    // The loop shapes spend their gain before the filter too, but the loop is
     // homogeneous in gain, so the envelope can carry the share -- under the
-    // headroom its DC blocker needs.
-    if (shape == OSC_SHAPE_WIND) {
+    // headroom the DC blocker needs.
+    if (shape == OSC_SHAPE_WIND || shape == OSC_SHAPE_BOWED) {
+      const uint16_t headroom_u15 = shape == OSC_SHAPE_WIND
+          ? kWindPeakHeadroom_u15 : kBowedPeakHeadroom_u15;
       return static_cast<uint16_t>(
-          coherent_scale_codes_u16_ * kWindPeakHeadroom_u15 >> 15);
+          coherent_scale_codes_u16_ * headroom_u15 >> 15);
     }
     const bool spends_gain_before_the_filter = shape == OSC_SHAPE_WHISTLE
         || (shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP);
@@ -324,6 +329,7 @@ class Oscillator {
   void RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix);
   void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
   void RenderWind(int16_t* input_samples, int16_t* audio_mix);
+  void RenderBowed(int16_t* input_samples, int16_t* audio_mix);
   // The loop shapes' one body; Loop names the curve and the ranges (see
   // WindLoop in oscillator.cc).
   template <typename Loop>

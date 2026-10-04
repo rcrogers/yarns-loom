@@ -154,6 +154,7 @@ const Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderFilteredNoise,
   &Oscillator::RenderWhistle,
   &Oscillator::RenderWind,
+  &Oscillator::RenderBowed,
   &Oscillator::RenderPing,
   &Oscillator::RenderPing,
   &Oscillator::RenderPing,
@@ -341,9 +342,11 @@ int16_t Oscillator::WarpTimbre(
   // instead of moving it. Carried as DAMP, geometrically, which is what lets
   // the top of the control reach zero -- the shift runs out of bits before the
   // exponential runs out of range, and zero damp is a lossless resonator.
-  // TIMBRE is WIND's loop offset, linear: RenderWind halves it into the
+  // TIMBRE is the loop shapes' offset, linear: RenderLoop halves it into the
   // table's units.
-  if (shape == OSC_SHAPE_WIND) return TimbreAtOrAboveZero(timbre);
+  if (shape == OSC_SHAPE_WIND || shape == OSC_SHAPE_BOWED) {
+    return TimbreAtOrAboveZero(timbre);
+  }
   if (shape >= OSC_SHAPE_WHISTLE && shape <= OSC_SHAPE_PING_HP) {
     return DampFromResonance(timbre);
   }
@@ -1121,10 +1124,12 @@ static const int32_t kSoftLimitHeadroom = 4;
 // Where to call it is measured, not free. Above the loop it holds a register
 // across everything else in there: WHISTLE is 68 cycles a sample hoisted and 74
 // at the call site, and PING is 64 at the call site and 74 hoisted.
+static inline const int16_t* TableAsRegister(const int16_t* table) {
+  asm volatile ("" : "+r"(table));
+  return table;
+}
 static inline const int16_t* SoftLimitTableAsRegister() {
-  const int16_t* curve = ws_soft_limit;
-  asm volatile ("" : "+r"(curve));
-  return curve;
+  return TableAsRegister(ws_soft_limit);
 }
 
 // A resonator's output: the curve input through the soft limiter, held to the
@@ -1432,6 +1437,9 @@ static const int32_t kLoopNoiseShift = 31 - kLoopDirectBits + kLoopNoiseBits;
 static const int32_t kLoopDampPreShift = 10;
 STATIC_ASSERT((INT32_MAX >> kLoopDampPreShift) * kLoopDamp_u1_14 <= INT32_MAX,
               loop_damp_product_fits);
+// The jittered damping's pre-shift: its two products together reach about
+// 4 d, so each operand gives up two more bits than kLoopDampPreShift's.
+static const int32_t kLoopJitterPreShift = 12;
 // The multiplier's ends are held to at least 2^-this of the block's larger gain.
 static const int32_t kLoopRampGuardBits = 2;
 // The DC blocker's running mean forgets 2^-this a sample: 28 Hz at 45 kHz.
@@ -1462,6 +1470,10 @@ static int32_t LoopArgumentMultiplier(
 //                       which the curve's slope there is divided back out of
 //   SlopeAtRest_q15()   the curve's slope at the offset, from the table and
 //                       the curve's value there
+//   kJitterShift        white jitter on the whole feedback, its value at rest
+//                       included: times 1 + jitter * noise, noise uniform in
+//                       -1..1 and jitter 2^(31 - this) / kLoopDamp_u1_14; 0
+//                       for none
 //
 // WIND: tanh, offset 0..2, so the bottom stays a sine and the top squares off.
 struct WindLoop {
@@ -1473,10 +1485,39 @@ struct WindLoop {
   static int32_t SlopeAtRest_q15(const int16_t*, int32_t, int32_t rest) {
     return 32768 - (rest * rest >> 15);
   }
+  static const int32_t kJitterShift = 0;
+};
+
+// BOWED: fold_back, u e^(1/2 - u^2 / 2), offset 0..0.8 -- bright, even-rich,
+// and pulled flat as it brightens, where tanh would square off. The jitter is
+// bow pressure wavering, which roughens every partial into a scrape.
+struct BowedLoop {
+  static const int16_t* Curve() { return TableAsRegister(ws_fold_back); }
+  static const int32_t kOffsetTop_q15 = 13107;  // 0.8 of 2
+  static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
+  static const int32_t kLoopGainTop_q15 = 229376;  // 7
+  // The secant across one table step each side, 1/16 of a unit: the table's
+  // own slope there, which no closed form of the curve's value gives.
+  static int32_t SlopeAtRest_q15(const int16_t* curve, int32_t biased_offset,
+                                 int32_t) {
+    return 16 * (LoopCurve(curve, biased_offset + 256)
+        - LoopCurve(curve, biased_offset - 256));
+  }
+  // 2^11 / 655: jitter 3.1.
+  static const int32_t kJitterShift = 20;
+  // Both products of the jittered damping, at their largest, fit 32 bits.
+  STATIC_ASSERT((INT32_MAX >> kLoopJitterPreShift) * kLoopDamp_u1_14
+                + (INT32_MAX >> kLoopJitterPreShift) * (1 << (31 - kJitterShift))
+                    <= INT32_MAX,
+                jittered_damp_products_fit);
 };
 
 void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
   RenderLoop<WindLoop>(input_samples, audio_mix);
+}
+
+void Oscillator::RenderBowed(int16_t* input_samples, int16_t* audio_mix) {
+  RenderLoop<BowedLoop>(input_samples, audio_mix);
 }
 
 template <typename Loop>
@@ -1519,8 +1560,9 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
     const int32_t gain = input_samples[kAudioBlockSize];
     // The curve less its value at rest: what the loop feeds back and what it
     // outputs, scaled by gain.
-    const int32_t shaped = gain * (LoopCurve(
-        curve, biased_offset + MulHighS(bp_q15_14, multiplier)) - rest);
+    const int32_t curve_value =
+        LoopCurve(curve, biased_offset + MulHighS(bp_q15_14, multiplier));
+    const int32_t shaped = gain * (curve_value - rest);
     noise_state = NextXorshift32(noise_state);
     const int32_t excitation_q15_14 =
         gain * (kLoopDirect + (static_cast<int32_t>(noise_state) >> kLoopNoiseShift));
@@ -1530,10 +1572,26 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
     // shifted from shaped's units to the state's.
     lp_q15_14 += 2 * MulHighS(cutoff_q0_31, bp_q15_14);
     const int32_t feedback_q15_14 = shaped >> (15 + 15 - kLoopUnitShift_q15_14);
-    const int32_t damped_q15_14 = bp_q15_14 - feedback_q15_14;
-    bp_q15_14 += 2 * MulHighS(cutoff_q0_31, excitation_q15_14 - lp_q15_14
-        - ((damped_q15_14 >> kLoopDampPreShift) * kLoopDamp_u1_14
-            >> (14 - kLoopDampPreShift)));
+    int32_t damping_q15_14;
+    if (Loop::kJitterShift) {
+      // Bow pressure wavering: the whole friction force jitters, the curve's
+      // value at rest included, d * jitter * noise times gain * curve. d's
+      // share of the jitter is draw >> kJitterShift, so the product needs no
+      // long multiply. The draw is the excitation's: that noise is
+      // 2^-kLoopNoiseBits of a unit, so what the two share is lost under the
+      // jitter's own.
+      const int32_t force_q15_14 =
+          gain * curve_value >> (15 + 15 - kLoopUnitShift_q15_14);
+      damping_q15_14 = (((bp_q15_14 - feedback_q15_14) >> kLoopJitterPreShift)
+          * kLoopDamp_u1_14 - (force_q15_14 >> kLoopJitterPreShift)
+              * (static_cast<int32_t>(noise_state) >> Loop::kJitterShift))
+          >> (14 - kLoopJitterPreShift);
+    } else {
+      damping_q15_14 = ((bp_q15_14 - feedback_q15_14) >> kLoopDampPreShift)
+          * kLoopDamp_u1_14 >> (14 - kLoopDampPreShift);
+    }
+    bp_q15_14 += 2 * MulHighS(
+        cutoff_q0_31, excitation_q15_14 - lp_q15_14 - damping_q15_14);
     // At half scale, less its running mean.
     const int32_t tap = shaped >> 16;
     tap_mean_q8 += tap - (tap_mean_q8 >> kLoopDcBlockerShift);

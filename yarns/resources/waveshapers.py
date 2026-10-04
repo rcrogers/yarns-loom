@@ -47,6 +47,11 @@ violent_overdrive = numpy.tanh(32.0 * x)
 # full scale and is a distortion rather than a limit.
 soft_limit = numpy.tanh(4.0 * x)
 
+# BOWED's friction curve, over the same 4 units each side of zero as soft_limit:
+# u e^(1/2 - u^2 / 2), which peaks at 1 where u is 1 and folds back towards
+# zero past it, as a bow's friction falls off once the string slips.
+fold_back = 4.0 * x * numpy.exp(0.5 - 8.0 * x * x)
+
 # Wavefolder curves from the first version
 # tri_fold = numpy.abs(4.0 * x - numpy.round(4.0 * x)) * numpy.sign(x)
 # sine_fold = numpy.sin(5 * numpy.pi * x)
@@ -70,5 +75,6 @@ soft_limit = numpy.tanh(4.0 * x)
 # waveshapers.append(('moderate_overdrive', scale(moderate_overdrive)))
 waveshapers.append(('violent_overdrive', scale(violent_overdrive)))
 waveshapers.append(('soft_limit', scale(soft_limit)))
+waveshapers.append(('fold_back', scale(fold_back)))
 # waveshapers.append(('sine_fold', scale(sine_fold, center=False)))
 # waveshapers.append(('tri_fold', scale(tri_fold)))
