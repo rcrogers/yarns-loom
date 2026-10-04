@@ -193,6 +193,9 @@ int main(int argc, char** argv) {
   const double slip_noise = Arg("slipn", 0);
   const bool slip_into_loop_only = ArgS("slipto", "out") == "loop";
   const double x_noise = Arg("xnoise", 0), x_slip = Arg("xslip", 0);
+  const double pressure_noise = Arg("pnoise", 0);
+  const double pressure_jitter_pole = 1 - exp(-2 * M_PI * 500 / fs);
+  double pressure_jitter = 0;
   for (int i = 0; i < length; ++i) {
     const double t = i / fs;
     const double g = has_controls ? controls[2 * i + 1] : env.Value(t, &level_at_key_up);
@@ -249,7 +252,18 @@ int main(int argc, char** argv) {
       }
       last_movement = fabs(shaped - shaped_previous);
       shaped_previous = shaped;
-      feedback = out_gain * d_c * scale_now * y;
+      // PNOISE=k: the feedback times 1 + k * noise low-passed at 500 Hz --
+      // jitter in how hard the loop drives itself, as bow pressure wavers.
+      double pressure = 1;
+      if (pressure_noise) {
+        noise_state ^= noise_state << 13;
+        noise_state ^= noise_state >> 17;
+        noise_state ^= noise_state << 5;
+        pressure_jitter += pressure_jitter_pole
+            * (static_cast<int>(noise_state) / 2147483648.0 - pressure_jitter);
+        pressure = 1 + pressure_noise * pressure_jitter;
+      }
+      feedback = out_gain * d_c * scale_now * y * pressure;
       feedback_tap = scale_now * ((slip_into_loop_only ? shaped : y) - Shape(shaper, off));
     }
     // DIRECT: the gain itself into the filter, as PING takes it -- its steps
