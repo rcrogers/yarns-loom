@@ -194,7 +194,10 @@ int main(int argc, char** argv) {
   const bool slip_into_loop_only = ArgS("slipto", "out") == "loop";
   const double x_noise = Arg("xnoise", 0), x_slip = Arg("xslip", 0);
   const double pressure_noise = Arg("pnoise", 0);
-  const double pressure_jitter_pole = 1 - exp(-2 * M_PI * 500 / fs);
+  // pnoisehz: the jitter's low-pass corner; 0 leaves it white.
+  const double pressure_jitter_hz = Arg("pnoisehz", 500);
+  const double pressure_jitter_pole =
+      pressure_jitter_hz > 0 ? 1 - exp(-2 * M_PI * pressure_jitter_hz / fs) : 1;
   double pressure_jitter = 0;
   for (int i = 0; i < length; ++i) {
     const double t = i / fs;
