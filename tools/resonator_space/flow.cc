@@ -199,7 +199,10 @@ int main(int argc, char** argv) {
                                   : static_cast<int>(duration * fs);
   std::vector<float> out(length);
   double bp = 0, lp = 0, dc_x = 0, dc_y = 0, level_at_key_up = 0, x_previous = 0,
-      shaped_previous = 0, last_movement = 0;
+      shaped_previous = 0, last_movement = 0, tap_previous = 0;
+  // tapdrive=k: the output tap reads the shaper a second time, k times
+  // harder than the loop does, on the same filter output.
+  const double tap_drive = Arg("tapdrive", 0);
   const double slip_noise = Arg("slipn", 0);
   const bool slip_into_loop_only = ArgS("slipto", "out") == "loop";
   const double x_noise = Arg("xnoise", 0), x_slip = Arg("xslip", 0);
@@ -280,12 +283,17 @@ int main(int argc, char** argv) {
       }
       feedback = out_gain * d_c * scale_now * y * pressure;
       feedback_tap = scale_now * ((slip_into_loop_only ? shaped : y) - Shape(shaper, off));
+      if (tap_drive) {
+        feedback_tap = scale_now
+            * (Shape(shaper, off + tap_drive * in_gain * bp_sum / scale_now) - Shape(shaper, off));
+      }
     }
     // DIRECT: the gain itself into the filter, as PING takes it -- its steps
     // and the exciter riding on it reach the filter as signal.
     const double direct = has_direct ? Eval(spec_direct, g, u, d) * g : 0;
     const double notch = in_noise + direct + feedback - std::min(d, 2.0) * bp;
     lp += c * bp;
+    const double hp = notch - lp;
     bp += c * (notch - lp);
     for (size_t m = 0; m < mode_bp.size(); ++m) {
       const double mode_notch = in_noise + direct + feedback
@@ -294,11 +302,20 @@ int main(int argc, char** argv) {
       mode_bp[m] += mode_c[m] * (mode_notch - mode_lp[m]);
     }
     double o;
-    if (tap == "fb") {
+    if (tap == "fb" || tap == "dfb") {
       // One-pole DC blocker, 20 Hz.
       o = feedback_tap - dc_x + exp(-2 * M_PI * 20 / fs) * dc_y;
       dc_x = feedback_tap;
       dc_y = o;
+      // dfb: its first difference, tilted up 6 dB per octave.
+      if (tap == "dfb") {
+        const double difference = o - tap_previous;
+        tap_previous = o;
+        o = difference;
+      }
+    } else if (tap == "hp") {
+      // The filter's high-pass: the feedback less the mode's own response.
+      o = hp;
     } else {
       o = tap == "lp" ? lp : bp;
       if (make_up) o /= make_up_gain;
