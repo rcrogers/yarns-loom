@@ -1450,23 +1450,13 @@ static inline int32_t LoopTanh(const int16_t* curve, int32_t biased_x) {
 }
 
 // bp to tanh's argument, loop gain / (gain * sech^2(offset)), as the multiplier
-// whose product with a q15_14 state has the argument in its high word. Held at
-// INT32_MAX below the gain where every argument it makes is past the table.
+// whose product with a q15_14 state has the argument in its high word.
+// Saturated where every argument it makes is past the table anyway.
 static int32_t LoopArgumentMultiplier(
     int32_t gain, int32_t tanh_offset, int32_t loop_gain_q15) {
   const int32_t sech_squared_q15 = 32768 - (tanh_offset * tanh_offset >> 15);
-  const uint32_t divisor = static_cast<uint32_t>(gain * sech_squared_q15 >> 15);
-  const int32_t numerator_shift = 32 - ResonatorState::kFractionalBits;
-  const uint64_t numerator =
-      static_cast<uint64_t>(loop_gain_q15) << numerator_shift;
-  // The quotient fits below 2^31 exactly when the divisor exceeds
-  // numerator / 2^31.
-  if (divisor <= static_cast<uint32_t>(loop_gain_q15) >> (31 - numerator_shift)) {
-    return INT32_MAX;
-  }
-  return static_cast<int32_t>(DivU64ByU32(
-      static_cast<uint32_t>(numerator >> 32), static_cast<uint32_t>(numerator),
-      divisor));
+  return ScaleRatio(loop_gain_q15, 1u << (32 - ResonatorState::kFractionalBits),
+                    static_cast<uint32_t>(gain * sech_squared_q15 >> 15));
 }
 
 void Oscillator::RenderWhistle(int16_t* input_samples, int16_t* audio_mix) {
