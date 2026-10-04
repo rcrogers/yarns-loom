@@ -324,6 +324,10 @@ class Oscillator {
   void RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix);
   void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
   void RenderWind(int16_t* input_samples, int16_t* audio_mix);
+  // The loop shapes' one body; Loop names the curve and the ranges (see
+  // WindLoop in oscillator.cc).
+  template <typename Loop>
+  void RenderLoop(int16_t* input_samples, int16_t* audio_mix);
   void RenderPing(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldSine(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix);
@@ -407,7 +411,7 @@ class Oscillator {
 
   PhaseDistortionSquareModulator pd_square_;
   StateVariableFilter svf_;
-  // WIND's output DC blocker: the tap's running mean, 2^8 times over.
+  // The loop shapes' output DC blocker: the tap's running mean, 2^8 times over.
   int32_t loop_tap_mean_q8_;
   Envelope gain_envelope_, timbre_envelope_;
 

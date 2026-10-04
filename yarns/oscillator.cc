@@ -1409,20 +1409,15 @@ static inline int32_t JetFeedback(int32_t, int16_t, int16_t) { return 0; }
 static inline int32_t JetNoise(int32_t excitation) { return excitation; }
 #endif
 
-// WIND as a self-excited loop: the band-pass fed back through tanh, biased
-// by TIMBRE. One loop unit is 2^kLoopUnitBits state counts and also the tanh
-// table's argument unit, which is tanh(4 x) over int16.
+// The loop shapes: a band-pass at the note fed back through a curve, biased by
+// TIMBRE. One loop unit is 2^kLoopUnitBits state counts and also the curve
+// table's argument unit: the tables run over 4 units each side of zero.
 static const int32_t kLoopUnitBits = 13;
 static const int32_t kLoopUnitShift_q15_14 =
     kLoopUnitBits + ResonatorState::kFractionalBits;
 // Q 25.
 static const int16_t kLoopDamp_u1_14 = 655;
-// The loop gain for a small signal, which the offset's sech^2 is divided back
-// out of on the way into tanh: from the bottom of the offset to the top, so
-// the bottom stays a sine and the top squares off.
-static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
-static const int32_t kLoopGainTop_q15 = 81920;  // 2.5
-// The offset's range in the tanh table's units: TIMBRE halved.
+// TIMBRE halved: the span the offset and the loop gain are both read across.
 static const int32_t kLoopOffsetBits = kEnvelopeSampleBits - 1;
 // Input noise of 2^-this loop units at full gain.
 static const int32_t kLoopNoiseBits = 7;
@@ -1442,31 +1437,56 @@ static const int32_t kLoopRampGuardBits = 2;
 // The DC blocker's running mean forgets 2^-this a sample: 28 Hz at 45 kHz.
 static const int32_t kLoopDcBlockerShift = 8;
 
-// tanh of x - 32768, x held to the table's span: the bias lets one USAT do
-// the clip.
-static inline int32_t LoopTanh(const int16_t* curve, int32_t biased_x) {
+// The curve at x - 32768, x held to the table's span: the bias lets one USAT
+// do the clip.
+static inline int32_t LoopCurve(const int16_t* curve, int32_t biased_x) {
   const uint32_t index = stmlib::ClipU16(biased_x);
   const int16_t* entry = &curve[index >> 8];
   return entry[0] + ((entry[1] - entry[0]) * static_cast<int32_t>(index & 0xff) >> 8);
 }
 
-// bp to tanh's argument, loop gain / (gain * sech^2(offset)), as the multiplier
-// whose product with a q15_14 state has the argument in its high word.
-// Saturated where every argument it makes is past the table anyway.
+// bp to the curve's argument, loop gain / (gain * the curve's slope at the
+// offset), as the multiplier whose product with a q15_14 state has the
+// argument in its high word. Saturated where every argument it makes is past
+// the table anyway.
 static int32_t LoopArgumentMultiplier(
-    int32_t gain, int32_t tanh_offset, int32_t loop_gain_q15) {
-  const int32_t sech_squared_q15 = 32768 - (tanh_offset * tanh_offset >> 15);
+    int32_t gain, int32_t slope_q15, int32_t loop_gain_q15) {
   return ScaleRatio(loop_gain_q15, 1u << (32 - ResonatorState::kFractionalBits),
-                    static_cast<uint32_t>(gain * sech_squared_q15 >> 15));
+                    static_cast<uint32_t>(gain * slope_q15 >> 15));
 }
 
+// What a loop shape is, to RenderLoop:
+//   Curve()             the curve's table, pinned to a register
+//   kOffsetTop_q15      the offset at full TIMBRE, as a share of 2 loop units
+//   kLoopGain*_q15      the small-signal loop gain at the offset's two ends,
+//                       which the curve's slope there is divided back out of
+//   SlopeAtRest_q15()   the curve's slope at the offset, from the table and
+//                       the curve's value there
+//
+// WIND: tanh, offset 0..2, so the bottom stays a sine and the top squares off.
+struct WindLoop {
+  static const int16_t* Curve() { return SoftLimitTableAsRegister(); }
+  static const int32_t kOffsetTop_q15 = 32768;
+  static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
+  static const int32_t kLoopGainTop_q15 = 81920;  // 2.5
+  // sech^2, the slope of tanh, is 1 - tanh^2.
+  static int32_t SlopeAtRest_q15(const int16_t*, int32_t, int32_t rest) {
+    return 32768 - (rest * rest >> 15);
+  }
+};
+
 void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
+  RenderLoop<WindLoop>(input_samples, audio_mix);
+}
+
+template <typename Loop>
+void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   StateVariableFilter svf = svf_;
   ResonatorState state;
   state.Load(svf);
   const int32_t cutoff_q0_31 =
       static_cast<int32_t>(SVF::CutoffFromFreq(pitch_)) << 16;
-  const int16_t* curve = SoftLimitTableAsRegister();
+  const int16_t* curve = Loop::Curve();
 
   // The offset once a block, from the TIMBRE the block opens on. The
   // multiplier walks between its values at the block's two ends, because
@@ -1474,18 +1494,21 @@ void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
   // worth of mismatch amplitude-modulates a rising note at the block rate.
   // Each end is held to at least 2^-kLoopRampGuardBits of the larger, so a
   // note that opens on a gain near nothing does not saturate the block.
-  const int32_t biased_offset = (input_samples[0] >> 1) + 32768;
-  const int32_t tanh_offset = LoopTanh(curve, biased_offset);
-  const int32_t loop_gain_q15 = kLoopGainBottom_q15
-      + ((kLoopGainTop_q15 - kLoopGainBottom_q15) * (biased_offset - 32768)
-          >> kLoopOffsetBits);
+  const int32_t half_timbre = input_samples[0] >> 1;
+  const int32_t biased_offset =
+      (half_timbre * Loop::kOffsetTop_q15 >> 15) + 32768;
+  const int32_t rest = LoopCurve(curve, biased_offset);
+  const int32_t slope_q15 = Loop::SlopeAtRest_q15(curve, biased_offset, rest);
+  const int32_t loop_gain_q15 = Loop::kLoopGainBottom_q15 + static_cast<int32_t>(
+      static_cast<int64_t>(Loop::kLoopGainTop_q15 - Loop::kLoopGainBottom_q15)
+          * half_timbre >> kLoopOffsetBits);
   const int32_t first_gain = input_samples[kAudioBlockSize];
   const int32_t last_gain = input_samples[2 * kAudioBlockSize - 1];
   const int32_t gain_floor = std::max(first_gain, last_gain) >> kLoopRampGuardBits;
   int32_t multiplier = LoopArgumentMultiplier(
-      std::max(first_gain, gain_floor), tanh_offset, loop_gain_q15);
+      std::max(first_gain, gain_floor), slope_q15, loop_gain_q15);
   const int32_t multiplier_slope = (LoopArgumentMultiplier(
-      std::max(last_gain, gain_floor), tanh_offset, loop_gain_q15) - multiplier)
+      std::max(last_gain, gain_floor), slope_q15, loop_gain_q15) - multiplier)
       / static_cast<int32_t>(kAudioBlockSize - 1);
 
   uint32_t noise_state = noise_state_;
@@ -1494,10 +1517,10 @@ void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_CORE(this_sample,
     (void) timbre;  // read once a block, above
     const int32_t gain = input_samples[kAudioBlockSize];
-    // tanh less its value at rest: what the loop feeds back and what it
+    // The curve less its value at rest: what the loop feeds back and what it
     // outputs, scaled by gain.
-    const int32_t shaped = gain * (LoopTanh(
-        curve, biased_offset + MulHighS(bp_q15_14, multiplier)) - tanh_offset);
+    const int32_t shaped = gain * (LoopCurve(
+        curve, biased_offset + MulHighS(bp_q15_14, multiplier)) - rest);
     noise_state = NextXorshift32(noise_state);
     const int32_t excitation_q15_14 =
         gain * (kLoopDirect + (static_cast<int32_t>(noise_state) >> kLoopNoiseShift));
@@ -1506,8 +1529,8 @@ void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
     // The feedback and the damping share d: d * (feedback - bp), the feedback
     // shifted from shaped's units to the state's.
     lp_q15_14 += 2 * MulHighS(cutoff_q0_31, bp_q15_14);
-    const int32_t damped_q15_14 =
-        bp_q15_14 - (shaped >> (15 + 15 - kLoopUnitShift_q15_14));
+    const int32_t feedback_q15_14 = shaped >> (15 + 15 - kLoopUnitShift_q15_14);
+    const int32_t damped_q15_14 = bp_q15_14 - feedback_q15_14;
     bp_q15_14 += 2 * MulHighS(cutoff_q0_31, excitation_q15_14 - lp_q15_14
         - ((damped_q15_14 >> kLoopDampPreShift) * kLoopDamp_u1_14
             >> (14 - kLoopDampPreShift)));
