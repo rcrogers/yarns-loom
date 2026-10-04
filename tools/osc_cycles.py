@@ -72,6 +72,11 @@ if not _table:
   raise SystemExit('  cannot find fn_table_; there is no set to price')
 REACHABLE = frozenset(re.findall(
     r'&Oscillator::(\w+)', re.sub(r'//[^\n]*', '', _table.group(1))))
+# A shape whose body is one call to a template instance -- RenderWind is
+# RenderLoop<WindLoop> -- is priced as that instance, under its own name.
+WRAPPED = dict((instance, wrapper) for wrapper, instance in re.findall(
+    r'void Oscillator::(\w+)\(int16_t\* input_samples, int16_t\* audio_mix\) \{'
+    r'\s*(\w+<\w+>)\(input_samples, audio_mix\);\s*\}', OSCILLATOR_CC))
 
 
 def shape_name(symbol):
@@ -80,7 +85,14 @@ def shape_name(symbol):
   match = re.match(r'^_ZN5yarns10Oscillator(\d+)', symbol)
   if not match:
     return ''
-  return symbol[match.end():match.end() + int(match.group(1))]
+  end = match.end() + int(match.group(1))
+  name = symbol[match.end():end]
+  # A template instance names its argument next: I N S_ <length><name> E E.
+  argument = re.match(r'INS_(\d+)', symbol[end:])
+  if argument:
+    start = end + argument.end()
+    name += '<%s>' % symbol[start:start + int(argument.group(1))]
+  return name
 
 # THE EDGE WORK IS NOT PAID EVERY SAMPLE, and charging it as though it were is
 # what made the band-limited shapes head this table.
@@ -253,6 +265,8 @@ rows = []
 unexplained_shapes = []
 for name, body in functions.items():
     short = shape_name(name)
+    body_name = short.split('<')[0]
+    short = WRAPPED.get(short, short)
     if short not in REACHABLE or not body:
         continue
     graph = pathcost.Graph(body)
@@ -284,7 +298,7 @@ for name, body in functions.items():
     per_sample = blocks - nested
     cycles = pathcost.longest_path(
         graph, call_cost, entry=header, restrict=per_sample)
-    modulated = 'RENDER_MODULATED' in SHAPE_BODIES.get(short, '')
+    modulated = 'RENDER_MODULATED' in SHAPE_BODIES.get(body_name, '')
     regions = wrap_guarded_regions(graph, per_sample)
     region_zero = [(a, a, 0) for body in regions for leader in body
                    for a, _ in graph.blocks[leader]]
