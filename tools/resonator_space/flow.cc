@@ -212,6 +212,18 @@ int main(int argc, char** argv) {
   const Spec spec_pnoise = ParseSpec(ArgS("PNOISE", "0"));
   const double pressure_noise = Arg("pnoise", 0);
   const bool pressure_on_ac = Arg("pnoiseac", 0) != 0;
+  // RETUNE=c0,c1,...: cents to tune the resonator by, evenly across TIMBRE
+  // 0..127 and interpolated -- a per-block pitch correction's table.
+  std::vector<double> retune_cents;
+  {
+    const std::string list = ArgS("RETUNE", "");
+    for (size_t start = 0; start < list.size();) {
+      const size_t comma = list.find(',', start);
+      retune_cents.push_back(atof(list.substr(start, comma - start).c_str()));
+      start = comma == std::string::npos ? list.size() : comma + 1;
+    }
+    if (retune_cents.size() == 1) retune_cents.push_back(retune_cents[0]);
+  }
   // pnoisehz: the jitter's low-pass corner; 0 leaves it white.
   const double pressure_jitter_hz = Arg("pnoisehz", 500);
   const double pressure_jitter_pole =
@@ -303,9 +315,18 @@ int main(int argc, char** argv) {
     // and the exciter riding on it reach the filter as signal.
     const double direct = has_direct ? Eval(spec_direct, g, u, d) * g : 0;
     const double notch = in_noise + direct + feedback - std::min(d, 2.0) * bp;
-    lp += c * bp;
+    // RETUNE: the resonator tuned this many cents off the note, read from the
+    // table at TIMBRE's position.
+    double c_now = c;
+    if (!retune_cents.empty()) {
+      const double x = u * (retune_cents.size() - 1);
+      const size_t k = std::min(static_cast<size_t>(x), retune_cents.size() - 2);
+      const double cents = retune_cents[k] + (x - k) * (retune_cents[k + 1] - retune_cents[k]);
+      c_now = 2 * sin(M_PI * f0 * pow(2, cents / 1200) / fs);
+    }
+    lp += c_now * bp;
     const double hp = notch - lp;
-    bp += c * (notch - lp);
+    bp += c_now * (notch - lp);
     for (size_t m = 0; m < mode_bp.size(); ++m) {
       const double mode_notch = in_noise + direct + feedback
           - std::min(d * mode_damp_factor[m], 2.0) * mode_bp[m];
