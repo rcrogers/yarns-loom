@@ -1186,23 +1186,6 @@ void Envelope::RenderStage(
 #undef YARNS_CHIFF_ASM_INPUTS
 
 
-// Scale by numerator/denominator in 32-bit hardware ops only: a umull forms
-// the 64-bit product, DivU64ByU32 divides, the result saturates into int32.
-// Keeps full precision at extreme ratios, where a Q15 factor collapses.
-static int32_t ScaleRatio(int32_t value, uint32_t numerator, uint32_t denominator) {
-  uint32_t magnitude = value < 0
-      ? 0u - static_cast<uint32_t>(value)
-      : static_cast<uint32_t>(value);
-  uint32_t product_hi = MulU32(magnitude, numerator);
-  uint32_t product_lo = magnitude * numerator;
-  uint32_t quotient = product_hi >= denominator
-      ? UINT32_MAX
-      : DivU64ByU32(product_hi, product_lo, denominator);
-  if (quotient > static_cast<uint32_t>(INT32_MAX)) quotient = INT32_MAX;
-  return value < 0 ? -static_cast<int32_t>(quotient)
-                   : static_cast<int32_t>(quotient);
-}
-
 // Rescale every level by numerator/denominator, both non-negative. Cold
 // path, so exact per-field division is fine. Slew times are
 // rates, so they are scale-invariant.

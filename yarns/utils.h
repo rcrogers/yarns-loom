@@ -44,6 +44,11 @@ namespace yarns {
 // four sites it costs 244 bytes more than the one copy.
 uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 
+// Scale by numerator/denominator in 32-bit hardware ops only: a umull forms
+// the 64-bit product, DivU64ByU32 divides, the result saturates into int32.
+// Keeps full precision at extreme ratios, where a Q15 factor collapses.
+int32_t ScaleRatio(int32_t value, uint32_t numerator, uint32_t denominator);
+
 // xorshift32. Zero is a fixed point, so a seed must be nonzero.
 //
 // Inline, unlike the rest of this header: its callers are per-sample loops, and

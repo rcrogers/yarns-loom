@@ -8,6 +8,8 @@
 
 #include "yarns/utils.h"
 
+#include "stmlib/dsp/dsp.h"
+
 namespace yarns {
 
 uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor) {
@@ -38,6 +40,20 @@ uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor) {
     if (rhat >= b) break;
   }
   return q1 * b + q0;
+}
+
+int32_t ScaleRatio(int32_t value, uint32_t numerator, uint32_t denominator) {
+  uint32_t magnitude = value < 0
+      ? 0u - static_cast<uint32_t>(value)
+      : static_cast<uint32_t>(value);
+  uint32_t product_hi = stmlib::MulU32(magnitude, numerator);
+  uint32_t product_lo = magnitude * numerator;
+  uint32_t quotient = product_hi >= denominator
+      ? UINT32_MAX
+      : DivU64ByU32(product_hi, product_lo, denominator);
+  if (quotient > static_cast<uint32_t>(INT32_MAX)) quotient = INT32_MAX;
+  return value < 0 ? -static_cast<int32_t>(quotient)
+                   : static_cast<int32_t>(quotient);
 }
 
 namespace {
