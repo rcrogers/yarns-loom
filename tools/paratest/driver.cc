@@ -79,6 +79,7 @@ struct Part {
   // these outlive NoteOn.
   ADSR adsr[kMaxVoices];
   uint32_t attack_inc = 0, decay_inc = 0;   // 0 = take the setting's LUT entry
+  int release = -1;   // RELEASE setting; -1 = the decay setting's, as before
   uint16_t peak = 65535;
   void NoteOn(const int* pitches, int16_t timbre, int attack, int decay,
               uint16_t sustain, uint32_t chiff, uint32_t chiff_samples) {
@@ -91,7 +92,8 @@ struct Part {
       a.peak_u16 = peak; a.sustain_u16 = sustain;
       a.attack_u32 = attack_inc ? attack_inc : EnvIncrement(attack);
       a.decay_u32 = decay_inc ? decay_inc : EnvIncrement(decay);
-      a.release_u32 = decay_inc ? decay_inc : EnvIncrement(decay);
+      a.release_u32 = release >= 0 ? EnvIncrement(release)
+          : decay_inc ? decay_inc : EnvIncrement(decay);
       voices[i].NoteOn(a, false, pitches[i] << 7, pitches[i] << 7, timbre,
                        chiff, chiff_samples);
     }
@@ -226,6 +228,7 @@ int main(int argc, char** argv) {
     Part p; p.Init(n, OptInt(argc, argv, "alloc", n));
     p.solo = OptInt(argc, argv, "solo", -1);
     p.peak = OptInt(argc, argv, "peak", 65535);
+    p.release = OptInt(argc, argv, "release", -1);
     p.attack_inc = attack_inc; p.decay_inc = decay_inc;
     // prime: a shape selected BEFORE `from`, so per-shape members a render
     // leaves behind are set the way a session leaves them. RenderWind's
