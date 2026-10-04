@@ -51,15 +51,15 @@ static const uint16_t kHighestNote = 128 * 128;
 // gain_envelope_ and timbre_envelope_.
 const uint8_t kEnvelopesPerOscillator = 2;
 
-// The most the incoherent scale may exceed the coherent one by: WIND's
+// The most the incoherent scale may exceed the coherent one by: WHISTLE's
 // curve drive carries this ratio and is held u3.12 on the strength of it.
 const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
 
-// WHISTLE's output is its tap, gain * (tanh - tanh(offset)) / 2, less the tap's
+// WIND's output is its tap, gain * (tanh - tanh(offset)) / 2, less the tap's
 // running mean. Taken at another offset, that mean leaves the output up to
 // (2 + tanh(offset_max)) / 2 of the gain, so the gain peaks the reciprocal of
 // that under the share: 2 / (2 + tanh(2)).
-const uint16_t kWhistlePeakHeadroom_u15 = 22111;
+const uint16_t kWindPeakHeadroom_u15 = 22111;
 
 class StateVariableFilter : public SVF {
  public:
@@ -101,8 +101,8 @@ enum OscillatorShape {
   OSC_SHAPE_NOISE_LP,
   OSC_SHAPE_NOISE_BP,
   OSC_SHAPE_NOISE_HP,
-  OSC_SHAPE_WIND,
   OSC_SHAPE_WHISTLE,
+  OSC_SHAPE_WIND,
   OSC_SHAPE_PING_LP,
   OSC_SHAPE_PING_BP,
   OSC_SHAPE_PING_HP,
@@ -165,7 +165,7 @@ class Oscillator {
     coherent_scale_codes_u16_ = coherent_scale_codes_u16;
     // The same scales as a fraction of the sample's own full scale, which is
     // what a gain multiplies by. The incoherent one is kept in this form only:
-    // WIND's level law is its one reader.
+    // WHISTLE's level law is its one reader.
     coherent_scale_u15_ = static_cast<uint16_t>(
         (static_cast<uint32_t>(coherent_scale_codes_u16_) << 15) / INT16_MAX);
     incoherent_scale_u15_ = static_cast<uint16_t>(
@@ -237,14 +237,14 @@ class Oscillator {
   // One function because two callers need the same answer: NoteOn sets the
   // envelope to it, and set_shape rescales a held note between two of them.
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
-    // WHISTLE spends its gain before the filter too, but its loop is
+    // WIND spends its gain before the filter too, but its loop is
     // homogeneous in gain, so the envelope can carry the share -- under the
     // headroom its DC blocker needs.
-    if (shape == OSC_SHAPE_WHISTLE) {
+    if (shape == OSC_SHAPE_WIND) {
       return static_cast<uint16_t>(
-          coherent_scale_codes_u16_ * kWhistlePeakHeadroom_u15 >> 15);
+          coherent_scale_codes_u16_ * kWindPeakHeadroom_u15 >> 15);
     }
-    const bool spends_gain_before_the_filter = shape == OSC_SHAPE_WIND
+    const bool spends_gain_before_the_filter = shape == OSC_SHAPE_WHISTLE
         || (shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP);
     return spends_gain_before_the_filter
         ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
@@ -322,8 +322,8 @@ class Oscillator {
   void RenderSyncTriangle(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix);
-  void RenderWind(int16_t* input_samples, int16_t* audio_mix);
   void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
+  void RenderWind(int16_t* input_samples, int16_t* audio_mix);
   void RenderPing(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldSine(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix);
@@ -407,7 +407,7 @@ class Oscillator {
 
   PhaseDistortionSquareModulator pd_square_;
   StateVariableFilter svf_;
-  // WHISTLE's output DC blocker: the tap's running mean, 2^8 times over.
+  // WIND's output DC blocker: the tap's running mean, 2^8 times over.
   int32_t loop_tap_mean_q8_;
   Envelope gain_envelope_, timbre_envelope_;
 

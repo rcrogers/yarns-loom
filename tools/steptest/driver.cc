@@ -24,8 +24,8 @@
 // signed both ways.
 //
 // WHAT IT ALREADY ANSWERED, so that nobody pays for the answer twice: the
-// WIND attack glitch is NOT a sample-step discontinuity. Run against
-// `4d3a444f`, which the user calls clean, WIND reads 60.4 where the build
+// WHISTLE attack glitch is NOT a sample-step discontinuity. Run against
+// `4d3a444f`, which the user calls clean, WHISTLE reads 60.4 where the build
 // they call glitchy reads 2.15, and every one of the worst cells moves the same
 // way by 20x to 30x at MATCHED settings. The hard CONSTRAIN that build capped
 // the state with is a real discontinuity and the knee removed it, so both
@@ -141,7 +141,7 @@ int main(int argc, char** argv) {
   // is a chiff -- broadband, so the bound has nothing to say about it. It reads
   // 88x, which is what that looks like.
   const int narrowband[] = {
-    OSC_SHAPE_WIND, OSC_SHAPE_PING_BP, OSC_SHAPE_PING_LP };
+    OSC_SHAPE_WHISTLE, OSC_SHAPE_PING_BP, OSC_SHAPE_PING_LP };
   for (size_t si = 0; si < sizeof(narrowband) / sizeof(*narrowband); ++si) {
     const int shape = narrowband[si];
     double worst = 0, worst_peak = 0;

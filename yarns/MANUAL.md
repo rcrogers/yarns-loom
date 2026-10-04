@@ -649,12 +649,12 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Note pitch controls the resonance of the SVF, from zero to self-oscillation
 - Shapes: low-pass, notch, band-pass, high-pass
 
-#### `WN` Wind: enveloped noise into tuned state-variable filter
+#### `WH` Whistle: enveloped noise into tuned state-variable filter
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
 - The [gain envelope](#modulation-destinations-for-envelope-output) amplifies the filter's noise input, instead of amplifying the oscillator's output
 
-#### `WH` Whistle: tuned state-variable filter fed back through a saturating stage
+#### `WN` Wind: tuned state-variable filter fed back through a saturating stage
 - Timbre: from a pure tone through brighter, brassier tones with even harmonics, up to a square-like tone
 - Note pitch controls the tuning of the filter
 - The [gain envelope](#modulation-destinations-for-envelope-output) both strikes the filter and sets the level of the feedback, instead of amplifying the oscillator's output
