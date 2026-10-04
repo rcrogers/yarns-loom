@@ -1477,6 +1477,8 @@ static int32_t LoopArgumentMultiplier(
 //                       which the curve's slope there is divided back out of
 //   SlopeAtRest_q15()   the curve's slope at the offset, from the table and
 //                       the curve's value there
+//   PitchCorrection()   pitch units (1/128 semitone) the resonator is tuned
+//                       up by at a TIMBRE, against the flat pull of the loop
 //   kJitterShift        white jitter on the whole feedback, its value at rest
 //                       included: times 1 + jitter * noise, noise uniform in
 //                       -1..1 and jitter 2^(31 - this) / kLoopDamp_u1_14; 0
@@ -1492,6 +1494,8 @@ struct WindLoop {
   static int32_t SlopeAtRest_q15(const int16_t*, int32_t, int32_t rest) {
     return 32768 - (rest * rest >> 15);
   }
+  // Within 1.7 cents of the note at every TIMBRE, the same as at none.
+  static int32_t PitchCorrection(int32_t) { return 0; }
   static const int32_t kJitterShift = 0;
 };
 
@@ -1509,6 +1513,18 @@ struct BowedLoop {
                                  int32_t) {
     return 16 * (LoopCurve(curve, biased_offset + 256)
         - LoopCurve(curve, biased_offset - 256));
+  }
+  // The fold-back pulls the note flat as TIMBRE drives it harder, by the same
+  // cents at every pitch (A2..A5 within 1.5): measured on this loop with its
+  // jitter, less its pull at TIMBRE 0, which WIND's resonator shares, and fit
+  // smooth. 0.3 cents rms from the fit; 10.5 at the top.
+  static int32_t PitchCorrection(int32_t half_timbre) {
+    static const int8_t kTable[17] = {
+        0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 7, 9, 13 };
+    const int32_t index = half_timbre >> (kLoopOffsetBits - 4);
+    const int32_t fraction = half_timbre & ((1 << (kLoopOffsetBits - 4)) - 1);
+    return kTable[index] + ((kTable[index + 1] - kTable[index]) * fraction
+        >> (kLoopOffsetBits - 4));
   }
   // 2^11 / 655: jitter 3.1.
   static const int32_t kJitterShift = 20;
@@ -1541,7 +1557,8 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   // Each end is held to at least 2^-kLoopRampGuardBits of the larger, so a
   // note that opens on a gain near nothing does not saturate the block.
   const int32_t half_timbre = input_samples[0] >> 1;
-  const int32_t cutoff_q0_31 = SVF::CutoffFromFreq_q0_31(pitch_);
+  const int32_t cutoff_q0_31 = SVF::CutoffFromFreq_q0_31(
+      pitch_ + Loop::PitchCorrection(half_timbre));
   const int32_t biased_offset =
       (half_timbre * Loop::kOffsetTop_q15 >> 15) + 32768;
   const int32_t rest = LoopCurve(curve, biased_offset);
