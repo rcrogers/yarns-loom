@@ -127,6 +127,16 @@ int main(int argc, char** argv) {
   const double midi = Arg("midi", 69);
   const double f0 = 440 * pow(2, (midi - 69) / 12);
   const double c = 2 * sin(M_PI * f0 / fs);
+  // modes=N: N resonators at k * f0 (k = 1..N, up to fs / 6, where Chamberlin
+  // stays stable), each damped d * k^modedamp, all driven by the same input;
+  // the shaper reads their summed band-passes -- a string's velocity at the bow.
+  std::vector<double> mode_c, mode_bp, mode_lp, mode_damp_factor;
+  for (int k = 2; k <= Arg("modes", 1) && k * f0 < fs / 6; ++k) {
+    mode_c.push_back(2 * sin(M_PI * k * f0 / fs));
+    mode_damp_factor.push_back(pow(k, Arg("modedamp", 0)));
+    mode_bp.push_back(0);
+    mode_lp.push_back(0);
+  }
   const double d_start = Arg("d", 0.01);
   // A Q sweep: d moves geometrically from d to d_end across the note.
   const double d_end = Arg("d_end", d_start);
@@ -230,7 +240,9 @@ int main(int argc, char** argv) {
       // SCALE: the feedback scale as a spec, floored so a scale of zero
       // leaves the filter to ring down rather than dividing by it.
       const double scale_now = has_scale ? std::max(Eval(spec_scale, g, u, d), 1e-6) : scale;
-      double x = off + in_gain * bp / scale_now;
+      double bp_sum = bp;
+      for (size_t m = 0; m < mode_bp.size(); ++m) bp_sum += mode_bp[m];
+      double x = off + in_gain * bp_sum / scale_now;
       // XNOISE=k / XSLIP=k: noise on the shaper's INPUT, plain or times how
       // fast its output moved last sample: jitter in when the slip comes.
       if (x_noise || x_slip) {
@@ -275,6 +287,12 @@ int main(int argc, char** argv) {
     const double notch = in_noise + direct + feedback - std::min(d, 2.0) * bp;
     lp += c * bp;
     bp += c * (notch - lp);
+    for (size_t m = 0; m < mode_bp.size(); ++m) {
+      const double mode_notch = in_noise + direct + feedback
+          - std::min(d * mode_damp_factor[m], 2.0) * mode_bp[m];
+      mode_lp[m] += mode_c[m] * mode_bp[m];
+      mode_bp[m] += mode_c[m] * (mode_notch - mode_lp[m]);
+    }
     double o;
     if (tap == "fb") {
       // One-pole DC blocker, 20 Hz.
