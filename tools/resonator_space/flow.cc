@@ -206,6 +206,10 @@ int main(int argc, char** argv) {
   const double slip_noise = Arg("slipn", 0);
   const bool slip_into_loop_only = ArgS("slipto", "out") == "loop";
   const double x_noise = Arg("xnoise", 0), x_slip = Arg("xslip", 0);
+  // PNOISE: the jitter amount as a spec (tracking gain or TIMBRE), in place
+  // of the constant pnoise.
+  const bool has_pnoise_spec = g_args.count("PNOISE") != 0;
+  const Spec spec_pnoise = ParseSpec(ArgS("PNOISE", "0"));
   const double pressure_noise = Arg("pnoise", 0);
   // pnoisehz: the jitter's low-pass corner; 0 leaves it white.
   const double pressure_jitter_hz = Arg("pnoisehz", 500);
@@ -273,13 +277,14 @@ int main(int argc, char** argv) {
       // PNOISE=k: the feedback times 1 + k * noise low-passed at 500 Hz --
       // jitter in how hard the loop drives itself, as bow pressure wavers.
       double pressure = 1;
-      if (pressure_noise) {
+      if (pressure_noise || has_pnoise_spec) {
         noise_state ^= noise_state << 13;
         noise_state ^= noise_state >> 17;
         noise_state ^= noise_state << 5;
         pressure_jitter += pressure_jitter_pole
             * (static_cast<int>(noise_state) / 2147483648.0 - pressure_jitter);
-        pressure = 1 + pressure_noise * pressure_jitter;
+        const double amount = has_pnoise_spec ? Eval(spec_pnoise, g, u, d) : pressure_noise;
+        pressure = 1 + amount * pressure_jitter;
       }
       feedback = out_gain * d_c * scale_now * y * pressure;
       feedback_tap = scale_now * ((slip_into_loop_only ? shaped : y) - Shape(shaper, off));
