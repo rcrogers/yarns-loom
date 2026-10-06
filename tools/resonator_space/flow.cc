@@ -31,6 +31,9 @@ static std::string ArgS(const char* key, const char* fallback) {
 static double Phi(double x) { return x * exp(0.5 - 0.5 * x * x); }
 // blend=k: the "blend" shaper's share of phi against tanh.
 static double g_blend = 0.5;
+// knee=k: the "phik" shaper, x e^((1 - |x|^2k) / 2k): phi at k = 1, peaking at 1
+// where x is 1 like it, with a sharper knee as k grows.
+static double g_knee = 1;
 static double Shape(int shaper, double x) {
   switch (shaper) {
     case 1: return tanh(x);
@@ -40,6 +43,7 @@ static double Shape(int shaper, double x) {
     case 5: return x < -1.5 ? -1 : x > 1.5 ? 1 : x - 4.0 / 27 * x * x * x;
     case 6: return sin(x);
     case 7: return (1 - g_blend) * tanh(x) + g_blend * Phi(x);
+    case 8: return x * exp((1 - pow(fabs(x), 2 * g_knee)) / (2 * g_knee));
     default: return x;
   }
 }
@@ -53,9 +57,9 @@ static double TanhAntialiased(double x, double x_previous) {
 }
 // none: no feedback path at all.
 static int ShaperIndex(const std::string& name) {
-  const char* names[] = { "linear", "tanh", "phi", "algebraic", "atan", "cubic", "sine", "blend" };
+  const char* names[] = { "linear", "tanh", "phi", "algebraic", "atan", "cubic", "sine", "blend", "phik" };
   if (name == "none") return -1;
-  for (int i = 0; i < 8; ++i) if (name == names[i]) return i;
+  for (int i = 0; i < 9; ++i) if (name == names[i]) return i;
   fprintf(stderr, "unknown shaper %s\n", name.c_str());
   exit(1);
 }
@@ -152,6 +156,7 @@ int main(int argc, char** argv) {
   const double make_up_floor = Arg("makeup_floor", 2.0 / 256);
   const int shaper = ShaperIndex(ArgS("shaper", "none"));
   g_blend = Arg("blend", g_blend);
+  g_knee = Arg("knee", g_knee);
   const double gain_out = Arg("go", 1), gain_in = Arg("gi", 1), offset = Arg("off", 0);
   const bool go_env = Arg("go_env", 0) != 0, gi_env = Arg("gi_env", 0) != 0,
       off_env = Arg("off_env", 0) != 0;
