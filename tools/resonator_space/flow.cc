@@ -217,6 +217,8 @@ int main(int argc, char** argv) {
   const Spec spec_pnoise = ParseSpec(ArgS("PNOISE", "0"));
   const double pressure_noise = Arg("pnoise", 0);
   const bool pressure_on_ac = Arg("pnoiseac", 0) != 0;
+  const double tilt = Arg("tilt", 0);
+  double tilt_previous = 0;
   // RETUNE=c0,c1,...: cents to tune the resonator by, evenly across TIMBRE
   // 0..127 and interpolated -- a per-block pitch correction's table.
   std::vector<double> retune_cents;
@@ -356,6 +358,13 @@ int main(int argc, char** argv) {
     } else {
       o = tap == "lp" ? lp : bp;
       if (make_up) o /= make_up_gain;
+    }
+    // tilt=b: the output plus b times its first difference -- a treble lift
+    // that leaves the fundamental where it is.
+    if (tilt) {
+      const double lifted = o + tilt * (o - tilt_previous);
+      tilt_previous = o;
+      o = lifted;
     }
     o *= has_drive ? Eval(spec_drive, g, u, d) : drive;
     o = out_stage == "tanh" ? tanh(o) : std::max(-1.0, std::min(1.0, o));
