@@ -84,15 +84,37 @@ struct Envelope {
 // A parameter as a function of the controls: "A" constant; "g:A:B" / "gx:A:B"
 // linear / geometric from A at gain 0 to B at gain 1; "u:A:B" / "ux:A:B" the
 // same in u, TIMBRE's position 0..1; "ctl" the control file's d; "dref:A:R"
-// A * R / d, a coupling fixed at R.
+// A * R / d, a coupling fixed at R; "tab:c0,c1,..." a table across TIMBRE.
+// A comma list as a table evenly across TIMBRE 0..127; one value is a constant.
+static std::vector<double> ParseTable(const std::string& list) {
+  std::vector<double> table;
+  for (size_t start = 0; start < list.size();) {
+    const size_t comma = list.find(',', start);
+    table.push_back(atof(list.substr(start, comma - start).c_str()));
+    start = comma == std::string::npos ? list.size() : comma + 1;
+  }
+  if (table.size() == 1) table.push_back(table[0]);
+  return table;
+}
+// The table at TIMBRE's position u, interpolated.
+static double TableAt(const std::vector<double>& table, double u) {
+  const double x = u * (table.size() - 1);
+  const size_t k = std::min(static_cast<size_t>(x), table.size() - 2);
+  return table[k] + (x - k) * (table[k + 1] - table[k]);
+}
+// "tab:c0,c1,..." is a table across TIMBRE (ParseTable, TableAt).
 struct Spec {
-  enum Kind { CONSTANT, GAIN, GAIN_GEOMETRIC, TIMBRE, TIMBRE_GEOMETRIC, CONTROL_D, FIXED_COUPLING };
+  enum Kind { CONSTANT, GAIN, GAIN_GEOMETRIC, TIMBRE, TIMBRE_GEOMETRIC, CONTROL_D, FIXED_COUPLING, TABLE };
   Kind kind;
   double a, b;
+  std::vector<double> table;
 };
 static Spec ParseSpec(const std::string& text) {
-  Spec s = { Spec::CONSTANT, 0, 0 };
+  Spec s = { Spec::CONSTANT, 0, 0, std::vector<double>() };
   if (text == "ctl") { s.kind = Spec::CONTROL_D; return s; }
+  if (text.compare(0, 4, "tab:") == 0) {
+    s.kind = Spec::TABLE; s.table = ParseTable(text.substr(4)); return s;
+  }
   const size_t colon = text.find(':');
   if (colon == std::string::npos) { s.a = atof(text.c_str()); return s; }
   const std::string kind = text.substr(0, colon);
@@ -117,28 +139,13 @@ static double Eval(const Spec& s, double g, double u, double d) {
     case Spec::TIMBRE_GEOMETRIC: return s.a * pow(s.b / s.a, u);
     case Spec::CONTROL_D: return d;
     case Spec::FIXED_COUPLING: return s.a * s.b / d;
+    case Spec::TABLE: return TableAt(s.table, u);
     default: return s.a;
   }
 }
 
 // A comma list as a table evenly across TIMBRE 0..127; one value is a constant.
-static std::vector<double> TableArg(const char* key) {
-  std::vector<double> table;
-  const std::string list = ArgS(key, "");
-  for (size_t start = 0; start < list.size();) {
-    const size_t comma = list.find(',', start);
-    table.push_back(atof(list.substr(start, comma - start).c_str()));
-    start = comma == std::string::npos ? list.size() : comma + 1;
-  }
-  if (table.size() == 1) table.push_back(table[0]);
-  return table;
-}
-// The table at TIMBRE's position u, interpolated.
-static double TableAt(const std::vector<double>& table, double u) {
-  const double x = u * (table.size() - 1);
-  const size_t k = std::min(static_cast<size_t>(x), table.size() - 2);
-  return table[k] + (x - k) * (table[k + 1] - table[k]);
-}
+static std::vector<double> TableArg(const char* key) { return ParseTable(ArgS(key, "")); }
 
 int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
