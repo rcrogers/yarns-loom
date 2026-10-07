@@ -121,6 +121,25 @@ static double Eval(const Spec& s, double g, double u, double d) {
   }
 }
 
+// A comma list as a table evenly across TIMBRE 0..127; one value is a constant.
+static std::vector<double> TableArg(const char* key) {
+  std::vector<double> table;
+  const std::string list = ArgS(key, "");
+  for (size_t start = 0; start < list.size();) {
+    const size_t comma = list.find(',', start);
+    table.push_back(atof(list.substr(start, comma - start).c_str()));
+    start = comma == std::string::npos ? list.size() : comma + 1;
+  }
+  if (table.size() == 1) table.push_back(table[0]);
+  return table;
+}
+// The table at TIMBRE's position u, interpolated.
+static double TableAt(const std::vector<double>& table, double u) {
+  const double x = u * (table.size() - 1);
+  const size_t k = std::min(static_cast<size_t>(x), table.size() - 2);
+  return table[k] + (x - k) * (table[k + 1] - table[k]);
+}
+
 int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     const char* eq = strchr(argv[i], '=');
@@ -223,16 +242,10 @@ int main(int argc, char** argv) {
   double tilt_previous = 0;
   // RETUNE=c0,c1,...: cents to tune the resonator by, evenly across TIMBRE
   // 0..127 and interpolated -- a per-block pitch correction's table.
-  std::vector<double> retune_cents;
-  {
-    const std::string list = ArgS("RETUNE", "");
-    for (size_t start = 0; start < list.size();) {
-      const size_t comma = list.find(',', start);
-      retune_cents.push_back(atof(list.substr(start, comma - start).c_str()));
-      start = comma == std::string::npos ? list.size() : comma + 1;
-    }
-    if (retune_cents.size() == 1) retune_cents.push_back(retune_cents[0]);
-  }
+  const std::vector<double> retune_cents = TableArg("RETUNE");
+  // DIRECTTAB=c0,c1,...: the direct term's coefficient as a table across
+  // TIMBRE, in place of DIRECT -- a strike sized to the loop's settled level.
+  const std::vector<double> direct_table = TableArg("DIRECTTAB");
   // pnoisehz: the jitter's low-pass corner; 0 leaves it white.
   const double pressure_jitter_hz = Arg("pnoisehz", 500);
   const double pressure_jitter_pole =
@@ -331,16 +344,14 @@ int main(int argc, char** argv) {
     }
     // DIRECT: the gain itself into the filter, as PING takes it -- its steps
     // and the exciter riding on it reach the filter as signal.
-    const double direct = has_direct ? Eval(spec_direct, g, u, d) * g : 0;
+    const double direct = !direct_table.empty() ? TableAt(direct_table, u) * g
+        : has_direct ? Eval(spec_direct, g, u, d) * g : 0;
     const double notch = in_noise + direct + feedback - std::min(d, 2.0) * bp;
     // RETUNE: the resonator tuned this many cents off the note, read from the
     // table at TIMBRE's position.
     double c_now = c;
     if (!retune_cents.empty()) {
-      const double x = u * (retune_cents.size() - 1);
-      const size_t k = std::min(static_cast<size_t>(x), retune_cents.size() - 2);
-      const double cents = retune_cents[k] + (x - k) * (retune_cents[k + 1] - retune_cents[k]);
-      c_now = 2 * sin(M_PI * f0 * pow(2, cents / 1200) / fs);
+      c_now = 2 * sin(M_PI * f0 * pow(2, TableAt(retune_cents, u) / 1200) / fs);
     }
     lp += c_now * bp;
     const double hp = notch - lp;
