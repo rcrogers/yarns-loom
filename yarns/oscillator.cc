@@ -1479,6 +1479,11 @@ static int32_t LoopArgumentMultiplier(
 //                       the curve's value there
 //   PitchCorrection()   pitch units (1/128 semitone) the resonator is tuned
 //                       up by at a TIMBRE, against the flat pull of the loop
+//   kFollowsFallingGain when the gain falls, the state falls with it rather
+//                       than the multiplier rising to meet it: the curve's
+//                       input stays where the loop put it. A falling gain
+//                       otherwise overdrives the curve until the state, which
+//                       decays only at the resonator's own rate, catches up
 //   kJitterShift        white jitter on the whole feedback, its value at rest
 //                       included: times 1 + jitter * noise, noise uniform in
 //                       -1..1 and jitter 2^(31 - this) / kLoopDamp_u1_14; 0
@@ -1496,6 +1501,8 @@ struct WindLoop {
   }
   // Within 1.7 cents of the note at every TIMBRE, the same as at none.
   static int32_t PitchCorrection(int32_t) { return 0; }
+  // tanh overdriven only saturates: a fast release brightens as it fades.
+  static const bool kFollowsFallingGain = false;
   static const int32_t kJitterShift = 0;
 };
 
@@ -1526,6 +1533,9 @@ struct BowedLoop {
     return kTable[index] + ((kTable[index + 1] - kTable[index]) * fraction
         >> (kLoopOffsetBits - 4));
   }
+  // The fold-back overdriven folds over: a pluck's decay, faster than the
+  // resonator's, threw its pitch about by hundreds of cents.
+  static const bool kFollowsFallingGain = true;
   // 2^11 / 655: jitter 3.1.
   static const int32_t kJitterShift = 20;
   // Both products of the jittered damping, at their largest, fit 32 bits.
@@ -1578,6 +1588,18 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   uint32_t noise_state = noise_state_;
   int32_t tap_mean_q8 = loop_tap_mean_q8_;
   int32_t bp_q15_14 = state.bp_q15_14, lp_q15_14 = state.lp_q15_14;
+  // A falling gain under a curve that folds back: the state comes down by the
+  // block's fall as the block opens, so the multiplier's rise over the block
+  // meets it rather than overdriving the curve (see kFollowsFallingGain).
+  // lp also holds the direct term's DC, which the input still supplies as
+  // the block opens: only the ring around it comes down, or the step pings the
+  // resonator once a block -- a tone at the block rate.
+  if (Loop::kFollowsFallingGain && last_gain < first_gain) {
+    const int32_t direct_q15_14 = first_gain * kLoopDirect;
+    bp_q15_14 = ScaleRatio(bp_q15_14, last_gain, first_gain);
+    lp_q15_14 = direct_q15_14
+        + ScaleRatio(lp_q15_14 - direct_q15_14, last_gain, first_gain);
+  }
   RENDER_CORE(this_sample,
     (void) timbre;  // read once a block, above
     const int32_t gain = input_samples[kAudioBlockSize];
