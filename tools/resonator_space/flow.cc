@@ -218,6 +218,8 @@ int main(int argc, char** argv) {
   const double pressure_noise = Arg("pnoise", 0);
   const bool pressure_on_ac = Arg("pnoiseac", 0) != 0;
   const double tilt = Arg("tilt", 0);
+  const bool rescale = Arg("rescale", 0) != 0;
+  double scale_previous = 0;
   double tilt_previous = 0;
   // RETUNE=c0,c1,...: cents to tune the resonator by, evenly across TIMBRE
   // 0..127 and interpolated -- a per-block pitch correction's table.
@@ -267,6 +269,14 @@ int main(int argc, char** argv) {
       // SCALE: the feedback scale as a spec, floored so a scale of zero
       // leaves the filter to ring down rather than dividing by it.
       const double scale_now = has_scale ? std::max(Eval(spec_scale, g, u, d), 1e-6) : scale;
+      // rescale=1: when the scale falls, the filter state falls with it, so the
+      // shaper's input stays where the loop put it instead of growing as the
+      // input gain divides by a smaller scale.
+      if (rescale && scale_previous > 0 && scale_now < scale_previous) {
+        bp *= scale_now / scale_previous;
+        lp *= scale_now / scale_previous;
+      }
+      scale_previous = scale_now;
       double bp_sum = bp;
       for (size_t m = 0; m < mode_bp.size(); ++m) bp_sum += mode_bp[m];
       double x = off + in_gain * bp_sum / scale_now;
