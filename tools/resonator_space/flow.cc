@@ -244,6 +244,16 @@ int main(int argc, char** argv) {
   const double pressure_noise = Arg("pnoise", 0);
   const bool pressure_on_ac = Arg("pnoiseac", 0) != 0;
   const double tilt = Arg("tilt", 0);
+  // scrape=k: the jitter's own part of the force, k * (curve less its rest)
+  // * noise, added to the output -- friction noise straight to the bridge,
+  // gated by the force, not filtered by the resonance. scrapehz=f high-passes
+  // it with one pole at f (0: none), or scrapepitch=r at r times the note.
+  const double scrape = Arg("scrape", 0);
+  const double scrape_corner = Arg("scrapepitch", 0) > 0 ? Arg("scrapepitch", 0) * f0 : Arg("scrapehz", 0);
+  const double scrape_pole = scrape_corner > 0 ? exp(-2 * M_PI * scrape_corner / fs) : 0;
+  double scrape_x = 0, scrape_y = 0, scrape_part = 0;
+  // hpmix=m: the filter's high-pass, m times, mixed into the output.
+  const double hp_mix = Arg("hpmix", 0);
   const bool rescale = Arg("rescale", 0) != 0;
   double scale_previous = 0;
   double tilt_previous = 0;
@@ -328,7 +338,7 @@ int main(int argc, char** argv) {
       // PNOISE=k: the feedback times 1 + k * noise low-passed at 500 Hz --
       // jitter in how hard the loop drives itself, as bow pressure wavers.
       double pressure = 1;
-      if (pressure_noise || has_pnoise_spec) {
+      if (pressure_noise || has_pnoise_spec || scrape) {
         noise_state ^= noise_state << 13;
         noise_state ^= noise_state >> 17;
         noise_state ^= noise_state << 5;
@@ -336,6 +346,7 @@ int main(int argc, char** argv) {
             * (static_cast<int>(noise_state) / 2147483648.0 - pressure_jitter);
         const double amount = has_pnoise_spec ? Eval(spec_pnoise, g, u, d) : pressure_noise;
         pressure = 1 + amount * pressure_jitter;
+        if (scrape) scrape_part = scrape * scale_now * (y - Shape(shaper, off)) * pressure_jitter;
       }
       // pnoiseac=1: the jitter on the feedback less its resting value only, as
       // the firmware's loop feeds back the curve less its value at rest.
@@ -390,6 +401,14 @@ int main(int argc, char** argv) {
     } else {
       o = tap == "lp" ? lp : bp;
       if (make_up) o /= make_up_gain;
+    }
+    if (hp_mix) o += hp_mix * hp;
+    if (scrape) {
+      const double lifted = scrape_corner > 0
+          ? scrape_pole * (scrape_y + scrape_part - scrape_x) : scrape_part;
+      scrape_x = scrape_part;
+      scrape_y = lifted;
+      o += lifted;
     }
     // tilt=b: the output plus b times its first difference -- a treble lift
     // that leaves the fundamental where it is.
