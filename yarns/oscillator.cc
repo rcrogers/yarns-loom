@@ -1470,6 +1470,15 @@ static int32_t LoopArgumentMultiplier(
                     static_cast<uint32_t>(gain * slope_q15 >> 15));
 }
 
+// A 17-entry table across TIMBRE, at half_timbre, interpolated.
+template <typename T>
+static inline int32_t LoopTableAt(const T* table, int32_t half_timbre) {
+  const int32_t index = half_timbre >> (kLoopOffsetBits - 4);
+  const int32_t fraction = half_timbre & ((1 << (kLoopOffsetBits - 4)) - 1);
+  return table[index] + ((table[index + 1] - table[index]) * fraction
+      >> (kLoopOffsetBits - 4));
+}
+
 // What a loop shape is, to RenderLoop:
 //   Curve()             the curve's table, pinned to a register
 //   kOffsetTop_q15      the offset at full TIMBRE, as a share of 2 loop units
@@ -1479,6 +1488,8 @@ static int32_t LoopArgumentMultiplier(
 //                       the curve's value there
 //   PitchCorrection()   pitch units (1/128 semitone) the resonator is tuned
 //                       up by at a TIMBRE, against the flat pull of the loop
+//   Direct()            the direct term, at a TIMBRE: what gain strikes the
+//                       filter with, as many loop units at full gain
 //   kFollowsFallingGain when the gain falls, the state falls with it rather
 //                       than the multiplier rising to meet it: the curve's
 //                       input stays where the loop put it. A falling gain
@@ -1503,6 +1514,7 @@ struct WindLoop {
   static int32_t PitchCorrection(int32_t) { return 0; }
   // tanh overdriven only saturates: a fast release brightens as it fades.
   static const bool kFollowsFallingGain = false;
+  static int32_t Direct(int32_t) { return kLoopDirect; }
   static const int32_t kJitterShift = 0;
 };
 
@@ -1528,10 +1540,20 @@ struct BowedLoop {
   static int32_t PitchCorrection(int32_t half_timbre) {
     static const int8_t kTable[17] = {
         0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 7, 9, 13 };
-    const int32_t index = half_timbre >> (kLoopOffsetBits - 4);
-    const int32_t fraction = half_timbre & ((1 << (kLoopOffsetBits - 4)) - 1);
-    return kTable[index] + ((kTable[index + 1] - kTable[index]) * fraction
-        >> (kLoopOffsetBits - 4));
+    return LoopTableAt(kTable, half_timbre);
+  }
+  // The strike sized to the loop's settled level. The level a fast attack
+  // strikes the filter to does not depend on the loop gain, but the level the
+  // loop settles at falls as the loop gain rises, so a full strike overdrove
+  // the fold-back -- its output a burst of folded harmonics, shifting as the
+  // ring decayed, which read as the note's pitch swooping. Measured on this
+  // map: the settled peak over the strike's, attack 0, A3 (pitch-independent
+  // to 1%), as a share of a full strike, u0.15.
+  static int32_t Direct(int32_t half_timbre) {
+    static const uint16_t kTable_u15[17] = {
+        32767, 32767, 32767, 32767, 32767, 30670, 28147, 25755, 23461,
+        21299, 19234, 17235, 15335, 13434, 11600, 9797, 8028 };
+    return kLoopDirect * LoopTableAt(kTable_u15, half_timbre) >> 15;
   }
   // The fold-back overdriven folds over: a pluck's decay, faster than the
   // resonator's, threw its pitch about by hundreds of cents.
@@ -1569,6 +1591,7 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t half_timbre = input_samples[0] >> 1;
   const int32_t cutoff_q0_31 = SVF::CutoffFromFreq_q0_31(
       pitch_ + Loop::PitchCorrection(half_timbre));
+  const int32_t direct = Loop::Direct(half_timbre);
   const int32_t biased_offset =
       (half_timbre * Loop::kOffsetTop_q15 >> 15) + 32768;
   const int32_t rest = LoopCurve(curve, biased_offset);
@@ -1595,7 +1618,7 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   // the block opens: only the ring around it comes down, or the step pings the
   // resonator once a block -- a tone at the block rate.
   if (Loop::kFollowsFallingGain && last_gain < first_gain) {
-    const int32_t direct_q15_14 = first_gain * kLoopDirect;
+    const int32_t direct_q15_14 = first_gain * direct;
     bp_q15_14 = ScaleRatio(bp_q15_14, last_gain, first_gain);
     lp_q15_14 = direct_q15_14
         + ScaleRatio(lp_q15_14 - direct_q15_14, last_gain, first_gain);
@@ -1610,7 +1633,7 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
     const int32_t shaped = gain * (curve_value - rest);
     noise_state = NextXorshift32(noise_state);
     const int32_t excitation_q15_14 =
-        gain * (kLoopDirect + (static_cast<int32_t>(noise_state) >> kLoopNoiseShift));
+        gain * (direct + (static_cast<int32_t>(noise_state) >> kLoopNoiseShift));
     // Chamberlin, signed and unclipped: the loop bounds the state, and the
     // output is gated by gain, so a ring need not decay to exactly nothing.
     // The feedback and the damping share d: d * (feedback - bp), the feedback
