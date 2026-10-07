@@ -255,7 +255,7 @@ int main(int argc, char** argv) {
         make_up ? sqrt(std::max(std::min(d, 2.0), make_up_floor) / 2) : 1;
     const double in_noise = (has_n ? Eval(spec_n, g, u, d) : noise * (noise_env ? g : 1))
         * make_up_gain * white;
-    double feedback = 0, feedback_tap = 0;
+    double feedback = 0, feedback_tap = 0, shaper_drive = 0;
     if (shaper >= 0) {
       const double off = has_off ? Eval(spec_off, g, u, d) : offset * (off_env ? g : 1);
       double in_gain = gain_in * (gi_env ? g : 1), out_gain = gain_out * (go_env ? g : 1);
@@ -280,6 +280,7 @@ int main(int argc, char** argv) {
       double bp_sum = bp;
       for (size_t m = 0; m < mode_bp.size(); ++m) bp_sum += mode_bp[m];
       double x = off + in_gain * bp_sum / scale_now;
+      shaper_drive = x - off;
       // XNOISE=k / XSLIP=k: noise on the shaper's INPUT, plain or times how
       // fast its output moved last sample: jitter in when the slip comes.
       if (x_noise || x_slip) {
@@ -362,6 +363,9 @@ int main(int argc, char** argv) {
         tap_previous = o;
         o = difference;
       }
+    } else if (tap == "x") {
+      // The shaper's input less its offset: how far the loop drives the curve.
+      o = shaper_drive;
     } else if (tap == "hp") {
       // The filter's high-pass: the feedback less the mode's own response.
       o = hp;
