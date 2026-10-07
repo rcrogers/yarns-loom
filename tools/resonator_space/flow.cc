@@ -252,6 +252,16 @@ int main(int argc, char** argv) {
   const double scrape_corner = Arg("scrapepitch", 0) > 0 ? Arg("scrapepitch", 0) * f0 : Arg("scrapehz", 0);
   const double scrape_pole = scrape_corner > 0 ? exp(-2 * M_PI * scrape_corner / fs) : 0;
   double scrape_x = 0, scrape_y = 0, scrape_part = 0;
+  // Per-CYCLE irregularity: a value drawn uniform in -1..1 at each upward zero
+  // crossing of bp, held for that period. cyclecents=c tunes the resonator by
+  // that times c cents (the period's length varies); cycleoff=b moves the
+  // curve's offset by that times b (its shape varies); cyclepress=k scales the
+  // feedback by 1 + that times k (its level varies).
+  const double cycle_cents = Arg("cyclecents", 0), cycle_offset = Arg("cycleoff", 0),
+      cycle_pressure = Arg("cyclepress", 0);
+  const bool per_cycle = cycle_cents || cycle_offset || cycle_pressure;
+  double cycle_value = 0, cycle_bp_previous = 0;
+  unsigned cycle_state = 0x9e3779b9u;
   // hpmix=m: the filter's high-pass, m times, mixed into the output.
   const double hp_mix = Arg("hpmix", 0);
   const bool rescale = Arg("rescale", 0) != 0;
@@ -273,6 +283,15 @@ int main(int argc, char** argv) {
     const double g = has_controls ? controls[2 * i + 1] : env.Value(t, &level_at_key_up);
     const double d_control = has_controls ? controls[2 * i]
         : d_start * pow(d_end / d_start, t / duration);
+    if (per_cycle) {
+      if (cycle_bp_previous < 0 && bp >= 0) {
+        cycle_state ^= cycle_state << 13;
+        cycle_state ^= cycle_state >> 17;
+        cycle_state ^= cycle_state << 5;
+        cycle_value = static_cast<int>(cycle_state) / 2147483648.0;
+      }
+      cycle_bp_previous = bp;
+    }
     // TIMBRE's position, from the warp d = 2 * 2^(-TI / 8.43), TI 0..127.
     const double u = std::max(0.0, std::min(1.0, -8.43 * log2(d_control / 2) / 127));
     const double d = has_spec_d ? Eval(spec_d, g, u, d_control) : d_control;
@@ -287,7 +306,8 @@ int main(int argc, char** argv) {
         * make_up_gain * white;
     double feedback = 0, feedback_tap = 0, shaper_drive = 0;
     if (shaper >= 0) {
-      const double off = has_off ? Eval(spec_off, g, u, d) : offset * (off_env ? g : 1);
+      const double off = (has_off ? Eval(spec_off, g, u, d) : offset * (off_env ? g : 1))
+          + cycle_offset * cycle_value;
       double in_gain = gain_in * (gi_env ? g : 1), out_gain = gain_out * (go_env ? g : 1);
       if (has_l) {
         const double h = 1e-5;
@@ -350,6 +370,7 @@ int main(int argc, char** argv) {
       }
       // pnoiseac=1: the jitter on the feedback less its resting value only, as
       // the firmware's loop feeds back the curve less its value at rest.
+      if (cycle_pressure) pressure *= 1 + cycle_pressure * cycle_value;
       feedback = pressure_on_ac
           ? out_gain * d_c * scale_now
               * (Shape(shaper, off) + (y - Shape(shaper, off)) * pressure)
@@ -368,8 +389,9 @@ int main(int argc, char** argv) {
     // RETUNE: the resonator tuned this many cents off the note, read from the
     // table at TIMBRE's position.
     double c_now = c;
-    if (!retune_cents.empty()) {
-      c_now = 2 * sin(M_PI * f0 * pow(2, TableAt(retune_cents, u) / 1200) / fs);
+    if (!retune_cents.empty() || cycle_cents) {
+      const double cents = (retune_cents.empty() ? 0 : TableAt(retune_cents, u)) + cycle_cents * cycle_value;
+      c_now = 2 * sin(M_PI * f0 * pow(2, cents / 1200) / fs);
     }
     lp += c_now * bp;
     const double hp = notch - lp;
