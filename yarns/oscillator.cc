@@ -1588,7 +1588,10 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   // worth of mismatch amplitude-modulates a rising note at the block rate.
   // Each end is held to at least 2^-kLoopRampGuardBits of the larger, so a
   // note that opens on a gain near nothing does not saturate the block.
-  const int32_t half_timbre = input_samples[0] >> 1;
+  // Held at zero from below: the TIMBRE indexes BOWED's tables, and one below
+  // zero read before them -- what lay there differed between host and target.
+  // The warp keeps the firmware's above zero; this keeps any caller's there.
+  const int32_t half_timbre = std::max(0, input_samples[0] >> 1);
   const int32_t cutoff_q0_31 = SVF::CutoffFromFreq_q0_31(
       pitch_ + Loop::PitchCorrection(half_timbre));
   const int32_t direct = Loop::Direct(half_timbre);
