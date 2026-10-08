@@ -234,6 +234,7 @@ class Oscillator {
   inline void ResetFilterState() {
     svf_.Init();
     loop_tap_mean_q8_ = 0;
+    loop_cycle_detune_q31_ = 0;
     previous_damp_drive_u15_ = 0;
   }
 
@@ -425,6 +426,8 @@ class Oscillator {
   StateVariableFilter svf_;
   // The loop shapes' output DC blocker: the tap's running mean, 2^8 times over.
   int32_t loop_tap_mean_q8_;
+  // The loop shapes' current cycle's detune, of the cutoff, q31.
+  int32_t loop_cycle_detune_q31_;
   Envelope gain_envelope_, timbre_envelope_;
 
  private:

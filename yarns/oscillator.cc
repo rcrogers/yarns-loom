@@ -1499,6 +1499,10 @@ static inline int32_t LoopTableAt(const T* table, int32_t half_timbre) {
 //                       included: times 1 + jitter * noise, noise uniform in
 //                       -1..1 and jitter 2^(31 - this) / kLoopDamp_u1_14; 0
 //                       for none
+//   kCycleDetune        each cycle's length drawn anew: at the state's upward
+//                       zero crossing the resonator retunes by noise * this
+//                       / 2^31 of its cutoff, noise uniform in -1..1 and held
+//                       until the next crossing; 0 for none
 //
 // WIND: tanh, offset 0..2, so the bottom stays a sine and the top squares off.
 struct WindLoop {
@@ -1516,6 +1520,7 @@ struct WindLoop {
   static const bool kFollowsFallingGain = false;
   static int32_t Direct(int32_t) { return kLoopDirect; }
   static const int32_t kJitterShift = 0;
+  static const int32_t kCycleDetune = 0;
 };
 
 // BOWED: fold_back, u e^(1/2 - u^2 / 2), offset 0..0.8 -- bright, even-rich,
@@ -1560,6 +1565,11 @@ struct BowedLoop {
   static const bool kFollowsFallingGain = true;
   // 2^11 / 655: jitter 3.1.
   static const int32_t kJitterShift = 20;
+  // The stick-slip cycle's own irregularity, which a bowed string's scrape
+  // is: each period's length +-20 cents, 2^(20/1200) - 1 of 2^31. A per-sample
+  // jitter roughens the tone but does not move the cycle; this moves only it.
+  // Linear in the draw, so the flat end reaches -20.2 cents.
+  static const int32_t kCycleDetune = 24952558;
   // Both products of the jittered damping, at their largest, fit 32 bits.
   STATIC_ASSERT((INT32_MAX >> kLoopJitterPreShift) * kLoopDamp_u1_14
                 + (INT32_MAX >> kLoopJitterPreShift) * (1 << (31 - kJitterShift))
@@ -1592,8 +1602,13 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   // zero read before them -- what lay there differed between host and target.
   // The warp keeps the firmware's above zero; this keeps any caller's there.
   const int32_t half_timbre = std::max(0, input_samples[0] >> 1);
-  const int32_t cutoff_q0_31 = SVF::CutoffFromFreq_q0_31(
+  const int32_t note_cutoff_q0_31 = SVF::CutoffFromFreq_q0_31(
       pitch_ + Loop::PitchCorrection(half_timbre));
+  // This cycle's length, carried across blocks: a cycle outlasts many.
+  int32_t cutoff_q0_31 = Loop::kCycleDetune
+      ? note_cutoff_q0_31
+          + 2 * MulHighS(note_cutoff_q0_31, loop_cycle_detune_q31_)
+      : note_cutoff_q0_31;
   const int32_t direct = Loop::Direct(half_timbre);
   const int32_t biased_offset =
       (half_timbre * Loop::kOffsetTop_q15 >> 15) + 32768;
@@ -1661,8 +1676,20 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
       damping_q15_14 = ((bp_q15_14 - feedback_q15_14) >> kLoopDampPreShift)
           * kLoopDamp_u1_14 >> (14 - kLoopDampPreShift);
     }
+    const int32_t bp_before_q15_14 = bp_q15_14;
     bp_q15_14 += 2 * MulHighS(
         cutoff_q0_31, excitation_q15_14 - lp_q15_14 - damping_q15_14);
+    // A new cycle: draw its length. The draw is this sample's excitation's,
+    // whose noise is 2^-kLoopNoiseBits of a unit -- lost under the ring.
+    // Rare, and marked so: laid out inline, the loop costs two cycles more.
+    if (Loop::kCycleDetune
+        && __builtin_expect((bp_before_q15_14 & ~bp_q15_14) < 0, 0)) {
+      const int32_t cycle_detune_q31 = 2 * MulHighS(
+          static_cast<int32_t>(noise_state), Loop::kCycleDetune);
+      loop_cycle_detune_q31_ = cycle_detune_q31;
+      cutoff_q0_31 = note_cutoff_q0_31
+          + 2 * MulHighS(note_cutoff_q0_31, cycle_detune_q31);
+    }
     // At half scale, less its running mean.
     const int32_t tap = shaped >> 16;
     tap_mean_q8 += tap - (tap_mean_q8 >> kLoopDcBlockerShift);
