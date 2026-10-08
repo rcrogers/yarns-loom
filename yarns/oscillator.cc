@@ -521,6 +521,19 @@ void Oscillator::Render(int16_t* audio_mix) {
     for (size_t i = 0; i < kAudioBlockSize; ++i)
       fprintf(stderr, "%d %d\n", input_samples[i], gain_samples[i]);
   }
+  // CTL_REPLAY=path reads CTL_DUMP's format back and hands the shape THAT in
+  // place of the envelopes: a timbre from one render and a gain from another.
+  // One voice; past the file's end the envelopes' own stand.
+  static FILE* ctl_replay =
+      getenv("CTL_REPLAY") ? fopen(getenv("CTL_REPLAY"), "r") : NULL;
+  if (ctl_replay) {
+    for (size_t i = 0; i < kAudioBlockSize; ++i) {
+      int timbre, gain;
+      if (fscanf(ctl_replay, "%d %d", &timbre, &gain) != 2) break;
+      input_samples[i] = static_cast<int16_t>(timbre);
+      gain_samples[i] = static_cast<int16_t>(gain);
+    }
+  }
 #endif
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
