@@ -1569,7 +1569,9 @@ struct BowedLoop {
   // is: each period's length +-20 cents, 2^(20/1200) - 1 of 2^31. A per-sample
   // jitter roughens the tone but does not move the cycle; this moves only it.
   // Linear in the draw, so the flat end reaches -20.2 cents.
-  static const int32_t kCycleDetune = 24952558;
+  // OFF: +-20 cents (24952558) costs 7 cycles a sample, 85 -> 92, which the
+  // budget does not have. 0 compiles the draw out.
+  static const int32_t kCycleDetune = 0;
   // Both products of the jittered damping, at their largest, fit 32 bits.
   STATIC_ASSERT((INT32_MAX >> kLoopJitterPreShift) * kLoopDamp_u1_14
                 + (INT32_MAX >> kLoopJitterPreShift) * (1 << (31 - kJitterShift))
