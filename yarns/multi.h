@@ -387,11 +387,8 @@ template<> struct MaxLayoutEnvelopes<0> {
   static const int value = LayoutEnvelopes<0>::value;
 };
 
-// THE SAME FOLD FOR AUDIO VOICES, and it exists because its absence cost a
-// session: with no named maximum to read, tools/osc_cycles.py carried a bare
-// `VOICES = 4` and priced every shape against a voice count no layout has. The
-// hungriest layout is PARAPHONIC_PLUS_TWO -- a paraphonic part plus two mono
-// ones -- which sounds SIX.
+// The same fold for audio voices. The hungriest layout is PARAPHONIC_PLUS_TWO
+// -- a paraphonic part plus two mono ones -- which sounds six.
 template<int kDcRole, int kNumAudioVoices>
 struct CVOutputMaxAudioVoices { static const int value = kNumAudioVoices; };
 
