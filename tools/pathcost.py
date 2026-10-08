@@ -48,12 +48,15 @@ NOT_TAKEN_BRANCH_CYCLES = 1
 LONG_MULTIPLY_CYCLES = 4
 MEMORY_CYCLES = 2
 
-_MNEMONIC = re.compile(r'^\s*[0-9a-f]+:\s+(?:[0-9a-f]{4}\s+)+(\S+)')
+# Encodings: halfwords for code, and 2 or 8 digits for .byte and .word data.
+_MNEMONIC = re.compile(
+    r'^\s*[0-9a-f]+:\s+(?:(?:[0-9a-f]{2}|[0-9a-f]{4}|[0-9a-f]{8})\s+)+(\S+)')
 _ADDRESS = re.compile(r'\s*([0-9a-f]+):\s')
 _LABEL = re.compile(r'^([0-9a-f]+) <(.+)>:')
-# `bne.w 8002310 <Foo+0x12>` and `b.n 8001fbe <Foo+0x22a>`: the operand's bare
-# hex is the target. Registers never match, being at least four hex digits.
-_TARGET = re.compile(r'\b([0-9a-f]{4,})\b')
+# `bne.w 8002310 <Foo+0x12>` and `b.n 8001fbe <Foo+0x22a>`: the hex before the
+# symbol is the target, at any width -- an image linked at 0 has three-digit
+# ones.
+_TARGET = re.compile(r'\b([0-9a-f]+) <')
 _CONDITION = r'(?:eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)'
 _CONDITIONAL_BRANCH = re.compile(r'^b%s(?:\.[nw])?$' % _CONDITION)
 _UNCONDITIONAL_BRANCH = re.compile(r'^b(?:\.[nw])?$')
