@@ -215,6 +215,30 @@ int main(int argc, char** argv) {
     fclose(cf);
   }
   const bool has_controls = !controls.empty();
+  // gctl=PATH gfor=loop,out,direct,noise: a second controls file whose GAIN
+  // feeds only the named paths, the rest reading ctl's -- to find which of the
+  // gain's paths does a thing. loop: the scale the state is read against and
+  // the feedback is scaled by; out: the output tap's scale; direct: the strike
+  // into the filter; noise: the input noise. Off when gctl is not given.
+  std::vector<float> controls_alt;
+  if (g_args.count("gctl")) {
+    FILE* cf = fopen(ArgS("gctl", "").c_str(), "rb");
+    if (!cf) { fprintf(stderr, "no gctl file\n"); return 1; }
+    float pair[2];
+    while (fread(pair, sizeof(float), 2, cf) == 2) {
+      controls_alt.push_back(pair[0]);
+      controls_alt.push_back(pair[1]);
+    }
+    fclose(cf);
+  }
+  const std::string gain_paths = ArgS("gfor", "");
+  const bool has_alt = !controls_alt.empty() && controls_alt.size() == controls.size();
+  if (!controls_alt.empty() && !has_alt) { fprintf(stderr, "gctl length differs from ctl\n"); return 1; }
+  const bool alt_loop = has_alt && gain_paths.find("loop") != std::string::npos;
+  const bool alt_out = has_alt && gain_paths.find("out") != std::string::npos;
+  const bool alt_direct = has_alt && gain_paths.find("direct") != std::string::npos;
+  const bool alt_noise = has_alt && gain_paths.find("noise") != std::string::npos;
+  const std::vector<float>& controls_loop = alt_loop ? controls_alt : controls;
   const Spec spec_d = ParseSpec(ArgS("D", has_controls ? "ctl" : "0"));
   const bool has_spec_d = g_args.count("D") || has_controls;
   const bool has_n = g_args.count("N"), has_l = g_args.count("L"),
@@ -292,10 +316,15 @@ int main(int argc, char** argv) {
     // exciter's) reaches the loop only through the block's ends.
     const int block_first = i & ~63, block_last = std::min(block_first + 63, length - 1);
     const bool block_controls = block_ctl && has_controls;
-    const double g = !has_controls ? env.Value(t, &level_at_key_up)
-        : !block_controls ? controls[2 * i + 1]
-        : controls[2 * block_first + 1] + (controls[2 * block_last + 1] - controls[2 * block_first + 1])
-            * (i - block_first) / std::max(block_last - block_first, 1);
+    const auto gain_from = [&](const std::vector<float>& c) {
+      return !block_controls ? static_cast<double>(c[2 * i + 1])
+          : c[2 * block_first + 1] + (c[2 * block_last + 1] - c[2 * block_first + 1])
+              * (i - block_first) / std::max(block_last - block_first, 1);
+    };
+    const double g = !has_controls ? env.Value(t, &level_at_key_up) : gain_from(controls);
+    const double g_alt = has_alt ? gain_from(controls_alt) : g;
+    const double g_loop = alt_loop ? g_alt : g, g_out = alt_out ? g_alt : g;
+    const double g_direct = alt_direct ? g_alt : g, g_noise = alt_noise ? g_alt : g;
     const double d_control = !has_controls ? d_start * pow(d_end / d_start, t / duration)
         : controls[2 * (block_controls ? block_first : i)];
     if (per_cycle) {
@@ -317,7 +346,7 @@ int main(int argc, char** argv) {
     const double white = static_cast<int>(noise_state) / 2147483648.0;
     const double make_up_gain =
         make_up ? sqrt(std::max(std::min(d, 2.0), make_up_floor) / 2) : 1;
-    const double in_noise = (has_n ? Eval(spec_n, g, u, d) : noise * (noise_env ? g : 1))
+    const double in_noise = (has_n ? Eval(spec_n, g_noise, u, d) : noise * (noise_env ? g_noise : 1))
         * make_up_gain * white;
     double feedback = 0, feedback_tap = 0, shaper_drive = 0;
     if (shaper >= 0) {
@@ -333,7 +362,9 @@ int main(int argc, char** argv) {
       }
       // SCALE: the feedback scale as a spec, floored so a scale of zero
       // leaves the filter to ring down rather than dividing by it.
-      const double scale_now = has_scale ? std::max(Eval(spec_scale, g, u, d), 1e-6) : scale;
+      const double scale_now = has_scale ? std::max(Eval(spec_scale, g_loop, u, d), 1e-6) : scale;
+      const double scale_out = !alt_out && !alt_loop ? scale_now
+          : has_scale ? std::max(Eval(spec_scale, g_out, u, d), 1e-6) : scale;
       // rescale=1: when the scale falls, the filter state falls with it, so the
       // shaper's input stays where the loop put it instead of growing as the
       // input gain divides by a smaller scale.
@@ -343,11 +374,11 @@ int main(int argc, char** argv) {
       }
       scale_previous = scale_now;
       if (rescale_mode == 2 && has_controls && has_scale && i == block_first) {
-        const double scale_last = std::max(Eval(spec_scale, controls[2 * block_last + 1], u, d), 1e-6);
+        const double scale_last = std::max(Eval(spec_scale, controls_loop[2 * block_last + 1], u, d), 1e-6);
         if (scale_last < scale_now) {
           const double ratio = scale_last / scale_now;
-          const double direct_dc = !direct_table.empty() ? TableAt(direct_table, u) * g
-              : has_direct ? Eval(spec_direct, g, u, d) * g : 0;
+          const double direct_dc = !direct_table.empty() ? TableAt(direct_table, u) * g_direct
+              : has_direct ? Eval(spec_direct, g_direct, u, d) * g_direct : 0;
           bp *= ratio;
           lp = direct_dc + (lp - direct_dc) * ratio;
         }
@@ -400,7 +431,7 @@ int main(int argc, char** argv) {
           ? out_gain * d_c * scale_now
               * (Shape(shaper, off) + (y - Shape(shaper, off)) * pressure)
           : out_gain * d_c * scale_now * y * pressure;
-      feedback_tap = scale_now * ((slip_into_loop_only ? shaped : y) - Shape(shaper, off));
+      feedback_tap = scale_out * ((slip_into_loop_only ? shaped : y) - Shape(shaper, off));
       if (tap_drive) {
         feedback_tap = scale_now
             * (Shape(shaper, off + tap_drive * in_gain * bp_sum / scale_now) - Shape(shaper, off));
@@ -408,8 +439,8 @@ int main(int argc, char** argv) {
     }
     // DIRECT: the gain itself into the filter, as PING takes it -- its steps
     // and the exciter riding on it reach the filter as signal.
-    const double direct = !direct_table.empty() ? TableAt(direct_table, u) * g
-        : has_direct ? Eval(spec_direct, g, u, d) * g : 0;
+    const double direct = !direct_table.empty() ? TableAt(direct_table, u) * g_direct
+        : has_direct ? Eval(spec_direct, g_direct, u, d) * g_direct : 0;
     const double notch = in_noise + direct + feedback - std::min(d, 2.0) * bp;
     // RETUNE: the resonator tuned this many cents off the note, read from the
     // table at TIMBRE's position.
