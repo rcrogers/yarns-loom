@@ -264,7 +264,13 @@ int main(int argc, char** argv) {
   unsigned cycle_state = 0x9e3779b9u;
   // hpmix=m: the filter's high-pass, m times, mixed into the output.
   const double hp_mix = Arg("hpmix", 0);
-  const bool rescale = Arg("rescale", 0) != 0;
+  // rescale=1 follows a falling scale sample by sample; rescale=2 once a block
+  // from the block's ends, keeping the direct term's DC on lp, as the firmware
+  // does. 1 ratchets on a scale with sample-rate noise in it (the exciter's):
+  // every downward step scales the state and no upward one restores it.
+  const int rescale_mode = static_cast<int>(Arg("rescale", 0));
+  const bool rescale = rescale_mode == 1;
+  const bool block_ctl = Arg("blockctl", 0) != 0;
   double scale_previous = 0;
   double tilt_previous = 0;
   // RETUNE=c0,c1,...: cents to tune the resonator by, evenly across TIMBRE
@@ -280,9 +286,18 @@ int main(int argc, char** argv) {
   double pressure_jitter = 0;
   for (int i = 0; i < length; ++i) {
     const double t = i / fs;
-    const double g = has_controls ? controls[2 * i + 1] : env.Value(t, &level_at_key_up);
-    const double d_control = has_controls ? controls[2 * i]
-        : d_start * pow(d_end / d_start, t / duration);
+    // blockctl=1 reads the controls as the firmware's loop does: TIMBRE once a
+    // 64-sample block, at its first sample, and gain as a ramp between the
+    // block's first and last samples -- so gain's sample-rate detail (the
+    // exciter's) reaches the loop only through the block's ends.
+    const int block_first = i & ~63, block_last = std::min(block_first + 63, length - 1);
+    const bool block_controls = block_ctl && has_controls;
+    const double g = !has_controls ? env.Value(t, &level_at_key_up)
+        : !block_controls ? controls[2 * i + 1]
+        : controls[2 * block_first + 1] + (controls[2 * block_last + 1] - controls[2 * block_first + 1])
+            * (i - block_first) / std::max(block_last - block_first, 1);
+    const double d_control = !has_controls ? d_start * pow(d_end / d_start, t / duration)
+        : controls[2 * (block_controls ? block_first : i)];
     if (per_cycle) {
       if (cycle_bp_previous < 0 && bp >= 0) {
         cycle_state ^= cycle_state << 13;
@@ -327,6 +342,16 @@ int main(int argc, char** argv) {
         lp *= scale_now / scale_previous;
       }
       scale_previous = scale_now;
+      if (rescale_mode == 2 && has_controls && has_scale && i == block_first) {
+        const double scale_last = std::max(Eval(spec_scale, controls[2 * block_last + 1], u, d), 1e-6);
+        if (scale_last < scale_now) {
+          const double ratio = scale_last / scale_now;
+          const double direct_dc = !direct_table.empty() ? TableAt(direct_table, u) * g
+              : has_direct ? Eval(spec_direct, g, u, d) * g : 0;
+          bp *= ratio;
+          lp = direct_dc + (lp - direct_dc) * ratio;
+        }
+      }
       double bp_sum = bp;
       for (size_t m = 0; m < mode_bp.size(); ++m) bp_sum += mode_bp[m];
       double x = off + in_gain * bp_sum / scale_now;
