@@ -1,6 +1,6 @@
 # EVERYTHING THAT RUNS IN ONE AUDIO BLOCK, for the layout that runs the most.
 #
-# cycles.py prices the envelope; osc_cycles.py prices a shape's sample loop.
+# cycles.py prices the envelope; osc_profile.py measures a shape's block.
 # Neither sees what surrounds them -- the DAC packing, the mix-buffer fill, the
 # Q15->Q16 shift, the per-voice dispatch -- and a budget that omits those is not
 # a budget. This adds them up, so what is left out is left out ON PURPOSE and
@@ -129,11 +129,9 @@ NO_CALLEES = lambda target: 0
 
 
 def loop_cycles(graph, body):
-  """ONE PASS of the loop, by longest path -- not the sum of its blocks.
-
-  Summing charges both arms of every `if` in the body, which is the error that
-  made osc_cycles.py head its table with the wrong shape. A call inside costs
-  only its branch here; the callee is a line of its own in this table.
+  """ONE PASS of the loop, by longest path -- not the sum of its blocks, which
+  charges both arms of every `if`. A call inside costs only its branch here;
+  the callee is a line of its own in this table.
   """
   return pathcost.longest_path(
       graph, NO_CALLEES, entry=header_of(graph, body), restrict=body)
@@ -222,7 +220,7 @@ for calls, body in ((True, dispatch[0]), (False, shift)):
 # excluded here rather than counted twice.
 # WITH its warp and its phase-increment helper, WITHOUT the two envelope renders
 # it calls -- those are cycles.py's rows. The shape it dispatches to goes through
-# a function pointer, which no static walk resolves and osc_cycles.py prices.
+# a function pointer, which no static walk resolves and osc_profile.py measures.
 envelope_render = [n for n in functions if '8Envelope13RenderSamples' in n]
 osc_call_cost, _ = pathcost.call_cost_function(
     functions, boundary=tuple(envelope_render))
@@ -262,16 +260,16 @@ ATTACK = [('envelopes, %s runs + handoffs' % metrics['runs_per_block'],
           ('NoteOn burst (all %d in one block)' % ENVELOPES,
            int(metrics['note_on_cycles']), ENVELOPES)]
 
-# Only the `name hi c4` lines; the tool prints prose around them too.
-shapes = [(parts[0], float(parts[1]), float(parts[2]))
-          for parts in (l.split() for l in tool('osc_cycles.py', '--metrics').splitlines())
-          if len(parts) == 3 and parts[0].startswith('Render')]
-# PER PITCH, not once. The dearest shape at the top of the keyboard is not the
-# dearest at middle C: a branchy shape's cost is wrap work it only pays up
-# there, and a flat one costs the same everywhere. Picking once by the top note
-# priced the middle-C block with a shape that is cheaper there.
-worst_shape_hi, worst_hi, _ = max(shapes, key=lambda row: row[1])
-worst_shape_c4, _, worst_c4 = max(shapes, key=lambda row: row[2])
+# Measured, per sample: `name steady first c4_steady c4_first`. A steady block
+# takes the dearest steady block; the block a note arrives in, the dearest first
+# block after set_shape. The worst shape is picked per pitch and per kind.
+shapes = [(parts[0], [float(p) for p in parts[1:]])
+          for parts in (l.split() for l in tool('osc_profile.py', '--metrics').splitlines())]
+
+
+def worst_shape(column):
+  name, columns = max(shapes, key=lambda row: row[1][column])
+  return name.replace('OSC_SHAPE_', ''), columns[column]
 
 print('layout %s -- the hungriest of %d' % (WORST.replace('LAYOUT_', ''), len(layouts)))
 print('  %d audio outputs carrying %s voices, %d envelope output(s), %d envelopes'
@@ -279,12 +277,12 @@ print('  %d audio outputs carrying %s voices, %d envelope output(s), %d envelope
 print('  %d cycles a block at %d Hz on %.0f MHz' % (BUDGET, FRAME_HZ, CPU_HZ / 1e6))
 print()
 print('  %-46s %8s %4s %9s %7s' % ('per-block item', 'each', 'x', 'cycles', '%CPU'))
-for kind, extra in (('steady block', STEADY), ('ATTACK block', ATTACK)):
-  for pitch, shape_cycles, worst_shape in (
-      ('top note', worst_hi, worst_shape_hi),
-      ('middle C', worst_c4, worst_shape_c4)):
+for kind, extra, columns in (('steady block', STEADY, (0, 2)),
+                             ('ATTACK block', ATTACK, (1, 3))):
+  for pitch, column in zip(('any pitch', 'middle C'), columns):
+    shape, shape_cycles = worst_shape(column)
     full = rows + extra + [
-        ('worst shape, %s (%s)' % (pitch, worst_shape.replace('Render', '')),
+        ('worst shape, %s (%s)' % (pitch, shape),
          shape_cycles * BLOCK_SAMPLES, sum(AUDIO_VOICES_PER_OUTPUT))]
     total = 0
     print('  --- %s, worst shape at %s ---' % (kind, pitch))
@@ -313,6 +311,7 @@ ACCOUNTED = {
     '10Oscillator6Render': 'a row, with its warp and its helpers',
     'Oscillator10WarpTimbre': 'inside the Oscillator::Render row',
     'Oscillator21ComputePhaseIncrement': 'inside the Oscillator::Render row',
+    'DampFromResonance': 'inside the Oscillator::Render row',
     '8Envelope13RenderSamples': 'cycles.py block_cycles',
     '8Envelope20AdvanceChiffForBlock': 'cycles.py block_cycles (chiff_block_cycles)',
     '8Envelope11RenderStage': 'cycles.py block_cycles (run_cycles)',
