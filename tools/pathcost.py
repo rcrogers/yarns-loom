@@ -15,6 +15,7 @@
 # WHAT IT DOES NOT DO: it does not know which way a data-dependent branch goes,
 # so the path it reports need not be reachable with any single input. It is an
 # upper bound, and it is for deltas and for sizing.
+import hashlib
 import re
 
 # Cortex-M3 timing, matching tools/cycles.py so the two are comparable, plus
@@ -75,6 +76,17 @@ def parse(dis_path):
     if current is not None and address:
       functions[current].append((int(address.group(1), 16), line.rstrip()))
   return {name: body for name, body in functions.items() if body}
+
+
+def image_digest(dis_path):
+  """What a disassembly maps each address to, hashed: two disassemblies of one
+  image agree whatever else (source lines) they carry."""
+  digest = hashlib.sha1()
+  for line in open(dis_path, encoding='utf8', errors='replace'):
+    match = re.match(r'^\s*([0-9a-f]+):\t([0-9a-f ]+)\t', line)
+    if match:
+      digest.update(('%s %s\n' % (match.group(1), match.group(2).strip())).encode())
+  return digest.hexdigest()
 
 
 def mnemonic(text):

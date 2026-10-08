@@ -20,8 +20,9 @@
 #   make check      verify the CURRENT tree without rebuilding the sim
 #   make firmware   build the flashable .syx (regenerates resources.*)
 #   make cycles     what the envelope costs per block, against the baseline
+#   make profile    what every shape costs per block, measured under QEMU
 
-.PHONY: all sim host cv ui osc warp mix level step qemu check firmware cycles
+.PHONY: all sim host cv ui osc warp mix level step qemu check firmware cycles profile
 
 # Rebuild the sim, then run the full verification.
 all: sim check
@@ -120,3 +121,9 @@ firmware:
 # STALE elf answers confidently about a build that is not the tree.
 cycles: firmware
 	sh tools/cycles.sh
+
+# Builds first, for the same reason: the profile links build/yarns/*.o.
+profile: firmware
+	SKIP_PROGRAMMING=true ./env/mutable-env.sh sh tools/oscprofile/build.sh
+	SKIP_PROGRAMMING=true ./env/mutable-env.sh bash tools/oscprofile/run.sh
+	python3 tools/osc_profile.py
