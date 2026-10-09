@@ -1,7 +1,10 @@
 # Folds a QEMU `-d exec,in_asm,nochain` trace of the profile harness into the
 # cycles each audio block executed, priced by tools/pathcost.py's table.
 #
-#   fold.py DIS SYM < trace > summary.json
+#   fold.py DIS SYM [SYMBOL ...] < trace > summary.json
+#
+# For each SYMBOL (a substring of one function's name), the summary counts,
+# per measured call, how many times that function was entered.
 #
 # The trace is the instruction stream, exactly: in_asm gives each translation
 # block's instructions once, exec gives every block executed in order. A
@@ -17,7 +20,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import pathcost
 
-dis_path, sym_path = sys.argv[1], sys.argv[2]
+dis_path, sym_path, flag_names = sys.argv[1], sys.argv[2], sys.argv[3:]
 
 symbols = {}
 for line in open(sym_path):
@@ -25,6 +28,16 @@ for line in open(sym_path):
   if len(parts) == 3:
     symbols[parts[2]] = int(parts[0], 16)
 BEGIN, END = symbols['ProfileBlockBegin'], symbols['ProfileBlockEnd']
+
+
+def entry_of(substring):
+  matches = [address for name, address in symbols.items() if substring in name]
+  if len(matches) != 1:
+    sys.exit('fold.py: %d symbols match %s' % (len(matches), substring))
+  return matches[0]
+
+
+FLAGS = dict((entry_of(name), name) for name in flag_names)
 HARNESS = (symbols['_harness_start'], symbols['_harness_end'])
 REFUND = pathcost.BRANCH_CYCLES - pathcost.NOT_TAKEN_BRANCH_CYCLES
 
@@ -80,6 +93,8 @@ violations, transitions = [], 0
 inside = False
 cycles = 0
 block_tbs, block_branches = {}, {}
+flag_counts = dict((name, []) for name in flag_names)
+block_flags = {}
 previous = None
 
 _TRACE = re.compile(r'^Trace \d+: \S+ \[[0-9a-f]+/([0-9a-f]+)/')
@@ -87,8 +102,11 @@ _IN_ASM = re.compile(r'^0x([0-9a-f]+):')
 
 
 def close_block():
-  global block_tbs, block_branches
+  global block_tbs, block_branches, block_flags
   blocks_cycles.append(cycles)
+  for name in flag_names:
+    flag_counts[name].append(block_flags.get(name, 0))
+  block_flags = {}
   for pc, count in block_tbs.items():
     tb_counts[pc] = tb_counts.get(pc, 0) + count
   for key, count in block_branches.items():
@@ -142,11 +160,14 @@ for line in sys.stdin:
       cycles += block.cycles
       if measured(pc):
         block_tbs[pc] = block_tbs.get(pc, 0) + 1
+      if pc in FLAGS:
+        block_flags[FLAGS[pc]] = block_flags.get(FLAGS[pc], 0) + 1
     previous = block
 
 json.dump({
     'image': pathcost.image_digest(dis_path),
     'blocks': blocks_cycles,
+    'flags': flag_counts,
     'tb_counts': {'%x' % pc: n for pc, n in tb_counts.items()},
     'tb_extent': {'%x' % pc: ['%x' % a for a in translations[pc].addresses]
                   for pc in tb_counts},
