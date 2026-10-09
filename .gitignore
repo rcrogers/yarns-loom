@@ -44,3 +44,7 @@ build
 *_BETA.sch
 *_beta.brd
 *_BETA.brd
+
+# Local Claude Code working files (plans, settings)
+.claude/
+.metrics/

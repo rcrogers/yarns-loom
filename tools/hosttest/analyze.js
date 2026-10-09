@@ -1,0 +1,376 @@
+// Firmware dart-port checks against sim-established expectations.
+const { execSync } = require('child_process');
+const H = require('./harness');
+// ONE REALIZATION IS NOT A RESULT: without a seed every scenario here renders
+// the same noise. battery.js sweeps CHIFF_SEED; bare, this is seed 0 as before.
+const SEED = process.env.CHIFF_SEED || '0';
+function seeded(args){ return /\bseed=/.test(args) ? args : args+' seed='+SEED; }
+function run(args){ return H.runNumbers(seeded(args)); }
+function noiseWin(s,aMs,bMs){ let sum=0,n=0;
+  for(let i=Math.max(1,aMs*45);i<Math.min(bMs*45,s.length);i++){sum+=Math.abs(s[i]-s[i-1]);n++;}
+  return n?sum/n:0; }
+function meanWin(s,aMs,bMs){ let m=0,n=0;
+  for(let i=aMs*45;i<Math.min(bMs*45,s.length);i++){m+=s[i];n++;} return n?m/n:0; }
+const FS_OUT = 32767;
+let fails = 0;
+function check(name,cond,detail){ console.log((cond?'PASS':'FAIL')+' '+name+(detail?'  ['+detail+']':'')); if(!cond)fails++; }
+
+// 1. amount 0 = classic: monotone rising attack, no noise anywhere
+{ const s=run('basic 0 67');
+  let steps=0; for(let i=1;i<45*1100;i++) if(s[i]<s[i-1]) steps++;
+  check('amt0 attack monotone', steps===0, steps+' down-steps');
+  check('amt0 no noise', noiseWin(s,1300,1900)<1, noiseWin(s,1300,1900).toFixed(2));
+}
+// 2. basic chiff: noise at onset, gone by ~the duration's end, mean near the nominal value. The
+// duration is an absolute time, off its own table: dur 49 is ~588ms, near
+// enough the ~580ms these fixed measurement windows were drawn around.
+{ const s=run('basic 96 49 attack=249'), d=run('basic 0 49 attack=249');
+  const n0=noiseWin(s,0,100), n1=noiseWin(s,300,500), n2=noiseWin(s,700,1100);
+  check('onset noise present', n0>50, n0.toFixed(1));
+  check('noise fades by the duration end', n2<n0/50, n2.toFixed(2)+' vs onset '+n0.toFixed(1));
+  const bias=(meanWin(s,700,1100)-meanWin(d,700,1100))/FS_OUT*100;
+  check('post-chiff mean == nominal', Math.abs(bias)<1, bias.toFixed(2)+'%');
+  const biasLoud=(meanWin(s,100,300)-meanWin(d,100,300))/FS_OUT*100;
+  check('loud-phase dip bounded', biasLoud>-40 && biasLoud<5, biasLoud.toFixed(1)+'%');
+  let mx=0; for(const v of s) if(v>mx)mx=v;
+  let dmx=0; for(const v of d) if(v>dmx)dmx=v;
+  
+  // The state clamp bounds the DAC range now, not the note's: bias is folded
+  // into the render state so ONE usat serves both the integrator and the
+  // output. A chiff can therefore push the envelope above its dialled peak --
+  // deliberately, and the user's call. What must still hold is that it stays
+  // inside the DAC and that the overshoot is a transient's worth, not a
+  // different level.
+  // A MAX OVER A NOISE PROCESS, so the limit is sized from a distribution, not
+  // a draw. MEASURED over 128 seeds: 8.9%..18.1%, max already 18.1 by seed 7.
+  const over=(mx-16383)*100/16383;
+  check('stays inside the DAC range', mx<=32767, mx+'');
+  check('peak overshoot is bounded', over<20,
+        over.toFixed(1)+'% above note top (classic max '+dmx+')');
+}
+// 3. early release: noise continues into release, lands ~0 by release end (400ms)
+{ const s=run('early_release 96 93');  // long chiff forces compression
+  const nStart=noiseWin(s,60,160), nEnd=noiseWin(s,420,460), nAfter=noiseWin(s,480,600);
+  check('release keeps noise', nStart>30, nStart.toFixed(1));
+  check('noise lands by release end', nEnd<nStart/20, nEnd.toFixed(2));
+  check('silence after release', nAfter<0.5, nAfter.toFixed(2));
+}
+// 4. retrigger during release: the transient must be in family with the
+// chiff's own motion, not a discontinuity. Compared against the trace's own
+// steps rather than an absolute constant -- the old absolute limit (FS_OUT/4)
+// sat BELOW the design's normal max step (10015 measured elsewhere in the same
+// trace), so it was passing on luck and failed the moment the chiff got denser.
+{ const s=run('retrigger 96 67');
+  let mx=0; const a=600*45-45, b=602*45; // around the retrigger at 600ms
+  for(let i=a;i<b;i++) mx=Math.max(mx,Math.abs(s[i]-s[i-1]));
+  const elsewhere=[];
+  for(let i=1;i<s.length;i++) if(i<a-45||i>=b+45) elsewhere.push(Math.abs(s[i]-s[i-1]));
+  elsewhere.sort((x,y)=>x-y);
+  const worstNormal=elsewhere[elsewhere.length-1];
+  check('retrigger transient in family with chiff motion', mx<=worstNormal*1.1,
+    'retrigger step '+mx+' vs worst step elsewhere '+worstNormal);
+}
+// 5. held note: sustain has motion while the chiff lives (dur 127 = 8s)
+{ const s=run('held 96 93');
+  const nSus=noiseWin(s,2000,3000), nLate=noiseWin(s,8200,8900);
+  check('sustain has noise (8s chiff)', nSus>5, nSus.toFixed(1));
+  check('noise closes by 8s', nLate<nSus/5, nLate.toFixed(2));
+}
+// 6. INVERTED range (CV DAC / negative timbre): the hardware-breaking case
+{ const s=run('inverted 0 67');
+  let up=0; for(let i=64;i<45*1100;i++) if(s[i]>s[i-1]) up++;
+  check('inverted amt0 attack monotone down', up===0, up+' up-steps');
+  let flat=0,run_=0; for(let i=45*100;i<45*1000;i++){ if(s[i]===s[i-1]){run_++;flat=Math.max(flat,run_);} else run_=0; }
+  check('inverted amt0 no long plateaus', flat<200, 'longest flat '+flat+' samples');
+}
+{ const s=run('inverted 96 49 attack=249'), d=run('inverted 0 49 attack=249');
+  const n0=noiseWin(s,0,100), n2=noiseWin(s,700,1100);
+  check('inverted chiff onset noise', n0>50, n0.toFixed(1));
+  check('inverted noise fades', n2<n0/50, n2.toFixed(2));
+  const bias=(meanWin(s,700,1100)-meanWin(d,700,1100))/FS_OUT*100;
+  check('inverted post-chiff mean == nominal', Math.abs(bias)<1, bias.toFixed(2)+'%');
+  // Pinning check wants a slow (default) attack so 100-1000ms is still the
+  // rising attack -- a short attack would reach a flat sustain there and this
+  // measures dwell, not attack rate.
+  const sp=run('inverted 96 67');
+  let flat=0,run_=0; for(let i=45*100;i<45*1000;i++){ if(sp[i]===sp[i-1]){run_++;flat=Math.max(flat,run_);} else run_=0; }
+  check('inverted chiff no pinning plateaus', flat<500, 'longest flat '+flat);
+}
+// 7. Late-duration early release must not hang (restructure regression trap)
+{ const s=run('latehang 96 93');
+  const relStart=s[7000*45-1], relEnd=s[Math.min(7100*45, s.length-1)];
+  check('latehang release falls', relEnd < relStart*0.15,
+    (relStart/FS_OUT*100).toFixed(1)+'% -> '+(relEnd/FS_OUT*100).toFixed(1)+'%');
+}
+// 8. No kink at the duration's end (dur 49 -> ~588ms, as in 2; the long attack is
+// there so the kink would sit on a rising envelope, not a settled one)
+{ const s=run('basic 96 49 attack=249'), d=run('basic 0 49 attack=249');
+  let worst=0;
+  for(let w=590;w<730;w+=10){ let m=0,n=0;
+    for(let i=w*45;i<(w+10)*45;i++){m+=s[i]-d[i];n++;}
+    worst=Math.max(worst,Math.abs(m/n)); }
+  check('no kink at the duration end', worst<FS_OUT*0.01, 'worst gap '+(worst/FS_OUT*100).toFixed(2)+'%');
+}
+// 9. amount continuity ladder: 0 -> 1 step must not exceed later steps
+{ const ladder=[0,1,2,4,8].map(a=>{
+    const s=run('basic '+a+' 67');
+    let sum=0,n=0;
+    for(let i=20*45;i<120*45;i++){sum+=Math.abs(s[i]-s[i-1]);n++;}
+    return sum/n;
+  });
+  const step01=ladder[1]-ladder[0], step48=ladder[4]-ladder[3];
+  check('amount 0->1 continuous', step01 < Math.max(1,step48*2),
+    'steps 0->1: '+step01.toFixed(2)+' vs 4->8: '+step48.toFixed(2));
+}
+
+// BIAS PATH. Everything above renders with bias == 0, which for a long time
+// meant the bias arithmetic was never executed by any check -- including the
+// QEMU asm-vs-C differential. That matters most for the unified clamp, whose
+// whole mechanism is that the render state carries envelope PLUS bias: with
+// bias 0 the state is just the value, both ramp adds add nothing, and the
+// recovery after the loop subtracts nothing. `tremolo=` drives the bias the
+// way Oscillator::Render does -- target sampled per block from the envelope's
+// own value, then ramped toward it -- so the folding, the ramp and the
+// recovery all run.
+{ const s=run('basic 0 43 attack_setting=40 decay_setting=64 sustain_setting=70 '+
+              'release_setting=64 gate=2000 tail=1400 tremolo=24000');
+  let mn=32767, mx=0; for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v; }
+  check('bias path: output inside the DAC range', mn>=0 && mx<=32767, mn+'..'+mx);
+  // A recovery that is off by even a little would accumulate once per run and
+  // show up as the sustain walking; flat here means value = state - bias is
+  // exact across run boundaries.
+  const a=meanWin(s,1500,1600), b=meanWin(s,1900,2000);
+  check('bias path: sustain does not drift', Math.abs(a-b)<8,
+        'sustain '+a.toFixed(1)+' -> '+b.toFixed(1));
+  // Release setting 64 is 795 ms, so the note is not done until ~2795. What is
+  // left after that is NOT a bias artifact: a stage lands at 1 - e^-4 of its
+  // span and the rest is shed slowly in DEAD, so a residual proportional to
+  // the sustain level is expected. MEASURED: 53 without tremolo, 33 with --
+  // bias makes it SMALLER, so
+  // the check is against the sustain level, not against zero.
+  const tail=meanWin(s,3000,3100);
+  check('bias path: post-release residual is small vs sustain', tail < a*0.02,
+        tail.toFixed(1)+' vs sustain '+a.toFixed(0));
+}
+
+// THE CLIP PATH. Tremolo above cannot reach it: it is negative feedback scaled
+// to the envelope's own value, so envelope + bias stays near range however deep
+// it is set. A timbre-LFO-style bias is INDEPENDENT of the envelope, so the sum
+// leaves the DAC range and the clamp has to bite -- which is the whole point of
+// folding bias into the render state. MEASURED at bias_lfo 20000: 3732 samples
+// on the ceiling, 40546 on the floor.
+{ const args='basic 0 90 attack_setting=40 decay_setting=64 sustain_setting=70 '+
+             'release_setting=64 gate=1200 tail=800 bias_lfo=20000 bias_lfo_blocks=8';
+  const s=run(args);
+  let mn=99999, mx=-99999, hi=0, run_=0, worst=0;
+  for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v;
+    if(v>=32767){ hi++; run_++; if(run_>worst)worst=run_; } else run_=0; }
+  check('clip path: never leaves the DAC range', mn>=0 && mx<=32767, mn+'..'+mx);
+  check('clip path: the clamp actually bites', hi>100, hi+' samples on the ceiling');
+  // Anti-windup: the state is clamped, so when the bias reverses the output
+  // must come off the rail with the bias. The LFO holds each polarity for 8
+  // blocks = 512 samples, so a dwell much beyond that means the state wound up
+  // behind a saturated output and has to unwind before anything moves -- the
+  // failure the old output-only usat could not prevent, because it did not
+  // feed back.
+  check('clip path: no windup behind the rail', worst <= 640,
+        'longest ceiling dwell '+worst+' samples (bias holds 512)');
+}
+
+// THE CLIP PATH WITH A LIVE CHIFF; every clamp check above runs at AMOUNT 0.
+// The chiff must DITHER across the rail, not sit on it -- the mean clamp keeps
+// the mean two chiff amplitudes inside each rail so the swing has room both ways.
+// MEASURED over 16 seeds: dwell 7..12 here, 449 with the bias alone.
+{ const args='basic 127 90 attack_setting=40 decay_setting=64 sustain_setting=70 '+
+             'release_setting=64 gate=1200 tail=800 bias_lfo=20000 bias_lfo_blocks=8';
+  const s=run(args);
+  let mn=99999, mx=-99999, hi=0, run_=0, worst=0;
+  for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v;
+    if(v>=32767){ hi++; run_++; if(run_>worst)worst=run_; } else run_=0; }
+  check('clip path + chiff: never leaves the DAC range', mn>=0 && mx<=32767, mn+'..'+mx);
+  check('clip path + chiff: the clamp bites', hi>100, hi+' samples on the ceiling');
+  check('clip path + chiff: no dwell at the rail', worst<=32,
+        'longest ceiling dwell '+worst+' (bias alone at AMOUNT 0 dwells 449)');
+}
+
+// THE INVARIANT, and it is the strongest check in this file: the output is
+// saturate(envelope + bias), where the envelope is bit-for-bit what it would
+// have been with bias 0. Equivalently, the envelope's OWN trajectory does not
+// depend on the bias. Read value_q30_ per block and diff against a bias-0 run
+// at the same settings.
+//
+// EVERY OTHER CHECK HERE READS THE OUTPUT SAMPLES, which stay in range and look
+// correct even while the clamp is writing bias back into the envelope. That is
+// why this class went unseen: with the render state carrying envelope + bias,
+// the state clamp bounded the SUM, so at a rail it clipped the bias into the
+// envelope's own integrator. MEASURED then, against a bias-0 run: the value
+// diverged by EXACTLY the bias amplitude (10, 8000, 20000 s16) every time the
+// sum touched a rail, and the battery was all green.
+{ const base='basic 96 90 value_trace=1 gate=2000 tail=1000 range=32767 ';
+  const ref=run(base+'bias_lfo=0');
+  for (const bias of [10, 8000, 20000, 32767]) {
+    const s=run(base+'bias_lfo='+bias);
+    let worst=0;
+    for (let i=0;i<ref.length;i++){ const d=Math.abs(s[i]-ref[i]); if(d>worst)worst=d; }
+    // EXACT, not within a tolerance: bias reaches the buffer on a scratch copy
+    // and is never fed back, so there is no path -- not even a rounding one --
+    // from bias into the envelope. A tolerance here would hide the defect this
+    // check exists for, which was worth thousands of Q30 LSBs.
+    check('invariant: envelope is bias-independent (bias '+bias+')', worst===0,
+          'max |diff| '+(worst/32768).toFixed(4)+' s16 over '+ref.length+' blocks');
+  }
+}
+
+// NEGATIVE ENVELOPES. A negative TIMBRE MOD ENV makes part.cc's timbre_14
+// negative (it is CONSTRAINed to [-8192, 8191]), so WarpTimbre's target is
+// negative and timbre_envelope_.NoteOn gets min 0 / max NEGATIVE -- the note's
+// whole range sits BELOW zero. The base timbre arrives as the envelope's BIAS,
+// and the envelope is supposed to SUBTRACT from it.
+//
+// 6a8a00b8 moved the value clamp from the note's range to [0, 2^30) and killed
+// this outright: MEASURED at that bound, value range 0..0 and the output flat
+// at the bias -- the envelope did not move at all, silently. Nothing in this
+// file could see it, because every scenario had a non-negative floor.
+{ const args='basic 0 90 range=-16383 bias_lfo=20000 bias_lfo_blocks=1000000 '+
+             'gate=2000 tail=500 attack_setting=40';
+  const rng=H.run(seeded(args+' value_range=1'))
+    .toString().trim().split(/\s+/).map(Number);
+  // The envelope must actually travel to its negative target, not sit pinned.
+  check('negative range: the envelope reaches its target',
+        rng[0] < -15000, 'value range '+rng[0]+'..'+rng[1]);
+  const s=run(args);
+  // MEASURE AFTER THE BIAS HAS RAMPED IN. Sample 0 is ~300 whatever the
+  // envelope does, because the bias slews up from 0 across the first block --
+  // a min over the whole render reads that startup transient and passes even
+  // when the envelope is dead. Caught by mutation-testing this check against
+  // the broken build, which it passed at "output dips to 312".
+  // Loop, not Math.min.apply: the render is ~112k samples and apply() spreads
+  // as arguments, which overflows the stack and silently kills the rest of the
+  // file (RangeError inside execSync's caller).
+  const dip=meanWin(s,120,150);
+  let mn=99999, mx=-99999; for(const v of s){ if(v<mn)mn=v; if(v>mx)mx=v; }
+  // With a standing bias of 20000 the envelope must pull the output DOWN. The
+  // threshold is HALF the bias: working it reaches ~4000, dead it sits at
+  // 20000, so neither verdict is near the line. 120-150 ms is the trough --
+  // the attack has travelled but the release has not started.
+  check('negative range: the envelope subtracts from the bias', dip < 10000,
+        'output at 120-150ms is '+dip.toFixed(0)+' of a 20000 bias'+
+        ' (20000 means the envelope is dead)');
+  check('negative range: output still inside the DAC range',
+        mn>=0 && mx<=FS_OUT, mn+'..'+mx);
+}
+
+// AN INVERTED ENVELOPE MODULATES DOWN FROM ITS BIAS, and the chiff must not
+// eat that. USER 2026-08-08: "modulating down from a bias is the right way to
+// think about it, not outputting negative timbre values" -- so a below-zero
+// range with NO bias rendering zero is CORRECT, not the defect. What must hold
+// is that the downward travel survives a live chiff: the mean clamp holds the
+// mean two chiff amplitudes inside each rail, and for a mean already near the floor
+// that pushes it UP, compressing the very motion the inversion is made of.
+// MEASURED here, trough over a 20000 bias: 8125 with the chiff off against
+// 11138 at AMOUNT 127 -- 37% of the travel lost at the top of the knob. The
+// limit is set well clear of both so this reads a break, not the compression.
+{
+  const opts=' 90 range=-16383 gate=500 tail=300 bias_lfo=20000';
+  const trough=(a)=>meanWin(run('basic '+a+opts),120,150);
+  const off=trough(0), on=trough(127);
+  // AGAINST THE CHIFF-OFF TRAVEL, not an absolute trough: the question is how
+  // much of the inversion the clamp costs, and only a ratio asks that. Half is
+  // the limit because a working build sits at ~0.75 and a broken one at ~0,
+  // so neither verdict is near the line.
+  const kept=(20000-on)/(20000-off);
+  check('a full chiff may not cost half an inverted envelope\'s travel',
+        kept > 0.5, 'keeps '+(100*kept).toFixed(0)+'% of its downward travel'+
+        ' (trough '+on.toFixed(0)+' at AMOUNT 127 against '+off.toFixed(0)+')');
+}
+
+// The invariant again, on a range that sits BELOW zero: the clamp offset must
+// not become a second path from bias into the envelope.
+{ const base='basic 96 90 range=-16383 gate=2000 tail=500 value_trace=1 ';
+  const ref=run(base+'bias_lfo=0');
+  for (const bias of [10, 20000]) {
+    const s=run(base+'bias_lfo='+bias);
+    let worst=0;
+    for (let i=0;i<ref.length;i++){ const d=Math.abs(s[i]-ref[i]); if(d>worst)worst=d; }
+    check('negative range: envelope is bias-independent (bias '+bias+')',
+          worst===0, 'max |diff| '+(worst/32768).toFixed(4)+' s16');
+  }
+}
+
+// The recovered value must stay inside the DAC range, because tremolo() forms
+// (value - release target) * strength_u16 in int32. Every release target is
+// non-negative, so a bounded value keeps |relative| <= 32767 and the product at
+// 32767 * 65535 = 2147385345, which fits with 98302 to spare. Unbounded it does
+// not: MEASURED 36063 before the split, i.e. 2.36e9, an overflow -- and
+// value() returns int16_t, so 36063 wrapped there too.
+{ const range=(args)=>H.run(seeded(args))
+    .toString().trim().split(/\s+/).map(Number);
+  for (const args of ['bias_lfo=32767', 'bias_lfo=32767 tremolo=48000']) {
+    const r=range('basic 96 90 value_range=1 range=32767 '+args);
+    check('value stays in the DAC range, so tremolo cannot overflow ('+args+')',
+          r[0]>=0 && r[1]<=FS_OUT, r[0]+'..'+r[1]);
+  }
+}
+
+// THE CHIFF'S SLEW TIME NEVER PASSES ITS SLOWEST. The slew-time map returns at
+// or under the slew time at amount zero, and the per-run writeback re-clamps to
+// it. Read from the engine, both fields, so this cannot drift from whatever the
+// engine believes the slowest to be.
+{
+  let worst = -1, worstAt = '';
+  for (const amount of [1, 24, 64, 96, 127]) {
+    for (const duration of [0, 40, 67, 90, 127]) {
+      const rows = H.run('basic '+amount+' '+duration+' slew_trace=1 seed='+SEED)
+        .toString().trim().split('\n');
+      for (const row of rows) {
+        const f = row.trim().split(/\s+/).map(Number);
+        if (f.length < 3) continue;
+        const over = f[0] - f[2];          // slew time minus the slowest
+        if (over > worst) { worst = over; worstAt = 'amount '+amount+' dur '+duration; }
+      }
+    }
+  }
+  check('chiff slew time stays at or under its slowest', worst <= 0,
+        'worst overshoot '+worst+' q5.27 at '+worstAt);
+}
+
+// AND IT MOVES. The slew time darkens across the note: the per-sample rate
+// decay carries it from the amount the run starts at to the amount it ends at,
+// and the writeback advances it by step * run_samples. Freezing the step leaves
+// the slew time at its onset value for the whole note.
+//
+// This exists because MUTATION TESTING found nothing else catches that.
+// Battery, anomaly and rescale are all blind to `slew_time_step = 0`, and the
+// check above passes on it -- a constant is trivially at or under the slowest.
+// The per-sample decay costs ~5 cycles a sample, about 4% of the CPU, and it
+// was the only feature in the render loop with no check standing behind it.
+{
+  let worstRatio = Infinity, worstAt = '';
+  // Amounts where the onset slew time is well short of the slowest, so there is
+  // room to darken, and durations long enough to spend it.
+  for (const amount of [64, 96, 127]) {
+    for (const duration of [40, 67, 90]) {
+      const rows = H.run('basic '+amount+' '+duration+' slew_trace=1 seed='+SEED)
+        .toString().trim().split('\n')
+        .map(r => r.trim().split(/\s+/).map(Number)).filter(f => f.length >= 3);
+      if (rows.length < 4) continue;
+      const first = rows[0][0], last = rows[rows.length - 1][0], slowest = rows[0][2];
+      // How much of the room between onset and the slowest it actually covered.
+      const room = slowest - first;
+      const moved = last - first;
+      const ratio = room > 0 ? moved / room : 1;
+      if (ratio < worstRatio) {
+        worstRatio = ratio;
+        worstAt = 'amount '+amount+' dur '+duration;
+      }
+    }
+  }
+  check('chiff slew time darkens across the note', worstRatio > 0.5,
+        'least covered '+(100 * worstRatio).toFixed(1)+'% of its room at '+worstAt);
+}
+
+// THE VERDICT, AT THE END, AND IT EXITS NONZERO. It used to sit two thirds of
+// the way up, so 22 checks below it printed FAIL after the word "ALL PASS" and
+// left the status 0. Mutation-verified.
+console.log(fails ? fails+' FAILURES' : 'ALL PASS');
+if (fails) process.exit(1);

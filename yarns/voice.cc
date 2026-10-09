@@ -68,7 +68,6 @@ void Voice::Init() {
   timbre_init_current_ = 0;
 
   refresh_counter_ = 0;
-  pitch_lfo_interpolator_.Init();
   timbre_lfo_interpolator_.Init();
   amplitude_lfo_interpolator_.Init();
   scaled_vibrato_lfo_interpolator_.Init();
@@ -80,7 +79,7 @@ void Voice::Init() {
 }
 
 /* static */
-CVOutput::DCFn CVOutput::dc_fn_table_[] = {
+const CVOutput::DCFn CVOutput::dc_fn_table_[] = {
   &CVOutput::pitch_dac_code,
   &CVOutput::velocity_dac_code,
   &CVOutput::aux_cv_dac_code,
@@ -169,10 +168,13 @@ void Voice::Refresh() {
     note_source_ = note_target_;
   }
   uint16_t portamento_level = portamento_exponential_shape_
-      ? Interpolate824(lut_env_expo, portamento_phase_)
+      ? Interpolate824(lut_env_expo_u16, portamento_phase_)
       : portamento_phase_ >> 16;
-  int32_t note = note_source_ + \
-      ((note_target_ - note_source_) * portamento_level >> 16);
+  // Kept at full width: the sixteen bits this shift drops are a pitch the
+  // oscillator can render, and dropping them steps a CZ fold by 41 Hz.
+  const int32_t portamento_offset_q15_16 =
+      (note_target_ - note_source_) * portamento_level;
+  int32_t note = note_source_ + (portamento_offset_q15_16 >> 16);
 
   note_portamento_ = note;
 
@@ -200,18 +202,26 @@ void Voice::Refresh() {
 
     scaled_vibrato_lfo_interpolator_.SetTarget(vibrato_lfo * vibrato_mod_ >> 8);
     scaled_vibrato_lfo_interpolator_.ComputeSlope();
-    int32_t pitch_lfo_15 = scaled_vibrato_lfo_interpolator_.target() * vibrato_range_ >> 8;
-    pitch_lfo_interpolator_.SetTarget(pitch_lfo_15);
-    pitch_lfo_interpolator_.ComputeSlope();
   }
   refresh_counter_ = (refresh_counter_ + 1) % (1 << kRefreshHzToLfoSampleHzRatioBits);
 
-  pitch_lfo_interpolator_.Tick();
   timbre_lfo_interpolator_.Tick();
   amplitude_lfo_interpolator_.Tick();
   scaled_vibrato_lfo_interpolator_.Tick();
 
-  note = ApplyPitchMods(note_portamento_);
+  // Portamento and bend each earn more precision than a whole pitch unit and
+  // each used to shift it away; the pitch LFO's interpolator carries sixteen
+  // bits its value() drops. A CZ shape's folded partials move up to 43 times
+  // faster than the note, so one pitch unit is 41 Hz of artifact at MIDI 96 and
+  // those remainders were heard as the note stepping.
+  //
+  // Summed rather than carried in one wide pitch, which is what keeps this
+  // inside int32: three remainders, each under a unit, and the whole part of
+  // their sum belongs to the note --
+  // floor(a) + floor(b) + floor(c) + floor(fa + fb + fc) is floor(a + b + c).
+  const uint32_t pitch_remainder_u2_16 =
+      (portamento_offset_q15_16 & 0xffff) + PitchModsRemainder_u1_16();
+  note = ApplyPitchMods(note_portamento_) + (pitch_remainder_u2_16 >> 16);
 
   int32_t timbre_15 =
     (timbre_init_current_ >> (16 - 15)) +
@@ -228,7 +238,8 @@ void Voice::Refresh() {
     mod_aux_[MOD_AUX_ENVELOPE] = dc_output(DC_AUX_2)->RefreshEnvelope(tremolo, is_highest_priority_);
   }
 
-  oscillator_.Refresh(note, timbre_15, tremolo);
+  oscillator_.Refresh(
+      note, static_cast<uint16_t>(pitch_remainder_u2_16), timbre_15, tremolo);
 
   mod_aux_[MOD_AUX_VELOCITY] = mod_velocity_ << 9;
   mod_aux_[MOD_AUX_MODULATION] = vibrato_mod_ << 9;
@@ -245,19 +256,35 @@ void CVOutput::Refresh() {
 }
 
 void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_low_freq_cv) {
-  int16_t samples[kAudioBlockSize] = {0};
+  // Buffer is fully overwritten by both branches below — skip zero-init.
+  // ALIGNED, because both branches below walk it as uint32 to move two int16 a
+  // pass. GCC gives a stack array of this size four-byte alignment anyway;
+  // saying so makes the two aliasing walks legal rather than lucky.
+  int16_t samples[kAudioBlockSize] __attribute__((aligned(4)));
+  // The pair both halves of this function walk the buffer with.
+  typedef uint32_t __attribute__((may_alias)) u32_alias;
+  u32_alias* const words = reinterpret_cast<u32_alias*>(samples);
   if (is_envelope()) {
-    envelope_.RenderSamples(samples, envelope_bias_ << 16);
-    for (size_t i = 0; i < kAudioBlockSize; ++i) {
-      samples[i] <<= 1;
+    envelope_.RenderSamples(
+      samples, static_cast<int32_t>(static_cast<uint32_t>(envelope_bias_) << 16));
+    // Q15 (0..32767) → Q16 (0..65534): both int16s in each 32-bit word
+    // are < 0x8000, so packing two per iteration via uint32 shift is
+    // exact (no cross-half carry). Halves the loop count.
+    for (size_t i = 0; i < kAudioBlockSize / 2; ++i) {
+      words[i] <<= 1;
     }
     dac.BufferSamples(block, channel, samples);
   } else if (is_audio()) {
-    std::fill(
-        samples,
-        samples + kAudioBlockSize,
-        zero_dac_code_
-    );
+    // TWO AT A TIME. std::fill compiles to one strh a sample -- 448 cycles an
+    // output, three outputs a block in the hungriest layout -- for a value that
+    // is the same in every slot. The same halving the Q15->Q16 shift above
+    // already uses; tools/block_budget.py reads the stride off the loop, so it
+    // reports this without being told.
+    const uint32_t zero_pair =
+        (static_cast<uint32_t>(zero_dac_code_) << 16) | zero_dac_code_;
+    for (size_t i = 0; i < kAudioBlockSize / 2; ++i) {
+      words[i] = zero_pair;
+    }
     for (uint8_t v = 0; v < num_audio_voices_; ++v) {
       audio_voices_[v]->oscillator()->Render(samples);
     }
@@ -270,15 +297,22 @@ void CVOutput::RenderSamples(uint8_t block, uint8_t channel, uint16_t default_lo
 void Voice::NoteOn(
   int16_t note, uint8_t velocity, uint8_t portamento,
   int8_t portamento_mod_velocity, bool trigger,
-  ADSR& adsr, int16_t timbre_envelope_target
+  ADSR& adsr, int16_t timbre_envelope_target,
+  uint32_t chiff_amount_q30, uint32_t chiff_audible_samples
 ) {
   // Check if voice is still producing sound (gated or releasing).
   // Only check envelopes that are actually active for this voice.
   // Must check before NoteOn resets the envelope.
-  bool is_sounding_prev_note = gate_
-    || (uses_audio() && oscillator_.sounding())
-    || (aux_1_envelope() && dc_output(DC_AUX_1)->sounding())
-    || (aux_2_envelope() && dc_output(DC_AUX_2)->sounding());
+  bool is_sounding_prev_note = gate_ || (
+    uses_audio()
+    // Oscillator is voice-specific, so gives best read
+    ? oscillator_.sounding()
+    // Fall back on aux envelope (may be paraphonically shared)
+    : (
+        (aux_1_envelope() && dc_output(DC_AUX_1)->sounding()) ||
+        (aux_2_envelope() && dc_output(DC_AUX_2)->sounding())
+      )
+  );
   if (trigger) {
     if (gate_) {
       retrigger_delay_ = 3;
@@ -292,8 +326,7 @@ void Voice::NoteOn(
   // Resolve the portamento endpoints before the oscillator NoteOn so it can
   // warp/prime against the correct pitch: note_source_ is the note's onset
   // pitch (where a glide starts, or the note itself when portamento is off),
-  // note_target_ its destination. Both are known here, ahead of Refresh
-  // updating the oscillator's live pitch.
+  // note_target_ its destination. Both are known here.
   if (has_cv_output()) {
     note_source_ = note_portamento_;
     note_target_ = note;
@@ -303,15 +336,18 @@ void Voice::NoteOn(
     }
   }
 
-  // start_pitch is the onset pitch assembled exactly as Refresh will (so the
-  // bias bump cancels the pitch jump with no residual chirp under bend/
-  // vibrato); target_pitch is the destination note's nominal pitch, used for
-  // the envelope's frozen warped target.
+  // The onset pitch is assembled exactly as Refresh will, so the bias bump
+  // cancels the pitch jump with no residual chirp under bend or vibrato.
   if (uses_audio()) oscillator_.NoteOn(
     adsr_, oscillator_mode_ == OSCILLATOR_MODE_DRONE,
-    ApplyPitchMods(note_source_), note_target_ + tuning_, timbre_envelope_target);
-  if (aux_1_envelope()) dc_output(DC_AUX_1)->NoteOn(adsr_);
-  if (aux_2_envelope()) dc_output(DC_AUX_2)->NoteOn(adsr_);
+    ApplyPitchMods(note_source_), note_target_ + tuning_, timbre_envelope_target,
+    chiff_amount_q30, chiff_audible_samples);
+  if (aux_1_envelope()) {
+    dc_output(DC_AUX_1)->NoteOn(adsr_, chiff_amount_q30, chiff_audible_samples);
+  }
+  if (aux_2_envelope()) {
+    dc_output(DC_AUX_2)->NoteOn(adsr_, chiff_amount_q30, chiff_audible_samples);
+  }
 
   if (!has_cv_output()) return;
 
