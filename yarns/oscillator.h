@@ -394,6 +394,20 @@ class Oscillator {
     return quadrant_lookup(lut_sine_quadrant_u16, phase);
   }
 
+  // The same table interpolated at full width, sin * 2^31 (less 2^15 at the
+  // peaks): the 16 bits sine() drops are what a shaper that amplifies its
+  // input's error -- SX, whose phase moves 16 cycles a unit -- needs.
+  inline int32_t sine_q31(uint32_t phase) const {
+    uint32_t quarter_phase = phase << 2;
+    quarter_phase ^= -((phase >> 30) & 1);
+    const int32_t a = lut_sine_quadrant_u16[quarter_phase >> 24];
+    const int32_t b = lut_sine_quadrant_u16[(quarter_phase >> 24) + 1];
+    const int32_t value = (a << 15)
+        + ((b - a) * static_cast<int32_t>((quarter_phase >> 8) & 0xffff) >> 1);
+    const int32_t sign = static_cast<int32_t>(phase) >> 31;
+    return (value ^ sign) - sign;
+  }
+
   inline int16_t triangle(uint32_t phase) const {
     // Phase offset ensures f(0) = 0, with peak at phase 1/4 (like sine).
     // This simplifies transfer waveshaping: input 0 always yields output 0.

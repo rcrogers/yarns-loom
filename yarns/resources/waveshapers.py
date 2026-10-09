@@ -73,7 +73,7 @@ fold_back = 4.0 * x * numpy.exp(0.5 - 8.0 * x * x)
 # sine_fold = sine + cubic + knee
 
 # waveshapers.append(('moderate_overdrive', scale(moderate_overdrive)))
-waveshapers.append(('violent_overdrive', scale(violent_overdrive)))
+# violent_overdrive: SINE TANH computes tanh(32 x) (RenderTanhSine).
 waveshapers.append(('soft_limit', scale(soft_limit)))
 waveshapers.append(('fold_back', scale(fold_back)))
 # waveshapers.append(('sine_fold', scale(sine_fold, center=False)))

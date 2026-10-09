@@ -105,7 +105,7 @@ fill = numpy.fmod(
 
 sizzle_input = sine_quadrant_input * 2 + numpy.pi / 3
 sizzle = numpy.sin(numpy.exp(sizzle_input)) * 127.5 + 127.5
-waveforms.append(('sizzle', scale(sizzle)))
+# sizzle: SINE EXPONENTIAL computes sin(exp(u)) (RenderExponentialSine).
 
 for zone in range(num_zones):
   f0 = 440.0 * 2.0 ** ((18 + 8 * zone - 69) / 12.0)

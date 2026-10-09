@@ -892,26 +892,81 @@ void Oscillator::RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix) {
 //   )
 // }
 
+// 2^f for f in [0, 1), u0.32, as 2^30 * (1 .. 2): a degree-4 fit by Horner,
+// one UMULL a degree, within 3.6e-6 of 2^f -- 0.12 of an output LSB in ST's
+// tanh.
+static inline uint32_t Exp2Fraction_q30(uint32_t fraction_u32) {
+  uint32_t value = 14693065;
+  value = 55531496 + MulHighU(value, fraction_u32);
+  value = 259438920 + MulHighU(value, fraction_u32);
+  value = 744070390 + MulHighU(value, fraction_u32);
+  return 1073745686 + MulHighU(value, fraction_u32);
+}
+
+// tanh(32 x), computed: the table it replaces held 257 points across a curve
+// that is flat beyond |x| = 0.19, so the whole knee fell on ~26 of them and the
+// interpolation between added up to 26 dB of aliasing over the curve itself at
+// low TIMBRE. x is formed in Q30 from the sine and the TIMBRE's gain -- 1/64 to
+// all of it -- with nothing dropped before the curve; with e = 2^(64 x log2 e)
+// = m 2^n, tanh = (m - 2^-n) / (m + 2^-n), one divide. At 32 |x| >= 6 it rounds
+// to full scale and is taken as that.
 void Oscillator::RenderTanhSine(int16_t* input_samples, int16_t* audio_mix) {
+  const uint32_t kSaturation_q30 = 201326592;  // 32 x = 6
+  const uint32_t kLog2E_u1_31 = 3098164009u;
   RENDER_PERIODIC(
-    this_sample = sine(phase);
-    int16_t baseline = this_sample >> 6;
-    this_sample = baseline + ((this_sample - baseline) * timbre >> 15);
-    this_sample = Interpolate88(ws_violent_overdrive, this_sample + 32768);
+    const int32_t drive_q15 = 512 + ((32256 * timbre) >> 15);
+    const int32_t x_q30 = sine(phase) * drive_q15;
+    const uint32_t magnitude_q30 = static_cast<uint32_t>(x_q30 < 0 ? -x_q30 : x_q30);
+    int32_t shaped = 32766;
+    if (magnitude_q30 < kSaturation_q30) {
+      // 64 x log2 e in q24: the magnitude is 2^30 x.
+      const uint32_t exponent_q24 = MulHighU(magnitude_q30 << 1, kLog2E_u1_31);
+      const uint32_t whole = exponent_q24 >> 24;
+      const uint32_t mantissa_q30 = Exp2Fraction_q30(exponent_q24 << 8);
+      const uint32_t reciprocal_q30 = (1u << 30) >> whole;
+      const uint32_t tanh_q16 = (mantissa_q30 - reciprocal_q30)
+          / ((mantissa_q30 + reciprocal_q30 + (1u << 15)) >> 16);
+      shaped = static_cast<int32_t>((tanh_q16 * 32766 + (1u << 15)) >> 16);
+    }
+    this_sample = x_q30 < 0 ? -shaped : shaped;
   )
 }
 
+// sin(exp(u)), u = 5 pi / 6 + pi x / 2, computed: exp(u) / 2 pi cycles is
+// C0 2^(a x), a = pi / (2 ln 2), C0 = e^(5 pi / 6) / 2 pi, which runs 0.45 to
+// 10.5 cycles across x -- its fraction is the phase of a sine. The table it
+// replaces held ~8 points a cycle at the top, and the interpolation between
+// added up to 29 dB of aliasing over the curve itself at full TIMBRE; the
+// phase-derived dither it carried broke that error up into noise rather than
+// lowering it, and goes with it. x comes off the sine at full width: the phase
+// moves 16 cycles a unit of x, so the 16-bit sine's own rounding was the next
+// limit. Scaled as the table was, its mean taken out, by the curve's true peak.
+//
+// C0 2^f by Horner, C0 folded into the fit, as cycles in q29 (it reaches 4.4):
+// within 3.6e-6 -- under what the sine's own rounding already moves the phase.
+static inline uint32_t SizzleCycles_q29(uint32_t fraction_u32) {
+  uint32_t value = 16028129;
+  value = 60577284 + MulHighU(value, fraction_u32);
+  value = 283012461 + MulHighU(value, fraction_u32);
+  value = 811679267 + MulHighU(value, fraction_u32);
+  return 1171310032 + MulHighU(value, fraction_u32);
+}
+
 void Oscillator::RenderExponentialSine(int16_t* input_samples, int16_t* audio_mix) {
+  // a in q14, carried by the TIMBRE gain: the exponent is then one SMULL off
+  // the sine. 15 bits of a reshape the TIMBRE map by 0.003%.
+  const int32_t kExponentGain_q14 = 37129;
+  const int32_t kMean_q15 = -2602;
+  const int32_t kScale_q15 = 30356;
   RENDER_PERIODIC(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff; // Use top 7/8
-    int16_t sine_sample = sine(phase);
-    int32_t scaled_sine = sine_sample * timbre;
-
-    int16_t dither = phase ^ (phase >> 16);
-    int16_t dither_14 = dither >> (16 - 14);
-    int32_t dithered_scaled_sine = (scaled_sine + dither_14) >> 15;
-
-    this_sample = Interpolate88(wav_sizzle, dithered_scaled_sine + 0x8000);
+    // a x in q28: sin * 2^31 times gain * a * 2^29, high word.
+    const int32_t exponent_q28 = MulHighS(sine_q31(phase), timbre * kExponentGain_q14);
+    const int32_t whole = exponent_q28 >> 28;  // -3 .. 2
+    const uint32_t cycles_q29 =
+        SizzleCycles_q29(static_cast<uint32_t>(exponent_q28) << 4);
+    const uint32_t sizzle_phase = cycles_q29 << (3 + whole);
+    this_sample = (sine(sizzle_phase) - kMean_q15) * kScale_q15 >> 15;
   )
 }
 
