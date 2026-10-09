@@ -1457,9 +1457,18 @@ static const int32_t kLoopNoiseShift = 31 - kLoopDirectBits + kLoopNoiseBits;
 static const int32_t kLoopDampPreShift = 10;
 STATIC_ASSERT((INT32_MAX >> kLoopDampPreShift) * kLoopDamp_u1_14 <= INT32_MAX,
               loop_damp_product_fits);
-// The jittered damping's pre-shift: its two products together reach about
-// 4 d, so each operand gives up two more bits than kLoopDampPreShift's.
+// The jittered damping's pre-shift: the state's and the jitter's terms
+// together reach about 4 units before d, so each gives up two more bits than
+// kLoopDampPreShift's.
 static const int32_t kLoopJitterPreShift = 12;
+// The pitch-scaled draw: the noise's top 16 bits times the scale, whose 11
+// fraction bits leave the draw at the noise times scale, 2^-5.
+static const int32_t kLoopRoughnessFractionBits = 11;
+static const int32_t kLoopRoughnessShift = 16 - kLoopRoughnessFractionBits;
+// The ratio the scale is the root of, with twice the scale's fraction bits.
+// RenderLoop holds the scale to 1/8..4, MIDI 129..9: past the keyboard
+// either way, so the clamp only guards the arithmetic.
+static const int32_t kLoopRoughnessRatioFractionBits = 2 * kLoopRoughnessFractionBits;
 // The multiplier's ends are held to at least 2^-this of the block's larger gain.
 static const int32_t kLoopRampGuardBits = 2;
 // The DC blocker's running mean forgets 2^-this a sample: 28 Hz at 45 kHz.
@@ -1508,10 +1517,18 @@ static inline int32_t LoopTableAt(const T* table, int32_t half_timbre) {
 //                       input stays where the loop put it. A falling gain
 //                       otherwise overdrives the curve until the state, which
 //                       decays only at the resonator's own rate, catches up
+//   kDampTimesLoopGain  0: d is kLoopDamp_u1_14. Otherwise Q follows the loop
+//                       gain: d = min(kLoopDamp_u1_14, this / loop gain), this
+//                       in u1.14 times q15, so d * loop gain -- which the
+//                       loop's flat pull goes as -- holds once the gain is up
+//   kRoughnessByPitch   the input noise and the jitter scaled by
+//                       sqrt(f(A3) / f), -3 dB an octave about A3: both are
+//                       white, so what reaches the note is the slice the
+//                       resonance passes, which widens with the pitch
 //   kJitterShift        white jitter on the whole feedback, its value at rest
 //                       included: times 1 + jitter * noise, noise uniform in
-//                       -1..1 and jitter 2^(31 - this) / kLoopDamp_u1_14; 0
-//                       for none
+//                       -1..1; jitter 2^(31 - this) / kLoopDamp_u1_14, or with
+//                       kRoughnessByPitch 2^(16 - this) at A3; 0 for none
 //   kCycleDetune        each cycle's length drawn anew: at the state's upward
 //                       zero crossing the resonator retunes by noise * this
 //                       / 2^31 of its cutoff, noise uniform in -1..1 and held
@@ -1532,18 +1549,21 @@ struct WindLoop {
   // tanh overdriven only saturates: a fast release brightens as it fades.
   static const bool kFollowsFallingGain = false;
   static int32_t Direct(int32_t) { return kLoopDirect; }
+  static const int32_t kDampTimesLoopGain = 0;
+  static const bool kRoughnessByPitch = false;
   static const int32_t kJitterShift = 0;
   static const int32_t kCycleDetune = 0;
 };
 
-// BOWED: fold_back, u e^(1/2 - u^2 / 2), offset 0..0.8 -- bright, even-rich,
+// BOWED: fold_back, u e^(1/2 - u^2 / 2), offset 0..0.7 -- bright, even-rich,
 // and pulled flat as it brightens, where tanh would square off. The jitter is
 // bow pressure wavering, which roughens every partial into a scrape.
 struct BowedLoop {
   static const int16_t* Curve() { return TableAsRegister(ws_fold_back); }
-  static const int32_t kOffsetTop_q15 = 13107;  // 0.8 of 2
+  static const int32_t kOffsetTop_q15 = 11469;  // 0.7 of 2
   static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
-  static const int32_t kLoopGainTop_q15 = 229376;  // 7
+  // 40: the harmonics keep coming as TIMBRE rises; at 7 the top was a plateau.
+  static const int32_t kLoopGainTop_q15 = 1310720;
   // The secant across one table step each side, 1/16 of a unit: the table's
   // own slope there, which no closed form of the curve's value gives.
   static int32_t SlopeAtRest_q15(const int16_t* curve, int32_t biased_offset,
@@ -1551,15 +1571,11 @@ struct BowedLoop {
     return 16 * (LoopCurve(curve, biased_offset + 256)
         - LoopCurve(curve, biased_offset - 256));
   }
-  // The fold-back pulls the note flat as TIMBRE drives it harder, by the same
-  // cents at every pitch (A2..A5 within 1.5): measured on this loop with its
-  // jitter, less its pull at TIMBRE 0, which WIND's resonator shares, and fit
-  // smooth. 0.3 cents rms from the fit; 10.5 at the top.
-  static int32_t PitchCorrection(int32_t half_timbre) {
-    static const int8_t kTable[17] = {
-        0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 7, 9, 13 };
-    return LoopTableAt(kTable, half_timbre);
-  }
+  // The fold-back's flat pull goes as d * loop gain, which kDampTimesLoopGain
+  // holds: measured held, A2..A5, -1.4 cents at TIMBRE 20, -1.3 at 64, -1.0
+  // at 105 -- as flat as the pull at none, so nothing to correct. (At Q 25
+  // throughout, it reached 10.5 cents at the top and took a table.)
+  static int32_t PitchCorrection(int32_t) { return 0; }
   // The strike sized to the loop's settled level. The level a fast attack
   // strikes the filter to does not depend on the loop gain, but the level the
   // loop settles at falls as the loop gain rises, so a full strike overdrove
@@ -1569,15 +1585,20 @@ struct BowedLoop {
   // to 1%), as a share of a full strike, u0.15.
   static int32_t Direct(int32_t half_timbre) {
     static const uint16_t kTable_u15[17] = {
-        32767, 32767, 32767, 32767, 32767, 30670, 28147, 25755, 23461,
-        21299, 19234, 17235, 15335, 13434, 11600, 9797, 8028 };
+        32767, 28780, 20975, 16600, 13772, 11764, 10237, 9018, 8012,
+        7153, 6403, 5741, 5151, 4610, 4109, 3647, 3211 };
     return kLoopDirect * LoopTableAt(kTable_u15, half_timbre) >> 15;
   }
   // The fold-back overdriven folds over: a pluck's decay, faster than the
   // resonator's, threw its pitch about by hundreds of cents.
   static const bool kFollowsFallingGain = true;
-  // 2^11 / 655: jitter 3.1.
-  static const int32_t kJitterShift = 20;
+  // k 0.2, in u1.14 times q15: Q 25 up to a loop gain of 5, then d * L = 0.2.
+  // That halves the flat start a strong loop has before it settles, and holds
+  // the settled pull to a constant.
+  static const int32_t kDampTimesLoopGain = 107374182;
+  static const bool kRoughnessByPitch = true;
+  // 2^-1: jitter 0.5 at A3.
+  static const int32_t kJitterShift = 17;
   // The stick-slip cycle's own irregularity, which a bowed string's scrape
   // is: each period's length +-20 cents, 2^(20/1200) - 1 of 2^31. A per-sample
   // jitter roughens the tone but does not move the cycle; this moves only it.
@@ -1585,11 +1606,6 @@ struct BowedLoop {
   // OFF: +-20 cents (24952558) costs 7 cycles a sample, 85 -> 92, which the
   // budget does not have. 0 compiles the draw out.
   static const int32_t kCycleDetune = 0;
-  // Both products of the jittered damping, at their largest, fit 32 bits.
-  STATIC_ASSERT((INT32_MAX >> kLoopJitterPreShift) * kLoopDamp_u1_14
-                + (INT32_MAX >> kLoopJitterPreShift) * (1 << (31 - kJitterShift))
-                    <= INT32_MAX,
-                jittered_damp_products_fit);
 };
 
 void Oscillator::RenderWind(int16_t* input_samples, int16_t* audio_mix) {
@@ -1632,6 +1648,24 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t loop_gain_q15 = Loop::kLoopGainBottom_q15 + static_cast<int32_t>(
       static_cast<int64_t>(Loop::kLoopGainTop_q15 - Loop::kLoopGainBottom_q15)
           * half_timbre >> kLoopOffsetBits);
+  int32_t damp_u1_14 = kLoopDamp_u1_14;
+  if (Loop::kDampTimesLoopGain) {
+    damp_u1_14 = std::min(damp_u1_14, Loop::kDampTimesLoopGain / loop_gain_q15);
+  }
+  // sqrt(f(A3) / f), from the cutoffs (proportional to the frequency within
+  // 0.2% to A6), with kLoopRoughnessFractionBits fraction bits: the root of
+  // their ratio carried with twice those.
+  int32_t roughness = 0;
+  if (Loop::kRoughnessByPitch) {
+    const uint32_t a3_cutoff = static_cast<uint32_t>(SVF::CutoffFromFreq_q0_31(57 << 7));
+    uint32_t ratio = DivU64ByU32(
+        a3_cutoff >> (32 - kLoopRoughnessRatioFractionBits),
+        a3_cutoff << kLoopRoughnessRatioFractionBits,
+        static_cast<uint32_t>(note_cutoff_q0_31));
+    CONSTRAIN(ratio, (1u << kLoopRoughnessRatioFractionBits) >> 6,
+              (1u << kLoopRoughnessRatioFractionBits) << 4);
+    roughness = static_cast<int32_t>(IntegerSqrt(ratio));
+  }
   const int32_t first_gain = input_samples[kAudioBlockSize];
   const int32_t last_gain = input_samples[2 * kAudioBlockSize - 1];
   const int32_t gain_floor = std::max(first_gain, last_gain) >> kLoopRampGuardBits;
@@ -1665,8 +1699,13 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
         LoopCurve(curve, biased_offset + MulHighS(bp_q15_14, multiplier));
     const int32_t shaped = gain * (curve_value - rest);
     noise_state = NextXorshift32(noise_state);
-    const int32_t excitation_q15_14 =
-        gain * (direct + (static_cast<int32_t>(noise_state) >> kLoopNoiseShift));
+    // One draw serves the input noise and the jitter; scaled with the pitch it
+    // is the draw times the scale, 2^-kLoopRoughnessShift.
+    const int32_t draw = Loop::kRoughnessByPitch
+        ? (static_cast<int32_t>(noise_state) >> 16) * roughness
+        : static_cast<int32_t>(noise_state);
+    const int32_t excitation_q15_14 = gain * (direct + (draw >> (kLoopNoiseShift
+        - (Loop::kRoughnessByPitch ? kLoopRoughnessShift : 0))));
     // Chamberlin, signed and unclipped: the loop bounds the state, and the
     // output is gated by gain, so a ring need not decay to exactly nothing.
     // The feedback and the damping share d: d * (feedback - bp), the feedback
@@ -1676,20 +1715,21 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
     int32_t damping_q15_14;
     if (Loop::kJitterShift) {
       // Bow pressure wavering: the whole friction force jitters, the curve's
-      // value at rest included, d * jitter * noise times gain * curve. d's
-      // share of the jitter is draw >> kJitterShift, so the product needs no
-      // long multiply. The draw is the excitation's: that noise is
-      // 2^-kLoopNoiseBits of a unit, so what the two share is lost under the
-      // jitter's own.
+      // value at rest included, d * jitter * noise times gain * curve. The
+      // jitter is the draw >> kJitterShift, in the state's pre-shifted units
+      // once the product drops what the draw's scale and that shift left over;
+      // d then takes both terms at once. The draw is the excitation's: that
+      // noise is 2^-kLoopNoiseBits of a unit, so what the two share is lost
+      // under the jitter's own.
       const int32_t force_q15_14 =
           gain * curve_value >> (15 + 15 - kLoopUnitShift_q15_14);
-      damping_q15_14 = (((bp_q15_14 - feedback_q15_14) >> kLoopJitterPreShift)
-          * kLoopDamp_u1_14 - (force_q15_14 >> kLoopJitterPreShift)
-              * (static_cast<int32_t>(noise_state) >> Loop::kJitterShift))
-          >> (14 - kLoopJitterPreShift);
+      damping_q15_14 = ((((bp_q15_14 - feedback_q15_14) >> kLoopJitterPreShift)
+          - ((force_q15_14 >> kLoopJitterPreShift) * (draw >> Loop::kJitterShift)
+              >> (31 - kLoopRoughnessShift - 16)))
+          * damp_u1_14) >> (14 - kLoopJitterPreShift);
     } else {
       damping_q15_14 = ((bp_q15_14 - feedback_q15_14) >> kLoopDampPreShift)
-          * kLoopDamp_u1_14 >> (14 - kLoopDampPreShift);
+          * damp_u1_14 >> (14 - kLoopDampPreShift);
     }
     const int32_t bp_before_q15_14 = bp_q15_14;
     bp_q15_14 += 2 * MulHighS(

@@ -59,9 +59,9 @@ const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
 // the tap's running mean. Taken at another offset, that mean leaves the output
 // up to (2 + curve(offset_max)) / 2 of the gain, so the gain peaks the
 // reciprocal of that under the share: 2 / (2 + tanh(2)) for WIND, and
-// 2 / (2 + fold_back(0.8)) for BOWED, whose curve also spans -1..1.
+// 2 / (2 + fold_back(0.7)) for BOWED, whose curve also spans -1..1.
 const uint16_t kWindPeakHeadroom_u15 = 22111;
-const uint16_t kBowedPeakHeadroom_u15 = 22157;
+const uint16_t kBowedPeakHeadroom_u15 = 22573;
 
 class StateVariableFilter : public SVF {
  public:
