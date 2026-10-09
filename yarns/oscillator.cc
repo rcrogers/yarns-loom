@@ -1477,11 +1477,22 @@ static inline int32_t LoopCurve(const int16_t* curve, int32_t biased_x) {
 // offset), as the multiplier whose product with a q15_14 state has the
 // argument in its high word. Saturated where every argument it makes is past
 // the table anyway.
+// The firmware takes it per sample as a divide (RenderLoop); this is the
+// reference the TEST build checks that against.
+#ifdef TEST
+// LOOP_MULTIPLIER=ramp / exact: RenderLoop's references, read once. At file
+// scope: a function-local static would pull in the runtime's thread-safe guard,
+// which the bare-metal harness cannot link.
+static const int g_loop_multiplier_reference =
+    !getenv("LOOP_MULTIPLIER") ? 0
+    : !strcmp(getenv("LOOP_MULTIPLIER"), "ramp") ? 1
+    : !strcmp(getenv("LOOP_MULTIPLIER"), "exact") ? 2 : 0;
 static int32_t LoopArgumentMultiplier(
     int32_t gain, int32_t slope_q15, int32_t loop_gain_q15) {
   return ScaleRatio(loop_gain_q15, 1u << (32 - ResonatorState::kFractionalBits),
                     static_cast<uint32_t>(gain * slope_q15 >> 15));
 }
+#endif
 
 // A 17-entry table across TIMBRE, at half_timbre, interpolated.
 template <typename T>
@@ -1607,12 +1618,11 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   state.Load(svf);
   const int16_t* curve = Loop::Curve();
 
-  // The offset once a block, from the TIMBRE the block opens on. The
-  // multiplier walks between its values at the block's two ends, because
-  // gain cancels out of the loop only where the multiplier tracks it: a block's
-  // worth of mismatch amplitude-modulates a rising note at the block rate.
-  // Each end is held to at least 2^-kLoopRampGuardBits of the larger, so a
-  // note that opens on a gain near nothing does not saturate the block.
+  // The offset once a block, from the TIMBRE the block opens on. Gain cancels
+  // out of the loop only where the multiplier tracks it, so the multiplier is
+  // taken at every gain sample (below). The gain it divides is held to at
+  // least 2^-kLoopRampGuardBits of the block's larger end, so a note that
+  // opens on a gain near nothing does not saturate the block.
   // Held at zero from below: the TIMBRE indexes BOWED's tables, and one below
   // zero read before them -- what lay there differed between host and target.
   // The warp keeps the firmware's above zero; this keeps any caller's there.
@@ -1635,11 +1645,43 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   const int32_t first_gain = input_samples[kAudioBlockSize];
   const int32_t last_gain = input_samples[2 * kAudioBlockSize - 1];
   const int32_t gain_floor = std::max(first_gain, last_gain) >> kLoopRampGuardBits;
-  int32_t multiplier = LoopArgumentMultiplier(
+  // THE MULTIPLIER FOLLOWS EVERY GAIN SAMPLE, not a line between the block's
+  // ends: the feedback and the strike take each sample's gain, so a line left
+  // the loop's own gain jumping by gain / line within the block -- what turned
+  // a fast EXCITER into a smashed, low-passed noise. Within a block the gain
+  // swings 0.26..4.8x its line at EXCITER 127, past what any expansion about
+  // the line follows, so it is the quotient itself: k / gain, one hardware
+  // divide a sample. k is loop gain * 2^33 / slope (bp's 14 fractional bits
+  // and the slope's 15), carried as 32 bits and a shift. The floor also keeps the
+  // quotient under 2^31 once shifted, so the loop needs no saturation.
+  // In 32-bit operations and DivU64ByU32: a 64-bit divide would pull in the
+  // runtime's, whose divide-by-zero path the bare-metal harness cannot link.
+  // The dividend's low word is zero: loop gain << 33 is loop gain << 1, high.
+  const int32_t kNumeratorBits = 32 - ResonatorState::kFractionalBits + 15;
+  STATIC_ASSERT(kNumeratorBits >= 32, numerator_fills_the_high_word);
+  const uint32_t slope = static_cast<uint32_t>(slope_q15);
+  const uint32_t dividend_high =
+      static_cast<uint32_t>(loop_gain_q15) << (kNumeratorBits - 32);
+  const uint32_t numerator_high = dividend_high / slope;
+  const uint32_t numerator_low =
+      DivU64ByU32(dividend_high - numerator_high * slope, 0, slope);
+  const int32_t numerator_shift =
+      numerator_high ? 32 - __builtin_clz(numerator_high) : 0;
+  const uint32_t numerator = numerator_shift
+      ? (numerator_high << (32 - numerator_shift)) | (numerator_low >> numerator_shift)
+      : numerator_low;
+  const int32_t divisor_floor = std::max(std::max(gain_floor, static_cast<int32_t>(1)),
+      static_cast<int32_t>((numerator_high << 1) | (numerator_low >> 31)) + 1);
+#ifdef TEST
+  // LOOP_MULTIPLIER=ramp (the line between the ends, as before) / exact
+  // (LoopArgumentMultiplier at each sample's gain): references for the above.
+  const int loop_reference = g_loop_multiplier_reference;
+  int32_t ramp_multiplier = LoopArgumentMultiplier(
       std::max(first_gain, gain_floor), slope_q15, loop_gain_q15);
-  const int32_t multiplier_slope = (LoopArgumentMultiplier(
-      std::max(last_gain, gain_floor), slope_q15, loop_gain_q15) - multiplier)
+  const int32_t ramp_slope = (LoopArgumentMultiplier(
+      std::max(last_gain, gain_floor), slope_q15, loop_gain_q15) - ramp_multiplier)
       / static_cast<int32_t>(kAudioBlockSize - 1);
+#endif
 
   uint32_t noise_state = noise_state_;
   int32_t tap_mean_q8 = loop_tap_mean_q8_;
@@ -1659,6 +1701,15 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_CORE(this_sample,
     (void) timbre;  // read once a block, above
     const int32_t gain = input_samples[kAudioBlockSize];
+    int32_t multiplier = static_cast<int32_t>(
+        numerator / static_cast<uint32_t>(std::max(gain, divisor_floor))
+            << numerator_shift);
+#ifdef TEST
+    if (loop_reference == 1) multiplier = ramp_multiplier;
+    if (loop_reference == 2) multiplier = LoopArgumentMultiplier(
+        std::max(gain, gain_floor), slope_q15, loop_gain_q15);
+    ramp_multiplier += ramp_slope;
+#endif
     // The curve less its value at rest: what the loop feeds back and what it
     // outputs, scaled by gain.
     const int32_t curve_value =
@@ -1709,7 +1760,6 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
     const int32_t tap = shaped >> 16;
     tap_mean_q8 += tap - (tap_mean_q8 >> kLoopDcBlockerShift);
     this_sample = tap - (tap_mean_q8 >> kLoopDcBlockerShift);
-    multiplier += multiplier_slope;
   )
   state.bp_q15_14 = bp_q15_14;
   state.lp_q15_14 = lp_q15_14;
