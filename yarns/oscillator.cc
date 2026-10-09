@@ -1470,10 +1470,6 @@ static const int32_t kLoopJitterPreShift = 12;
 // fraction bits leave the draw at the noise times scale, 2^-5.
 static const int32_t kLoopRoughnessFractionBits = 11;
 static const int32_t kLoopRoughnessShift = 16 - kLoopRoughnessFractionBits;
-// The ratio the scale is the root of, with twice the scale's fraction bits.
-// RenderLoop holds the scale to 1/8..4, MIDI 129..9: past the keyboard
-// either way, so the clamp only guards the arithmetic.
-static const int32_t kLoopRoughnessRatioFractionBits = 2 * kLoopRoughnessFractionBits;
 // The multiplier's ends are held to at least 2^-this of the block's larger gain.
 static const int32_t kLoopRampGuardBits = 2;
 // The DC blocker's running mean forgets 2^-this a sample: 28 Hz at 45 kHz.
@@ -1657,19 +1653,31 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   if (Loop::kDampTimesLoopGain) {
     damp_u1_14 = std::min(damp_u1_14, Loop::kDampTimesLoopGain / loop_gain_q15);
   }
-  // sqrt(f(A3) / f), from the cutoffs (proportional to the frequency within
-  // 0.2% to A6), with kLoopRoughnessFractionBits fraction bits: the root of
-  // their ratio carried with twice those.
+  // sqrt(f(A3) / f) = 2^(-semitones from A3 / 24): it halves every two
+  // octaves. A table across two octaves, interpolated, shifted by how many
+  // two-octave spans lie between the note and A3 -- a few cycles a block, where
+  // the ratio's divide and square root cost ~220 (measured under QEMU). With
+  // kLoopRoughnessFractionBits fraction bits, held to 1/8..4.
   int32_t roughness = 0;
   if (Loop::kRoughnessByPitch) {
-    const uint32_t a3_cutoff = static_cast<uint32_t>(SVF::CutoffFromFreq_q0_31(57 << 7));
-    uint32_t ratio = DivU64ByU32(
-        a3_cutoff >> (32 - kLoopRoughnessRatioFractionBits),
-        a3_cutoff << kLoopRoughnessRatioFractionBits,
-        static_cast<uint32_t>(note_cutoff_q0_31));
-    CONSTRAIN(ratio, (1u << kLoopRoughnessRatioFractionBits) >> 6,
-              (1u << kLoopRoughnessRatioFractionBits) << 4);
-    roughness = static_cast<int32_t>(IntegerSqrt(ratio));
+    // 2^(-i / 24) for i semitones, 2^15 the unit.
+    static const uint16_t kHalvingAcrossTwoOctaves_u15[25] = {
+        32768, 31835, 30929, 30048, 29193, 28362, 27554, 26770, 26008,
+        25268, 24548, 23849, 23170, 22511, 21870, 21247, 20643, 20055,
+        19484, 18929, 18390, 17867, 17358, 16864, 16384 };
+    const int32_t kTwoOctaves = 24 << 7;
+    // Enough two-octave spans below A3 that MIDI 0 counts up from zero.
+    const int32_t kSpansBelowA3 = 4;
+    const int32_t from = pitch_ - (57 << 7) + kSpansBelowA3 * kTwoOctaves;
+    const int32_t spans = from / kTwoOctaves;
+    const int32_t within = from - spans * kTwoOctaves;
+    const uint16_t* entry = &kHalvingAcrossTwoOctaves_u15[within >> 7];
+    const int32_t halving_u15 =
+        entry[0] + ((entry[1] - entry[0]) * (within & 0x7f) >> 7);
+    roughness = halving_u15
+        >> (spans - kSpansBelowA3 + 15 - kLoopRoughnessFractionBits);
+    CONSTRAIN(roughness, 1 << (kLoopRoughnessFractionBits - 3),
+              1 << (kLoopRoughnessFractionBits + 2));
   }
   const int32_t first_gain = input_samples[kAudioBlockSize];
   const int32_t last_gain = input_samples[2 * kAudioBlockSize - 1];
