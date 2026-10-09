@@ -294,12 +294,7 @@ int main(int argc, char** argv) {
   // every downward step scales the state and no upward one restores it.
   const int rescale_mode = static_cast<int>(Arg("rescale", 0));
   const bool rescale = rescale_mode == 1;
-  // blockctl=1: TIMBRE and every gain path read once a block (gain a ramp
-  // between the block's ends). blockctl=2: as the firmware's loop reads them --
-  // TIMBRE once a block and gain every sample, except the scale the state is
-  // read against (the firmware's multiplier), which ramps between the ends.
-  const int block_mode = static_cast<int>(Arg("blockctl", 0));
-  const bool block_ctl = block_mode == 1;
+  const bool block_ctl = Arg("blockctl", 0) != 0;
   double scale_previous = 0;
   double tilt_previous = 0;
   // RETUNE=c0,c1,...: cents to tune the resonator by, evenly across TIMBRE
@@ -330,12 +325,8 @@ int main(int argc, char** argv) {
     const double g_alt = has_alt ? gain_from(controls_alt) : g;
     const double g_loop = alt_loop ? g_alt : g, g_out = alt_out ? g_alt : g;
     const double g_direct = alt_direct ? g_alt : g, g_noise = alt_noise ? g_alt : g;
-    const bool firmware_controls = block_mode == 2 && has_controls;
-    const double g_drive = !firmware_controls ? g_loop
-        : controls_loop[2 * block_first + 1] + (controls_loop[2 * block_last + 1] - controls_loop[2 * block_first + 1])
-            * (i - block_first) / std::max(block_last - block_first, 1);
     const double d_control = !has_controls ? d_start * pow(d_end / d_start, t / duration)
-        : controls[2 * (block_controls || firmware_controls ? block_first : i)];
+        : controls[2 * (block_controls ? block_first : i)];
     if (per_cycle) {
       if (cycle_bp_previous < 0 && bp >= 0) {
         cycle_state ^= cycle_state << 13;
@@ -394,9 +385,7 @@ int main(int argc, char** argv) {
       }
       double bp_sum = bp;
       for (size_t m = 0; m < mode_bp.size(); ++m) bp_sum += mode_bp[m];
-      const double scale_drive = !firmware_controls ? scale_now
-          : has_scale ? std::max(Eval(spec_scale, g_drive, u, d), 1e-6) : scale;
-      double x = off + in_gain * bp_sum / scale_drive;
+      double x = off + in_gain * bp_sum / scale_now;
       shaper_drive = x - off;
       // XNOISE=k / XSLIP=k: noise on the shaper's INPUT, plain or times how
       // fast its output moved last sample: jitter in when the slip comes.
