@@ -1366,6 +1366,8 @@ static double g_bow_xmax =
 static double g_bow_pressure =
     getenv("BOW_PRESSURE100") ? atoi(getenv("BOW_PRESSURE100")) / 100.0 : 1;
 static int g_bow_out_lp = getenv("BOW_OUT") ? !strcmp(getenv("BOW_OUT"), "lp") : 0;
+// LOOP_MEAN_PROBE=1: RenderLoop prints its DC blocker's mean once a block.
+static int g_loop_mean_probe = getenv("LOOP_MEAN_PROBE") ? 1 : 0;
 // BOW_D_REF=d_u1_14 couples the bow with that fixed damping in place of the
 // timbre's d, so the loop gain rises with Q; BOW_D_PROBE=1 prints d per sample.
 static double g_bow_d_ref =
@@ -1756,6 +1758,14 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   state.Store(&svf);
   noise_state_ = noise_state;
   loop_tap_mean_q8_ = tap_mean_q8;
+#ifdef TEST
+  // LOOP_MEAN_PROBE=1 prints, once a block, the DC blocker's mean and the gain
+  // peak it is bounded against, both in output codes.
+  if (g_loop_mean_probe) {
+    fprintf(stderr, "LOOPMEAN %ld %d\n", static_cast<long>(tap_mean_q8 >> kLoopDcBlockerShift),
+            static_cast<int>(gain_envelope_peak_codes_u16(shape_)));
+  }
+#endif
   svf_ = svf;
 }
 
