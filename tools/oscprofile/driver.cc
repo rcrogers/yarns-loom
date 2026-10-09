@@ -24,11 +24,13 @@ namespace {
 Oscillator osc;
 
 const int kBlocks = 8;
-// Every fourth semitone, which crosses every band-limited zone, and the top
-// of the keyboard.
-const int kLowestMidi = 12;
-const int kMidiStep = 4;
-const int16_t kTopPitch = kHighestNote - 1;
+// Both ends of the keyboard, middle C, and closer steps toward the top, where
+// edges come fastest. Against every fourth semitone, these eight found every
+// shape's dearest block.
+const int16_t kPitches[] = {
+  0 << 7, 36 << 7, 60 << 7, 84 << 7, 100 << 7, 112 << 7, 124 << 7,
+  kHighestNote - 1,
+};
 
 // What TIMBRE does across a case, as the knob plus the envelope hand it to the
 // shape: raw 0..full scale, warped by the shape's own map.
@@ -90,10 +92,9 @@ int main(int argc, char** argv) {
     if (only >= 0 && shape != only) continue;
     for (int sweep = 0; sweep < kNumSweeps; ++sweep) {
       for (int gain = 0; gain < kNumGains; ++gain) {
-        for (int midi = kLowestMidi; midi < 128; midi += kMidiStep) {
-          RenderCase(shape, static_cast<int16_t>(midi << 7), sweep, gain);
+        for (size_t p = 0; p < sizeof(kPitches) / sizeof(kPitches[0]); ++p) {
+          RenderCase(shape, kPitches[p], sweep, gain);
         }
-        RenderCase(shape, kTopPitch, sweep, gain);
       }
     }
   }
