@@ -86,8 +86,13 @@ int32_t Excursion(int16_t sample, uint16_t zero_code) {
   return static_cast<int16_t>(static_cast<uint16_t>(sample) - zero_code);
 }
 
-void RunCase(int shape, int num_voices, int pitch, int timbre, int chiff,
-             int timbre_knob, Worst* worst) {
+// num_voices are assigned -- each given its share -- and the first `sounding`
+// of them are played. One sounding of n is ONE VOICE AGAINST ITS OWN SHARE:
+// the per-voice contract, which is the one every shape must keep whatever the
+// voice count, coherent or not (an incoherent shape trades level, never its
+// peak).
+void RunCase(int shape, int num_voices, int sounding, int pitch, int timbre,
+             int chiff, int timbre_knob, Worst* worst) {
   Random::Seed(0x21);
   for (uint8_t v = 0; v < kMaxVoices; ++v) voices[v].Init();
   audio_output.Init(true);
@@ -110,7 +115,7 @@ void RunCase(int shape, int num_voices, int pitch, int timbre, int chiff,
 
   // A chord rather than a unison, so the voices are not one waveform times n.
   const int kIntervals[] = { 0, 7, 12, 16 };
-  for (uint8_t v = 0; v < num_voices; ++v) {
+  for (uint8_t v = 0; v < sounding; ++v) {
     voices[v].NoteOn(static_cast<int16_t>((pitch + kIntervals[v]) << 7), 100,
                      0, 0, true, adsr, static_cast<int16_t>(timbre),
                      chiff_amount_q30, chiff_audible_samples);
@@ -215,26 +220,52 @@ int main(int argc, char** argv) {
 
   int failures = 0;
   for (int shape = 0; shape <= OSC_SHAPE_FM; ++shape) {
+    // THE MIX: n voices sounding, against the whole span.
     Worst worst; memset(&worst, 0, sizeof(worst));
+    // ONE VOICE: one of n sounding, against its own share, as a fraction of it
+    // -- the share is the allowance over n, so a voice's worst is compared
+    // case by case, not against the largest share.
+    Worst voice_worst; memset(&voice_worst, 0, sizeof(voice_worst));
+    double voice_worst_share = 0;
     for (int n = 1; n <= kMaxVoices; ++n) {
+      const int32_t share = allowance / n;
       for (size_t p = 0; p < sizeof(kPitches)/sizeof(kPitches[0]); ++p) {
         for (size_t t = 0; t < sizeof(kTimbres)/sizeof(kTimbres[0]); ++t) {
           for (size_t c = 0; c < sizeof(kChiffAmounts)/sizeof(kChiffAmounts[0]); ++c)
           for (size_t k = 0; k < sizeof(kKnobs)/sizeof(kKnobs[0]); ++k) {
-            RunCase(shape, n, kPitches[p], kTimbres[t], kChiffAmounts[c],
+            RunCase(shape, n, n, kPitches[p], kTimbres[t], kChiffAmounts[c],
                     kKnobs[k], &worst);
+            Worst one; memset(&one, 0, sizeof(one));
+            RunCase(shape, n, 1, kPitches[p], kTimbres[t], kChiffAmounts[c],
+                    kKnobs[k], &one);
+            if (one.excursion / (double) share > voice_worst_share) {
+              voice_worst_share = one.excursion / (double) share;
+              voice_worst = one;
+            }
           }
         }
       }
     }
     const bool over = worst.excursion > allowance;
+    // The share is voice.h's own division; a voice may meet it exactly.
+    const bool voice_over = voice_worst.excursion
+        > allowance / voice_worst.voices;
     if (over) ++failures;
+    if (voice_over) ++failures;
     if (over || verbose) {
-      printf("%s shape %2d  worst %6d of %d (%.2f)  "
+      printf("%s shape %2d  mix   worst %6d of %d (%.2f)  "
              "MIDI %d, TIMBRE %d + mod %d, EXCITER %d, %d voice(s)\n",
              over ? "FAIL" : "    ", shape, worst.excursion, allowance,
              worst.excursion / (double) allowance,
              worst.pitch, worst.knob, worst.timbre, worst.chiff, worst.voices);
+    }
+    if (voice_over || verbose) {
+      printf("%s shape %2d  voice worst %6d of %d (%.2f)  "
+             "MIDI %d, TIMBRE %d + mod %d, EXCITER %d, share of %d voice(s)\n",
+             voice_over ? "FAIL" : "    ", shape, voice_worst.excursion,
+             allowance / voice_worst.voices, voice_worst_share,
+             voice_worst.pitch, voice_worst.knob, voice_worst.timbre,
+             voice_worst.chiff, voice_worst.voices);
     }
   }
   if (failures) {
@@ -243,8 +274,8 @@ int main(int argc, char** argv) {
            "between.\n", failures);
     return 1;
   }
-  printf("PASS %d shapes stay inside the output range at 1..%d voices "
-         "(%lu cases each)\n",
+  printf("PASS %d shapes stay inside the output range at 1..%d voices, and one "
+         "voice inside its own share at each (%lu cases each)\n",
          OSC_SHAPE_FM + 1, kMaxVoices,
          (unsigned long) (kMaxVoices * 5 * 4 * 3 * 3));
   return 0;
