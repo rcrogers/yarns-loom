@@ -663,16 +663,18 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
     - A fast release brightens the tone as it fades
 
 #### `BW` Bowed: tuned state-variable filter fed back through a friction curve
-- Timbre: from a pure tone through bright, scratchy tones rich in both even and odd harmonics, pulling slightly flat as it brightens
-- Note pitch controls the tuning of the filter
+- Timbre: from a pure tone through bright, scratchy tones rich in both even and odd harmonics, still gaining harmonics at the top of the range
+- Note pitch controls the tuning of the filter, which stays in tune at every timbre
 - The [gain envelope](#modulation-destinations-for-envelope-output) both strikes the filter and sets the level of the feedback, instead of amplifying the oscillator's output
     - A fast attack strikes the note so it sounds at once; a slower attack lets it swell in
-- The feedback wavers like bow pressure, adding a scrape that grows with timbre and with pitch
+    - A fast decay or release fades the note without throwing its pitch
+- The feedback wavers like bow pressure, adding a scrape that grows with timbre and sounds even across the keyboard
 
 #### `P-` Ping: direct envelope signal into tuned state-variable filter
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
 - The gain envelope is used as a direct DC input to ping the filter, instead of amplifying the oscillator's output
+    - A full-peak ring saturates, brightening its onset into a pluck; a lower envelope peak rings more cleanly
 - Shapes: low-pass, band-pass, high-pass
 
 #### `-◝` Analog wave into state-variable filter
