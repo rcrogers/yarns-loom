@@ -62,6 +62,11 @@ const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
 // 2 / (2 + fold_back(0.7)) for BOWED, whose curve also spans -1..1.
 const uint16_t kWindPeakHeadroom_u15 = 22111;
 const uint16_t kBowedPeakHeadroom_u15 = 22573;
+#ifdef TEST
+// LOOP_DC_BEFORE_GAIN (oscillator.cc): the loop shapes' DC blocker before the
+// gain, under headroom 1.
+extern int g_loop_dc_before_gain;
+#endif
 
 class StateVariableFilter : public SVF {
  public:
@@ -251,8 +256,11 @@ class Oscillator {
     // homogeneous in gain, so the envelope can carry the share -- under the
     // headroom the DC blocker needs.
     if (shape == OSC_SHAPE_WIND || shape == OSC_SHAPE_BOWED) {
-      const uint16_t headroom_u15 = shape == OSC_SHAPE_WIND
+      uint16_t headroom_u15 = shape == OSC_SHAPE_WIND
           ? kWindPeakHeadroom_u15 : kBowedPeakHeadroom_u15;
+#ifdef TEST
+      if (g_loop_dc_before_gain) headroom_u15 = 32767;
+#endif
       return static_cast<uint16_t>(
           coherent_scale_codes_u16_ * headroom_u15 >> 15);
     }

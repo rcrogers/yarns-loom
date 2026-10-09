@@ -1368,6 +1368,9 @@ static double g_bow_pressure =
 static int g_bow_out_lp = getenv("BOW_OUT") ? !strcmp(getenv("BOW_OUT"), "lp") : 0;
 // LOOP_MEAN_PROBE=1: RenderLoop prints its DC blocker's mean once a block.
 static int g_loop_mean_probe = getenv("LOOP_MEAN_PROBE") ? 1 : 0;
+// LOOP_DC_BEFORE_GAIN=1: the loop shapes take their DC out of the curve before
+// the gain rather than out of the gained tap, under headroom 1 (oscillator.h).
+int g_loop_dc_before_gain = getenv("LOOP_DC_BEFORE_GAIN") ? 1 : 0;
 // BOW_D_REF=d_u1_14 couples the bow with that fixed damping in place of the
 // timbre's d, so the loop gain rises with Q; BOW_D_PROBE=1 prints d per sample.
 static double g_bow_d_ref =
@@ -1748,9 +1751,21 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
           + 2 * MulHighS(note_cutoff_q0_31, cycle_detune_q31);
     }
     // At half scale, less its running mean.
+#ifdef TEST
+    if (g_loop_dc_before_gain) {
+      // The DC taken out of the curve's value before the gain spends it: the
+      // output is gain * (curve - its running mean), both inside the curve's
+      // span, so it never passes the gain -- the headroom is 1.
+      tap_mean_q8 += curve_value - (tap_mean_q8 >> kLoopDcBlockerShift);
+      this_sample = gain * (curve_value - (tap_mean_q8 >> kLoopDcBlockerShift)) >> 16;
+    } else {
+#endif
     const int32_t tap = shaped >> 16;
     tap_mean_q8 += tap - (tap_mean_q8 >> kLoopDcBlockerShift);
     this_sample = tap - (tap_mean_q8 >> kLoopDcBlockerShift);
+#ifdef TEST
+    }
+#endif
     multiplier += multiplier_slope;
   )
   state.bp_q15_14 = bp_q15_14;
