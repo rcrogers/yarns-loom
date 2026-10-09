@@ -1,12 +1,11 @@
 # Worst-case cycle cost of a code path, from a disassembly.
 #
-# tools/cycles.py counts the render loop, which is the per-SAMPLE cost. It
-# cannot see the per-RUN path -- the block of work RenderStage does once before
-# the loop and once after it -- and that path holds the walk, the mean clamp,
-# and several helper calls. It had never been measured, only reduced.
+# The shapes and the envelope are measured (tools/osc_profile.py,
+# tools/env_profile.py), with this file's cost table; block_budget.py prices
+# the per-block glue around them statically, here.
 #
 # WHAT THIS COMPUTES: the longest path through a function's control flow graph,
-# in the same ESTIMATED Cortex-M3 cycles tools/cycles.py counts. Longest, not
+# in ESTIMATED Cortex-M3 cycles. Longest, not
 # average, because this is a realtime system: the worst case is the only case
 # that has to fit. Back edges are cut, so each loop body is counted once; a
 # caller that knows a trip count applies it by WEIGHTING the loop's blocks.
@@ -18,8 +17,7 @@
 import hashlib
 import re
 
-# Cortex-M3 timing, matching tools/cycles.py so the two are comparable, plus
-# the entries a straight-line path needs that a loop body never had:
+# Cortex-M3 timing, including:
 #   udiv/sdiv   2-12 cycles depending on the operands; the worst case governs.
 #   push/pop    1 cycle plus 1 per register.
 # WHAT THESE NUMBERS ARE, AND ARE NOT.

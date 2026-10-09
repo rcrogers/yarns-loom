@@ -1,6 +1,6 @@
 # EVERYTHING THAT RUNS IN ONE AUDIO BLOCK, for the layout that runs the most.
 #
-# cycles.py prices the envelope; osc_profile.py measures a shape's block.
+# env_profile.py measures the envelope's calls; osc_profile.py a shape's block.
 # Neither sees what surrounds them -- the DAC packing, the mix-buffer fill, the
 # Q15->Q16 shift, the per-voice dispatch -- and a budget that omits those is not
 # a budget. This adds them up, so what is left out is left out ON PURPOSE and
@@ -219,7 +219,7 @@ for calls, body in ((True, dispatch[0]), (False, shift)):
 # Its two envelope renders and its shape call are counted below, so they are
 # excluded here rather than counted twice.
 # WITH its warp and its phase-increment helper, WITHOUT the two envelope renders
-# it calls -- those are cycles.py's rows. The shape it dispatches to goes through
+# it calls -- those are env_profile.py's rows. The shape it dispatches to goes through
 # a function pointer, which no static walk resolves and osc_profile.py measures.
 envelope_render = [n for n in functions if '8Envelope13RenderSamples' in n]
 osc_call_cost, _ = pathcost.call_cost_function(
@@ -243,22 +243,15 @@ def tool(script, *args):
       encoding='utf8')
 
 
-# cycles.py prints its human report before the metrics, so take only the
-# `key value` lines rather than depending on where they start.
-metrics = dict(
-    line.split() for line in tool('cycles.py', '--metrics').splitlines()
-    if re.match(r'^\w+ -?\d+$', line))
-# TWO KINDS OF BLOCK, because they are not close. A steady block renders one
-# run an envelope. THE BLOCK A NOTE ARRIVES IN pays three: RenderStage renders
-# up to the stage boundary and tail-calls itself, so a fast attack expires
-# inside the block and hands off twice. It pays the NoteOn burst on top.
-# That is the block the user reports glitching on, so it gets its own column
-# rather than a footnote.
-STEADY = [('envelopes, one run', int(metrics['block_cycles']), ENVELOPES)]
-ATTACK = [('envelopes, %s runs + handoffs' % metrics['runs_per_block'],
-           int(metrics['block_cycles_handoff']), ENVELOPES),
-          ('NoteOn burst (all %d in one block)' % ENVELOPES,
-           int(metrics['note_on_cycles']), ENVELOPES)]
+# Measured envelope calls, from env_profile.py. Two kinds of block: a steady
+# one takes the dearest block with no NoteOn in it, stage hand-offs included;
+# the block a note arrives in, the dearest NoteOn and the block after it.
+metrics = dict((key, int(value)) for key, value in
+               (line.split() for line in tool('env_profile.py', '--metrics').splitlines()))
+STEADY = [('envelope block (up to %d stage runs)' % metrics['runs_per_block'],
+           metrics['any_block'], ENVELOPES)]
+ATTACK = [('envelope NoteOn + its block (all %d in one block)' % ENVELOPES,
+           metrics['arrival'], ENVELOPES)]
 
 # Measured, per sample: `name steady first c4_steady c4_first`. A steady block
 # takes the dearest steady block; the block a note arrives in, the dearest first
@@ -297,10 +290,7 @@ for kind, extra, columns in (('steady block', STEADY, (0, 2)),
 # EVERY FUNCTION IN THE TREE IS ACCOUNTED FOR, OR THIS SAYS SO.
 #
 # The rows above are a list someone wrote, and a list cannot tell you what is
-# missing from it. That is exactly how AdvanceChiffForBlock's 625 cycles left
-# the budget: the work moved out of RenderStage, cycles.py prices RenderStage,
-# and the envelope read seven points cheaper for doing the same arithmetic. A
-# COST THAT MOVES BETWEEN FUNCTIONS HAS NOT MOVED, and nothing noticed.
+# missing from it. A cost that moves between functions has not moved.
 #
 # So: walk the call tree from the per-block entry and demand a reason for each
 # function in it. A new callee is then a loud failure rather than a silent zero.
@@ -312,11 +302,11 @@ ACCOUNTED = {
     'Oscillator10WarpTimbre': 'inside the Oscillator::Render row',
     'Oscillator21ComputePhaseIncrement': 'inside the Oscillator::Render row',
     'DampFromResonance': 'inside the Oscillator::Render row',
-    '8Envelope13RenderSamples': 'cycles.py block_cycles',
-    '8Envelope20AdvanceChiffForBlock': 'cycles.py block_cycles (chiff_block_cycles)',
-    '8Envelope11RenderStage': 'cycles.py block_cycles (run_cycles)',
-    '8Envelope18HandOffToNextStage': 'cycles.py block_cycles_handoff',
-    '8Envelope7Trigger': 'inside handoff_cycles and note_on_cycles',
+    '8Envelope13RenderSamples': 'env_profile.py, the call whole',
+    '8Envelope20AdvanceChiffForBlock': 'inside env_profile.py\'s RenderSamples',
+    '8Envelope11RenderStage': 'inside env_profile.py\'s RenderSamples',
+    '8Envelope18HandOffToNextStage': 'inside env_profile.py\'s RenderSamples',
+    '8Envelope7Trigger': 'inside env_profile.py\'s RenderSamples and NoteOn',
     'ChiffSlewTimeAtAmount': 'inside its callers',
     'ChiffSlewInputFractionAtAmount': 'inside its callers',
     'DivU64ByU32': 'inside its callers',
