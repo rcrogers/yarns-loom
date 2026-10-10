@@ -891,15 +891,16 @@ void Oscillator::RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix) {
 //   )
 // }
 
-// 2^f for f in [0, 1), u0.32, as 2^30 * (1 .. 2): a degree-4 fit by Horner,
-// one UMULL a degree, within 3.6e-6 of 2^f -- 0.12 of an output LSB in ST's
-// tanh.
-static inline uint32_t Exp2Fraction_q30(uint32_t fraction_u32) {
-  uint32_t value = 14693065;
-  value = 55531496 + MulHighU(value, fraction_u32);
-  value = 259438920 + MulHighU(value, fraction_u32);
-  value = 744070390 + MulHighU(value, fraction_u32);
-  return 1073745686 + MulHighU(value, fraction_u32);
+// 2^f for f in [0, 1), u0.16, as 2^15 * (1 .. 2): a degree-4 fit by Horner in
+// 16 bits -- one MUL a degree, the coefficients immediates, where 32 bits took
+// a UMULL and a literal load each -- within 7e-5 of 2^f, under an output LSB
+// in ST's tanh. Its constant is exactly 1, so m >= 2^-n and tanh >= 0.
+static inline uint32_t Exp2Fraction_q15(uint32_t fraction_u16) {
+  uint32_t value = 448;
+  value = 1695 + (value * fraction_u16 >> 16);
+  value = 7917 + (value * fraction_u16 >> 16);
+  value = 22707 + (value * fraction_u16 >> 16);
+  return 32768 + (value * fraction_u16 >> 16);
 }
 
 // tanh(32 x), computed: the table it replaces held 257 points across a curve
@@ -921,7 +922,8 @@ void Oscillator::RenderTanhSine(int16_t* input_samples, int16_t* audio_mix) {
       // 64 x log2 e in q24: the magnitude is 2^30 x.
       const uint32_t exponent_q24 = MulHighU(magnitude_q30 << 1, kLog2E_u1_31);
       const uint32_t whole = exponent_q24 >> 24;
-      const uint32_t mantissa_q30 = Exp2Fraction_q30(exponent_q24 << 8);
+      const uint32_t mantissa_q30 =
+          Exp2Fraction_q15((exponent_q24 >> 8) & 0xffff) << 15;
       const uint32_t reciprocal_q30 = (1u << 30) >> whole;
       const uint32_t tanh_q16 = (mantissa_q30 - reciprocal_q30)
           / ((mantissa_q30 + reciprocal_q30 + (1u << 15)) >> 16);
