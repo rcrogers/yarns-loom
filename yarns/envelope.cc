@@ -905,16 +905,48 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
     chiff_amount_q30_, chiff_slew_time_at_amount_zero_q5_27_);
   decay.slew_time_step_q5_27 = run_samples
     ? (chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) / run_samples : 0;
-  decay.drive_q4_26 = ChiffDriveAtAmount_q4_26(chiff_amount_q30);
-  // Against this run's START slew time: the writeback to the end is at the
-  // loop's tail, so the slew time and amount here are a consistent pair.
-  //   - Derived HERE and not at the tail, where the start state is really
-  //     established, because here it shares its exp2 with the render's own
-  //     rate. Moving it to the tail cost 47 cycles a run for that reason.
+  // The run renders at its RMS amount, so a run carries the energy the decay
+  // does. The amount is a = A (u - c) / (1 - c), u = e^(-4 phase); over the
+  // run, with S = (a_start - a_end) / (4 phase_span) and F = A c / (1 - c):
+  //   mean(a^2) = S (a_start + a_end - 2 F) / 2 + F^2
+  const uint32_t chiff_phase_span_q32 = chiff_phase_end_q32 - chiff_phase_q32_;
+  uint32_t chiff_amount_rms_q30 = 0;
+  if (chiff_phase_span_q32) {
+    const double kExpoEnd = __builtin_exp(-4.0 * 255.0 / 256.0);
+    const uint32_t kFloorPerAmount_q32 = static_cast<uint32_t>(
+      kExpoEnd / (1.0 - kExpoEnd) * 4294967296.0 + 0.5);
+    const uint32_t fall_q30 = chiff_amount_q30 - chiff_amount_q30_;
+    const int64_t slope_q30 = DivU64ByU32(
+      fall_q30 >> 2, fall_q30 << 30, chiff_phase_span_q32);
+    const int64_t floor_q30 = static_cast<int64_t>(
+      (static_cast<uint64_t>(chiff_amount_initial_q30_) * kFloorPerAmount_q32) >> 32);
+    int64_t mean_square_q60 = slope_q30
+      * (static_cast<int64_t>(chiff_amount_q30) + chiff_amount_q30_ - 2 * floor_q30) / 2
+      + floor_q30 * floor_q30;
+    const int64_t start_square_q60 =
+      static_cast<int64_t>(chiff_amount_q30) * chiff_amount_q30;
+    const int64_t end_square_q60 =
+      static_cast<int64_t>(chiff_amount_q30_) * chiff_amount_q30_;
+    if (mean_square_q60 > start_square_q60) mean_square_q60 = start_square_q60;
+    if (mean_square_q60 < end_square_q60) mean_square_q60 = end_square_q60;
+    // An even shift brings the square inside 32 bits; the root takes half.
+    const uint32_t high_q28 = static_cast<uint32_t>(mean_square_q60 >> 32);
+    const uint32_t shift = high_q28 ? 2 * ((33 - __builtin_clz(high_q28)) >> 1) : 0;
+    chiff_amount_rms_q30 = IntegerSqrt(
+      static_cast<uint32_t>(mean_square_q60 >> shift)) << (shift >> 1);
+  }
+  decay.drive_q4_26 = ChiffDriveAtAmount_q4_26(chiff_amount_rms_q30);
+  // The gain is divided out at a quarter of the way across the run's slew
+  // time. FITTED, not derived: the energy is front-loaded, and against a
+  // chiff re-read every sample the start reads ~3 dB low at DURATION 6..10
+  // and the midpoint ~3 dB high; a quarter lands within 1.2 dB at every
+  // DURATION.
+  const uint32_t chiff_slew_time_compensated_q5_27 = chiff_slew_time_log2_q5_27_
+    + ((chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) >> 2);
   chiff_slew_input_fraction_q30_ = ChiffSlewInputFractionAtAmount_q30(
-    chiff_amount_q30, chiff_slew_time_log2_q5_27_,
+    chiff_amount_rms_q30, chiff_slew_time_compensated_q5_27,
     static_cast<int32_t>(
-      SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_)));
+      SlewRateFromTimeLog2_q31(chiff_slew_time_compensated_q5_27)));
   chiff_phase_q32_ = chiff_phase_end_q32;
   return decay;
 }
