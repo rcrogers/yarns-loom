@@ -18,7 +18,7 @@ The root `Makefile` documents its own targets. In short:
     make check      host + qemu + simparity + peakfloor + xvmod + strictmode
                     + blockedge + blockrate + decay
     make firmware   flashable .syx
-    make cycles     what the envelope costs per block
+    make cycles     what the envelope's calls cost, measured under QEMU
 
 `make sim` needs Docker/emscripten. `make check` deliberately does **not**
 rebuild the sim, so a stale committed page shows up as a simparity failure
@@ -46,7 +46,7 @@ different *code paths* within it, and that is the whole point of the table.
 | `make ui` | the DISPLAY: the real driver's GPIO decoded back into the segment word at each character, over the frame swap, the prefix flash and a scroll | brightness, and the encoder and switch drivers |
 | `make osc` | all 42 OSCILLATOR SHAPES, sample for sample, driven with a controlled timbre buffer rather than through the envelope | whether the recorded output is the RIGHT output |
 | `chiff_checks/simparity.js` | the published page renders identically to the native build | whether either is right |
-| `make cycles` | worst-case cost via the longest path through the CFG, loops weighted by their trip count | anything the linker pulls in — watch `flash free` |
+| `make cycles` | each envelope call's cost as the firmware's code executes it under QEMU, over a grid of patches | a case the grid does not reach (it lists unexecuted code); anything the linker pulls in — watch `flash free` |
 | `hosttest/blockrate.js` | a dBFS level on the tremolo bias's once-a-block breaks | whether that level is audible to you |
 | hardware | brightness, the encoder and switches, and how it sounds | — |
 

@@ -598,8 +598,7 @@ void Oscillator::Render(int16_t* audio_mix) {
   modulator_phase_ = modulator_phase; \
 
 // True on the sample a phase accumulator wrapped, which happens at a rate of
-// phase_increment / 2^32. tools/osc_cycles.py locates these by source line and
-// charges what they guard at that rate.
+// phase_increment / 2^32.
 static inline bool PhaseWrapped(uint32_t phase, uint32_t phase_increment) {
   return phase < phase_increment;
 }
