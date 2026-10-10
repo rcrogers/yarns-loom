@@ -22,7 +22,7 @@
 #   make cycles     what the envelope's calls cost, measured under QEMU
 #   make profile    what every shape costs per block, measured under QEMU
 
-.PHONY: all sim host cv ui osc warp mix level step qemu check firmware cycles profile
+.PHONY: all sim host cv ui osc warp mix level step qemu check firmware elf cycles profile
 
 # Rebuild the sim, then run the full verification.
 all: sim check
@@ -116,15 +116,28 @@ check: host cv ui osc warp mix step qemu
 firmware:
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh make -f yarns/makefile syx
 
-# The envelope renders 13 times a block. Builds first: the profile links
-# build/yarns/*.o, and a stale build answers about code that is not the tree.
-cycles: firmware
+# The firmware's objects and image alone, without the .syx and the checks
+# that rebuild every time: what the profile links and checks against.
+elf:
+	SKIP_PROGRAMMING=true ./env/mutable-env.sh make -f yarns/makefile build/yarns/yarns.elf
+
+# The profile image links the firmware's own objects, so those build first: a
+# stale build answers about code that is not the tree. The image relinks only
+# when an input moved, and run.py reruns only the runs whose image, tools or
+# job moved.
+PROFILE_INPUTS = tools/oscprofile/build.sh tools/oscprofile/driver.cc \
+  tools/oscprofile/profile.ld tools/oscqemu/startup.c tools/panel_chain.h \
+  build/yarns/yarns.elf \
+  $(patsubst %,build/yarns/%.o,oscillator envelope resources utils random)
+
+build/oscprofile/profile.elf: $(PROFILE_INPUTS)
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh sh tools/oscprofile/build.sh
-	SKIP_PROGRAMMING=true ./env/mutable-env.sh bash tools/oscprofile/run.sh env
+
+# The envelope renders 13 times a block.
+cycles: elf build/oscprofile/profile.elf
+	python3 tools/oscprofile/run.py env
 	python3 tools/env_profile.py
 
-# Builds first, for the same reason.
-profile: firmware
-	SKIP_PROGRAMMING=true ./env/mutable-env.sh sh tools/oscprofile/build.sh
-	SKIP_PROGRAMMING=true ./env/mutable-env.sh bash tools/oscprofile/run.sh
+profile: elf build/oscprofile/profile.elf
+	python3 tools/oscprofile/run.py
 	python3 tools/osc_profile.py

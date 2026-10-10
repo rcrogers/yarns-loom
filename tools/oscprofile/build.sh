@@ -13,7 +13,9 @@ mkdir -p "$OUT"
 for object in oscillator envelope resources utils random; do
   [ -f "build/yarns/$object.o" ] || { echo "no build/yarns/$object.o: make firmware first"; exit 1; }
 done
-FLAGS=$(make -f yarns/makefile -n -B build/yarns/oscillator.o 2>/dev/null \
+# -W, not -B: -B remakes the included makefiles even under -n, which
+# regenerates resources.* and so recompiles the firmware next build.
+FLAGS=$(make -f yarns/makefile -n -W yarns/oscillator.cc build/yarns/oscillator.o 2>/dev/null \
   | grep -- ' -c .*yarns/oscillator.cc -o ' \
   | sed -e 's/^[^ ]* -c //' -e 's/ yarns\/oscillator.cc -o build\/yarns\/oscillator.o$//' \
         -e 's/ -fstack-usage//')

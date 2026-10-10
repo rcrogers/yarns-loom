@@ -19,6 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import pathcost
+from measured import tools_digest
 
 dis_path, sym_path, flag_names = sys.argv[1], sys.argv[2], sys.argv[3:]
 
@@ -73,7 +74,9 @@ def measured(address):
 
 
 class Block(object):
-  """One QEMU translation block, priced as far as it can be on its own."""
+  """One QEMU translation block, priced as far as it can be on its own, and
+  what each block seen after it means: (follows from its last instruction,
+  the branch outcome to count or None, cycles to take back)."""
 
   def __init__(self, addresses):
     self.addresses = addresses
@@ -81,7 +84,26 @@ class Block(object):
     self.last = addresses[-1]
     _, size, self.kind, self.target, self.computed = instruction[self.last]
     self.fallthrough = self.last + size
+    self.measured_start = measured(addresses[0])
     self.measured_last = measured(self.last)
+    self.next = {}
+
+  def successor(self, pc):
+    if self.computed or self.kind == 'return':
+      fits = True
+    elif self.kind == 'branch':
+      fits = pc == self.target or pc == self.fallthrough
+    elif self.kind == 'fall':
+      fits = pc == self.fallthrough
+    else:
+      fits = pc == self.target
+    outcome, refund = None, 0
+    if self.measured_last and self.kind == 'branch':
+      taken = pc == self.target and self.target != self.fallthrough
+      outcome = (self.last, taken)
+      refund = 0 if taken else REFUND
+    self.next[pc] = (fits, outcome, refund)
+    return self.next[pc]
 
 
 translations = {}
@@ -96,9 +118,6 @@ block_tbs, block_branches = {}, {}
 flag_counts = dict((name, []) for name in flag_names)
 block_flags = {}
 previous = None
-
-_TRACE = re.compile(r'^Trace \d+: \S+ \[[0-9a-f]+/([0-9a-f]+)/')
-_IN_ASM = re.compile(r'^0x([0-9a-f]+):')
 
 
 def close_block():
@@ -115,15 +134,11 @@ def close_block():
   block_tbs, block_branches = {}, {}
 
 
+# Exec lines read `Trace 0: <host> [<cs_base>/<pc>/<flags>...] <symbol>`;
+# in_asm lines `0x<address>:  <encoding>  <instruction>`.
 for line in sys.stdin:
-  if line.startswith('0x'):
-    match = _IN_ASM.match(line)
-    pending.append(int(match.group(1), 16))
-    continue
-  if line.startswith('IN:'):
-    pending = []
-    continue
-  if line.startswith('Trace'):
+  first = line[0]
+  if first == 'T':
     if pending:
       start = pending[0]
       block = Block(pending)
@@ -132,23 +147,15 @@ for line in sys.stdin:
         violations.append('block 0x%x retranslated with a different extent' % start)
       translations[start] = block
       pending = None
-    pc = int(_TRACE.match(line).group(1), 16)
+    pc = int(line.split('/', 2)[1], 16)
     if previous is not None:
       transitions += 1
-      fits = previous.computed or {
-          'branch': pc in (previous.target, previous.fallthrough),
-          'jump': pc == previous.target,
-          'call': pc == previous.target,
-          'fall': pc == previous.fallthrough,
-          'return': True}[previous.kind]
+      fits, outcome, refund = previous.next.get(pc) or previous.successor(pc)
       if not fits:
         violations.append('0x%x (%s) -> 0x%x' % (previous.last, previous.kind, pc))
-      if inside and previous.measured_last and previous.kind == 'branch':
-        taken = pc == previous.target and previous.target != previous.fallthrough
-        if not taken:
-          cycles -= REFUND
-        key = '%x %s' % (previous.last, 'taken' if taken else 'fell')
-        block_branches[key] = block_branches.get(key, 0) + 1
+      if inside and outcome is not None:
+        cycles -= refund
+        block_branches[outcome] = block_branches.get(outcome, 0) + 1
     if pc == BEGIN:
       inside, cycles = True, 0
     elif pc == END:
@@ -158,21 +165,31 @@ for line in sys.stdin:
     block = translations[pc]
     if inside:
       cycles += block.cycles
-      if measured(pc):
+      if block.measured_start:
         block_tbs[pc] = block_tbs.get(pc, 0) + 1
       if pc in FLAGS:
         block_flags[FLAGS[pc]] = block_flags.get(FLAGS[pc], 0) + 1
     previous = block
+  elif first == '0' and line[1] == 'x':
+    pending.append(int(line[2:line.index(':')], 16))
+  elif line.startswith('IN:'):
+    pending = []
+
+
+def outcome_key(outcome):
+  return '%x %s' % (outcome[0], 'taken' if outcome[1] else 'fell')
+
 
 json.dump({
     'image': pathcost.image_digest(dis_path),
+    'tools': tools_digest(),
     'blocks': blocks_cycles,
     'flags': flag_counts,
     'tb_counts': {'%x' % pc: n for pc, n in tb_counts.items()},
     'tb_extent': {'%x' % pc: ['%x' % a for a in translations[pc].addresses]
                   for pc in tb_counts},
-    'branch_taken': branch_taken,
-    'branch_block_max': branch_block_max,
+    'branch_taken': dict((outcome_key(o), n) for o, n in branch_taken.items()),
+    'branch_block_max': dict((outcome_key(o), n) for o, n in branch_block_max.items()),
     'transitions': transitions,
     'violations': violations[:50],
     'violation_count': len(violations),
