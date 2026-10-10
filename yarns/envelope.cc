@@ -698,13 +698,32 @@ void Envelope::Trigger(EnvelopeStage stage) {
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by a stage change, so it is computed once a block.
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
+  // The chiff's decay ends a run: past that sample it is silent for the rest
+  // of the note.
+  uint32_t run_samples = kAudioBlockSize;
+  const uint32_t chiff_phase_remaining_q32 = 0xFFFFFFFFu - chiff_phase_q32_;
+  if (chiff_amount_initial_q30_ && chiff_phase_remaining_q32 &&
+      static_cast<uint64_t>(chiff_phase_step_q32_) * run_samples
+        > chiff_phase_remaining_q32) {
+    run_samples = (chiff_phase_remaining_q32 - 1) / chiff_phase_step_q32_ + 1;
+  }
   ChiffBlock chiff;
-  AdvanceChiffForBlock(kAudioBlockSize, &chiff);
-  RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31, &chiff);
-  // The end-of-block slew time becomes the next block's start. Needs no bound:
-  // the step is a truncating divide, so this lands at or under the end it was
-  // derived from. The battery watches the invariant.
-  chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * kAudioBlockSize;
+  AdvanceChiffForBlock(run_samples, &chiff);
+  RenderStage(sample_buffer, run_samples, bias_q31_, bias_slope_q31, &chiff);
+  // The run's end slew time becomes the next run's start. Needs no bound:
+  // the step is a truncating divide, so this lands at or under the end it
+  // was derived from. The battery watches the invariant.
+  chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * run_samples;
+  if (run_samples < kAudioBlockSize) {
+    // What AdvanceChiffForBlock makes of a zero input.
+    chiff.slew_time_step_q5_27 = 0;
+    chiff.clip_threshold_q26 = 0;
+    chiff.mean_min_q30 = 0;
+    chiff.mean_max_q30 = value_ceiling_q30_;
+    std::fill(chiff.levels_q4_26, chiff.levels_q4_26 + (1 << kChiffDrawBits), 0);
+    RenderStage(sample_buffer + run_samples, kAudioBlockSize - run_samples,
+                bias_q31_, bias_slope_q31, &chiff);
+  }
 }
 
 // Advance to the next stage and render the block's remaining samples there.
