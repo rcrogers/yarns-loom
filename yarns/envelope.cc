@@ -698,24 +698,32 @@ void Envelope::Trigger(EnvelopeStage stage) {
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by a stage change, so it is computed once a block.
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  // Where the chiff's decay completes, if inside this block: the render
-  // silences it there.
+  // The chiff's decay ends a run: past that sample it is silent for the rest
+  // of the note.
+  uint32_t run_samples = kAudioBlockSize;
   const uint32_t chiff_phase_remaining_q32 = 0xFFFFFFFFu - chiff_phase_q32_;
-  uint32_t chiff_live_samples = UINT32_MAX;
   if (chiff_amount_initial_q30_ && chiff_phase_remaining_q32 &&
-      static_cast<uint64_t>(chiff_phase_step_q32_) * kAudioBlockSize
+      static_cast<uint64_t>(chiff_phase_step_q32_) * run_samples
         > chiff_phase_remaining_q32) {
-    chiff_live_samples =
-      (chiff_phase_remaining_q32 - 1) / chiff_phase_step_q32_ + 1;
+    run_samples = (chiff_phase_remaining_q32 - 1) / chiff_phase_step_q32_ + 1;
   }
   ChiffBlock chiff;
-  AdvanceChiffForBlock(kAudioBlockSize, &chiff);
-  chiff.live_samples_left = chiff_live_samples;
-  RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31, &chiff);
-  // The end-of-block slew time becomes the next block's start. Needs no bound:
-  // the step is a truncating divide, so this lands at or under the end it was
-  // derived from. The battery watches the invariant.
-  chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * kAudioBlockSize;
+  AdvanceChiffForBlock(run_samples, &chiff);
+  RenderStage(sample_buffer, run_samples, bias_q31_, bias_slope_q31, &chiff);
+  // The run's end slew time becomes the next run's start. Needs no bound:
+  // the step is a truncating divide, so this lands at or under the end it
+  // was derived from. The battery watches the invariant.
+  chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * run_samples;
+  if (run_samples < kAudioBlockSize) {
+    // What AdvanceChiffForBlock makes of a zero input.
+    chiff.slew_time_step_q5_27 = 0;
+    chiff.clip_threshold_q26 = 0;
+    chiff.mean_min_q30 = 0;
+    chiff.mean_max_q30 = value_ceiling_q30_;
+    std::fill(chiff.levels_q4_26, chiff.levels_q4_26 + (1 << kChiffDrawBits), 0);
+    RenderStage(sample_buffer + run_samples, kAudioBlockSize - run_samples,
+                bias_q31_, bias_slope_q31, &chiff);
+  }
 }
 
 // Advance to the next stage and render the block's remaining samples there.
@@ -997,9 +1005,9 @@ void Envelope::RenderStage(
     const uint32_t chiff_slew_rate_retained_per_sample_q31 =
       chiff->rate_retained_per_sample_q31;
     const int32_t* const chiff_levels_q4_26 = chiff->levels_q4_26;
-    int32_t chiff_clip_threshold_q26 = chiff->clip_threshold_q26;
-    int32_t mean_min_q30 = chiff->mean_min_q30;
-    int32_t mean_max_q30 = chiff->mean_max_q30;
+    const int32_t chiff_clip_threshold_q26 = chiff->clip_threshold_q26;
+    const int32_t mean_min_q30 = chiff->mean_min_q30;
+    const int32_t mean_max_q30 = chiff->mean_max_q30;
     // What nominal chases. A timed stage runs four time constants and a slew
     // covers 1 - e^-4 of its span in that time, so the adjusted target carries
     // the reciprocal and nominal lands ON the stage target as the countdown
@@ -1046,7 +1054,7 @@ void Envelope::RenderStage(
       nominal_value_end_q30, bias_end_q30, mean_min_q30, mean_max_q30);
     // The difference is small and signed; the wrap in the subtraction is what
     // makes reinterpreting it as int32 give the true delta.
-    int32_t target_with_all_bias_slope = run_samples
+    const int32_t target_with_all_bias_slope = run_samples
       ? static_cast<int32_t>(target_with_all_bias_end - target_with_all_bias)
           / static_cast<int32_t>(run_samples)
       : 0;
@@ -1063,36 +1071,8 @@ void Envelope::RenderStage(
     uint32_t draws =
       draw_state >> ((kChiffDrawsPerWord - draws_left) * kChiffDrawBits);
     while (sample_buffer != run_end) {
-      // The chiff's end is a chunk boundary: past it the levels and the clip
-      // are zero, which holds the chiff at zero.
-      if (!chiff->live_samples_left) {
-        std::fill(chiff->levels_q4_26,
-                  chiff->levels_q4_26 + (1 << kChiffDrawBits), 0);
-        chiff->clip_threshold_q26 = chiff_clip_threshold_q26 = 0;
-        chiff->live_samples_left = UINT32_MAX;
-        // And the mean is no longer held off the rails: the target ramp is
-        // re-derived from here to the run's end without the chiff's margin.
-        chiff->mean_min_q30 = mean_min_q30 = 0;
-        chiff->mean_max_q30 = mean_max_q30 = value_ceiling_q30_;
-        const uint32_t samples_to_run_end =
-          static_cast<uint32_t>(run_end - sample_buffer);
-        const int32_t bias_now_q30 = static_cast<int32_t>(
-          static_cast<uint32_t>(bias_end_q30)
-          - static_cast<uint32_t>(bias_slope_q30) * samples_to_run_end);
-        target_with_all_bias = TargetWithAllBias(
-            stage_adjusted_target_q1_30 - nominal_delta_q1_30, bias_now_q30,
-            mean_min_q30, mean_max_q30)
-          + static_cast<uint32_t>(stage_adjusted_target_q1_30);
-        const uint32_t target_with_all_bias_end = TargetWithAllBias(
-            nominal_value_end_q30, bias_end_q30, mean_min_q30, mean_max_q30)
-          + static_cast<uint32_t>(stage_adjusted_target_q1_30);
-        target_with_all_bias_slope =
-          static_cast<int32_t>(target_with_all_bias_end - target_with_all_bias)
-          / static_cast<int32_t>(samples_to_run_end);
-      }
-      const uint32_t samples_left = std::min<uint32_t>(
-        static_cast<uint32_t>(run_end - sample_buffer),
-        chiff->live_samples_left);
+      const uint32_t samples_left =
+        static_cast<uint32_t>(run_end - sample_buffer);
       // Whole words stay inside the loop. The body sits at the register
       // ceiling -- 11 values + the draws word + ip/lr = 14 -- so the loop's
       // end test is read from memory, 2 cycles per 8 samples. A chunk loop
@@ -1100,7 +1080,6 @@ void Envelope::RenderStage(
       if (draws_left == kChiffDrawsPerWord &&
           samples_left >= kChiffDrawsPerWord) {
         uint32_t words_left = samples_left / kChiffDrawsPerWord;
-        chiff->live_samples_left -= words_left * kChiffDrawsPerWord;
 #if defined(__arm__) && __ARM_ARCH >= 7
         __asm__ volatile(
           "1:\n"
@@ -1140,7 +1119,6 @@ void Envelope::RenderStage(
       }
       uint32_t chunk = samples_left;
       if (chunk > draws_left) chunk = draws_left;
-      chiff->live_samples_left -= chunk;
       int16_t* const chunk_end = sample_buffer + chunk;
     // Thumb-2 asm. Gate on __arm__, not __ARM_ARCH: arm64 hosts define
     // __ARM_ARCH == 8 without __arm__, and must take the C reference below.
