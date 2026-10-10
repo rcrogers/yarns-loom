@@ -68,17 +68,17 @@ namespace {
 }  // namespace
 
 
-// The envelope value's own format. Everything below follows from it.
-const int kValueBits = 30;
+// The envelope value's own format is kEnvelopeValueBits (envelope.h).
+// Everything below follows from it.
 // What the output sample carries is kEnvelopeSampleBits (envelope.h, where the
 // consumers can see the guarantee it gives them). The shift from the value to
 // the sample is the difference, not a second figure: state them independently
 // and they can disagree, which loses either the top of the range or the
 // saturation itself.
-const int kSampleBits = kValueBits - kEnvelopeSampleBits;
+const int kSampleBits = kEnvelopeValueBits - kEnvelopeSampleBits;
 
 // The DAC range in Q30. (2^30 - 1) >> kSampleBits is 32767 exactly.
-const int32_t kValueMax_q30 = (1 << kValueBits) - 1;
+const int32_t kValueMax_q30 = (1 << kEnvelopeValueBits) - 1;
 
 // How far the mean must move so the chiff's amplitude fits between it and the
 // rails; 0 when it already does.
@@ -695,7 +695,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
   }
 }
 
-void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
+template<typename Sample>
+__attribute__((always_inline))
+inline void Envelope::RenderBlock(Sample* sample_buffer, int32_t bias_target_q31) {
   // Bias is unaffected by a stage change, so it is computed once a block.
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
   ChiffBlock chiff;
@@ -707,11 +709,20 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * kAudioBlockSize;
 }
 
+void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
+  RenderBlock(sample_buffer, bias_target_q31);
+}
+
+void Envelope::RenderSamples(int32_t* sample_buffer, int32_t bias_target_q31) {
+  RenderBlock(sample_buffer, bias_target_q31);
+}
+
 // Advance to the next stage and render the block's remaining samples there.
 // The caller saves the value first, so the re-entrant Trigger sees the real
 // start value.
+template<typename Sample>
 void Envelope::HandOffToNextStage(
-  int16_t* sample_buffer, size_t block_samples_left,
+  Sample* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
 ) {
   Trigger(static_cast<EnvelopeStage>(stage_ + 1));
@@ -740,7 +751,7 @@ void Envelope::HandOffToNextStage(
         * chiff_slew_rate_retained_per_sample_q31) >> 32)) << 1;                \
   } while (0)
 
-#define YARNS_CHIFF_ASM_SAMPLE(bit_offset) \
+#define YARNS_CHIFF_ASM_SAMPLE(bit_offset, STORE) \
   YARNS_CHIFF_ASM_REFINE                                                             \
   "  ubfx  ip, %[draws], #" bit_offset ", %[draw_bits]\n" /* one draw, low end         */ \
   "  ldr   lr, [%[levels], ip, lsl #2]\n"                 /* what the slew chases      */ \
@@ -762,8 +773,15 @@ void Envelope::HandOffToNextStage(
   "  movgt ip, %[mean_max]\n"                             /*   ramped correction cannot \
                                                            *   track an exponential value */ \
   "  add   ip, ip, %[chiff], lsl %[state_shift]\n"        /*   exponential value       */ \
-  "  usat  ip, %[sat_bits], ip, asr %[sample_bits]\n"     /* saturate and shift, 1 op  */ \
+  STORE
+// The narrow sample: saturate and shift, one op.
+#define YARNS_CHIFF_ASM_STORE_NARROW \
+  "  usat  ip, %[sat_bits], ip, asr %[sample_bits]\n" \
   "  strh  ip, [%[buf]], #2\n"
+// The wide sample: saturate only.
+#define YARNS_CHIFF_ASM_STORE_WIDE \
+  "  usat  ip, %[value_bits], ip\n" \
+  "  str   ip, [%[buf]], #4\n"
 // Every constant above is an "i" operand, not a digit in a string, so a
 // rename reaches the asm. "i" substitutes the literal and costs no register,
 // which matters: twelve "r" operands is the ceiling the body allocates.
@@ -790,7 +808,8 @@ void Envelope::HandOffToNextStage(
   [state_shift] "i"(                                                          \
     kChiffLevelFractionalBits - kChiffSlewStateFractionalBits),               \
   [sample_bits] "i"(kSampleBits),                                             \
-  [sat_bits] "i"(kEnvelopeSampleBits)
+  [sat_bits] "i"(kEnvelopeSampleBits),                                        \
+  [value_bits] "i"(kEnvelopeValueBits)
 
 #define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
   do {                                                                        \
@@ -823,13 +842,23 @@ void Envelope::HandOffToNextStage(
     int32_t mean_q30 = static_cast<int32_t>(target_with_all_bias                     \
       - static_cast<uint32_t>(nominal_delta_q1_30));                              \
     if (mean_q30 > mean_max_q30) mean_q30 = mean_max_q30;                         \
-    int32_t sample = static_cast<int32_t>(static_cast<uint32_t>(mean_q30)           \
-      + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))          \
-      >> kSampleBits;                                                           \
-    if (sample < 0) sample = 0;                                               \
-    if (sample > kEnvelopeSampleMax) sample = kEnvelopeSampleMax;             \
-    *sample_buffer++ = static_cast<int16_t>(sample);                          \
+    StoreSample(&sample_buffer, static_cast<int32_t>(                         \
+      static_cast<uint32_t>(mean_q30)                                         \
+      + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))); \
   } while (0)
+
+// The asm's USAT and store, one per sample width.
+static inline void StoreSample(int16_t** sample_buffer, int32_t value_q30) {
+  int32_t sample = value_q30 >> kSampleBits;
+  if (sample < 0) sample = 0;
+  if (sample > kEnvelopeSampleMax) sample = kEnvelopeSampleMax;
+  *(*sample_buffer)++ = static_cast<int16_t>(sample);
+}
+static inline void StoreSample(int32_t** sample_buffer, int32_t value_q30) {
+  if (value_q30 < 0) value_q30 = 0;
+  if (value_q30 > kValueMax_q30) value_q30 = kValueMax_q30;
+  *(*sample_buffer)++ = value_q30;
+}
 
 // Advances the chiff's phase, amount and slew input by one run, and hands back
 // what the loop runs on. All three move together: pinning the input costs the
@@ -956,8 +985,9 @@ void Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff) {
   chiff->mean_max_q30 = value_ceiling_q30_ - clip_threshold_bounded_q30;
 }
 
+template<typename Sample>
 void Envelope::RenderStage(
-  int16_t* sample_buffer, size_t block_samples_left,
+  Sample* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
 ) {
   int32_t value_without_bias_q30 = value_without_bias_q30_;
@@ -971,7 +1001,7 @@ void Envelope::RenderStage(
   // below degenerates on its own. The worst case is a live chiff.
   uint32_t run_samples = block_samples_left;
   if (timed) run_samples = std::min<uint32_t>(run_samples, stage_samples_left_);
-  int16_t* const run_end = sample_buffer + run_samples;
+  Sample* const run_end = sample_buffer + run_samples;
 
   {
     // Bias is a terminal add: neither slew carries it, so the envelope's
@@ -1062,27 +1092,35 @@ void Envelope::RenderStage(
           samples_left >= kChiffDrawsPerWord) {
         uint32_t words_left = samples_left / kChiffDrawsPerWord;
 #if defined(__arm__) && __ARM_ARCH >= 7
-        __asm__ volatile(
-          "1:\n"
-          YARNS_CHIFF_ASM_SAMPLE("0")
-          YARNS_CHIFF_ASM_SAMPLE("4")
-          YARNS_CHIFF_ASM_SAMPLE("8")
-          YARNS_CHIFF_ASM_SAMPLE("12")
-          YARNS_CHIFF_ASM_SAMPLE("16")
-          YARNS_CHIFF_ASM_SAMPLE("20")
-          YARNS_CHIFF_ASM_SAMPLE("24")
-          YARNS_CHIFF_ASM_SAMPLE("28")
-          // Consume then advance, so the register leaves holding the next
-          // unspent word. ubfx reads without writing, so xorshift32 in place
-          // is three instructions and no memory traffic.
-          "  eor   %[draws], %[draws], %[draws], lsl #13\n"
-          "  eor   %[draws], %[draws], %[draws], lsr #17\n"
-          "  eor   %[draws], %[draws], %[draws], lsl #5\n"
-          "  subs  %[words], %[words], #1\n"        // in the freed pointer's
-          "  bne   1b\n"                            //   register
-          : YARNS_CHIFF_ASM_STATE, [words] "+r"(words_left)
-          : YARNS_CHIFF_ASM_INPUTS
+        // Consume then advance, so the register leaves holding the next
+        // unspent word. ubfx reads without writing, so xorshift32 in place is
+        // three instructions and no memory traffic. subs counts in the freed
+        // pointer's register.
+#define YARNS_CHIFF_ASM_WORDS(STORE) \
+        __asm__ volatile( \
+          "1:\n" \
+          YARNS_CHIFF_ASM_SAMPLE("0", STORE) \
+          YARNS_CHIFF_ASM_SAMPLE("4", STORE) \
+          YARNS_CHIFF_ASM_SAMPLE("8", STORE) \
+          YARNS_CHIFF_ASM_SAMPLE("12", STORE) \
+          YARNS_CHIFF_ASM_SAMPLE("16", STORE) \
+          YARNS_CHIFF_ASM_SAMPLE("20", STORE) \
+          YARNS_CHIFF_ASM_SAMPLE("24", STORE) \
+          YARNS_CHIFF_ASM_SAMPLE("28", STORE) \
+          "  eor   %[draws], %[draws], %[draws], lsl #13\n" \
+          "  eor   %[draws], %[draws], %[draws], lsr #17\n" \
+          "  eor   %[draws], %[draws], %[draws], lsl #5\n" \
+          "  subs  %[words], %[words], #1\n" \
+          "  bne   1b\n" \
+          : YARNS_CHIFF_ASM_STATE, [words] "+r"(words_left) \
+          : YARNS_CHIFF_ASM_INPUTS \
           : "ip", "lr", "cc", "memory");
+        if (sizeof(Sample) == sizeof(int16_t)) {
+          YARNS_CHIFF_ASM_WORDS(YARNS_CHIFF_ASM_STORE_NARROW)
+        } else {
+          YARNS_CHIFF_ASM_WORDS(YARNS_CHIFF_ASM_STORE_WIDE)
+        }
+#undef YARNS_CHIFF_ASM_WORDS
 #else
         while (words_left--) {
           for (uint32_t i = 0; i < kChiffDrawsPerWord; ++i) {
@@ -1100,25 +1138,33 @@ void Envelope::RenderStage(
       }
       uint32_t chunk = samples_left;
       if (chunk > draws_left) chunk = draws_left;
-      int16_t* const chunk_end = sample_buffer + chunk;
+      Sample* const chunk_end = sample_buffer + chunk;
     // Thumb-2 asm. Gate on __arm__, not __ARM_ARCH: arm64 hosts define
     // __ARM_ARCH == 8 without __arm__, and must take the C reference below.
 #if defined(__arm__) && __ARM_ARCH >= 7
     // Hand-allocated: GCC 4.8 spills here, so every live value is an operand.
     // The QEMU differential proves this identical to the C reference.
     // Head and tail only -- the samples outside the whole words.
-    __asm__ volatile(
-      "  cmp   %[buf], %[end]\n"
-      "  beq   2f\n"
-      "1:\n"
-      YARNS_CHIFF_ASM_SAMPLE("0")
-      "  lsr   %[draws], %[draws], %[draw_bits]\n"  // consumed low end first
-      "  cmp   %[buf], %[end]\n"
-      "  bne   1b\n"
-      "2:\n"
-      : YARNS_CHIFF_ASM_STATE
-      : YARNS_CHIFF_ASM_INPUTS, [end] "r"(chunk_end)
+    // The draws are consumed low end first.
+#define YARNS_CHIFF_ASM_RUN(STORE) \
+    __asm__ volatile( \
+      "  cmp   %[buf], %[end]\n" \
+      "  beq   2f\n" \
+      "1:\n" \
+      YARNS_CHIFF_ASM_SAMPLE("0", STORE) \
+      "  lsr   %[draws], %[draws], %[draw_bits]\n" \
+      "  cmp   %[buf], %[end]\n" \
+      "  bne   1b\n" \
+      "2:\n" \
+      : YARNS_CHIFF_ASM_STATE \
+      : YARNS_CHIFF_ASM_INPUTS, [end] "r"(chunk_end) \
       : "ip", "lr", "cc", "memory");
+    if (sizeof(Sample) == sizeof(int16_t)) {
+      YARNS_CHIFF_ASM_RUN(YARNS_CHIFF_ASM_STORE_NARROW)
+    } else {
+      YARNS_CHIFF_ASM_RUN(YARNS_CHIFF_ASM_STORE_WIDE)
+    }
+#undef YARNS_CHIFF_ASM_RUN
 #else
     while (sample_buffer != chunk_end) {
       // One draw, consumed low end first, matching the asm's UBFX then LSR.
@@ -1179,6 +1225,8 @@ void Envelope::RenderStage(
 }
 
 #undef YARNS_CHIFF_ASM_SAMPLE
+#undef YARNS_CHIFF_ASM_STORE_NARROW
+#undef YARNS_CHIFF_ASM_STORE_WIDE
 #undef YARNS_CHIFF_ASM_REFINE
 #undef YARNS_CHIFF_REFINE_RATE
 #undef YARNS_CHIFF_RENDER_SAMPLE

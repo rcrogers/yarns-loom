@@ -45,6 +45,8 @@ const size_t kMaxChiffEnvelopes = 13;
 // negative one means anything, and the shapes that shift one, cast it to
 // uint32_t, or index a table with it would each break differently without this.
 const int kEnvelopeSampleBits = 15;
+// The envelope's value itself: what a wide sample carries, unshifted.
+const int kEnvelopeValueBits = 30;
 const int16_t kEnvelopeSampleMax = (1 << kEnvelopeSampleBits) - 1;
 
 // Bits per chiff draw, so sixteen levels. A two-level input's output is a
@@ -100,6 +102,9 @@ class Envelope {
   void Trigger(EnvelopeStage stage);
   // Every sample written is in [0, kEnvelopeSampleMax].
   void RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31);
+  // The same samples, wide: in [0, 2^kEnvelopeValueBits), the bits the narrow
+  // ones shift away kept.
+  void RenderSamples(int32_t* sample_buffer, int32_t bias_target_q31);
   // EVERYTHING THE CHIFF CONTRIBUTES TO ONE BLOCK, derived once.
   //
   // NONE OF IT IS STAGE-DEPENDENT. The chiff's schedule is an absolute time off
@@ -124,14 +129,18 @@ class Envelope {
     int32_t levels_q4_26[1 << kChiffDrawBits];
   };
 
+  template<typename Sample>
+  void RenderBlock(Sample* sample_buffer, int32_t bias_target_q31);
+  template<typename Sample>
   void RenderStage(
-    int16_t* sample_buffer, size_t block_samples_left,
+    Sample* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
   );
   // Same arg footprint as RenderStage, so the transition is a sibling call
   // with no per-transition frame.
+  template<typename Sample>
   void HandOffToNextStage(
-    int16_t* sample_buffer, size_t block_samples_left,
+    Sample* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
   );
 
