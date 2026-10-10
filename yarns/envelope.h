@@ -122,6 +122,8 @@ class Envelope {
     int32_t mean_min_q30;
     int32_t mean_max_q30;
     int32_t levels_q4_26[1 << kChiffDrawBits];
+    // Samples until the chiff's decay completes, counted across runs.
+    uint32_t live_samples_left;
   };
 
   void RenderStage(
