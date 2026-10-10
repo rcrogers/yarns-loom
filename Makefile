@@ -120,11 +120,11 @@ firmware:
 # build/yarns/*.o, and a stale build answers about code that is not the tree.
 cycles: firmware
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh sh tools/oscprofile/build.sh
-	SKIP_PROGRAMMING=true ./env/mutable-env.sh bash tools/oscprofile/run.sh env
+	python3 tools/oscprofile/run.py env
 	python3 tools/env_profile.py
 
 # Builds first, for the same reason.
 profile: firmware
 	SKIP_PROGRAMMING=true ./env/mutable-env.sh sh tools/oscprofile/build.sh
-	SKIP_PROGRAMMING=true ./env/mutable-env.sh bash tools/oscprofile/run.sh
+	python3 tools/oscprofile/run.py
 	python3 tools/osc_profile.py
