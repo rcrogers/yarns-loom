@@ -225,6 +225,9 @@ class Envelope {
   // Half the note's ALLOWED range. A level, so it rescales with the others.
   int32_t chiff_slew_input_max_q30_;
   int32_t chiff_slew_state_q26_;
+  // The bits the last sample's shift to the output dropped, added into the
+  // next: first-order error feedback, so the rounding error is high-passed.
+  uint32_t output_remainder_q30_;
 
   // Where the current stage began. With the stage phase this anchors the
   // nominal value in closed form.

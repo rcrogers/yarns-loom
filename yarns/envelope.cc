@@ -157,6 +157,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   value_without_bias_q30_ = zero_value_q30;
   nominal_value_q30_ = zero_value_q30;
   chiff_slew_state_q26_ = 0;
+  output_remainder_q30_ = 0;
   stage_start_q30_ = zero_value_q30;
   value_floor_q30_ = std::min<int32_t>(zero_value_q30, 0);
   value_ceiling_q30_ = kValueMax_q30;
@@ -762,6 +763,10 @@ void Envelope::HandOffToNextStage(
   "  movgt ip, %[mean_max]\n"                             /*   ramped correction cannot \
                                                            *   track an exponential value */ \
   "  add   ip, ip, %[chiff], lsl %[state_shift]\n"        /*   exponential value       */ \
+  "  ldr   lr, %[remainder]\n"                            /* error feedback: what the  */ \
+  "  add   ip, ip, lr\n"                                  /*   last shift dropped      */ \
+  "  ubfx  lr, ip, #0, %[sample_bits]\n"                  /*   and what this one drops */ \
+  "  str   lr, %[remainder]\n"                                                            \
   "  usat  ip, %[sat_bits], ip, asr %[sample_bits]\n"     /* saturate and shift, 1 op  */ \
   "  strh  ip, [%[buf]], #2\n"
 // Every constant above is an "i" operand, not a digit in a string, so a
@@ -776,7 +781,9 @@ void Envelope::HandOffToNextStage(
   [chiff_rate] "+r"(chiff_slew_rate_q31),                                     \
   [target] "+r"(target_with_all_bias),                                        \
   [buf] "+r"(sample_buffer),                                                  \
-  [draws] "+r"(draws)
+  [draws] "+r"(draws),                                                        \
+  /* In MEMORY: no register is left. */                                       \
+  [remainder] "+m"(output_remainder_q30)
 #define YARNS_CHIFF_ASM_INPUTS                                                \
   /* In MEMORY, deliberately: the body is at the register ceiling and this is
    * read once per WORD, not per sample, so a stack slot is the cheap home. */ \
@@ -823,9 +830,11 @@ void Envelope::HandOffToNextStage(
     int32_t mean_q30 = static_cast<int32_t>(target_with_all_bias                     \
       - static_cast<uint32_t>(nominal_delta_q1_30));                              \
     if (mean_q30 > mean_max_q30) mean_q30 = mean_max_q30;                         \
-    int32_t sample = static_cast<int32_t>(static_cast<uint32_t>(mean_q30)           \
-      + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))          \
-      >> kSampleBits;                                                           \
+    const uint32_t sum_q30 = static_cast<uint32_t>(mean_q30)                   \
+      + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits))           \
+      + output_remainder_q30;                                                   \
+    output_remainder_q30 = sum_q30 & ((1u << kSampleBits) - 1);                 \
+    int32_t sample = static_cast<int32_t>(sum_q30) >> kSampleBits;              \
     if (sample < 0) sample = 0;                                               \
     if (sample > kEnvelopeSampleMax) sample = kEnvelopeSampleMax;             \
     *sample_buffer++ = static_cast<int16_t>(sample);                          \
@@ -963,6 +972,7 @@ void Envelope::RenderStage(
   int32_t value_without_bias_q30 = value_without_bias_q30_;
   int32_t nominal_value_q30 = nominal_value_q30_;
   int32_t chiff_slew_state_q26 = chiff_slew_state_q26_;
+  uint32_t output_remainder_q30 = output_remainder_q30_;
 
   // One straight run, bounded by the block and the stage countdown. Whichever
   // expires hands off or re-enters -- once, not re-checked per sample.
@@ -1142,6 +1152,7 @@ void Envelope::RenderStage(
     nominal_value_q30 = stage_adjusted_target_q1_30 - nominal_delta_q1_30;
     nominal_value_q30_ = nominal_value_q30;
     chiff_slew_state_q26_ = chiff_slew_state_q26;
+    output_remainder_q30_ = output_remainder_q30;
     // Nominal plus chiff, carrying NO bias, and bounded before anyone reads
     // it: value_without_bias() returns int16_t and tremolo() multiplies in
     // int32, so both wrap out of range.
