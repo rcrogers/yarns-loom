@@ -720,7 +720,11 @@ void Envelope::RenderSamples(int32_t* sample_buffer, int32_t bias_target_q31) {
 // Advance to the next stage and render the block's remaining samples there.
 // The caller saves the value first, so the re-entrant Trigger sees the real
 // start value.
+//   - Out of line, as it was before the render took a sample type: a template
+//     GCC inlines into RenderStage, and the transition is meant as a sibling
+//     call.
 template<typename Sample>
+__attribute__((noinline))
 void Envelope::HandOffToNextStage(
   Sample* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
