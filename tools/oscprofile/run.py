@@ -32,7 +32,8 @@ IMAGE = 'oscprofile-qemu'
 CONTAINER = 'oscprofile-%d' % os.getpid()
 SHAPE_ENTRIES = r'^_ZN5yarns10Oscillator(\d+Render|10RenderLoop)'
 ENVELOPE_ENTRIES = r'^_ZN5yarns8Envelope(6NoteOn|7NoteOff|13RenderSamples)E'
-ENVELOPE_FLAGS = ['_ZN5yarns8Envelope18HandOffToNextStage']
+# The narrow instance: the one the driver renders.
+ENVELOPE_FLAGS = ['_ZN5yarns8Envelope18HandOffToNextStageIsE']
 
 
 def tool(*arguments):
