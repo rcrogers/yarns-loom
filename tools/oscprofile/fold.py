@@ -19,6 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import pathcost
+from measured import tools_digest
 
 dis_path, sym_path, flag_names = sys.argv[1], sys.argv[2], sys.argv[3:]
 
@@ -181,6 +182,7 @@ def outcome_key(outcome):
 
 json.dump({
     'image': pathcost.image_digest(dis_path),
+    'tools': tools_digest(),
     'blocks': blocks_cycles,
     'flags': flag_counts,
     'tb_counts': {'%x' % pc: n for pc, n in tb_counts.items()},

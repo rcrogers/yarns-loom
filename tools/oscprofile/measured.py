@@ -7,6 +7,7 @@
 #   - a call the driver announced that the trace did not measure
 #   - an executed function that is not instruction for instruction the
 #     firmware's
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,15 @@ import pathcost
 
 OUT = os.path.join(ROOT, 'build/oscprofile')
 PROFILE_DIS = os.path.join(OUT, 'profile.dis')
+
+
+def tools_digest():
+  """What made a run's summary besides the image: run.py reruns a run whose
+  tools moved."""
+  digest = hashlib.sha1()
+  for name in ('fold.py', 'ranges.py', 'run.py', '../pathcost.py'):
+    digest.update(open(os.path.join(HERE, name), 'rb').read())
+  return digest.hexdigest()
 
 
 def fail(tool, message):
