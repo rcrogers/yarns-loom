@@ -493,33 +493,52 @@ void Oscillator::Render(int16_t* audio_mix) {
   // envelope renders below.
   // Timbre at [p], gain at [p + kAudioBlockSize]: one pointer walks both, and
   // every register held here is one the shape cannot have.
-  int16_t timbre_gain[2 * kAudioBlockSize];
+  // A shape that rings its gain takes it wide, in the same place.
+  union {
+    int16_t narrow[2 * kAudioBlockSize];
+    struct {
+      int16_t timbre[kAudioBlockSize];
+      int32_t gain_q30[kAudioBlockSize];
+    } wide;
+  } timbre_gain;
+  STATIC_ASSERT(sizeof(timbre_gain.wide.timbre)
+                == kAudioBlockSize * sizeof(int16_t), wide_gain_follows_timbre);
   // The shapes are handed the WHOLE array and index the gain half off it, so
   // what they take is input_samples, not either half by itself.
-  int16_t* input_samples = &timbre_gain[0];
-  int16_t* gain_samples = &timbre_gain[kAudioBlockSize];
+  int16_t* input_samples = &timbre_gain.narrow[0];
+  int16_t* gain_samples = &timbre_gain.narrow[kAudioBlockSize];
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
   timbre_envelope_.RenderSamples(
     input_samples, static_cast<int32_t>(static_cast<uint32_t>(timbre_bias) << 16));
 
   int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
-  gain_envelope_.RenderSamples(
-    gain_samples, static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16));
+  const int32_t gain_bias_q31 =
+    static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16);
+  const bool gain_wide = takes_wide_gain(shape_);
+  if (gain_wide) {
+    gain_envelope_.RenderSamples(timbre_gain.wide.gain_q30, gain_bias_q31);
+  } else {
+    gain_envelope_.RenderSamples(gain_samples, gain_bias_q31);
+  }
 
 #ifdef TEST
+  // The hooks below read and write the narrow format whatever the shape takes.
+  const int kWideGainShift = kEnvelopeValueBits - kEnvelopeSampleBits;
   // GAIN_PROBE=n prints every gain sample of the first n blocks rendered.
   static int gain_probe_blocks =
       getenv("GAIN_PROBE") ? atoi(getenv("GAIN_PROBE")) : 0;
   if (gain_probe_blocks > 0) {
     --gain_probe_blocks;
     for (size_t i = 0; i < kAudioBlockSize; ++i)
-      fprintf(stderr, "%d\n", gain_samples[i]);
+      fprintf(stderr, "%d\n", gain_wide
+          ? timbre_gain.wide.gain_q30[i] >> kWideGainShift : gain_samples[i]);
   }
   // CTL_DUMP=1 prints every sample's timbre and gain, as the shape reads them.
   static const bool ctl_dump = getenv("CTL_DUMP") != NULL;
   if (ctl_dump) {
     for (size_t i = 0; i < kAudioBlockSize; ++i)
-      fprintf(stderr, "%d %d\n", input_samples[i], gain_samples[i]);
+      fprintf(stderr, "%d %d\n", input_samples[i], gain_wide
+          ? timbre_gain.wide.gain_q30[i] >> kWideGainShift : gain_samples[i]);
   }
   // CTL_REPLAY=path reads CTL_DUMP's format back and hands the shape THAT in
   // place of the envelopes: a timbre from one render and a gain from another.
@@ -528,10 +547,18 @@ void Oscillator::Render(int16_t* audio_mix) {
       getenv("CTL_REPLAY") ? fopen(getenv("CTL_REPLAY"), "r") : NULL;
   if (ctl_replay) {
     for (size_t i = 0; i < kAudioBlockSize; ++i) {
-      int timbre, gain;
-      if (fscanf(ctl_replay, "%d %d", &timbre, &gain) != 2) break;
+      // The gain may carry a fraction: a wide gain keeps it, a narrow one
+      // floors it, as the envelope's own shift does.
+      int timbre;
+      double gain;
+      if (fscanf(ctl_replay, "%d %lf", &timbre, &gain) != 2) break;
       input_samples[i] = static_cast<int16_t>(timbre);
-      gain_samples[i] = static_cast<int16_t>(gain);
+      if (gain_wide) {
+        timbre_gain.wide.gain_q30[i] = static_cast<int32_t>(
+            __builtin_floor(__builtin_ldexp(gain, kWideGainShift)));
+      } else {
+        gain_samples[i] = static_cast<int16_t>(__builtin_floor(gain));
+      }
     }
   }
 #endif
@@ -1988,14 +2015,17 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // dies away its state sits at the excitation's own level -- a thump under a
   // percussive envelope, a standing offset under a sustained one. bp and hp
   // reject it.
+  // The resonant step response overshoots its input, so the excitation is
+  // half the gain, and every bit of it the state can hold.
+  // A narrow gain count is one state unit.
+  const int kGainQ30ToHalfQ15_14 = kEnvelopeValueBits - kEnvelopeSampleBits
+      + 1 - ResonatorState::kFractionalBits;
+  const int32_t* gain_q30 =
+      reinterpret_cast<const int32_t*>(input_samples + kAudioBlockSize);
 #define PING_LOOP(OUTPUT) \
   RENDER_CORE(this_sample, \
-    const int16_t gain = input_samples[kAudioBlockSize]; \
-    /* The resonant step response overshoots its input, so the excitation is */ \
-    /* halved to leave room for the overshoot. */ \
     const int32_t state_q15_14 = svf.RenderSampleAtPitch<OUTPUT>( \
-        &state, PreShape((gain >> 1) * (1 << ResonatorState::kFractionalBits)), \
-        timbre); \
+        &state, PreShape(*gain_q30++ >> kGainQ30ToHalfQ15_14), timbre); \
     InLoopSaturate(&state.bp_q15_14, state_into_curve_q32); \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = ResonatorShape(curve, MulHighS( \

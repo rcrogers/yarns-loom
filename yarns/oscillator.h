@@ -251,6 +251,12 @@ class Oscillator {
   //
   // One function because two callers need the same answer: NoteOn sets the
   // envelope to it, and set_shape rescales a held note between two of them.
+  // The resonators that are excited by the gain itself take it wide, so its
+  // steps under one narrow LSB do not ring them.
+  static inline bool takes_wide_gain(OscillatorShape shape) {
+    return shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP;
+  }
+
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
     // The loop shapes spend their gain before the filter too, but the loop is
     // homogeneous in gain, so the envelope can carry the share -- under the
