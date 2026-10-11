@@ -912,15 +912,16 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
        lut_chiff_rms_over_start_u16, chiff_phase_end_q32 - chiff_phase_q32_))
     >> 16);
   decay.drive_q4_26 = ChiffDriveAtAmount_q4_26(chiff_amount_rms_q30);
-  // Against this run's START slew time: the writeback to the end is at the
-  // loop's tail, so the slew time and amount here are a consistent pair.
-  //   - Derived HERE and not at the tail, where the start state is really
-  //     established, because here it shares its exp2 with the render's own
-  //     rate. Moving it to the tail cost 47 cycles a run for that reason.
+  // The gain is divided out a quarter of the way across the run's slew time:
+  // the rate falls through the run, and the energy is front-loaded. FITTED,
+  // against a chiff re-read every sample: the start reads ~3 dB low at
+  // DURATION 6..10 and the midpoint ~3 dB high.
+  const uint32_t chiff_slew_time_compensated_q5_27 = chiff_slew_time_log2_q5_27_
+    + ((chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) >> 2);
   chiff_slew_input_fraction_q30_ = ChiffSlewInputFractionAtAmount_q30(
-    chiff_amount_rms_q30, chiff_slew_time_log2_q5_27_,
+    chiff_amount_rms_q30, chiff_slew_time_compensated_q5_27,
     static_cast<int32_t>(
-      SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_)));
+      SlewRateFromTimeLog2_q31(chiff_slew_time_compensated_q5_27)));
   chiff_phase_q32_ = chiff_phase_end_q32;
   return decay;
 }
