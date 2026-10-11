@@ -718,15 +718,8 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
   // The chiff's decay ends a run: past that sample it is silent for the rest
   // of the note.
-  uint32_t run_samples = kAudioBlockSize;
-  const uint32_t chiff_phase_remaining_q32 = 0xFFFFFFFFu - chiff_phase_q32_;
-  if (chiff_amount_initial_q30_ && chiff_phase_remaining_q32 &&
-      static_cast<uint64_t>(chiff_phase_step_q32_) * run_samples
-        > chiff_phase_remaining_q32) {
-    run_samples = (chiff_phase_remaining_q32 - 1) / chiff_phase_step_q32_ + 1;
-  }
   ChiffBlock chiff;
-  AdvanceChiffForBlock(run_samples, &chiff);
+  const uint32_t run_samples = AdvanceChiffForBlock(kAudioBlockSize, &chiff);
   RenderStage(sample_buffer, run_samples, bias_q31_, bias_slope_q31, &chiff);
   // The run's end slew time becomes the next run's start. Needs no bound:
   // the step is a truncating divide, so this lands at or under the end it
@@ -904,6 +897,7 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
   ChiffRunDecay decay;
   decay.slew_time_step_q5_27 = 0;
   decay.drive_q4_26 = 1 << kChiffSlewStateFractionalBits;  // 1.0
+  decay.live_samples = run_samples;
   if (!chiff_amount_initial_q30_) return decay;
   // Saturate on the high word and on the phase left, not on a 64-bit compare:
   // one umull answers whether the product fits.
@@ -911,9 +905,15 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
   const uint64_t advanced =
     static_cast<uint64_t>(chiff_phase_step_q32_) * run_samples;
   const uint32_t advanced_q32 = static_cast<uint32_t>(advanced);
-  const uint32_t chiff_phase_end_q32 =
-    (advanced >> 32) == 0 && advanced_q32 < chiff_phase_remaining_q32
-      ? chiff_phase_q32_ + advanced_q32 : 0xFFFFFFFFu;
+  const bool chiff_completes =
+    (advanced >> 32) != 0 || advanced_q32 >= chiff_phase_remaining_q32;
+  const uint32_t chiff_phase_end_q32 = chiff_completes
+    ? 0xFFFFFFFFu : chiff_phase_q32_ + advanced_q32;
+  // The schedule spans only the samples up to where the decay completes.
+  if (chiff_completes && chiff_phase_remaining_q32) {
+    decay.live_samples =
+      (chiff_phase_remaining_q32 - 1) / chiff_phase_step_q32_ + 1;
+  }
   // This run's start is last run's end for both the amount and the slew time,
   // so only the END is derived here and carried forward.
   const uint32_t chiff_amount_q30 = chiff_amount_q30_;
@@ -921,8 +921,8 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
     ChiffAmountAtPhase_q30(chiff_amount_initial_q30_, chiff_phase_end_q32);
   const uint32_t chiff_slew_time_end_q5_27 = ChiffSlewTimeAtAmount_q5_27(
     chiff_amount_q30_, chiff_slew_time_at_amount_zero_q5_27_);
-  decay.slew_time_step_q5_27 = run_samples
-    ? (chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) / run_samples : 0;
+  decay.slew_time_step_q5_27 =
+    (chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) / decay.live_samples;
   // The run renders at its RMS amount, a fixed fraction of its starting
   // amount for a given phase span: a run carries the energy the decay does.
   const uint32_t chiff_amount_rms_q30 = static_cast<uint32_t>(
@@ -947,7 +947,7 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
 // ONCE A BLOCK, NOT ONCE A RUN. Everything here is a function of the chiff's
 // own schedule, which is absolute, so a stage boundary is not an event it
 // should notice -- see ChiffBlock in envelope.h and L14b.
-void Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff) {
+uint32_t Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff) {
   const ChiffRunDecay decay = AdvanceChiffDecay(block_samples);
   chiff->slew_time_step_q5_27 = decay.slew_time_step_q5_27;
   // Derived, not stored: the rate and the slew time are one quantity, held in
@@ -998,6 +998,7 @@ void Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff) {
   // caller knows what it may spend.
   chiff->mean_min_q30 = clip_threshold_bounded_q30;
   chiff->mean_max_q30 = value_ceiling_q30_ - clip_threshold_bounded_q30;
+  return decay.live_samples;
 }
 
 void Envelope::RenderStage(

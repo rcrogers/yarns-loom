@@ -143,6 +143,7 @@ class Envelope {
   struct ChiffRunDecay {
     uint32_t slew_time_step_q5_27;   // per sample
     int32_t drive_q4_26;             // at the amount the run STARTS from
+    uint32_t live_samples;           // up to where the decay completes
   };
 
 
@@ -175,7 +176,8 @@ class Envelope {
  private:
   int32_t ChiffSlewInput_q30() const;
   inline ChiffRunDecay AdvanceChiffDecay(uint32_t run_samples);
-  void AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff);
+  // Returns the samples up to where the chiff's decay completes.
+  uint32_t AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff);
 
 
   // The two byte-sized fields lead, so they share one word rather than each
