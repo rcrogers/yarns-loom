@@ -157,10 +157,15 @@ block_tbs, block_branches = {}, {}
 flag_counts = dict((name, []) for name in flag_names)
 block_flags = {}
 previous = None
+# The dearest call's own executions, so a report can say where its cycles went.
+worst_block = {'index': -1, 'cycles': -1, 'tb_counts': {}}
 
 
 def close_block():
   global block_tbs, block_branches, block_flags
+  if cycles > worst_block['cycles']:
+    worst_block.update(index=len(blocks_cycles), cycles=cycles,
+                       tb_counts=dict(block_tbs))
   blocks_cycles.append(cycles)
   blocks_flash.append(flash_words)
   blocks_taken.append(taken)
@@ -237,6 +242,9 @@ json.dump({
     'tb_counts': {'%x' % pc: n for pc, n in tb_counts.items()},
     'tb_extent': {'%x' % pc: ['%x' % a for a in translations[pc].addresses]
                   for pc in tb_counts},
+    'worst_block': {'index': worst_block['index'], 'cycles': worst_block['cycles'],
+                    'tb_counts': {'%x' % pc: n
+                                  for pc, n in worst_block['tb_counts'].items()}},
     'branch_taken': dict((outcome_key(o), n) for o, n in branch_taken.items()),
     'branch_block_max': dict((outcome_key(o), n) for o, n in branch_block_max.items()),
     'transitions': transitions,
