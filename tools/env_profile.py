@@ -38,8 +38,7 @@ BLOCK_KINDS = ('held block', 'release block', 'block after it')
 TARGETS = ('gain', 'TIMBRE up', 'TIMBRE down', 'CV')
 BIASES = ('bias held', 'bias stepping')
 PEAKS = ('panel peak', 'peak at sustain')
-# The narrow instance: the one the driver renders.
-HAND_OFF = '_ZN5yarns8Envelope18HandOffToNextStageIsE'
+HAND_OFF = '_ZN5yarns8Envelope18HandOffToNextStage'
 PARTS = sorted(int(d[3:]) for d in os.listdir(measured.OUT) if re.match(r'^env\d+$', d))
 
 

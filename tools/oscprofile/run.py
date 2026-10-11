@@ -53,8 +53,7 @@ CONTAINER_SECONDS = 6 * 3600
 WATCHDOG_SECONDS = 300
 SHAPE_ENTRIES = r'^_ZN5yarns10Oscillator(\d+Render|10RenderLoop)'
 ENVELOPE_ENTRIES = r'^_ZN5yarns8Envelope(6NoteOn|7NoteOff|13RenderSamples)E'
-# The narrow instance: the one the driver renders.
-ENVELOPE_FLAGS = ['_ZN5yarns8Envelope18HandOffToNextStageIsE']
+ENVELOPE_FLAGS = ['_ZN5yarns8Envelope18HandOffToNextStage']
 # Fixed, not the CPU count: any split runs the same cases, and a fixed one
 # keeps the cache's keys when Docker's CPUs change.
 ENVELOPE_PARTS = 16
