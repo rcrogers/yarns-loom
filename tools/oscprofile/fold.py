@@ -96,6 +96,8 @@ block_tbs, block_branches = {}, {}
 flag_counts = dict((name, []) for name in flag_names)
 block_flags = {}
 previous = None
+# The dearest call's own executions, so a report can say where its cycles went.
+worst_block = {'index': -1, 'cycles': -1, 'tb_counts': {}}
 
 _TRACE = re.compile(r'^Trace \d+: \S+ \[[0-9a-f]+/([0-9a-f]+)/')
 _IN_ASM = re.compile(r'^0x([0-9a-f]+):')
@@ -103,6 +105,9 @@ _IN_ASM = re.compile(r'^0x([0-9a-f]+):')
 
 def close_block():
   global block_tbs, block_branches, block_flags
+  if cycles > worst_block['cycles']:
+    worst_block.update(index=len(blocks_cycles), cycles=cycles,
+                       tb_counts=dict(block_tbs))
   blocks_cycles.append(cycles)
   for name in flag_names:
     flag_counts[name].append(block_flags.get(name, 0))
@@ -171,6 +176,9 @@ json.dump({
     'tb_counts': {'%x' % pc: n for pc, n in tb_counts.items()},
     'tb_extent': {'%x' % pc: ['%x' % a for a in translations[pc].addresses]
                   for pc in tb_counts},
+    'worst_block': {'index': worst_block['index'], 'cycles': worst_block['cycles'],
+                    'tb_counts': {'%x' % pc: n
+                                  for pc, n in worst_block['tb_counts'].items()}},
     'branch_taken': branch_taken,
     'branch_block_max': branch_block_max,
     'transitions': transitions,
