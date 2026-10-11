@@ -256,6 +256,25 @@ class Oscillator {
   static inline bool takes_wide_gain(OscillatorShape shape) {
     return shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP;
   }
+  static const int kGainNarrowToWideShift =
+      kEnvelopeValueBits - kEnvelopeSampleBits;
+
+  // What a shape is handed: the timbre, then the gain in the form the shape
+  // reads -- narrow, or wide where takes_wide_gain.
+  union ShapeInputs {
+    int16_t narrow[2 * kAudioBlockSize];
+    struct {
+      int16_t timbre[kAudioBlockSize];
+      int32_t gain_q30[kAudioBlockSize];
+    } wide;
+    inline void SetGain(size_t i, int16_t gain, OscillatorShape shape) {
+      if (takes_wide_gain(shape)) {
+        wide.gain_q30[i] = static_cast<int32_t>(gain) << kGainNarrowToWideShift;
+      } else {
+        narrow[kAudioBlockSize + i] = gain;
+      }
+    }
+  };
 
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
     // The loop shapes spend their gain before the filter too, but the loop is

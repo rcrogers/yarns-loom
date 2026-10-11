@@ -73,13 +73,15 @@ void RenderCase(int shape, int16_t pitch, int sweep, int gain) {
   const int steps = kBlocks * kAudioBlockSize;
   for (int b = 0; b < kBlocks; ++b) {
     osc.Refresh(pitch, 0, 0, 0);
-    int16_t timbre_gain[2 * kAudioBlockSize];
+    Oscillator::ShapeInputs inputs;
+    int16_t* const timbre_gain = inputs.narrow;
     int16_t mix[kAudioBlockSize] = { 0 };
     for (size_t i = 0; i < kAudioBlockSize; ++i) {
       const int step = b * kAudioBlockSize + i;
       timbre_gain[i] = osc.WarpTimbre(RawTimbre(sweep, step, steps),
                                       static_cast<OscillatorShape>(shape));
-      timbre_gain[i + kAudioBlockSize] = GainAt(gain, step, steps);
+      inputs.SetGain(i, GainAt(gain, step, steps),
+                     static_cast<OscillatorShape>(shape));
     }
     ProfileBlockBegin();
     (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);

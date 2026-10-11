@@ -493,16 +493,7 @@ void Oscillator::Render(int16_t* audio_mix) {
   // envelope renders below.
   // Timbre at [p], gain at [p + kAudioBlockSize]: one pointer walks both, and
   // every register held here is one the shape cannot have.
-  // A shape that rings its gain takes it wide, in the same place.
-  union {
-    int16_t narrow[2 * kAudioBlockSize];
-    struct {
-      int16_t timbre[kAudioBlockSize];
-      int32_t gain_q30[kAudioBlockSize];
-    } wide;
-  } timbre_gain;
-  STATIC_ASSERT(sizeof(timbre_gain.wide.timbre)
-                == kAudioBlockSize * sizeof(int16_t), wide_gain_follows_timbre);
+  ShapeInputs timbre_gain;
   // The shapes are handed the WHOLE array and index the gain half off it, so
   // what they take is input_samples, not either half by itself.
   int16_t* input_samples = &timbre_gain.narrow[0];
@@ -523,7 +514,6 @@ void Oscillator::Render(int16_t* audio_mix) {
 
 #ifdef TEST
   // The hooks below read and write the narrow format whatever the shape takes.
-  const int kWideGainShift = kEnvelopeValueBits - kEnvelopeSampleBits;
   // GAIN_PROBE=n prints every gain sample of the first n blocks rendered.
   static int gain_probe_blocks =
       getenv("GAIN_PROBE") ? atoi(getenv("GAIN_PROBE")) : 0;
@@ -531,14 +521,14 @@ void Oscillator::Render(int16_t* audio_mix) {
     --gain_probe_blocks;
     for (size_t i = 0; i < kAudioBlockSize; ++i)
       fprintf(stderr, "%d\n", gain_wide
-          ? timbre_gain.wide.gain_q30[i] >> kWideGainShift : gain_samples[i]);
+          ? timbre_gain.wide.gain_q30[i] >> kGainNarrowToWideShift : gain_samples[i]);
   }
   // CTL_DUMP=1 prints every sample's timbre and gain, as the shape reads them.
   static const bool ctl_dump = getenv("CTL_DUMP") != NULL;
   if (ctl_dump) {
     for (size_t i = 0; i < kAudioBlockSize; ++i)
       fprintf(stderr, "%d %d\n", input_samples[i], gain_wide
-          ? timbre_gain.wide.gain_q30[i] >> kWideGainShift : gain_samples[i]);
+          ? timbre_gain.wide.gain_q30[i] >> kGainNarrowToWideShift : gain_samples[i]);
   }
   // CTL_REPLAY=path reads CTL_DUMP's format back and hands the shape THAT in
   // place of the envelopes: a timbre from one render and a gain from another.
@@ -555,7 +545,7 @@ void Oscillator::Render(int16_t* audio_mix) {
       input_samples[i] = static_cast<int16_t>(timbre);
       if (gain_wide) {
         timbre_gain.wide.gain_q30[i] = static_cast<int32_t>(
-            __builtin_floor(__builtin_ldexp(gain, kWideGainShift)));
+            __builtin_floor(__builtin_ldexp(gain, kGainNarrowToWideShift)));
       } else {
         gain_samples[i] = static_cast<int16_t>(__builtin_floor(gain));
       }
