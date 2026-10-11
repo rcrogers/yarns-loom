@@ -753,25 +753,27 @@ void Envelope::HandOffToNextStage(
 // raw 0..kChiffDrawValueMax field. `bit_offset` is a string because `ubfx`
 // needs an immediate.
 // The rate falls across the run, and a constant held for the whole 64 samples
-// cannot follow it. Refined at every DRAW WORD instead: ip/lr are dead here, so
-// the factor comes from a stack slot and costs no register.
+// cannot follow it. A whole word steps it half a word's decay, renders its eight
+// samples, and steps the other half: each word sits on its own midpoint and
+// leaves the rate where eight per-sample steps would. A partial word steps it
+// every sample. ip/lr are dead here, so the factor comes from a stack slot and
+// costs no register.
 //   - smull, not smmul: SMMUL is the ARMv7E-M DSP extension and this builds for
 //     cortex-m3. The high word shifted up one is (rate * retained) >> 31,
-//     dropping the low word's top bit -- under 1 ulp of Q31 a word.
-#define YARNS_CHIFF_ASM_REFINE                                           \
-  "  ldr   lr, %[rate_retained]\n"                                            \
+//     dropping the low word's top bit -- under 1 ulp of Q31 a step.
+#define YARNS_CHIFF_ASM_REFINE(retained)                                      \
+  "  ldr   lr, %[" retained "]\n"                                             \
   "  smull ip, lr, %[chiff_rate], lr\n"                                       \
   "  lsl   %[chiff_rate], lr, #1\n"
 
-#define YARNS_CHIFF_REFINE_RATE()                                     \
+#define YARNS_CHIFF_REFINE_RATE(retained_q31)                                 \
   do {                                                                        \
     chiff_slew_rate_q31 = static_cast<int32_t>(                               \
       ((static_cast<int64_t>(chiff_slew_rate_q31)                             \
-        * chiff_slew_rate_retained_per_sample_q31) >> 32)) << 1;                \
+        * (retained_q31)) >> 32)) << 1;                                       \
   } while (0)
 
 #define YARNS_CHIFF_ASM_SAMPLE(bit_offset) \
-  YARNS_CHIFF_ASM_REFINE                                                             \
   "  ubfx  ip, %[draws], #" bit_offset ", %[draw_bits]\n" /* one draw, low end         */ \
   "  ldr   lr, [%[levels], ip, lsl #2]\n"                 /* what the slew chases      */ \
   "  sub   lr, lr, %[chiff]\n"                            /* delta                     */ \
@@ -811,6 +813,7 @@ void Envelope::HandOffToNextStage(
   /* In MEMORY, deliberately: the body is at the register ceiling and this is
    * read once per WORD, not per sample, so a stack slot is the cheap home. */ \
   [rate_retained] "m"(chiff_slew_rate_retained_per_sample_q31),                 \
+  [rate_retained_half_word] "m"(chiff_slew_rate_retained_per_half_word_q31),     \
   [levels] "r"(chiff_levels_q4_26),                                           \
   [clip] "r"(chiff_clip_threshold_q26),                                       \
   [mean_max] "r"(mean_max_q30),                                               \
@@ -824,7 +827,6 @@ void Envelope::HandOffToNextStage(
 
 #define YARNS_CHIFF_RENDER_SAMPLE(draw)                                       \
   do {                                                                        \
-    YARNS_CHIFF_REFINE_RATE();                                        \
     /* (delta * rate) >> 32, DOUBLED -- i.e. the high word only, no low-word  \
      * term. Two instructions saved per slew step. The dropped bit is a half  \
      * LSB per sample, and the error is bounded by the last step: at a       \
@@ -960,6 +962,12 @@ uint32_t Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chif
   chiff->rate_retained_per_sample_q31 =
     SlewRateFromTimeLog2_q31(std::min<uint32_t>(
       decay.slew_time_step_q5_27, kMaxRepresentableSlewTimeLog2_q5_27));
+  const uint32_t kChiffDrawsPerHalfWord = kChiffDrawsPerWord / 2;
+  chiff->rate_retained_per_half_word_q31 =
+    SlewRateFromTimeLog2_q31(std::min<uint32_t>(
+      decay.slew_time_step_q5_27,
+      kMaxRepresentableSlewTimeLog2_q5_27 / kChiffDrawsPerHalfWord)
+      * kChiffDrawsPerHalfWord);
   const uint32_t amplitude_gain_q31_sqrt =
     ChiffAmplitudeGainAtSlewTime_q31_sqrt(slew_time_q5_27, chiff->slew_rate_q31);
   const int32_t slew_input_q30 = ChiffSlewInput_q30();
@@ -1030,6 +1038,8 @@ void Envelope::RenderStage(
     int32_t chiff_slew_rate_q31 = chiff->slew_rate_q31;
     const uint32_t chiff_slew_rate_retained_per_sample_q31 =
       chiff->rate_retained_per_sample_q31;
+    const uint32_t chiff_slew_rate_retained_per_half_word_q31 =
+      chiff->rate_retained_per_half_word_q31;
     const int32_t* const chiff_levels_q4_26 = chiff->levels_q4_26;
     const int32_t chiff_clip_threshold_q26 = chiff->clip_threshold_q26;
     const int32_t mean_min_q30 = chiff->mean_min_q30;
@@ -1095,6 +1105,7 @@ void Envelope::RenderStage(
 #if defined(__arm__) && __ARM_ARCH >= 7
         __asm__ volatile(
           "1:\n"
+          YARNS_CHIFF_ASM_REFINE("rate_retained_half_word")
           YARNS_CHIFF_ASM_SAMPLE("0")
           YARNS_CHIFF_ASM_SAMPLE("4")
           YARNS_CHIFF_ASM_SAMPLE("8")
@@ -1103,6 +1114,7 @@ void Envelope::RenderStage(
           YARNS_CHIFF_ASM_SAMPLE("20")
           YARNS_CHIFF_ASM_SAMPLE("24")
           YARNS_CHIFF_ASM_SAMPLE("28")
+          YARNS_CHIFF_ASM_REFINE("rate_retained_half_word")
           // Consume then advance, so the register leaves holding the next
           // unspent word. ubfx reads without writing, so xorshift32 in place
           // is three instructions and no memory traffic.
@@ -1116,11 +1128,13 @@ void Envelope::RenderStage(
           : "ip", "lr", "cc", "memory");
 #else
         while (words_left--) {
+          YARNS_CHIFF_REFINE_RATE(chiff_slew_rate_retained_per_half_word_q31);
           for (uint32_t i = 0; i < kChiffDrawsPerWord; ++i) {
             YARNS_CHIFF_RENDER_SAMPLE(
               static_cast<int32_t>((draws >> (i * kChiffDrawBits))
                                    & kChiffDrawValueMax));
           }
+          YARNS_CHIFF_REFINE_RATE(chiff_slew_rate_retained_per_half_word_q31);
           draws = NextXorshift32(draws);
         }
 #endif
@@ -1142,6 +1156,7 @@ void Envelope::RenderStage(
       "  cmp   %[buf], %[end]\n"
       "  beq   2f\n"
       "1:\n"
+      YARNS_CHIFF_ASM_REFINE("rate_retained")
       YARNS_CHIFF_ASM_SAMPLE("0")
       "  lsr   %[draws], %[draws], %[draw_bits]\n"  // consumed low end first
       "  cmp   %[buf], %[end]\n"
@@ -1153,6 +1168,7 @@ void Envelope::RenderStage(
 #else
     while (sample_buffer != chunk_end) {
       // One draw, consumed low end first, matching the asm's UBFX then LSR.
+      YARNS_CHIFF_REFINE_RATE(chiff_slew_rate_retained_per_sample_q31);
       YARNS_CHIFF_RENDER_SAMPLE(static_cast<int32_t>(draws & kChiffDrawValueMax));
       draws >>= kChiffDrawBits;
     }

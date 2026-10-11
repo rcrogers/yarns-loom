@@ -117,6 +117,7 @@ class Envelope {
     // carries it from one run to the next.
     int32_t slew_rate_q31;
     uint32_t rate_retained_per_sample_q31;
+    uint32_t rate_retained_per_half_word_q31;
     uint32_t slew_time_step_q5_27;
     int32_t clip_threshold_q26;
     int32_t mean_min_q30;
