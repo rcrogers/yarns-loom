@@ -109,6 +109,9 @@ static int g_adjust_bias = 0;
 static int g_adjust_bias_block = 0;
 static int g_rescale_num = 0;
 static int g_rescale_block = 0;
+// wide=1: render the wide samples a takes_wide_gain shape reads, so the asm's
+// wide store is held to the C reference too.
+static int g_wide = 0;
 static int32_t g_value_min = INT32_MAX;
 static int32_t g_value_max = INT32_MIN;
 
@@ -116,6 +119,7 @@ static void RenderMs(double ms) {
   size_t n = (size_t)(ms * 45.0);
   for (size_t i = 0; i < n; i += kAudioBlockSize) {
     int16_t buffer[kAudioBlockSize];
+    int32_t wide_buffer[kAudioBlockSize];
     uint32_t bias_target_q31 = g_tremolo
         ? static_cast<uint32_t>(env.tremolo(g_tremolo)) << 16 : 0;
     if (g_bias_lfo) {
@@ -129,15 +133,22 @@ static void RenderMs(double ms) {
       env.Rescale(g_rescale_num, 1);
     }
     ++g_block_counter;
-    env.RenderSamples(buffer, static_cast<int32_t>(bias_target_q31));
+    if (g_wide) {
+      env.RenderSamples(wide_buffer, static_cast<int32_t>(bias_target_q31));
+    } else {
+      env.RenderSamples(buffer, static_cast<int32_t>(bias_target_q31));
+    }
     // THE SATURATION CONTRACT, watched where the samples land rather than in
     // one scenario's output -- every mode below renders through here, so a new
     // scenario is covered without anyone remembering to. yarns/envelope.h says
     // what reading a sample as unsigned buys its consumers.
     for (size_t j = 0; j < kAudioBlockSize; ++j) {
-      if (buffer[j] < 0 || buffer[j] > kEnvelopeSampleMax) {
+      const int32_t sample = g_wide ? wide_buffer[j] : buffer[j];
+      const int32_t sample_max = g_wide
+          ? (1 << kEnvelopeValueBits) - 1 : kEnvelopeSampleMax;
+      if (sample < 0 || sample > sample_max) {
         ++g_saturation_violations;
-        g_saturation_worst = buffer[j];
+        g_saturation_worst = sample;
       }
     }
     if (g_chiff_trace) {
@@ -167,6 +178,16 @@ static void RenderMs(double ms) {
       continue;
     }
     for (size_t j = 0; j < kAudioBlockSize; ++j) {
+      if (g_wide) {
+        const uint32_t sample = static_cast<uint32_t>(wide_buffer[j]);
+        if (g_hash_mode) {
+          g_hash = (g_hash ^ (sample & 0xffff)) * 16777619u;
+          g_hash = (g_hash ^ (sample >> 16)) * 16777619u;
+        } else {
+          printf("%ld\n", static_cast<long>(wide_buffer[j]));
+        }
+        continue;
+      }
       if (g_hash_mode) g_hash = (g_hash ^ (uint16_t)buffer[j]) * 16777619u;
       else printf("%d\n", buffer[j]);
     }
@@ -198,6 +219,7 @@ int main(int argc, char** argv) {
     PanelChiffAudibleSamples(duration, 0, 0);
   // KEY=VALUE flag so it never lands in the positional attack_ms slot.
   g_hash_mode = OptInt(argc, argv, "hash", 0) != 0;
+  g_wide = OptInt(argc, argv, "wide", 0);
   g_tremolo = static_cast<uint16_t>(OptInt(argc, argv, "tremolo", 0));
   g_bias_lfo = OptInt(argc, argv, "bias_lfo", 0);
   g_value_range = OptInt(argc, argv, "value_range", 0);

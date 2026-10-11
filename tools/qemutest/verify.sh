@@ -35,6 +35,9 @@ BIAS_LFO=20000
 # operand exercises the sign path through both.
 NEG_SCENARIOS="basic held"
 NEG_RANGE=-16383
+# The wide samples (a takes_wide_gain shape's gain) take their own store: USAT
+# to the value's width, unshifted, and a word. Held to the C reference plain,
+# under the saturating bias, and through the sign path.
 
 echo "== building host C reference (clang) =="
 ( cd ../hosttest && python3 ../portable_envelope.py ../.. envelope_host.cc &&
@@ -66,7 +69,19 @@ echo "== building ARM asm ELF + running every scenario under QEMU =="
       -semihosting-config arg=test,arg=$s,arg='"$AMOUNT"',arg='"$DURATION"',arg=hash=1,arg=range='"$NEG_RANGE"',arg=bias_lfo='"$BIAS_LFO"' \
       -kernel test.elf
     mv qemu_out.txt "qemu_${s}_neg.txt"
-  done' ) >/dev/null
+  done
+  qemu-system-arm -M lm3s6965evb -nographic -semihosting \
+    -semihosting-config arg=test,arg=basic,arg='"$AMOUNT"',arg='"$DURATION"',arg=hash=1,arg=wide=1 \
+    -kernel test.elf
+  mv qemu_out.txt qemu_basic_wide.txt
+  qemu-system-arm -M lm3s6965evb -nographic -semihosting \
+    -semihosting-config arg=test,arg=held,arg='"$AMOUNT"',arg='"$DURATION"',arg=hash=1,arg=wide=1,arg=tremolo='"$TREMOLO"',arg=bias_lfo='"$BIAS_LFO"' \
+    -kernel test.elf
+  mv qemu_out.txt qemu_held_wide_bias.txt
+  qemu-system-arm -M lm3s6965evb -nographic -semihosting \
+    -semihosting-config arg=test,arg=basic,arg='"$AMOUNT"',arg='"$DURATION"',arg=hash=1,arg=wide=1,arg=range='"$NEG_RANGE"',arg=bias_lfo='"$BIAS_LFO"' \
+    -kernel test.elf
+  mv qemu_out.txt qemu_basic_wide_neg.txt' ) >/dev/null
 
 echo "== diffing asm vs C, per scenario =="
 fail=0
@@ -96,6 +111,20 @@ for s in $NEG_SCENARIOS; do
     printf 'PASS %-10s neg hash %s  (asm == C)\n' "$s" "$(cat qemu_${s}_neg.txt)"
   else
     printf 'FAIL %-10s neg host=%s qemu=%s\n' "$s" "$(cat host_${s}_neg.txt)" "$(cat qemu_${s}_neg.txt)"
+    fail=1
+  fi
+done
+for run in "basic_wide:basic wide=1" \
+           "held_wide_bias:held wide=1 tremolo=$TREMOLO bias_lfo=$BIAS_LFO" \
+           "basic_wide_neg:basic wide=1 range=$NEG_RANGE bias_lfo=$BIAS_LFO"; do
+  name=${run%%:*}
+  set -- ${run#*:}
+  scenario=$1; shift
+  ../hosttest/test "$scenario" "$AMOUNT" "$DURATION" hash=1 "$@" > "host_$name.txt"
+  if cmp -s "host_$name.txt" "qemu_$name.txt"; then
+    printf 'PASS %-14s hash %s  (asm == C)\n' "$name" "$(cat qemu_$name.txt)"
+  else
+    printf 'FAIL %-14s host=%s qemu=%s\n' "$name" "$(cat host_$name.txt)" "$(cat qemu_$name.txt)"
     fail=1
   fi
 done
