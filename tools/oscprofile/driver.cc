@@ -73,7 +73,9 @@ void RenderCase(int shape, int16_t pitch, int sweep, int gain) {
   const int steps = kBlocks * kAudioBlockSize;
   for (int b = 0; b < kBlocks; ++b) {
     osc.Refresh(pitch, 0, 0, 0);
-    Oscillator::ShapeInputs inputs;
+    // Static: the frame limit is the firmware's, and this harness frame holds
+    // the shape's whole input besides.
+    static Oscillator::ShapeInputs inputs;
     int16_t* const timbre_gain = inputs.narrow;
     int16_t mix[kAudioBlockSize] = { 0 };
     for (size_t i = 0; i < kAudioBlockSize; ++i) {
