@@ -23,6 +23,7 @@
 #include "stmlib/stmlib.h"            // STATIC_ASSERT
 
 #include "yarns/drivers/dac.h"        // kAudioBlockSize
+#include "yarns/oscillator.h"         // Oscillator::ShapeInputs
 
 #ifndef STACK_RESERVATION_BYTES
 #error "STACK_RESERVATION_BYTES must be passed by the makefile; see yarns/makefile"
@@ -34,36 +35,32 @@ namespace stack_budget {
 // THE ARRAYS, sizeof-derived, so bumping kAudioBlockSize is caught here rather
 // than at runtime.
 //
-// Oscillator::Render keeps ONE array of two halves (timbre at [p], gain at
-// [p + kAudioBlockSize]) on the stack deliberately -- hot audio path; static
-// locals caused audible glitches under 4-voice paraphonic renders. See
-// oscillator.cc Render() for the rationale.
-const size_t kOscillatorRenderArray = 2 * kAudioBlockSize * sizeof(int16_t);
+// Oscillator::Render keeps its shape's inputs (the timbre, then the gain narrow
+// or wide) on the stack deliberately -- hot audio path; static locals caused
+// audible glitches under 4-voice paraphonic renders. See oscillator.cc Render()
+// for the rationale.
+const size_t kOscillatorRenderArray = sizeof(Oscillator::ShapeInputs);
 // CVOutput::RenderSamples (voice.cc): one int16 samples[kAudioBlockSize].
 const size_t kCVOutputRenderArray = kAudioBlockSize * sizeof(int16_t);
 
 // EVERYTHING ELSE ON THE DEEPEST PATH, measured rather than guessed. The
 // makefile passes -fstack-usage, which writes a .su beside every object, so
-// these are read and not estimated. From build/yarns/*.su, 2026-08-26, with the
+// these are read and not estimated. From build/yarns/*.su, 2026-10-11, with the
 // arrays above subtracted out:
 //
-//   CVOutput::RenderSamples      152 - 128 =  24
-//   Oscillator::Render           272 - 256 =  16
-//   Envelope::RenderSamples                =  16
-//   Envelope::RenderStage                  = 216  <- see below
-//   Envelope::AdvanceChiffDecay            =  48
+//   CVOutput::RenderSamples        152 - 128 =  24
+//   Oscillator::Render             400 - 384 =  16
+//   Envelope::RenderSamples                  = 120  (ChiffBlock, its setup inlined)
+//   Envelope::RenderStage                    = 152  per stage run
+//   Envelope::HandOffToNextStage             =  40  between two runs
 //
-// RenderStage dominates because its per-run setup holds the eleven values the
-// render loop needs live at once, and spills doing it. Its 216 includes the
-// sixteen-entry level table the render loop reads, which is 64 of them --
-// building that table freed the register the slew input used to hold, and the
-// spill slots that went with it more than paid for the array.
-// RenderStage tail-calls HandOffToNextStage with b.w and re-enters ITSELF as a
-// loop, so the stage machinery does not nest and this counts once.
-//
-// The figure this replaced allowed 256 B for "~6 frames at 20-40 B each". One
-// frame on this path is 248.
-const size_t kMeasuredFraming = 24 + 16 + 16 + 216 + 48;
+// The envelopes are the deepest thing Render calls: the dearest shape frame is
+// 152 (RenderLoop<BowedLoop>). RenderStage hands off and re-enters with BL, so
+// the frames NEST, one RenderStage a stage run and one HandOffToNextStage
+// between each pair; make cycles reports at most kStageRunsPerBlock runs.
+const size_t kStageRunsPerBlock = 3;
+const size_t kMeasuredFraming = 24 + 16 + 120
+    + 152 * kStageRunsPerBlock + 40 * (kStageRunsPerBlock - 1);
 
 // Above CVOutput::RenderSamples: the audio ISR's context save and the callers
 // in yarns.cc, which are not on a .su path this header can cite. Unchanged
