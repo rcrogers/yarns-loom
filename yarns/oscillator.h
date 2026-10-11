@@ -243,16 +243,10 @@ class Oscillator {
     previous_damp_drive_u15_ = 0;
   }
 
-  // What the gain envelope runs at, which is not the same as what the shape is
-  // worth. A shape that spends the gain BEFORE its filter drives an excitation
-  // with it, so the envelope is a full-range drive and the share is applied to
-  // the shape's output instead; every other shape spends it at the output, and
-  // the envelope carries the share itself.
-  //
-  // One function because two callers need the same answer: NoteOn sets the
-  // envelope to it, and set_shape rescales a held note between two of them.
   // The resonators that are excited by the gain itself take it wide, so its
-  // steps under one narrow LSB do not ring them.
+  // steps under one narrow LSB do not ring them. The other shapes that spend it
+  // before a filter or loop scale their excitation by it, where such a step is
+  // a change of level, not an excitation.
   static inline bool takes_wide_gain(OscillatorShape shape) {
     return shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP;
   }
@@ -276,6 +270,14 @@ class Oscillator {
     }
   };
 
+  // What the gain envelope runs at, which is not the same as what the shape is
+  // worth. A shape that spends the gain BEFORE its filter drives an excitation
+  // with it, so the envelope is a full-range drive and the share is applied to
+  // the shape's output instead; every other shape spends it at the output, and
+  // the envelope carries the share itself.
+  //
+  // One function because two callers need the same answer: NoteOn sets the
+  // envelope to it, and set_shape rescales a held note between two of them.
   inline uint16_t gain_envelope_peak_codes_u16(OscillatorShape shape) const {
     // The loop shapes spend their gain before the filter too, but the loop is
     // homogeneous in gain, so the envelope can carry the share -- under the
@@ -289,8 +291,8 @@ class Oscillator {
       return static_cast<uint16_t>(
           coherent_scale_codes_u16_ * headroom_u15 >> 15);
     }
-    const bool spends_gain_before_the_filter = shape == OSC_SHAPE_WHISTLE
-        || (shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP);
+    const bool spends_gain_before_the_filter =
+        shape == OSC_SHAPE_WHISTLE || takes_wide_gain(shape);
     return spends_gain_before_the_filter
         ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
   }
