@@ -107,7 +107,10 @@ enum Bias { kBiasHeld, kBiasStepping, kNumBiases };
 const int32_t kBiasStep_q31 = 8000 << 16;
 // Stage settings from the fastest, which hand off inside a block, to the
 // slowest; a peak from the panel or equal to the sustain, which makes Trigger
-// chain; EXCITER AMOUNT and DURATION from none to the most.
+// chain; EXCITER AMOUNT and DURATION from none to the most, and three whose
+// decay completes on the 63rd sample of a block -- the dearest place for it,
+// one sample short of the block's end: in the first block, beside the fastest
+// stages' hand-offs; after the legato NoteOn; and in the release.
 const int kAttacks[] = { 0, 8, 32, 127 };
 const int kDecays[] = { 0, 24, 127 };
 const int kSustains[] = { 0, 64, 127 };
@@ -115,6 +118,7 @@ const int kReleases[] = { 0, 24, 127 };
 enum Peak { kPeakPanel, kPeakAtSustain, kNumPeaks };
 const int kChiffs[][2] = {
   { 0, 0 }, { 16, 40 }, { 64, 80 }, { 127, 127 }, { 127, 0 },
+  { 7, 3 }, { 8, 10 }, { 50, 16 },
 };
 // A case's calls: NoteOn, held blocks, a legato NoteOn, held blocks, NoteOff,
 // release blocks, a NoteOn while releasing, and the blocks after it.
