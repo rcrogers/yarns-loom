@@ -245,7 +245,10 @@ static uint32_t ChiffAmplitudeGainAtSlewTime_q31_sqrt(
 // One endpoint of the ramp the render adds to every sample: the mean's rail
 // correction, plus the bias it was measured with. The run wants it at its start
 // and at its end, and differences the two.
-static uint32_t TargetWithAllBias(
+//   - Always inlined: with a render per sample width it has four call sites,
+//     and GCC 4.8 splits it out and calls it twice a run.
+__attribute__((always_inline))
+static inline uint32_t TargetWithAllBias(
     int32_t nominal_q30, int32_t bias_q30,
     int32_t mean_min_q30, int32_t mean_max_q30) {
   if (mean_min_q30 >= mean_max_q30) {
