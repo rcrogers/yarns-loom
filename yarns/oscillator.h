@@ -135,8 +135,12 @@ enum OscillatorShape {
   // OSC_SHAPE_FOLD_SINE,
   // OSC_SHAPE_FOLD_TRIANGLE,
   OSC_SHAPE_DIRAC_COMB,
-  OSC_SHAPE_TANH_SINE,
-  OSC_SHAPE_EXP_SINE,
+  OSC_SHAPE_TRI_THRU_TANH,
+  OSC_SHAPE_SINE_THRU_TANH,
+  OSC_SHAPE_EXP_THRU_TANH,
+  OSC_SHAPE_TRI_THRU_TANH_BIASED,
+  OSC_SHAPE_SINE_THRU_TANH_BIASED,
+  OSC_SHAPE_EXP_THRU_TANH_BIASED,
   OSC_SHAPE_TRI_THRU_TRI,
   OSC_SHAPE_SINE_THRU_TRI,
   OSC_SHAPE_EXP_THRU_TRI,
@@ -149,6 +153,12 @@ enum OscillatorShape {
   OSC_SHAPE_TRI_THRU_SINE_BIASED,
   OSC_SHAPE_SINE_THRU_SINE_BIASED,
   OSC_SHAPE_EXP_THRU_SINE_BIASED,
+  OSC_SHAPE_TRI_THRU_SIZZLE,
+  OSC_SHAPE_SINE_THRU_SIZZLE,
+  OSC_SHAPE_EXP_THRU_SIZZLE,
+  OSC_SHAPE_TRI_THRU_SIZZLE_BIASED,
+  OSC_SHAPE_SINE_THRU_SIZZLE_BIASED,
+  OSC_SHAPE_EXP_THRU_SIZZLE_BIASED,
   OSC_SHAPE_TRI_THRU_EXP,
   OSC_SHAPE_SINE_THRU_EXP,
   OSC_SHAPE_EXP_THRU_EXP,
@@ -353,9 +363,11 @@ class Oscillator {
   // void RenderFoldSine(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix);
   void RenderDiracComb(int16_t* input_samples, int16_t* audio_mix);
-  void RenderTanhSine(int16_t* input_samples, int16_t* audio_mix);
-  void RenderExponentialSine(int16_t* input_samples, int16_t* audio_mix);
   void RenderTransfer(int16_t* input_samples, int16_t* audio_mix);
+  void RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix);
+  void RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix);
+  // The block's carrier, at full width, advancing the phase.
+  void RenderTransferCarrier_q31(int32_t* carrier_q31);
   void RenderFM(int16_t* input_samples, int16_t* audio_mix);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
@@ -394,18 +406,23 @@ class Oscillator {
     return quadrant_lookup(lut_sine_quadrant_u16, phase);
   }
 
-  // The same table interpolated at full width, sin * 2^31 (less 2^15 at the
-  // peaks): the 16 bits sine() drops are what a shaper that amplifies its
-  // input's error -- SX, whose phase moves 16 cycles a unit -- needs.
-  inline int32_t sine_q31(uint32_t phase) const {
+  // A quadrant table interpolated at full width, * 2^31 (less 2^15 at the
+  // peaks): the 16 bits quadrant_lookup() drops are what a shaper that
+  // amplifies its input's error -- sizzle, whose phase moves 16 cycles a unit --
+  // needs.
+  inline int32_t quadrant_lookup_q31(const uint16_t* table, uint32_t phase) const {
     uint32_t quarter_phase = phase << 2;
     quarter_phase ^= -((phase >> 30) & 1);
-    const int32_t a = lut_sine_quadrant_u16[quarter_phase >> 24];
-    const int32_t b = lut_sine_quadrant_u16[(quarter_phase >> 24) + 1];
+    const int32_t a = table[quarter_phase >> 24];
+    const int32_t b = table[(quarter_phase >> 24) + 1];
     const int32_t value = (a << 15)
         + ((b - a) * static_cast<int32_t>((quarter_phase >> 8) & 0xffff) >> 1);
     const int32_t sign = static_cast<int32_t>(phase) >> 31;
     return (value ^ sign) - sign;
+  }
+
+  inline int32_t sine_q31(uint32_t phase) const {
+    return quadrant_lookup_q31(lut_sine_quadrant_u16, phase);
   }
 
   inline int16_t triangle(uint32_t phase) const {
@@ -413,6 +430,13 @@ class Oscillator {
     // This simplifies transfer waveshaping: input 0 always yields output 0.
     phase += 0x40000000;
     return ((phase >> 15) ^ (phase >> 31 ? 0xffff : 0x0000)) - 0x8000;
+  }
+
+  // The same at full width, * 2^31: triangle() is its top 16 bits.
+  inline int32_t triangle_q31(uint32_t phase) const {
+    phase += 0x40000000;
+    const uint32_t fold = static_cast<uint32_t>(static_cast<int32_t>(phase) >> 31);
+    return static_cast<int32_t>(((phase << 1) ^ fold) ^ 0x80000000u);
   }
 
   // Narrowest first, so the byte and halfword fields sit inside the reach of

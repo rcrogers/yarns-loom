@@ -706,19 +706,18 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `┴┴` Dirac comb
 - Timbre: harmonic content
 
-#### `ST` Compressed sine: hyperbolic tangent (tanh) function
-- Timbre: compression amount
-
-#### `SX` Exponential sine
-- Timbre: exponentiation amount
-
-#### `-^`, `-s`, `-e` Wavefolding transfer functions
-- Timbre: folding amount (amplification of the carrier wave into the transfer function)
-- Shapes: 18 variants, grouped under 3 distinct transfer functions
+#### `-ᵀ`, `-^`, `-s`, `-z`, `-e` Waveshaping transfer functions
+- Timbre: drive or folding amount (amplification of the carrier wave into the transfer function)
+- Shapes: 30 variants, grouped under 5 distinct transfer functions
 - Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
-- Transfer function (second symbol): triangle (`^`), sine (`s`), expo (`e`)
-- Biased variants of transfer function (`ˇ`, `ˢ`, `ə`): offset the transfer function input by a quarter cycle, producing asymmetric harmonics
+- Transfer function (second symbol):
+  - Tanh (`ᵀ`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
+  - Triangle (`^`), sine (`s`), expo (`e`): folding
+  - Sizzle (`z`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
+- Biased variants of transfer function (`⊥`, `ˇ`, `ˢ`, `ᶻ`, `ə`): offset the transfer function input, producing asymmetric harmonics
+  - Folding and sizzle transfer functions: an eighth of a cycle
+  - Tanh: to where its output rests at the same level as the biased sine's
 
 #### `FM` Frequency modulation
 - Timbre: modulation index
