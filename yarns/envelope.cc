@@ -720,14 +720,18 @@ void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
   // of the note.
   ChiffBlock chiff;
   const uint32_t run_samples = AdvanceChiffForBlock(kAudioBlockSize, &chiff);
-  chiff.silent = false;
   RenderStage(sample_buffer, run_samples, bias_q31_, bias_slope_q31, &chiff);
   // The run's end slew time becomes the next run's start. Needs no bound:
   // the step is a truncating divide, so this lands at or under the end it
   // was derived from. The battery watches the invariant.
   chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * run_samples;
   if (run_samples < kAudioBlockSize) {
-    chiff.silent = true;
+    // What AdvanceChiffForBlock makes of a zero input.
+    chiff.slew_time_step_q5_27 = 0;
+    chiff.clip_threshold_q26 = 0;
+    chiff.mean_min_q30 = 0;
+    chiff.mean_max_q30 = value_ceiling_q30_;
+    std::fill(chiff.levels_q4_26, chiff.levels_q4_26 + (1 << kChiffDrawBits), 0);
     RenderStage(sample_buffer + run_samples, kAudioBlockSize - run_samples,
                 bias_q31_, bias_slope_q31, &chiff);
   }
@@ -1001,10 +1005,6 @@ void Envelope::RenderStage(
   int16_t* sample_buffer, size_t block_samples_left,
   int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
 ) {
-  if (chiff->silent) {
-    return RenderStageSilent(
-      sample_buffer, block_samples_left, bias_q31, bias_slope_q31, chiff);
-  }
   int32_t value_without_bias_q30 = value_without_bias_q30_;
   int32_t nominal_value_q30 = nominal_value_q30_;
   int32_t chiff_slew_state_q26 = chiff_slew_state_q26_;
@@ -1205,108 +1205,6 @@ void Envelope::RenderStage(
   if (block_samples_left) {
     // Samples left with no stage handoff: re-enter for the remainder.
     return RenderStage(
-      sample_buffer, block_samples_left, bias_q31, bias_slope_q31, chiff);
-  }
-}
-
-// RenderStage once the chiff has fallen silent: what it renders when the levels
-// and the clip are zero and the mean may reach either rail, without the chiff's
-// per-sample work. The draws are still spent, so the noise that follows is the
-// noise RenderStage would have drawn.
-//   - Out of line: inlined, it takes registers from RenderStage's own setup.
-__attribute__((noinline))
-void Envelope::RenderStageSilent(
-  int16_t* sample_buffer, size_t block_samples_left,
-  int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
-) {
-  chiff_slew_state_q26_ = 0;
-  const bool timed = stage_phase_increment_u32_ != 0;
-  uint32_t run_samples = block_samples_left;
-  if (timed) run_samples = std::min<uint32_t>(run_samples, stage_samples_left_);
-  int16_t* const run_end = sample_buffer + run_samples;
-
-  const int32_t mean_min_q30 = 0;
-  const int32_t mean_max_q30 = value_ceiling_q30_;
-  const int32_t bias_q30 = bias_q31 >> 1;
-  const int32_t stage_adjusted_target_q1_30 = stage_adjusted_target_q1_30_;
-  const int32_t stage_slew_rate_q31 = stage_slew_rate_q31_;
-  const int32_t bias_slope_q30 = bias_slope_q31 >> 1;
-  int32_t nominal_value_q30 = nominal_value_q30_;
-  int32_t nominal_value_end_q30 = nominal_value_q30;
-  {
-    const int32_t nominal_delta_q1_30 = stage_adjusted_target_q1_30 - nominal_value_q30;
-    int64_t step = ((static_cast<int64_t>(nominal_delta_q1_30) * stage_slew_rate_q31) >> 31)
-      * static_cast<int32_t>(run_samples);
-    if ((nominal_delta_q1_30 >= 0 && step > nominal_delta_q1_30) || (nominal_delta_q1_30 < 0 && step < nominal_delta_q1_30)) {
-      step = nominal_delta_q1_30;
-    }
-    nominal_value_end_q30 += static_cast<int32_t>(step);
-  }
-  const int32_t bias_end_q30 = static_cast<int32_t>(
-    static_cast<uint32_t>(bias_q30)
-    + static_cast<uint32_t>(bias_slope_q30) * run_samples);
-  uint32_t target_with_all_bias = TargetWithAllBias(
-    nominal_value_q30, bias_q30, mean_min_q30, mean_max_q30);
-  const uint32_t target_with_all_bias_end = TargetWithAllBias(
-    nominal_value_end_q30, bias_end_q30, mean_min_q30, mean_max_q30);
-  const int32_t target_with_all_bias_slope = run_samples
-    ? static_cast<int32_t>(target_with_all_bias_end - target_with_all_bias)
-        / static_cast<int32_t>(run_samples)
-    : 0;
-  int32_t nominal_delta_q1_30 = stage_adjusted_target_q1_30 - nominal_value_q30;
-  target_with_all_bias += static_cast<uint32_t>(stage_adjusted_target_q1_30);
-
-  while (sample_buffer != run_end) {
-    nominal_delta_q1_30 -= 2 * static_cast<int32_t>(
-      (static_cast<int64_t>(nominal_delta_q1_30) * stage_slew_rate_q31) >> 32);
-    target_with_all_bias += target_with_all_bias_slope;
-    int32_t mean_q30 = static_cast<int32_t>(target_with_all_bias
-      - static_cast<uint32_t>(nominal_delta_q1_30));
-    if (mean_q30 > mean_max_q30) mean_q30 = mean_max_q30;
-    int32_t sample = mean_q30 >> kSampleBits;
-    if (sample < 0) sample = 0;
-    if (sample > kEnvelopeSampleMax) sample = kEnvelopeSampleMax;
-    *sample_buffer++ = static_cast<int16_t>(sample);
-  }
-
-  // The draws the run would have spent.
-  uint32_t draws_to_spend = run_samples;
-  uint32_t draws_left = chiff_draws_left_;
-  ChiffDrawWord draw_state = chiff_draws_;
-  while (draws_to_spend >= draws_left) {
-    draws_to_spend -= draws_left;
-    draw_state = NextXorshift32(draw_state);
-    draws_left = kChiffDrawsPerWord;
-  }
-  chiff_draws_ = draw_state;
-  chiff_draws_left_ = static_cast<uint8_t>(draws_left - draws_to_spend);
-
-  nominal_value_q30 = stage_adjusted_target_q1_30 - nominal_delta_q1_30;
-  nominal_value_q30_ = nominal_value_q30;
-  int32_t value_without_bias_q30 = nominal_value_q30;
-  if (value_without_bias_q30 < value_floor_q30_) {
-    value_without_bias_q30 = value_floor_q30_;
-  }
-  const int32_t value_top_q30 = value_floor_q30_ + kValueMax_q30;
-  if (value_without_bias_q30 > value_top_q30) {
-    value_without_bias_q30 = value_top_q30;
-  }
-  bias_q31 = static_cast<int32_t>(static_cast<uint32_t>(bias_q31)
-    + static_cast<uint32_t>(bias_slope_q31) * run_samples);
-
-  block_samples_left -= run_samples;
-  value_without_bias_q30_ = value_without_bias_q30;
-  bias_q31_ = bias_q31;
-
-  if (timed) {
-    stage_samples_left_ -= run_samples;
-    if (stage_samples_left_ == 0) {
-      return HandOffToNextStage(
-        sample_buffer, block_samples_left, bias_q31, bias_slope_q31, chiff);
-    }
-  }
-  if (block_samples_left) {
-    return RenderStageSilent(
       sample_buffer, block_samples_left, bias_q31, bias_slope_q31, chiff);
   }
 }

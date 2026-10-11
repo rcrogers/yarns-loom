@@ -122,16 +122,10 @@ class Envelope {
     int32_t mean_min_q30;
     int32_t mean_max_q30;
     int32_t levels_q4_26[1 << kChiffDrawBits];
-    // Held at zero for the rest of the block: RenderStageSilent renders it.
-    bool silent;
   };
 
   void CacheStageAdjustedTarget();
   void RenderStage(
-    int16_t* sample_buffer, size_t block_samples_left,
-    int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
-  );
-  void RenderStageSilent(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
   );
