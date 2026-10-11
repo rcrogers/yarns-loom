@@ -35,11 +35,12 @@ CALLS = (['NoteOn'] + ['held block'] * driver_constant('kHeldBlocks')
          + ['NoteOff'] + ['release block'] * driver_constant('kReleaseBlocks')
          + ['NoteOn, releasing'] + ['block after it'] * driver_constant('kRetriggerBlocks'))
 BLOCK_KINDS = ('held block', 'release block', 'block after it')
-TARGETS = ('gain', 'TIMBRE up', 'TIMBRE down', 'CV')
+TARGETS = ('gain', 'TIMBRE up', 'TIMBRE down', 'CV', 'gain wide')
 BIASES = ('bias held', 'bias stepping')
 PEAKS = ('panel peak', 'peak at sustain')
-# The narrow instance: the one the driver renders.
-HAND_OFF = '_ZN5yarns8Envelope18HandOffToNextStageIsE'
+# One per sample width, int16_t and int32_t.
+HAND_OFFS = ('_ZN5yarns8Envelope18HandOffToNextStageIsE',
+             '_ZN5yarns8Envelope18HandOffToNextStageIlE')
 PARTS = sorted(int(d[3:]) for d in os.listdir(measured.OUT) if re.match(r'^env\d+$', d))
 
 
@@ -58,7 +59,7 @@ def main():
   calls, executed = [], {}
   for part in PARTS:
     fold, case_lines, executions = measured.load_run(TOOL, 'env%d' % part)
-    hand_offs = fold['flags'][HAND_OFF]
+    hand_offs = [sum(counts) for counts in zip(*(fold['flags'][name] for name in HAND_OFFS))]
     index = 0
     for line in case_lines:
       case = tuple(int(field) for field in line[1:10])
