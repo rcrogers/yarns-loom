@@ -122,11 +122,8 @@ class Envelope {
     int32_t mean_min_q30;
     int32_t mean_max_q30;
     int32_t levels_q4_26[1 << kChiffDrawBits];
-    // The block's samples left when the chiff falls silent; 0 for none.
-    uint32_t silent_at_block_samples_left;
   };
 
-  void SilenceChiffBlock(ChiffBlock* chiff) const;
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
