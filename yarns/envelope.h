@@ -129,16 +129,18 @@ class Envelope {
     int32_t levels_q4_26[1 << kChiffDrawBits];
   };
 
-  // The buffer is 16-bit slots; a wide sample takes two.
-  void RenderBlock(int16_t* sample_buffer, bool wide, int32_t bias_target_q31);
+  template<typename Sample>
+  void RenderBlock(Sample* sample_buffer, int32_t bias_target_q31);
+  template<typename Sample>
   void RenderStage(
-    int16_t* sample_buffer, bool wide, size_t block_samples_left,
+    Sample* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
   );
   // Same arg footprint as RenderStage, so the transition is a sibling call
   // with no per-transition frame.
+  template<typename Sample>
   void HandOffToNextStage(
-    int16_t* sample_buffer, bool wide, size_t block_samples_left,
+    Sample* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
   );
 
