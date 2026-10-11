@@ -170,6 +170,20 @@ static inline bool IsTransferBiased(OscillatorShape shape) {
   return (shape - kFirstTransferShape) % 6 >= 3;
 }
 
+// How steep the shape's carrier and curve are, which sets its fold knee:
+// tri=2 (derivative discontinuities), sine=1, expo=3 (peak slope), carrier *
+// curve -- except sizzle, 3 whatever its carrier, as its sine-only predecessor
+// had: the carrier's own factor on top capped full TIMBRE at middle C at 47%
+// (tri) and 36% (expo) of the range, against the sine's 64% they were chosen
+// at. Tanh takes no knee, so its 1 is never read.
+static inline uint8_t TransferCrestFactor(OscillatorShape shape) {
+  static const uint8_t kSlopeFactor[] = {2, 1, 3, 1, 3};  // by TransferCurve
+  const uint8_t curve = TransferCurveOf(shape);
+  const uint8_t carrier = (shape - kFirstTransferShape) % 3;
+  return kSlopeFactor[curve]
+      * (curve == TRANSFER_CURVE_SIZZLE ? 1 : kSlopeFactor[carrier]);
+}
+
 // The biased tanh sits where the biased sine curve does: at rest it reads
 // sin(1/8 cycle) = 0.707 of full scale, which takes an input of
 // atanh(0.707) = 0.881 -- in RenderTransferTanh's units, 0.881 / 32 of 2^30.
@@ -416,18 +430,10 @@ int16_t Oscillator::WarpTimbre(
     // pitch-dependent ceiling.  f(t) = knee * t / (knee + t), computed as
     // t - t^2/(knee + t) to avoid 32-bit overflow.
     //
-    // Crest factor compensates for carrier/transfer steepness:
-    // tri=2 (derivative discontinuities), sine=1, expo=3 (peak slope).
-    // Combined factor is carrier * transfer -- except sizzle, 3 whatever its
-    // carrier, read off the shape asked about as its sine-only predecessor's
-    // was. The carrier's own factor on top capped full TIMBRE at middle C at
-    // 47% (tri) and 36% (expo) of the range, against the sine's 64% they were
-    // chosen at.
-    uint8_t crest_factor = 1;  // FM
-    if (IsTransferShape(shape)) {
-      crest_factor = TransferCurveOf(shape) == TRANSFER_CURVE_SIZZLE
-          ? 3 : transfer_crest_factor_;
-    }
+    // The crest factor is the shape's own, the one asked about: set_shape asks
+    // for the new shape's before it has become the current one.
+    const uint8_t crest_factor =
+        IsTransferShape(shape) ? TransferCrestFactor(shape) : 1;  // 1: FM
     uint32_t max_folds = 0x80000000u / ComputePhaseIncrement(pitch) / crest_factor;
     if (max_folds > 0x80000u) return timbre;
     int32_t knee = static_cast<int32_t>(max_folds << (kSamplePeakBits - kTransferMaxGainBits));
@@ -490,19 +496,13 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   // would cut the note.
   if (!sounding()) ResetFilterState();
 
-  transfer_crest_factor_ = 1;
   if (IsTransferShape(new_shape)) {
-    // tri, sine, expo; tanh and sizzle unread (WarpTimbre: tanh takes no fold
-    // knee, sizzle a fixed one).
-    static const uint8_t slope_factor[] = {2, 1, 3, 1, 1};
     uint8_t index = new_shape - kFirstTransferShape;
     transfer_carrier_ = index % 3;
     transfer_function_ = TransferCurveOf(new_shape);
     // The periodic curves' only: tanh and sizzle pick theirs up per block,
     // in their own units (kTanhAsymmetricBias_q30, kSizzle*RestPhaseOffset).
     transfer_bias_ = IsTransferBiased(new_shape) ? kTransferAsymmetricBias : 0;
-    transfer_crest_factor_ = slope_factor[transfer_carrier_]
-        * slope_factor[transfer_function_];
     // Halve max transfer gain when triangle is involved (carrier or transfer)
     // to compensate for its derivative discontinuities.
     transfer_gain_shift_ =

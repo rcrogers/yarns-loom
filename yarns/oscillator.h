@@ -206,7 +206,6 @@ class Oscillator {
     pd_square_.polarity = false;
     high_ = false;
     next_sample_ = 0;
-    transfer_crest_factor_ = 1;
   }
 
   void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias) {
@@ -448,7 +447,6 @@ class Oscillator {
   // render.
   uint8_t transfer_carrier_;
   uint8_t transfer_function_;
-  uint8_t transfer_crest_factor_;
   uint8_t transfer_gain_shift_;
 
   int16_t raw_timbre_bias_;
