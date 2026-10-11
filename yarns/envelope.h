@@ -110,8 +110,8 @@ class Envelope {
   // and all sixteen levels three times over, because the STAGE happened to end.
   //
   // The one thing that genuinely wanted the run boundary was the slew rate's
-  // tread, and it does not any more: the render refines the rate every sample,
-  // so it crosses a run boundary without noticing one.
+  // tread, and it does not any more: the render refines the rate within the
+  // run, so it crosses a run boundary without noticing one.
   struct ChiffBlock {
     // The only member that moves: the render advances it a sample at a time and
     // carries it from one run to the next.
@@ -122,7 +122,9 @@ class Envelope {
     int32_t clip_threshold_q26;
     int32_t mean_min_q30;
     int32_t mean_max_q30;
-    int32_t levels_q4_26[1 << kChiffDrawBits];
+    int32_t level_table_q4_26[1 << kChiffDrawBits];
+    // The table, or the silent levels once the chiff's decay has completed.
+    const int32_t* levels_q4_26;
   };
 
   void CacheStageAdjustedTarget();
