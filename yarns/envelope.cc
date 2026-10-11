@@ -601,6 +601,22 @@ uint32_t ChiffAudibleSamples(uint32_t chiff_duration_increment_u32) {
       ? (UINT32_MAX / chiff_duration_increment_u32) : UINT32_MAX;
 }
 
+// What nominal chases. A timed stage runs four time constants and a slew covers
+// 1 - e^-4 of its span in that time, so the adjusted target carries the
+// reciprocal and nominal lands ON the stage target as the countdown expires.
+// Holds chase the stage target itself.
+//   - It passes the stage target, so the slew input sits outside the note's
+//     range, unclamped. arrival.js is what holds the landing.
+inline void Envelope::CacheStageAdjustedTarget() {
+  const uint32_t kStageTargetOvershoot_u16 = static_cast<uint32_t>(
+    65536.0 / (1.0 - __builtin_exp(-4.0)) + 0.5);
+  stage_adjusted_target_q1_30_ = stage_phase_increment_u32_
+    ? stage_start_q30_ + static_cast<int32_t>(
+        (static_cast<int64_t>(stage_target_q30_ - stage_start_q30_) *
+         kStageTargetOvershoot_u16) >> 16)
+    : stage_target_q30_;
+}
+
 void Envelope::Trigger(EnvelopeStage stage) {
   // Anchor the new stage on where the leaving stage's nominal value reached:
   // with no chiff the value is the classic slew; a timed stage's is closed-form
@@ -638,8 +654,10 @@ void Envelope::Trigger(EnvelopeStage stage) {
       // Hold stage: no countdown; keep slewing toward the target at the rate
       // inherited from the previous stage. The chiff runs on its own schedule.
       stage_phase_increment_u32_ = 0;
+      stage_adjusted_target_q1_30_ = stage_target_q30_;
       return;
   }
+  CacheStageAdjustedTarget();
 
   if (stage_start_q30_ == stage_target_q30_) {
     return Trigger(static_cast<EnvelopeStage>(stage + 1));
@@ -1015,21 +1033,7 @@ void Envelope::RenderStage(
     const int32_t chiff_clip_threshold_q26 = chiff->clip_threshold_q26;
     const int32_t mean_min_q30 = chiff->mean_min_q30;
     const int32_t mean_max_q30 = chiff->mean_max_q30;
-    // What nominal chases. A timed stage runs four time constants and a slew
-    // covers 1 - e^-4 of its span in that time, so the adjusted target carries
-    // the reciprocal and nominal lands ON the stage target as the countdown
-    // expires. Holds chase the stage target itself.
-    //   - It passes the stage target, so the slew input sits outside the
-    //     note's range, unclamped. arrival.js is what holds the landing.
-    const uint32_t kStageTargetOvershoot_u16 = static_cast<uint32_t>(
-      65536.0 / (1.0 - __builtin_exp(-4.0)) + 0.5);
-    const int32_t stage_target_q30 = stage_target_q30_;
-    int32_t stage_adjusted_target_q1_30 = stage_target_q30;
-    if (timed) {
-      stage_adjusted_target_q1_30 = stage_start_q30_ + static_cast<int32_t>(
-        (static_cast<int64_t>(stage_target_q30 - stage_start_q30_) *
-         kStageTargetOvershoot_u16) >> 16);
-    }
+    const int32_t stage_adjusted_target_q1_30 = stage_adjusted_target_q1_30_;
     // Each slew step is four instructions: SMMLA, which halves that, is the
     // ARMv7E-M DSP extension (Cortex-M4), and this builds for cortex-m3.
     const int32_t stage_slew_rate_q31 = stage_slew_rate_q31_;
@@ -1229,6 +1233,7 @@ void Envelope::Rescale(int32_t numerator, int32_t denominator) {
   chiff_slew_state_q26_ = ScaleRatio(chiff_slew_state_q26_, num, den);
   stage_target_q30_ = ScaleRatio(stage_target_q30_, num, den);
   stage_start_q30_ = ScaleRatio(stage_start_q30_, num, den);
+  CacheStageAdjustedTarget();
   chiff_slew_input_max_q30_ = ScaleRatio(chiff_slew_input_max_q30_, num, den);
   // min(floor, 0) * s == min(floor * s, 0) for a non-negative s, so the offset
   // scales directly and the floor it came from need not be kept.

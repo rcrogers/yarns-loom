@@ -124,6 +124,7 @@ class Envelope {
     int32_t levels_q4_26[1 << kChiffDrawBits];
   };
 
+  void CacheStageAdjustedTarget();
   void RenderStage(
     int16_t* sample_buffer, size_t block_samples_left,
     int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
@@ -229,6 +230,8 @@ class Envelope {
   // Where the current stage began. With the stage phase this anchors the
   // nominal value in closed form.
   int32_t stage_start_q30_;
+  // What nominal chases this stage; Trigger caches it.
+  int32_t stage_adjusted_target_q1_30_;
   int32_t nominal_value_q30_;
   // min(note floor, 0). USAT bounds [0, 2^30), so a note reaching below zero is
   // rendered offset by its floor. State, not a local: GCC spills it there.
