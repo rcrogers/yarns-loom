@@ -1,5 +1,5 @@
 # EVERY METRIC A CHANGE CAN MOVE, IN ONE PLACE, AGAINST A NAMED BASELINE:
-# per-shape cycles and spills, the per-block totals, flash, and the goldens.
+# per-shape block cycles, the per-block totals, flash, and the goldens.
 # A change is neutral only against all of them.
 #
 #   ./env/mutable-env.sh make -f yarns/makefile syx     # build the baseline
@@ -39,7 +39,7 @@ def in_env(args):
 
 
 def disassembly():
-  # -dl, not -d: osc_cycles and block_budget find loops by source line.
+  # -dl, not -d: block_budget finds loops by source line.
   return in_env([OBJDUMP, '-dl', ELF])
 
 
@@ -57,14 +57,16 @@ def run_tool(name, dis_path):
 
 
 def shapes(dis_path):
-  """Per-shape worst-case cycles, %CPU and spills, from osc_cycles.py."""
+  """Per-shape measured block cycles a sample, from osc_profile.py: the dearest
+  steady block and the dearest first block. It fails on a profile older than
+  the build, so `make profile` before `save`."""
   out = {}
-  for line in run_tool('osc_cycles.py', dis_path).splitlines():
-    m = re.match(r'\s+(Render\w+)\s+([\d.]+)%\s+([\d.]+)%\s+(\d+)\s+(\d+)'
-                 r'\s+(\d+)\s+(\d+)', line)
-    if m:
-      out[m.group(1)] = {'cpu_hi': float(m.group(2)), 'cpu_c4': float(m.group(3)),
-                         'worst_cycles': int(m.group(5)), 'spills': int(m.group(6))}
+  text = subprocess.run(
+      [sys.executable, os.path.join(HERE, 'osc_profile.py'), dis_path, '--metrics'],
+      capture_output=True, text=True, check=True).stdout
+  for line in text.splitlines():
+    name, steady, first = line.split()[:3]
+    out[name] = {'worst': float(steady), 'first': float(first)}
   return out
 
 
@@ -123,11 +125,12 @@ def report(before, after):
   for name in sorted(set(before['shapes']) | set(after['shapes'])):
     x = before['shapes'].get(name, {})
     y = after['shapes'].get(name, {})
-    for field, unit in (('worst_cycles', 'cycles a sample'), ('spills', 'spills')):
+    for field, unit in (('worst', 'worst block, cycles a sample'),
+                        ('first', 'first block, cycles a sample')):
       a, b = x.get(field), y.get(field)
       if a != b:
         moved = True
-        print('  %-26s %s %s -> %s  %+d' % (name, unit, a, b, (b or 0) - (a or 0)))
+        print('  %-26s %s %s -> %s  %+.2f' % (name, unit, a, b, (b or 0) - (a or 0)))
 
   for case in sorted(set(before['blocks']) | set(after['blocks'])):
     a = before['blocks'].get(case, {}).get('percent')
@@ -143,7 +146,7 @@ def report(before, after):
       print('    ' + line)
 
   if not moved:
-    print('  no metric moved: cycles, spills, block totals, flash and goldens '
+    print('  no metric moved: shape cycles, block totals, flash and goldens '
           'all identical.')
 
 

@@ -1,12 +1,11 @@
 # Worst-case cycle cost of a code path, from a disassembly.
 #
-# tools/cycles.py counts the render loop, which is the per-SAMPLE cost. It
-# cannot see the per-RUN path -- the block of work RenderStage does once before
-# the loop and once after it -- and that path holds the walk, the mean clamp,
-# and several helper calls. It had never been measured, only reduced.
+# The shapes and the envelope are measured (tools/osc_profile.py,
+# tools/env_profile.py), with this file's cost table; block_budget.py prices
+# the per-block glue around them statically, here.
 #
 # WHAT THIS COMPUTES: the longest path through a function's control flow graph,
-# in the same ESTIMATED Cortex-M3 cycles tools/cycles.py counts. Longest, not
+# in ESTIMATED Cortex-M3 cycles. Longest, not
 # average, because this is a realtime system: the worst case is the only case
 # that has to fit. Back edges are cut, so each loop body is counted once; a
 # caller that knows a trip count applies it by WEIGHTING the loop's blocks.
@@ -15,10 +14,10 @@
 # WHAT IT DOES NOT DO: it does not know which way a data-dependent branch goes,
 # so the path it reports need not be reachable with any single input. It is an
 # upper bound, and it is for deltas and for sizing.
+import hashlib
 import re
 
-# Cortex-M3 timing, matching tools/cycles.py so the two are comparable, plus
-# the entries a straight-line path needs that a loop body never had:
+# Cortex-M3 timing, including:
 #   udiv/sdiv   2-12 cycles depending on the operands; the worst case governs.
 #   push/pop    1 cycle plus 1 per register.
 # WHAT THESE NUMBERS ARE, AND ARE NOT.
@@ -48,12 +47,15 @@ NOT_TAKEN_BRANCH_CYCLES = 1
 LONG_MULTIPLY_CYCLES = 4
 MEMORY_CYCLES = 2
 
-_MNEMONIC = re.compile(r'^\s*[0-9a-f]+:\s+(?:[0-9a-f]{4}\s+)+(\S+)')
+# Encodings: halfwords for code, and 2 or 8 digits for .byte and .word data.
+_MNEMONIC = re.compile(
+    r'^\s*[0-9a-f]+:\s+(?:(?:[0-9a-f]{2}|[0-9a-f]{4}|[0-9a-f]{8})\s+)+(\S+)')
 _ADDRESS = re.compile(r'\s*([0-9a-f]+):\s')
 _LABEL = re.compile(r'^([0-9a-f]+) <(.+)>:')
-# `bne.w 8002310 <Foo+0x12>` and `b.n 8001fbe <Foo+0x22a>`: the operand's bare
-# hex is the target. Registers never match, being at least four hex digits.
-_TARGET = re.compile(r'\b([0-9a-f]{4,})\b')
+# `bne.w 8002310 <Foo+0x12>` and `b.n 8001fbe <Foo+0x22a>`: the hex before the
+# symbol is the target, at any width -- an image linked at 0 has three-digit
+# ones.
+_TARGET = re.compile(r'\b([0-9a-f]+) <')
 _CONDITION = r'(?:eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)'
 _CONDITIONAL_BRANCH = re.compile(r'^b%s(?:\.[nw])?$' % _CONDITION)
 _UNCONDITIONAL_BRANCH = re.compile(r'^b(?:\.[nw])?$')
@@ -72,6 +74,17 @@ def parse(dis_path):
     if current is not None and address:
       functions[current].append((int(address.group(1), 16), line.rstrip()))
   return {name: body for name, body in functions.items() if body}
+
+
+def image_digest(dis_path):
+  """What a disassembly maps each address to, hashed: two disassemblies of one
+  image agree whatever else (source lines) they carry."""
+  digest = hashlib.sha1()
+  for line in open(dis_path, encoding='utf8', errors='replace'):
+    match = re.match(r'^\s*([0-9a-f]+):\t([0-9a-f ]+)\t', line)
+    if match:
+      digest.update(('%s %s\n' % (match.group(1), match.group(2).strip())).encode())
+  return digest.hexdigest()
 
 
 def mnemonic(text):
