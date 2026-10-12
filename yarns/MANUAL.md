@@ -706,7 +706,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `┴┴` Dirac comb
 - Timbre: harmonic content
 
-#### `-ᵀ`, `-^`, `-s`, `-z`, `-e` Waveshaping transfer functions
+#### `-ᵀ`, `-^`, `-s`, `-w`, `-e` Waveshaping transfer functions
 - Timbre: drive or folding amount (amplification of the carrier wave into the transfer function)
 - Shapes: 30 variants, grouped under 5 distinct transfer functions
 - Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
@@ -714,8 +714,8 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Transfer function (second symbol):
   - Tanh (`ᵀ`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
   - Triangle (`^`), sine (`s`), expo (`e`): folding
-  - Sizzle (`z`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
-- Biased variants of transfer function (`⊥`, `ˇ`, `ˢ`, `ᶻ`, `ə`): offset the transfer function input, producing asymmetric harmonics
+  - Sizzle (`w`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
+- Biased variants of transfer function (`⊥`, `ˇ`, `ˢ`, `ʍ`, `ə`): offset the transfer function input, producing asymmetric harmonics
   - Folding and sizzle transfer functions: an eighth of a cycle
   - Tanh: to where its output rests at the same level as the biased sine's
 

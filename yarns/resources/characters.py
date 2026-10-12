@@ -227,7 +227,7 @@ characters = {
   '\xC2': 'agp',  # rotated 's' (sine)
   '\xC3': 'gj',   # rotated '^' (tri)
   '\xC4': 'abjk', # rotated 'e' (expo)
-  '\xCA': 'ajk',  # rotated 'z' (sizzle)
+  '\xCA': 'bjgf', # rotated 'w' (sizzle)
 
   # Tanh transfer function symbol: a tiny T, and inverted for biased
   '\xC8': 'ah',
