@@ -1,6 +1,6 @@
-// Copyright 2013 Olivier Gillet.
+// Copyright 2013 Emilie Gillet.
 //
-// Author: Olivier Gillet (ol.gillet@gmail.com)
+// Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,7 @@ class CvScaler {
   
   bool can_calibrate() const;
   
-  // This class owns the calibration data and is reponsible for removing
+  // This class owns the calibration data and is responsible for removing
   // offsets.
   inline int16_t audio_sample(uint8_t channel) const {
     int32_t value = static_cast<int32_t>(

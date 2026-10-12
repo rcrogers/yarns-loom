@@ -1,6 +1,6 @@
-// Copyright 2013 Olivier Gillet.
+// Copyright 2013 Emilie Gillet.
 //
-// Author: Olivier Gillet (ol.gillet@gmail.com)
+// Author: Emilie Gillet (emilie.o.gillet@gmail.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 // -----------------------------------------------------------------------------
 //
 // Class monitoring a sequence of notes on the MIDI input and automatically
-// chosing the best layout
+// choosing the best layout
 
 #ifndef YARNS_LAYOUT_CONFIGURATOR_H_
 #define YARNS_LAYOUT_CONFIGURATOR_H_
