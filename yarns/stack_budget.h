@@ -50,17 +50,15 @@ const size_t kCVOutputRenderArray = kAudioBlockSize * sizeof(int16_t);
 //
 //   CVOutput::RenderSamples        152 - 128 =  24
 //   Oscillator::Render             400 - 384 =  16
-//   Envelope::RenderSamples                  = 120  (ChiffBlock, its setup inlined)
-//   Envelope::RenderStage                    = 152  per stage run
-//   Envelope::HandOffToNextStage             =  40  between two runs
+//   Envelope::RenderSamples                  =   0  (a tail call)
+//   Envelope::RenderBlock                    = 128  (ChiffBlock, the cursor)
+//   Envelope::RenderRun                      = 160  (every run of the block)
+//   Envelope::Trigger                        =  28  (at a stage hand-off)
 //
 // The envelopes are the deepest thing Render calls: the dearest shape frame is
-// 152 (RenderLoop<BowedLoop>). RenderStage hands off and re-enters with BL, so
-// the frames NEST, one RenderStage a stage run and one HandOffToNextStage
-// between each pair; make cycles reports at most kStageRunsPerBlock runs.
-const size_t kStageRunsPerBlock = 3;
-const size_t kMeasuredFraming = 24 + 16 + 120
-    + 152 * kStageRunsPerBlock + 40 * (kStageRunsPerBlock - 1);
+// 152 (RenderLoop<BowedLoop>). RenderRun loops over the block's stage runs, so
+// nothing nests; AdvanceChiffForBlock (80) returns before RenderRun begins.
+const size_t kMeasuredFraming = 24 + 16 + 0 + 128 + 160 + 28;
 
 // Above CVOutput::RenderSamples: the audio ISR's context save and the callers
 // in yarns.cc, which are not on a .su path this header can cite. Unchanged

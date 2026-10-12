@@ -245,8 +245,7 @@ static uint32_t ChiffAmplitudeGainAtSlewTime_q31_sqrt(
 // One endpoint of the ramp the render adds to every sample: the mean's rail
 // correction, plus the bias it was measured with. The run wants it at its start
 // and at its end, and differences the two.
-//   - Always inlined: with a render per sample width it has four call sites,
-//     and GCC 4.8 splits it out and calls it twice a run.
+//   - Always inlined: GCC 4.8 otherwise splits it out and calls it twice a run.
 __attribute__((always_inline))
 static inline uint32_t TargetWithAllBias(
     int32_t nominal_q30, int32_t bias_q30,
@@ -698,43 +697,7 @@ void Envelope::Trigger(EnvelopeStage stage) {
   }
 }
 
-template<typename Sample>
-__attribute__((always_inline))
-inline void Envelope::RenderBlock(Sample* sample_buffer, int32_t bias_target_q31) {
-  // Bias is unaffected by a stage change, so it is computed once a block.
-  const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  ChiffBlock chiff;
-  AdvanceChiffForBlock(kAudioBlockSize, &chiff);
-  RenderStage(sample_buffer, kAudioBlockSize, bias_q31_, bias_slope_q31, &chiff);
-  // The end-of-block slew time becomes the next block's start. Needs no bound:
-  // the step is a truncating divide, so this lands at or under the end it was
-  // derived from. The battery watches the invariant.
-  chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * kAudioBlockSize;
-}
 
-void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
-  RenderBlock(sample_buffer, bias_target_q31);
-}
-
-void Envelope::RenderSamples(int32_t* sample_buffer, int32_t bias_target_q31) {
-  RenderBlock(sample_buffer, bias_target_q31);
-}
-
-// Advance to the next stage and render the block's remaining samples there.
-// The caller saves the value first, so the re-entrant Trigger sees the real
-// start value.
-//   - Out of line, as it was before the render took a sample type: a template
-//     GCC inlines into RenderStage, and the transition is meant as a sibling
-//     call.
-template<typename Sample>
-__attribute__((noinline))
-void Envelope::HandOffToNextStage(
-  Sample* sample_buffer, size_t block_samples_left,
-  int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
-) {
-  Trigger(static_cast<EnvelopeStage>(stage_ + 1));
-  RenderStage(sample_buffer, block_samples_left, bias_q31, bias_slope_q31, chiff);
-}
 
 // One rendered sample, written once and expanded by all four loops below:
 // whole-word and head/tail, in both the asm and the C reference. `draw` is the
@@ -849,22 +812,25 @@ void Envelope::HandOffToNextStage(
     int32_t mean_q30 = static_cast<int32_t>(target_with_all_bias                     \
       - static_cast<uint32_t>(nominal_delta_q1_30));                              \
     if (mean_q30 > mean_max_q30) mean_q30 = mean_max_q30;                         \
-    StoreSample(&sample_buffer, static_cast<int32_t>(                         \
+    StoreSample(&sample_buffer, wide, static_cast<int32_t>(                   \
       static_cast<uint32_t>(mean_q30)                                         \
       + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))); \
   } while (0)
 
-// The asm's USAT and store, one per sample width.
-static inline void StoreSample(int16_t** sample_buffer, int32_t value_q30) {
+// The asm's USAT and store, at either width.
+static inline void StoreSample(
+    int16_t** sample_buffer, bool wide, int32_t value_q30) {
+  if (wide) {
+    if (value_q30 < 0) value_q30 = 0;
+    if (value_q30 > kValueMax_q30) value_q30 = kValueMax_q30;
+    *reinterpret_cast<int32_t*>(*sample_buffer) = value_q30;
+    *sample_buffer += 2;
+    return;
+  }
   int32_t sample = value_q30 >> kSampleBits;
   if (sample < 0) sample = 0;
   if (sample > kEnvelopeSampleMax) sample = kEnvelopeSampleMax;
   *(*sample_buffer)++ = static_cast<int16_t>(sample);
-}
-static inline void StoreSample(int32_t** sample_buffer, int32_t value_q30) {
-  if (value_q30 < 0) value_q30 = 0;
-  if (value_q30 > kValueMax_q30) value_q30 = kValueMax_q30;
-  *(*sample_buffer)++ = value_q30;
 }
 
 // Advances the chiff's phase, amount and slew input by one run, and hands back
@@ -992,14 +958,13 @@ void Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff) {
   chiff->mean_max_q30 = value_ceiling_q30_ - clip_threshold_bounded_q30;
 }
 
-template<typename Sample>
-void Envelope::RenderStage(
-  Sample* sample_buffer, size_t block_samples_left,
-  int32_t bias_q31, int32_t bias_slope_q31, ChiffBlock* chiff
+// A run's setup: what its sample loop starts from.
+__attribute__((always_inline))
+inline void Envelope::BeginRun(
+  size_t block_samples_left, int32_t bias_q31, int32_t bias_slope_q31,
+  const ChiffBlock* chiff, Run* run
 ) {
-  int32_t value_without_bias_q30 = value_without_bias_q30_;
-  int32_t nominal_value_q30 = nominal_value_q30_;
-  int32_t chiff_slew_state_q26 = chiff_slew_state_q26_;
+  const int32_t nominal_value_q30 = nominal_value_q30_;
 
   // One straight run, bounded by the block and the stage countdown. Whichever
   // expires hands off or re-enters -- once, not re-checked per sample.
@@ -1008,7 +973,8 @@ void Envelope::RenderStage(
   // below degenerates on its own. The worst case is a live chiff.
   uint32_t run_samples = block_samples_left;
   if (timed) run_samples = std::min<uint32_t>(run_samples, stage_samples_left_);
-  Sample* const run_end = sample_buffer + run_samples;
+  run->timed = timed;
+  run->run_samples = run_samples;
 
   {
     // Bias is a terminal add: neither slew carries it, so the envelope's
@@ -1019,11 +985,6 @@ void Envelope::RenderStage(
     // event its schedule knows about. The rate is the exception -- it moves a
     // sample at a time, and carries from one run into the next through this
     // struct.
-    int32_t chiff_slew_rate_q31 = chiff->slew_rate_q31;
-    const uint32_t chiff_slew_rate_retained_per_sample_q31 =
-      chiff->rate_retained_per_sample_q31;
-    const int32_t* const chiff_levels_q4_26 = chiff->levels_q4_26;
-    const int32_t chiff_clip_threshold_q26 = chiff->clip_threshold_q26;
     const int32_t mean_min_q30 = chiff->mean_min_q30;
     const int32_t mean_max_q30 = chiff->mean_max_q30;
     // What nominal chases. A timed stage runs four time constants and a slew
@@ -1079,9 +1040,74 @@ void Envelope::RenderStage(
     // Track the delta to the adjusted target, not the value: a slew step on
     // the value is sub/smull/add, on the delta it is a pure geometric decay,
     // smull/sub. The target folds into the offset register either way.
-    int32_t nominal_delta_q1_30 = stage_adjusted_target_q1_30 - nominal_value_q30;
-    target_with_all_bias += static_cast<uint32_t>(stage_adjusted_target_q1_30);
+    run->stage_adjusted_target_q1_30 = stage_adjusted_target_q1_30;
+    run->nominal_delta_q1_30 = stage_adjusted_target_q1_30 - nominal_value_q30;
+    run->target_with_all_bias =
+      target_with_all_bias + static_cast<uint32_t>(stage_adjusted_target_q1_30);
+    run->target_with_all_bias_slope = target_with_all_bias_slope;
+  }
+}
 
+// What a run leaves for the next. True when the stage expired and the next one
+// began.
+__attribute__((always_inline))
+inline bool Envelope::EndRun(
+  const Run& run, int32_t* bias_q31, int32_t bias_slope_q31) {
+  const int32_t nominal_value_q30 =
+    run.stage_adjusted_target_q1_30 - run.nominal_delta_q1_30;
+  nominal_value_q30_ = nominal_value_q30;
+  // Nominal plus chiff, carrying NO bias, and bounded before anyone reads
+  // it: value_without_bias() returns int16_t and tremolo() multiplies in
+  // int32, so both wrap out of range.
+  int32_t value_without_bias_q30 = nominal_value_q30 + static_cast<int32_t>(
+    static_cast<uint32_t>(chiff_slew_state_q26_)
+    << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits));
+  if (value_without_bias_q30 < value_floor_q30_) {
+    value_without_bias_q30 = value_floor_q30_;
+  }
+  const int32_t value_top_q30 = value_floor_q30_ + kValueMax_q30;
+  if (value_without_bias_q30 > value_top_q30) {
+    value_without_bias_q30 = value_top_q30;
+  }
+  value_without_bias_q30_ = value_without_bias_q30;
+  *bias_q31 = static_cast<int32_t>(static_cast<uint32_t>(*bias_q31)
+    + static_cast<uint32_t>(bias_slope_q31) * run.run_samples);
+  bias_q31_ = *bias_q31;
+  if (!run.timed) return false;
+  stage_samples_left_ -= run.run_samples;
+  if (stage_samples_left_) return false;
+  // The value is saved first, so the re-entrant Trigger sees the real start
+  // value.
+  Trigger(static_cast<EnvelopeStage>(stage_ + 1));
+  return true;
+}
+
+// Every run of the block, setup to hand-off. Its one call, the hand-off's
+// Trigger, comes after a run's samples: a call ahead of the asm leaves values in
+// the registers the asm needs, and GCC 4.8 cannot take them back.
+__attribute__((noinline))
+void Envelope::RenderRun(
+  BlockCursor* cursor, ChiffBlock* chiff, int32_t bias_slope_q31) {
+  // A run that ends its stage is followed by another, even of no samples.
+  bool stage_ended;
+  do {
+    int16_t* sample_buffer = cursor->sample_buffer;
+    const bool wide = cursor->wide;
+    Run run;
+    BeginRun(cursor->samples_left, cursor->bias_q31, bias_slope_q31, chiff, &run);
+    // A wide sample is two slots.
+    int16_t* const run_end = sample_buffer + (run.run_samples << wide);
+    int32_t chiff_slew_rate_q31 = chiff->slew_rate_q31;
+    const uint32_t chiff_slew_rate_retained_per_sample_q31 =
+      chiff->rate_retained_per_sample_q31;
+    const int32_t* const chiff_levels_q4_26 = chiff->levels_q4_26;
+    const int32_t chiff_clip_threshold_q26 = chiff->clip_threshold_q26;
+    const int32_t mean_max_q30 = chiff->mean_max_q30;
+    const int32_t stage_slew_rate_q31 = stage_slew_rate_q31_;
+    int32_t chiff_slew_state_q26 = chiff_slew_state_q26_;
+    int32_t nominal_delta_q1_30 = run.nominal_delta_q1_30;
+    uint32_t target_with_all_bias = run.target_with_all_bias;
+    const int32_t target_with_all_bias_slope = run.target_with_all_bias_slope;
     // A run can straddle a word boundary, so the loop chunks there. Both the
     // word and how much of it is unspent carry across runs.
     ChiffDrawWord draw_state = chiff_draws_;
@@ -1090,7 +1116,7 @@ void Envelope::RenderStage(
       draw_state >> ((kChiffDrawsPerWord - draws_left) * kChiffDrawBits);
     while (sample_buffer != run_end) {
       const uint32_t samples_left =
-        static_cast<uint32_t>(run_end - sample_buffer);
+        static_cast<uint32_t>(run_end - sample_buffer) >> wide;
       // Whole words stay inside the loop. The body sits at the register
       // ceiling -- 11 values + the draws word + ip/lr = 14 -- so the loop's
       // end test is read from memory, 2 cycles per 8 samples. A chunk loop
@@ -1122,7 +1148,7 @@ void Envelope::RenderStage(
           : YARNS_CHIFF_ASM_STATE, [words] "+r"(words_left) \
           : YARNS_CHIFF_ASM_INPUTS \
           : "ip", "lr", "cc", "memory");
-        if (sizeof(Sample) == sizeof(int16_t)) {
+        if (!wide) {
           YARNS_CHIFF_ASM_WORDS(YARNS_CHIFF_ASM_STORE_NARROW)
         } else {
           YARNS_CHIFF_ASM_WORDS(YARNS_CHIFF_ASM_STORE_WIDE)
@@ -1145,7 +1171,7 @@ void Envelope::RenderStage(
       }
       uint32_t chunk = samples_left;
       if (chunk > draws_left) chunk = draws_left;
-      Sample* const chunk_end = sample_buffer + chunk;
+      int16_t* const chunk_end = sample_buffer + (chunk << wide);
     // Thumb-2 asm. Gate on __arm__, not __ARM_ARCH: arm64 hosts define
     // __ARM_ARCH == 8 without __arm__, and must take the C reference below.
 #if defined(__arm__) && __ARM_ARCH >= 7
@@ -1166,7 +1192,7 @@ void Envelope::RenderStage(
       : YARNS_CHIFF_ASM_STATE \
       : YARNS_CHIFF_ASM_INPUTS, [end] "r"(chunk_end) \
       : "ip", "lr", "cc", "memory");
-    if (sizeof(Sample) == sizeof(int16_t)) {
+    if (!wide) {
       YARNS_CHIFF_ASM_RUN(YARNS_CHIFF_ASM_STORE_NARROW)
     } else {
       YARNS_CHIFF_ASM_RUN(YARNS_CHIFF_ASM_STORE_WIDE)
@@ -1188,47 +1214,14 @@ void Envelope::RenderStage(
     }
     chiff_draws_ = draw_state;
     chiff_draws_left_ = static_cast<uint8_t>(draws_left);
-    // Where the rate reached, for the next run in this block to continue
-    // from.
+    // Where the rate reached, for the next run in this block to continue from.
     chiff->slew_rate_q31 = chiff_slew_rate_q31;
-
-    nominal_value_q30 = stage_adjusted_target_q1_30 - nominal_delta_q1_30;
-    nominal_value_q30_ = nominal_value_q30;
     chiff_slew_state_q26_ = chiff_slew_state_q26;
-    // Nominal plus chiff, carrying NO bias, and bounded before anyone reads
-    // it: value_without_bias() returns int16_t and tremolo() multiplies in
-    // int32, so both wrap out of range.
-    value_without_bias_q30 = nominal_value_q30 + static_cast<int32_t>(
-      static_cast<uint32_t>(chiff_slew_state_q26)
-      << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits));
-    if (value_without_bias_q30 < value_floor_q30_) {
-      value_without_bias_q30 = value_floor_q30_;
-    }
-    const int32_t value_top_q30 = value_floor_q30_ + kValueMax_q30;
-    if (value_without_bias_q30 > value_top_q30) {
-      value_without_bias_q30 = value_top_q30;
-    }
-    bias_q31 = static_cast<int32_t>(static_cast<uint32_t>(bias_q31)
-      + static_cast<uint32_t>(bias_slope_q31) * run_samples);
-  }
-
-  block_samples_left -= run_samples;
-  value_without_bias_q30_ = value_without_bias_q30;
-  bias_q31_ = bias_q31;
-
-  if (timed) {
-    stage_samples_left_ -= run_samples;
-    if (stage_samples_left_ == 0) {
-      // Countdown expired: hand off to the next stage. Tail call stays flat.
-      return HandOffToNextStage(
-        sample_buffer, block_samples_left, bias_q31, bias_slope_q31, chiff);
-    }
-  }
-  if (block_samples_left) {
-    // Samples left with no stage handoff: re-enter for the remainder.
-    return RenderStage(
-      sample_buffer, block_samples_left, bias_q31, bias_slope_q31, chiff);
-  }
+    run.nominal_delta_q1_30 = nominal_delta_q1_30;
+    cursor->sample_buffer = sample_buffer;
+    cursor->samples_left -= run.run_samples;
+    stage_ended = EndRun(run, &cursor->bias_q31, bias_slope_q31);
+  } while (stage_ended || cursor->samples_left);
 }
 
 #undef YARNS_CHIFF_ASM_SAMPLE
@@ -1240,6 +1233,28 @@ void Envelope::RenderStage(
 #undef YARNS_CHIFF_ASM_STATE
 #undef YARNS_CHIFF_ASM_INPUTS
 
+// The buffer is 16-bit slots; a wide sample takes two.
+void Envelope::RenderBlock(
+  int16_t* sample_buffer, bool wide, int32_t bias_target_q31) {
+  // Bias is unaffected by a stage change, so it is computed once a block.
+  const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
+  ChiffBlock chiff;
+  AdvanceChiffForBlock(kAudioBlockSize, &chiff);
+  BlockCursor cursor = { sample_buffer, kAudioBlockSize, bias_q31_, wide };
+  RenderRun(&cursor, &chiff, bias_slope_q31);
+  // The end-of-block slew time becomes the next block's start. Needs no bound:
+  // the step is a truncating divide, so this lands at or under the end it was
+  // derived from. The battery watches the invariant.
+  chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * kAudioBlockSize;
+}
+
+void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
+  RenderBlock(sample_buffer, false, bias_target_q31);
+}
+
+void Envelope::RenderSamples(int32_t* sample_buffer, int32_t bias_target_q31) {
+  RenderBlock(reinterpret_cast<int16_t*>(sample_buffer), true, bias_target_q31);
+}
 
 // Rescale every level by numerator/denominator, both non-negative. Cold
 // path, so exact per-field division is fine. Slew times are

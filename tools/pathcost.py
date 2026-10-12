@@ -511,8 +511,8 @@ def longest_path_breakdown(graph, call_cost, by_address, weights=()):
 def call_cost_function(functions, boundary=()):
   """-> (cost(address), {address: name}); `boundary` names cost nothing.
 
-  A callee already on the stack costs nothing: RenderStage tail-calls its way
-  back into itself for the next run, and ONE run is what is being priced.
+  A callee already on the stack costs nothing: a function that calls back into
+  itself is priced for one pass, not unrolled.
   """
   by_address = {body[0][0]: name for name, body in functions.items()}
   memo, visiting = {}, set()
