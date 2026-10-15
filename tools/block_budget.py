@@ -21,6 +21,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'oscprofile'))
+import measured
 import pathcost
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -344,11 +346,11 @@ def account_for_the_whole_tree():
 
 account_for_the_whole_tree()
 print()
-print('  THESE TOTALS ARE LOWER BOUNDS. The cost table is a Cortex-M3 core and the')
-print('  F103 is not one: two flash wait states at 72 MHz, hidden by the prefetch')
-print('  buffer for straight-line code and not for a taken branch. The error has')
-print('  the same sign everywhere. Trust a DIFFERENCE between two builds; do not')
-print('  quote a total as a measurement. See tools/pathcost.py.')
+print('  THESE TOTALS ARE NOT MEASUREMENTS. The envelope and shape rows price')
+print('  flash reads and taken branches by the datasheet, not by hardware --')
+print('  %s.' % measured.ASSUMPTIONS)
+print('  The other rows are the bare Cortex-M3 table, a lower bound. Trust a')
+print('  DIFFERENCE between two builds; do not quote a total as a measurement.')
 print()
 print('  NOT COUNTED, and it is not nothing: ui.DoEvents, midi_handler.ProcessInput')
 print('  and multi.LowPriority share the same main loop and the same 72 MHz. They')

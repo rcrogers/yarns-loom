@@ -1,7 +1,8 @@
 # Measured cycles of every envelope call: the firmware's own Envelope run under
 # QEMU over a grid of patches (tools/oscprofile), each executed instruction
 # priced by tools/pathcost.py's Cortex-M3 table, a conditional branch as taken
-# or not by where execution went next.
+# or not by where execution went next, plus measured.py's flash read and taken
+# branch costs.
 #
 #   make cycles                           build, run, report
 #   python3 tools/env_profile.py [DIS]    report from build/oscprofile
@@ -58,11 +59,13 @@ def main():
   for part in PARTS:
     fold, case_lines, executions = measured.load_run(TOOL, 'env%d' % part)
     hand_offs = fold['flags'][HAND_OFF]
+    costs = measured.modeled(fold)
     index = 0
     for line in case_lines:
       case = tuple(int(field) for field in line[1:10])
       for kind in CALLS:
-        calls.append((kind, fold['blocks'][index], hand_offs[index], case))
+        calls.append((kind, costs[index], hand_offs[index], case,
+                      fold['blocks'][index], fold['flash_reads'][index]))
         index += 1
     for address, count in executions.items():
       executed[address] = executed.get(address, 0) + count
@@ -80,11 +83,11 @@ def main():
   arrival = max(arrivals)
 
   if '--metrics' in arguments:
-    print('steady_block %d' % steady[1])
-    print('any_block %d' % any_block[1])
+    print('steady_block %d' % round(steady[1]))
+    print('any_block %d' % round(any_block[1]))
     print('runs_per_block %d' % most_runs)
-    print('note_on %d' % note_on[1])
-    print('arrival %d' % arrival[0])
+    print('note_on %d' % round(note_on[1]))
+    print('arrival %d' % round(arrival[0]))
     return
   if '--uncovered' in arguments:
     measured.report_unexecuted(image, names, executed,
@@ -92,23 +95,25 @@ def main():
     return
 
   print('  %d cases, %d calls' % (len(calls) // len(CALLS), len(calls)))
-  print('  %-22s %8s %8s  %s' % ('call', 'worst', 'mean', 'where the worst was'))
+  print('  %s' % measured.ASSUMPTIONS)
+  print('  %-22s %7s %7s %7s %6s  %s' % ('call', 'worst', 'core', 'mean', 'flash',
+                                         'where the worst was'))
   for kind in sorted(set(CALLS), key=CALLS.index):
     these = [c for c in calls if c[0] == kind]
     worst = max(these, key=lambda c: c[1])
-    print('  %-22s %8d %8.0f  %s' % (kind, worst[1],
-                                     sum(c[1] for c in these) / float(len(these)),
-                                     describe(worst[3])))
+    print('  %-22s %7.0f %7d %7.0f %6d  %s' % (
+        kind, worst[1], worst[4], sum(c[1] for c in these) / float(len(these)),
+        worst[5], describe(worst[3])))
   print('  ---')
-  print('  steady block, no stage hand-off   %5d cycles, %5.1f a sample  %s'
+  print('  steady block, no stage hand-off   %5.0f cycles, %5.1f a sample  %s'
         % (steady[1], steady[1] / float(BLOCK_SAMPLES), describe(steady[3])))
-  print('  any block                         %5d cycles, %5.1f a sample  %s'
+  print('  any block                         %5.0f cycles, %5.1f a sample  %s'
         % (any_block[1], any_block[1] / float(BLOCK_SAMPLES), describe(any_block[3])))
   print('  stage runs in one block, at most  %5d' % most_runs)
-  print('  NoteOn and the block after it     %5d cycles  %s'
+  print('  NoteOn and the block after it     %5.0f cycles  %s'
         % (arrival[0], describe(arrival[1])))
-  print('  A call whole, every rare path as often as it ran. A Cortex-M3 table')
-  print('  without flash wait states: a lower bound, good for deltas.')
+  print('  A call whole, every rare path as often as it ran. core = the worst call')
+  print('  by the cycle table alone; flash = the words it read from flash.')
   measured.report_unexecuted(image, names, executed)
 
 

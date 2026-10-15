@@ -1,10 +1,19 @@
 # Folds a QEMU `-d exec,in_asm,nochain` trace of the profile harness into the
 # cycles each audio block executed, priced by tools/pathcost.py's table.
 #
-#   fold.py DIS SYM [SYMBOL ...] < trace > summary.json
+#   fold.py DIS SYM [--reads=FILE] [SYMBOL ...] < trace > summary.json
 #
 # For each SYMBOL (a substring of one function's name), the summary counts,
 # per measured call, how many times that function was entered.
+#
+# Two counts the cycle table cannot price, per measured call, for
+# measured.py to:
+#   flash_reads  words loaded from flash, by FILE: flashload.so's flash and
+#                RAM reads for each load instruction, from the same run. A
+#                load seen reading both counts as flash and, if a measured
+#                call ran it, is listed.
+#   taken        control transfers that leave the straight line: a taken
+#                branch, a jump, a call, a return.
 #
 # The trace is the instruction stream, exactly: in_asm gives each translation
 # block's instructions once, exec gives every block executed in order. A
@@ -21,7 +30,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import pathcost
 from measured import tools_digest
 
-dis_path, sym_path, flag_names = sys.argv[1], sys.argv[2], sys.argv[3:]
+dis_path, sym_path = sys.argv[1], sys.argv[2]
+reads_path = next((a[len('--reads='):] for a in sys.argv[3:] if a.startswith('--reads=')), None)
+flag_names = [a for a in sys.argv[3:] if not a.startswith('--reads=')]
 
 symbols = {}
 for line in open(sym_path):
@@ -53,6 +64,29 @@ def computed_destination(text):
               re.search(r'(?:^|[\s{,])pc(?:[,}]|$)', operands))
 
 
+def words_loaded(text):
+  """Words one execution of a load reads."""
+  name = pathcost.mnemonic(text)
+  if name.startswith('ldrd'):
+    return 2
+  if re.match(r'^(?:ldm|pop)', name):
+    registers = 0
+    for group in text.split('{')[-1].split('}')[0].split(','):
+      ends = group.strip().split('-')
+      registers += (int(ends[1][1:]) - int(ends[0][1:]) + 1) if len(ends) == 2 else 1
+    return registers
+  return 1
+
+
+# Each load instruction's flash and RAM reads, from flashload.so.
+reads = {}
+for line in open(reads_path) if reads_path else ():
+  if not line.startswith('#'):
+    pc, flash, ram = line.split()
+    reads[int(pc, 16)] = (int(flash), int(ram))
+mixed_loads = sorted(pc for pc, (flash, ram) in reads.items() if flash and ram)
+
+
 _ENCODING = re.compile(r'^\s*[0-9a-f]+:\s+((?:[0-9a-f]{4}\s)+)')
 instruction = {}
 for line in open(dis_path, encoding='utf8', errors='replace'):
@@ -65,8 +99,9 @@ for line in open(dis_path, encoding='utf8', errors='replace'):
   address = int(line.split(':')[0], 16)
   size = 2 * len(match.group(1).split())
   kind, target = pathcost.classify(text)
+  flash_words = words_loaded(text) if reads.get(address, (0, 0))[0] else 0
   instruction[address] = (pathcost.instruction_cycles(text), size, kind, target,
-                          computed_destination(text))
+                          computed_destination(text), flash_words)
 
 
 def measured(address):
@@ -76,13 +111,15 @@ def measured(address):
 class Block(object):
   """One QEMU translation block, priced as far as it can be on its own, and
   what each block seen after it means: (follows from its last instruction,
-  the branch outcome to count or None, cycles to take back)."""
+  the branch outcome to count or None, cycles to take back, 1 if the next
+  block is not the straight line on)."""
 
   def __init__(self, addresses):
     self.addresses = addresses
     self.cycles = sum(instruction[a][0] for a in addresses if measured(a))
+    self.flash_words = sum(instruction[a][5] for a in addresses if measured(a))
     self.last = addresses[-1]
-    _, size, self.kind, self.target, self.computed = instruction[self.last]
+    _, size, self.kind, self.target, self.computed, _ = instruction[self.last]
     self.fallthrough = self.last + size
     self.measured_start = measured(addresses[0])
     self.measured_last = measured(self.last)
@@ -102,13 +139,15 @@ class Block(object):
       taken = pc == self.target and self.target != self.fallthrough
       outcome = (self.last, taken)
       refund = 0 if taken else REFUND
-    self.next[pc] = (fits, outcome, refund)
+    left_line = int(self.measured_last and pc != self.fallthrough)
+    self.next[pc] = (fits, outcome, refund, left_line)
     return self.next[pc]
 
 
 translations = {}
 pending = None
-blocks_cycles = []
+blocks_cycles, blocks_flash, blocks_taken = [], [], []
+flash_words, taken = 0, 0
 tb_counts = {}
 branch_taken, branch_block_max = {}, {}
 violations, transitions = [], 0
@@ -123,6 +162,8 @@ previous = None
 def close_block():
   global block_tbs, block_branches, block_flags
   blocks_cycles.append(cycles)
+  blocks_flash.append(flash_words)
+  blocks_taken.append(taken)
   for name in flag_names:
     flag_counts[name].append(block_flags.get(name, 0))
   block_flags = {}
@@ -150,14 +191,17 @@ for line in sys.stdin:
     pc = int(line.split('/', 2)[1], 16)
     if previous is not None:
       transitions += 1
-      fits, outcome, refund = previous.next.get(pc) or previous.successor(pc)
+      fits, outcome, refund, left_line = (previous.next.get(pc)
+                                          or previous.successor(pc))
       if not fits:
         violations.append('0x%x (%s) -> 0x%x' % (previous.last, previous.kind, pc))
-      if inside and outcome is not None:
-        cycles -= refund
-        block_branches[outcome] = block_branches.get(outcome, 0) + 1
+      if inside:
+        taken += left_line
+        if outcome is not None:
+          cycles -= refund
+          block_branches[outcome] = block_branches.get(outcome, 0) + 1
     if pc == BEGIN:
-      inside, cycles = True, 0
+      inside, cycles, flash_words, taken = True, 0, 0, 0
     elif pc == END:
       if inside:
         close_block()
@@ -165,6 +209,7 @@ for line in sys.stdin:
     block = translations[pc]
     if inside:
       cycles += block.cycles
+      flash_words += block.flash_words
       if block.measured_start:
         block_tbs[pc] = block_tbs.get(pc, 0) + 1
       if pc in FLAGS:
@@ -184,6 +229,10 @@ json.dump({
     'image': pathcost.image_digest(dis_path),
     'tools': tools_digest(),
     'blocks': blocks_cycles,
+    'flash_reads': blocks_flash if reads_path else None,
+    'taken': blocks_taken,
+    'mixed_loads': ['%x' % pc for pc in mixed_loads if any(
+        pc in translations[start].addresses for start in tb_counts)],
     'flags': flag_counts,
     'tb_counts': {'%x' % pc: n for pc, n in tb_counts.items()},
     'tb_extent': {'%x' % pc: ['%x' % a for a in translations[pc].addresses]

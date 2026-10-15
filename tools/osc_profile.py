@@ -63,7 +63,7 @@ def main():
     cases = [(int(pitch), int(sweep), int(gain), block)
              for _, _, pitch, sweep, gain, blocks in case_lines
              for block in range(int(blocks))]
-    blocks = list(zip(fold['blocks'], cases))
+    blocks = list(zip(measured.modeled(fold), cases))
     steady = [(c, case) for c, case in blocks if case[3] > 0]
     first = [(c, case) for c, case in blocks if case[3] == 0]
     middle_c = lambda pairs: max(c for c, case in pairs if case[0] == MIDDLE_C_PITCH)
@@ -75,6 +75,10 @@ def main():
                  'c4_steady': middle_c(steady), 'c4_first': middle_c(first),
                  'least': min(c for c, _ in blocks),
                  'mean': sum(c for c, _ in blocks) / float(len(blocks)),
+                 'core': max(fold['blocks']),
+                 'flash': sum(fold['flash_reads']) / float(samples),
+                 'taken': sum(fold['taken']) / float(samples),
+                 'mixed': fold['mixed_loads'],
                  'stack': stack / float(samples)})
     runs[name] = (fold, samples)
     for address, count in executions.items():
@@ -110,27 +114,35 @@ def main():
                                arguments[arguments.index('--uncovered') + 1])
     return
 
-  print('  %-28s %7s %7s %7s %7s %7s %7s %7s' % (
+  print('  %s' % measured.ASSUMPTIONS)
+  print('  %-24s %7s %7s %7s %7s %7s %7s %7s %6s %6s %6s' % (
       'shape, cycles a sample', 'worst', '1st blk', 'C4', 'C4 1st', 'least',
-      'mean', 'stack'))
+      'mean', 'core', 'flash', 'taken', 'stack'))
   for row in sorted(rows, key=lambda r: -r['steady'][0]):
-    print('  %-28s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.2f' % (
+    print('  %-24s %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %7.1f %6.2f %6.2f %6.2f' % (
         row['name'].replace('OSC_SHAPE_', ''), per_sample(row['steady'][0]),
         per_sample(row['first']), per_sample(row['c4_steady']),
         per_sample(row['c4_first']), per_sample(row['least']),
-        per_sample(row['mean']), row['stack']))
+        per_sample(row['mean']), per_sample(row['core']), row['flash'],
+        row['taken'], row['stack']))
   print('  ---')
+  print('  worst .. mean: the cycle table plus the two costs above. core = the')
+  print('  dearest block by the cycle table alone; flash = words read from flash a')
+  print('  sample (flashload.so, by address); taken = control transfers off the')
+  print('  straight line a sample.')
   print('  One render call over its %d samples: per-block setup, every sample, and'
         % BLOCK_SAMPLES)
   print('  every rare path as often as it ran. worst = the dearest block after the')
   print('  first, over every pitch, TIMBRE and gain case; 1st blk = the dearest first')
   print('  block after set_shape; C4 = those at MIDI 60; least, mean = over every')
-  print('  block; stack = sp loads and stores executed a sample. A Cortex-M3 table')
-  print('  without flash wait states: a lower bound, good for deltas.')
+  print('  block; stack = sp loads and stores executed a sample.')
   print('  Where the worst blocks were:')
   for row in sorted(rows, key=lambda r: -r['steady'][0])[:5]:
     print('    %-24s %s' % (row['name'].replace('OSC_SHAPE_', ''),
                             describe(row['steady'][1])))
+  mixed = sorted(set(pc for row in rows for pc in row['mixed']))
+  if mixed:
+    print('  Loads seen reading both flash and RAM, priced as flash: ' + ', '.join(mixed))
   measured.report_unexecuted(image, names, executed)
 
 

@@ -26,9 +26,31 @@ def tools_digest():
   """What made a run's summary besides the image: run.py reruns a run whose
   tools moved."""
   digest = hashlib.sha1()
-  for name in ('fold.py', 'ranges.py', 'run.py', '../pathcost.py'):
+  for name in ('fold.py', 'ranges.py', 'run.py', 'flashload.c', 'Dockerfile',
+               '../pathcost.py'):
     digest.update(open(os.path.join(HERE, name), 'rb').read())
   return digest.hexdigest()
+
+
+# What the cycle table leaves out, priced from the datasheets and UNCALIBRATED:
+# no hardware measurement checks them. RM0008 3.3.3: at 72 MHz the F103's
+# flash takes 2 wait states, which its prefetch buffer hides from
+# straight-line instruction fetch alone.
+#   - A data read from flash -- a literal pool, a table -- waits them out.
+FLASH_READ_EXTRA_CYCLES = 2
+#   - A transfer off the straight line fetches its target past the buffer.
+TAKEN_BRANCH_EXTRA_CYCLES = 2
+ASSUMPTIONS = ('UNCALIBRATED: a flash data read +%d cycles, a taken branch +%d '
+               '(RM0008: 2 wait states at 72 MHz)'
+               % (FLASH_READ_EXTRA_CYCLES, TAKEN_BRANCH_EXTRA_CYCLES))
+
+
+def modeled(fold):
+  """Each measured call's cycles with the flash reads and taken branches
+  priced."""
+  return [cycles + FLASH_READ_EXTRA_CYCLES * flash + TAKEN_BRANCH_EXTRA_CYCLES * taken
+          for cycles, flash, taken in zip(fold['blocks'], fold['flash_reads'],
+                                          fold['taken'])]
 
 
 def fail(tool, message):
@@ -48,6 +70,8 @@ def load_run(tool, directory):
     fail(tool, 'no profile in %s: run make profile' % directory)
   if fold.get('image') != pathcost.image_digest(PROFILE_DIS):
     fail(tool, '%s was profiled against another image: re-run it' % directory)
+  if fold.get('flash_reads') is None:
+    fail(tool, '%s was profiled without flash reads: re-run it' % directory)
   if fold['violation_count']:
     fail(tool, '%s: %d trace transitions do not follow from their branch, e.g. %s'
          % (directory, fold['violation_count'], fold['violations'][0]))

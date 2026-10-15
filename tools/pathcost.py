@@ -29,9 +29,10 @@ import re
 # nothing here models.
 #
 # The error therefore has the SAME SIGN everywhere -- these are lower bounds --
-# and it does not cancel between two builds of the same code shape. That is why
-# every tool here says it is good for DELTAS: a difference between two builds is
-# trustworthy, an absolute total is not.
+# and it cancels between two builds only where they read flash and branch
+# alike: a shape that reads ten words of flash a sample can rank below one
+# that reads none and be the dearer. tools/oscprofile/measured.py prices both
+# for the code it profiles, from the datasheet.
 #
 # NEVER QUOTE A TOTAL AS A MEASUREMENT. "The attack block is 93.6%" means "93.6%
 # by a model that cannot see wait states", and the true figure is higher by an
