@@ -1033,15 +1033,13 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
 // phase-derived dither it carried broke that error up into noise rather than
 // lowering it, and goes with it.
 //
-// C0 2^f by Horner, C0 folded into the fit, as cycles in q29 (it reaches 4.4):
-// within 3.6e-6 -- under what the sine's own rounding already moves the phase.
-static inline uint32_t SizzleCycles_q29(uint32_t fraction_u32) {
-  uint32_t value = 16028129;
-  value = 60577284 + MulHighU(value, fraction_u32);
-  value = 283012461 + MulHighU(value, fraction_u32);
-  value = 811679267 + MulHighU(value, fraction_u32);
-  return 1171310032 + MulHighU(value, fraction_u32);
-}
+// C0 2^f as cycles in q29 (it reaches 4.4): 2^f off Exp2Fraction_q15, as tanh
+// takes it, times C0 in q14 -- one MUL a degree, every constant an immediate.
+// Its 32-bit predecessor, a UMULL a degree with C0 folded into the fit, read
+// all five of its coefficients from the literal pool every sample: in flash,
+// two wait states each, which the profile could not see. Within 7e-5 of C0
+// 2^f, 0.0007 cycle at the top of the sweep.
+static const uint32_t kSizzleC0_q14 = 35746;  // e^(5 pi / 6) / 2 pi
 
 // The transfer family's carriers through sizzle, at full width: the phase moves
 // 16 cycles a unit of x, so a 16-bit carrier's own rounding is the next limit.
@@ -1059,8 +1057,8 @@ void Oscillator::RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix
     // a x in q28: carrier * 2^31 times gain * a * 2^29, high word.
     const int32_t exponent_q28 = MulHighS(*carrier++, timbre * kExponentGain_q14);
     const int32_t whole = exponent_q28 >> 28;  // -3 .. 2
-    const uint32_t cycles_q29 =
-        SizzleCycles_q29(static_cast<uint32_t>(exponent_q28) << 4);
+    const uint32_t cycles_q29 = kSizzleC0_q14 * Exp2Fraction_q15(
+        (static_cast<uint32_t>(exponent_q28) >> 12) & 0xffff);
     const uint32_t sizzle_phase = (cycles_q29 << (3 + whole)) + rest_phase_offset;
     this_sample = sine(sizzle_phase);
   )
