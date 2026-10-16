@@ -972,18 +972,26 @@ void Oscillator::RenderTransferCarrier_q31(int32_t* carrier_q31) {
   phase_ = phase;
 }
 
-// The transfer family's carriers through tanh(32 x): x is the carrier times the
-// TIMBRE's drive -- 1/64 to all of it -- plus the bias. It drives rather than
-// folds, so it takes neither the family's gain law nor its fold knee.
+// The transfer family's carriers through tanh(y): y is the carrier times the
+// TIMBRE's gain, plus the bias. It drives rather than folds, so it takes
+// neither the family's gain law nor its fold knee.
+//
+// The gain is exponential in TIMBRE, 0.5 to 16 -- five doublings, 2^(5 t) -- so
+// the knob moves as evenly as the sound does: the level is within 0.2 dB of its
+// ceiling by a gain of 8, and past 16 no harmonic but the highest moves by more
+// than 2 dB, while the aliasing at high notes grows and a biased shape's even
+// harmonics fade toward its plain twin's. Within each doubling 2^f is 1 + f
+// (0.6565 + 0.3435 f), within 0.4%, its slope continuous to 2%.
 //
 // With z = 2 y log2 e (y = 32 x) and e^2y = 2^z = m 2^n, tanh = (m - 2^-n) /
 // (m + 2^-n): one divide, its quotient already the output's 2^15 scale. m =
 // 2^frac(z) in Q15 is a degree-3 fit by Horner in 16 bits, every coefficient an
 // immediate, within 1.9e-4 of 2^f: under 3 LSB of tanh. Its constant is
-// exactly 1, so m >= 2^-n and tanh >= 0. log2 e rides on the drive, so z is
-// one MUL off the carrier: drive_q15 * log2 e / 2^14, the drive being 1/64 to
-// all of the TIMBRE. Past y = 5.89, where tanh rounds to full scale, it is
-// taken as that: 0x11000000 is an immediate.
+// exactly 1, so m >= 2^-n and tanh >= 0. log2 e rides on the gain, so z is
+// one MUL off the carrier: the gain times 2 log2 e / 2^15, 739 at a gain of 0.5,
+// the doubling's quadratic scaled by it. Below zero TIMBRE is the least gain.
+// Past y = 5.89, where tanh rounds to full scale, it is taken as that:
+// 0x11000000 is an immediate.
 //
 // The curve is small enough to copy once a carrier, as RenderTransfer's are:
 // the carrier, read in the loop, holds no buffer and costs no second pass.
@@ -994,8 +1002,11 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
       ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
 #define TANH_LOOP(CARRIER) \
   RENDER_PERIODIC( \
-    const int32_t drive_log2e = 739 + ((46537 * timbre) >> 15); \
-    const int32_t z_q24 = (CARRIER) * drive_log2e + bias_q24; \
+    const int32_t doublings_q15 = (timbre < 0 ? 0 : timbre) * 5; \
+    const int32_t fraction_q15 = doublings_q15 & 0x7fff; \
+    const int32_t gain_log2e = (739 + (fraction_q15 \
+        * (485 + (fraction_q15 * 254 >> 15)) >> 15)) << (doublings_q15 >> 15); \
+    const int32_t z_q24 = (CARRIER) * gain_log2e + bias_q24; \
     const uint32_t magnitude_q24 = \
         static_cast<uint32_t>(z_q24 < 0 ? -z_q24 : z_q24); \
     int32_t shaped = 32767; \
