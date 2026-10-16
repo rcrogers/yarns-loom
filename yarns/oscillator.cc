@@ -146,11 +146,11 @@ enum TransferCurve {
   TRANSFER_CURVE_TANH,
   TRANSFER_CURVE_SIZZLE
 };
-// Each curve's variants by where its rest point puts the harmonics: odd only,
-// odd and even in equal energy over the TIMBRE sweep, even the most. Tanh has
-// no balanced variant: its even share never reaches half (at most 0.054 of
-// the energy at the least gain, 0.444 at the most, approached as the offset
-// grows without bound and the level falls away).
+// Each curve's variants by where its rest point puts the harmonics: odd the
+// least even share of the energy over the TIMBRE sweep, even the most, and
+// balanced the share halfway between the two. For the periodic curves odd and
+// even are exact, so balanced is half the energy; sizzle's and tanh's own
+// extremes fall short of 0 and 1, and balanced is halfway between them.
 enum TransferVariant {
   TRANSFER_VARIANT_ODD,
   TRANSFER_VARIANT_BALANCED,
@@ -163,24 +163,18 @@ static inline bool IsTransferShape(OscillatorShape shape) {
   return shape >= kFirstTransferShape && shape <= kLastTransferShape;
 }
 
-// Three shapes a variant, one a carrier: tanh's odd and even, then nine shapes
-// a curve -- odd, balanced, even -- for tri, sine, sizzle and expo.
-static const int kTanhShapes = 6;
+// Nine shapes a curve: odd, balanced, even, three carriers each. The curves go
+// tanh, tri, sine, sizzle, expo.
 static inline uint8_t TransferCurveOf(OscillatorShape shape) {
   static const uint8_t kCurveInEnumOrder[] = {
-    TRANSFER_CURVE_TRI, TRANSFER_CURVE_SINE, TRANSFER_CURVE_SIZZLE,
-    TRANSFER_CURVE_EXP
+    TRANSFER_CURVE_TANH, TRANSFER_CURVE_TRI, TRANSFER_CURVE_SINE,
+    TRANSFER_CURVE_SIZZLE, TRANSFER_CURVE_EXP
   };
-  const int index = shape - kFirstTransferShape;
-  return index < kTanhShapes ? TRANSFER_CURVE_TANH
-      : kCurveInEnumOrder[(index - kTanhShapes) / 9];
+  return kCurveInEnumOrder[(shape - kFirstTransferShape) / 9];
 }
 
 static inline uint8_t TransferVariantOf(OscillatorShape shape) {
-  const int index = shape - kFirstTransferShape;
-  return index < kTanhShapes
-      ? (index < 3 ? TRANSFER_VARIANT_ODD : TRANSFER_VARIANT_EVEN)
-      : (index - kTanhShapes) / 3 % 3;
+  return (shape - kFirstTransferShape) / 3 % 3;
 }
 
 static inline uint8_t TransferCarrierOf(OscillatorShape shape) {
@@ -226,16 +220,23 @@ static inline uint32_t TransferBias(uint8_t curve, uint8_t variant) {
       : kTransferBalancedBias[curve];
 }
 
-// Even tanh offsets the carrier before the gain, by 2/3 of its peak: where the
-// even harmonics peak in level at every gain from 2 up (within 0.3 dB, and 3 dB
-// short at the least gain). An offset after the gain fades against the swing
-// as the gain rises, and with it the evens.
-static const int32_t kTanhEvenCarrierOffset = (2 << 15) / 3;
+// Tanh offsets the carrier before the gain: an offset after it fades against
+// the swing as the gain rises, and with it the evens. Even by 2/3 of the
+// carrier's peak, where the even harmonics peak in level at every gain from 2
+// up (within 0.3 dB, and 3 dB short at the least gain); its even share is 0.181
+// over the sweep. Balanced by 0.358, where the share is half that, measured
+// (resonator-scripts/half221.py).
+static const int32_t kTanhCarrierOffset[] = {  // by TransferVariant
+  0,
+  static_cast<int32_t>(0.358 * 32768 + 0.5),
+  (2 << 15) / 3,
+};
 
 // Sizzle's variants are where its sine sits at rest. Its exponential is not odd
 // in the carrier, so no rest gives odd or even alone past the bottom of TIMBRE;
-// averaged over the sweep, the even share is least at -20 degrees (0.34), half
-// at 27.4, and most at 65.4 (0.63), measured (resonator-scripts/angles210.py).
+// averaged over the sweep, the even share is least at -20 degrees (0.34), most
+// at 65.4 (0.63), and halfway between at 24.3, measured
+// (resonator-scripts/angles210.py, half221.py).
 // The exponential's own C0 rests it at frac(C0): 65.4 degrees, the most even,
 // so even takes no offset and the others are offsets from it. The output is the
 // sine as it stands, no mean taken out: the waveform's mean moves with TIMBRE by
@@ -247,7 +248,7 @@ static const uint32_t kSizzleRestPhase =
     (kSizzleC0_q14 & ((1 << 14) - 1)) << (32 - 14);
 static const uint32_t kSizzleRestPhaseOffset[] = {  // by TransferVariant
   PHASE_OF_DEGREES(360 - 20.0) - kSizzleRestPhase,
-  PHASE_OF_DEGREES(27.4) - kSizzleRestPhase,
+  PHASE_OF_DEGREES(24.3) - kSizzleRestPhase,
   0,
 };
 
@@ -284,6 +285,9 @@ const Oscillator::RenderFn Oscillator::fn_table_[] = {
   // &Oscillator::RenderFoldSine,
   // &Oscillator::RenderFoldTriangle,
   &Oscillator::RenderDiracComb,
+  &Oscillator::RenderTransferTanh,
+  &Oscillator::RenderTransferTanh,
+  &Oscillator::RenderTransferTanh,
   &Oscillator::RenderTransferTanh,
   &Oscillator::RenderTransferTanh,
   &Oscillator::RenderTransferTanh,
@@ -565,7 +569,7 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
     transfer_carrier_ = TransferCarrierOf(new_shape);
     transfer_function_ = TransferCurveOf(new_shape);
     // The periodic curves' only: tanh and sizzle pick theirs up per block,
-    // in their own units (kTanhEvenCarrierOffset, kSizzleRestPhaseOffset).
+    // in their own units (kTanhCarrierOffset, kSizzleRestPhaseOffset).
     transfer_bias_ = transfer_function_ < TRANSFER_CURVE_TANH
         ? TransferBias(transfer_function_, TransferVariantOf(new_shape)) : 0;
     // Halve max transfer gain when triangle is involved (carrier or transfer)
@@ -1069,8 +1073,7 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
   const int32_t kGainDoublings = 5;
   const int32_t kGainLeast_log2e =
       static_cast<int32_t>(kGainLeast * 1024 * kLog2E + 0.5);
-  const int32_t carrier_offset =
-      TransferVariantOf(shape_) == TRANSFER_VARIANT_EVEN ? kTanhEvenCarrierOffset : 0;
+  const int32_t carrier_offset = kTanhCarrierOffset[TransferVariantOf(shape_)];
   const uint16_t* carrier_table = transfer_carrier_ == TRANSFER_CURVE_SINE
       ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
 #define TANH_LOOP(CARRIER) \

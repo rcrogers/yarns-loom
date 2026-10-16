@@ -234,6 +234,7 @@ characters = {
   '\xCB': 'hjb',   # 's' (sine)
   '\xCC': 'lmdc',  # 'e' (expo)
   '\xCD': 'ajld',  # 'w' (sizzle)
+  '\xCE': 'bck',   # tiny T (tanh)
 
   # Tanh transfer function symbol: a tiny T, and inverted for biased
   '\xC8': 'ah',
