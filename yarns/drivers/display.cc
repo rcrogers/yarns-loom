@@ -43,39 +43,96 @@ const uint16_t kPinData = GPIO_Pin_9; // DISP_SER, DS, serial data input
 const uint16_t kScrollingDelay = 260;
 const uint16_t kScrollingPreDelay = 600;
 
-// 8000/2^(6+1) = 62.5 Hz refresh rate
-// Add 1 for kDisplayWidth = 2
-const uint8_t kDisplayBrightnessPWMBits = 6;
-const uint8_t kDisplayBrightnessPWMMax = 1 << kDisplayBrightnessPWMBits;
+// Ticks of the 8 kHz refresh one character holds, so each is lit at 62.5 Hz.
+const uint16_t kDisplayMuxTicks = 64;
+// The timer's resolution, and so the brightness'. Its 36 MHz over 2^10 puts the
+// switching at 35 kHz, past hearing: the current the display draws is what the
+// supply carries to the CV outputs, and in software this landed at 125 Hz.
+const uint8_t kDisplayBrightnessPWMBits = 10;
+const uint16_t kDisplayBrightnessPWMPeriod =
+    (1 << kDisplayBrightnessPWMBits) - 1;
+// 72 MHz over this, and the period above, is the switching rate.
+const uint16_t kDisplayTimerPrescaler = 1;
+// Dither depth at the PWM comparator, a power of two.
+const int32_t kDisplayBrightnessPWMDither = 8;
 
 const uint16_t kCharacterEnablePins[] = {
   GPIO_Pin_6,
   GPIO_Pin_5
 };
 
+// PB6 is TIM4_CH1 where it lies; PB5 is TIM3_CH2 only under TIM3's partial
+// remap, which moves CH1 and CH2 off PA6 and PA7 and leaves CH3 and CH4 where
+// they already were. Neither is a pin this module drives.
+//
+// MAPR directly, because GPIO_PinRemapConfig ORs ~DBGAFR_SWJCFG_MASK into
+// every write, which lands 0b111 in SWJ_CFG and turns off JTAG and SWD.
+// SWJ_CFG reads as zero, so a read-modify-write puts back the full-SWJ reset
+// state and the debug port survives.
+static void InitCharacterTimers() {
+  AFIO->MAPR = (AFIO->MAPR & ~AFIO_MAPR_TIM3_REMAP)
+      | AFIO_MAPR_TIM3_REMAP_PARTIALREMAP;
+
+  TIM_TimeBaseInitTypeDef timer_init = {0};
+  timer_init.TIM_Period = kDisplayBrightnessPWMPeriod;
+  timer_init.TIM_Prescaler = kDisplayTimerPrescaler;
+  timer_init.TIM_ClockDivision = TIM_CKD_DIV1;
+  timer_init.TIM_CounterMode = TIM_CounterMode_Up;
+  TIM_TimeBaseInit(TIM3, &timer_init);
+  TIM_TimeBaseInit(TIM4, &timer_init);
+
+  TIM_OCInitTypeDef oc_init = {0};
+  oc_init.TIM_OCMode = TIM_OCMode_PWM1;
+  oc_init.TIM_OutputState = TIM_OutputState_Enable;
+  // Dark until a character claims the window.
+  oc_init.TIM_Pulse = 0;
+  oc_init.TIM_OCPolarity = TIM_OCPolarity_High;
+  TIM_OC1Init(TIM4, &oc_init);
+  TIM_OC2Init(TIM3, &oc_init);
+  // Preloaded, because the duty is rewritten every tick and a write landing
+  // under the counter would cut that period's pulse short.
+  TIM_OC1PreloadConfig(TIM4, TIM_OCPreload_Enable);
+  TIM_OC2PreloadConfig(TIM3, TIM_OCPreload_Enable);
+
+  TIM_Cmd(TIM3, ENABLE);
+  TIM_Cmd(TIM4, ENABLE);
+}
+
+void SetCharacterDuty(uint8_t position, uint16_t duty) {
+  if (position == 0) {
+    TIM4->CCR1 = duty;
+  } else {
+    TIM3->CCR2 = duty;
+  }
+}
+
 void Display::Init() {
   GPIO_InitTypeDef gpio_init = {0};
   gpio_init.GPIO_Pin = kPinClk;
   gpio_init.GPIO_Pin |= kPinEnable;
   gpio_init.GPIO_Pin |= kPinData;
-  gpio_init.GPIO_Pin |= kCharacterEnablePins[0];
-  gpio_init.GPIO_Pin |= kCharacterEnablePins[1];
-  
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
   gpio_init.GPIO_Mode = GPIO_Mode_Out_PP;
   GPIO_Init(GPIOB, &gpio_init);
 
+  gpio_init.GPIO_Pin = kCharacterEnablePins[0] | kCharacterEnablePins[1];
+  gpio_init.GPIO_Mode = GPIO_Mode_AF_PP;
+  GPIO_Init(GPIOB, &gpio_init);
+  InitCharacterTimers();
+
   GPIOB->BSRR = kPinEnable;
   active_position_ = 0;
-  brightness_pwm_cycle_ = 0;
+  mux_ticks_left_ = 0;
   memset(short_buffer_, ' ', kDisplayWidth);
   memset(long_buffer_, ' ', kScrollBufferSize);
   use_mask_ = false;
   fading_counter_ = 0;
   fading_increment_ = 0;
   
-  blinking_ = false;
+  std::fill(&blink_frame_[0], &blink_frame_[kDisplayWidth], 0);
   brightness_ = UINT16_MAX;
+  frame_counter_ = 0;
+  prefix_transitions_ = false;
 }
 
 void Display::Scroll() {
@@ -92,7 +149,7 @@ void Display::set_brightness(uint16_t brightness, bool linearize) {
     // Applying a brightness fraction naively to PWM results in a visual bias
     // toward over-brightness -- expo conversion biases it back toward darkness
     uint8_t darkness = UINT8_MAX - (brightness >> 8);
-    brightness_ = UINT16_MAX - lut_env_expo[(darkness >> 1) + (darkness >> 2)];
+    brightness_ = UINT16_MAX - lut_env_expo_u16[(darkness >> 1) + (darkness >> 2)];
   } else {
     brightness_ = brightness;
   }
@@ -119,6 +176,7 @@ void Display::RefreshSlow() {
       ? long_buffer_ + scrolling_step_
       : (
         // 0...24/32: show normal short buffer
+        !prefix_transitions_ ||
         blink_counter_ < ((kBlinkMask >> 1) + (kBlinkMask >> 2))
         ? short_buffer_
         : (
@@ -143,7 +201,7 @@ void Display::RefreshSlow() {
     actual_brightness_ = brightness_;
   }
   blink_counter_ = (blink_counter_ + 1) % kBlinkMask;
-  std::fill(&redraw_[0], &redraw_[kDisplayWidth], true); // Force redraw
+  frame_counter_ = (frame_counter_ + 1) % kFrameBlinkMask;
 
 #else
 
@@ -156,31 +214,53 @@ void Display::RefreshSlow() {
 }
 
 void Display::RefreshFast() {
-  if (brightness_pwm_cycle_ == 0) {
-    // On rising edge, switch to next display position and draw it
-    GPIOB->BRR = kCharacterEnablePins[active_position_];
-    active_position_ = (active_position_ + 1) % kDisplayWidth;
-    redraw_[active_position_] = true;
-  } else if (brightness_pwm_cycle_ - 1 == actual_brightness_) {
-    // On falling edge, undraw current display position
-    redraw_[active_position_] = true;
+  if (mux_ticks_left_) {
+    --mux_ticks_left_;
+    // Every tick, not once a window: the crossfade moves the brightness at the
+    // slow refresh's rate, and sampling it at the window's would step it.
+    SetCharacterDuty(active_position_, actual_brightness_);
+    return;
   }
-  if (redraw_[active_position_]) {
-    redraw_[active_position_] = false;
-    if (brightness_pwm_cycle_ <= actual_brightness_
-        && (!blinking_ || blink_high())) {
-      if (use_mask_) {
-        Shift14SegmentsWord(mask_[active_position_]);
-      } else {
-        Shift14SegmentsWord(chr_characters[
-          static_cast<uint8_t>(displayed_buffer_[active_position_])]);
-      }
-      GPIOB->BSRR = kCharacterEnablePins[active_position_];
-    } else {
-      GPIOB->BRR = kCharacterEnablePins[active_position_];
-    }
+  mux_ticks_left_ = kDisplayMuxTicks - 1;
+  // Dark while the shift register stops describing it.
+  SetCharacterDuty(active_position_, 0);
+  active_position_ = (active_position_ + 1) % kDisplayWidth;
+  uint16_t segments = use_mask_
+      ? mask_[active_position_]
+      : chr_characters[
+          static_cast<uint8_t>(displayed_buffer_[active_position_])];
+  // The frames describe the short name, and RefreshSlow points
+  // displayed_buffer_ elsewhere for a scrolling long name and for the prefix
+  // flash -- both of which already have their own other side.
+  if (!frame_high() && displayed_buffer_ == short_buffer_) {
+    segments = blink_frame_[active_position_];
   }
-  brightness_pwm_cycle_ = (brightness_pwm_cycle_ + 1) % kDisplayBrightnessPWMMax;
+  Shift14SegmentsWord(segments);
+  SetCharacterDuty(active_position_, actual_brightness_);
+}
+
+// A glyph's other frame, or the only one it has. Read once per Print, so the
+// short list costs less than a table with an entry for every character.
+static uint16_t OtherFrame(char c) {
+  const uint8_t code = static_cast<uint8_t>(c);
+  for (const uint16_t* p = chr_blinking_characters; p[0]; p += 2) {
+    if (p[0] == code) return p[1];
+  }
+  return chr_characters[code];
+}
+
+void Display::SetBlinkFrames() {
+  for (uint8_t i = 0; i < kDisplayWidth; ++i) {
+    blink_frame_[i] = OtherFrame(short_buffer_[i]);
+  }
+}
+
+void Display::set_blink(bool blinking) {
+  if (blinking) {
+    std::fill(&blink_frame_[0], &blink_frame_[kDisplayWidth], 0);
+  } else {
+    SetBlinkFrames();
+  }
 }
 
 void Display::Print(
@@ -188,6 +268,7 @@ void Display::Print(
   uint16_t brightness, uint16_t fade, char prefix
 ) {
   strncpy(short_buffer_, short_buffer, kDisplayWidth);
+  SetBlinkFrames();
 
 #ifdef APPLICATION
   strncpy(long_buffer_, long_buffer, kScrollBufferSize);
@@ -202,6 +283,7 @@ void Display::Print(
 
   strncpy(prefix_show_buffer_, short_buffer, kDisplayWidth);
   strncpy(prefix_blank_buffer_, short_buffer, kDisplayWidth);
+  prefix_transitions_ = false;
   if (prefix != '\0') {
     if (short_buffer_[0] == ' ') { // All buffers show prefix, no transitions
       short_buffer_[0] = prefix;
@@ -210,6 +292,7 @@ void Display::Print(
     } else { // Only one buffer shows prefix
       prefix_show_buffer_[0] = prefix;
       prefix_blank_buffer_[0] = ' ';
+      prefix_transitions_ = true;
     }
   }
 }

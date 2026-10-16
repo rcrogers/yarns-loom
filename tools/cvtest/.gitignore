@@ -1,0 +1,4 @@
+cvtest
+cvtest_asan
+paneltest
+*.dSYM

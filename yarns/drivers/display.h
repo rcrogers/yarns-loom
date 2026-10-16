@@ -37,7 +37,19 @@ namespace yarns {
 
 const uint8_t kDisplayWidth = 2;
 const uint8_t kScrollBufferSize = 64;
-const uint16_t kBlinkMask = 512;
+// Counted in RefreshSlow, which Ui::Poll drives at 1kHz, so these are periods
+// in milliseconds. Divisible by 32, which keeps the prefix flash's fractions
+// exact. ui.cc derives the held-key rate from this, so it may not move.
+const uint16_t kBlinkMask = 320;
+// A frame swap -- a glyph's second frame, or set_blink's blank -- runs at a
+// THIRD of the held-key rate (kBlinkMask >> 1), so the two read as different
+// things. Its own counter: sharing kBlinkMask would drag the held keys along.
+const uint16_t kFrameBlinkMask = 3 * (kBlinkMask >> 1);
+
+// A character's share of the light, 0 to kDisplayBrightnessPWMPeriod. The pins
+// the characters are enabled by are timer outputs, so the duty is where this
+// lives; the harness implements this to watch the same writes.
+void SetCharacterDuty(uint8_t position, uint16_t duty);
 
 class Display {
  public:
@@ -58,6 +70,8 @@ class Display {
 
   inline void PrintMasks(const uint16_t* masks) {
     std::copy(&masks[0], &masks[kDisplayWidth], &mask_[0]);
+    // Raw segments name no other frame, so they are their own.
+    std::copy(&masks[0], &masks[kDisplayWidth], &blink_frame_[0]);
     use_mask_ = true;
   }
   
@@ -69,9 +83,14 @@ class Display {
   void Scroll();
   
   inline bool scrolling() const { return scrolling_; }
-  inline void set_blink(bool blinking) { blinking_ = blinking; }
+  // Blinking the whole field is the case where the other frame is blank. This
+  // writes the same frames Print does, so it has to follow the Print it applies
+  // to -- Ui::RefreshDisplay does, calling it after refresh_display().
+  void set_blink(bool blinking);
 
-  inline bool blink_high() const { return blink_counter_ < (kBlinkMask >> 1); }
+  inline bool frame_high() const {
+    return frame_counter_ < (kFrameBlinkMask >> 1);
+  }
  
  private:
   void Shift14SegmentsWord(uint16_t data);
@@ -87,7 +106,11 @@ class Display {
   uint16_t actual_brightness_;
 
   bool scrolling_;
-  bool blinking_;
+  // What each position shows on the other side of the blink. Equal to what it
+  // shows now unless a glyph names something else, so most of the display most
+  // of the time does not blink at all.
+  uint16_t blink_frame_[kDisplayWidth];
+  void SetBlinkFrames();
   
   uint16_t scrolling_pre_delay_timer_;
   uint16_t scrolling_timer_;
@@ -98,10 +121,14 @@ class Display {
   uint8_t scrolling_step_;
   
   uint16_t active_position_;
-  uint16_t brightness_pwm_cycle_;
+  uint16_t mux_ticks_left_;
   uint16_t brightness_;
-  bool redraw_[kDisplayWidth];
   uint16_t blink_counter_;
+  uint16_t frame_counter_;
+  // Whether the prefix flash actually transitions. Without it every prefix
+  // buffer holds the short name, and switching only breaks frame_high()'s
+  // `displayed_buffer_ == short_buffer_` test.
+  bool prefix_transitions_;
   
   DISALLOW_COPY_AND_ASSIGN(Display);
 };

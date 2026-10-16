@@ -7,6 +7,7 @@ An alternate firmware for the [Yarns synthesizer module&nbsp;↗](https://mutabl
 - Sequencer-programmed arpeggiator movement&nbsp;[→](yarns/MANUAL.md#sequencer-programmed-arpeggiator)
 - 27 oscillator shapes, with mod matrix for timbre and amplitude&nbsp;[→](yarns/MANUAL.md#oscillator-timbre)
 - ADSR envelopes with velocity shaping&nbsp;[→](yarns/MANUAL.md#envelope)
+- Exciter noise burst for struck/plucked attacks&nbsp;[→](yarns/MANUAL.md#exciter)
 - Expanded support for MIDI CCs&nbsp;[→](yarns/MANUAL.md#control-change-messages)
 - New paraphonic layouts with 4-voice paraphonic part and 6 overall voices&nbsp;[→](yarns/MANUAL.md#new-layouts)
 - New polyphonic voicing algorithms&nbsp;[→](yarns/MANUAL.md#polyphonic-voice-allocation)
