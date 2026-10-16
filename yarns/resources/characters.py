@@ -232,7 +232,7 @@ characters = {
   # Transfer function symbols on their side (balanced): each turned in its
   # own quarter or half, read in stroke order
   '\xCB': 'hjb',   # 's' (sine)
-  '\xCC': 'lmdc',  # 'e' (expo)
+  '\xCC': 'lndc',  # 'e' (expo)
   '\xCD': 'ajld',  # 'w' (sizzle)
   '\xCE': 'bck',   # tiny T (tanh)
 
