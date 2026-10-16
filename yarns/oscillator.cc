@@ -202,9 +202,12 @@ static const int32_t kTanhAsymmetricBias_q24 = static_cast<int32_t>(
 // offset from there. The output is the sine as it stands, no mean taken out:
 // the waveform's mean moves with TIMBRE by far more than a fixed offset could
 // follow.
-static const double kSizzleC0 = __builtin_exp(5 * kPi / 6) / (2 * kPi);
-static const uint32_t kSizzleRestPhaseOffset = 0u - static_cast<uint32_t>(
-    (kSizzleC0 - __builtin_floor(kSizzleC0)) * 4294967296.0 + 0.5);
+static const uint32_t kSizzleC0_q14 = static_cast<uint32_t>(
+    __builtin_exp(5 * kPi / 6) / (2 * kPi) * (1 << 14) + 0.5);
+// At x = 0 the phase is C0 in q14 shifted to 2^32 a cycle; its fraction, taken
+// off, puts the rest exactly on the zero crossing.
+static const uint32_t kSizzleRestPhaseOffset =
+    0u - ((kSizzleC0_q14 & ((1 << 14) - 1)) << (32 - 14));
 static const uint32_t kSizzleBiasedRestPhaseOffset =
     kSizzleRestPhaseOffset + (1u << 29);
 
@@ -990,8 +993,10 @@ void Oscillator::RenderTransferCarrier_q31(int32_t* carrier_q31) {
 // the knob moves as evenly as the sound does: the level is within 0.2 dB of its
 // ceiling by a gain of 8, and past 16 no harmonic but the highest moves by more
 // than 2 dB, while the aliasing at high notes grows and a biased shape's even
-// harmonics fade toward its plain twin's. Within each doubling 2^f is 1 + f
-// (0.6565 + 0.3435 f), within 0.4%, its slope continuous to 2%.
+// harmonics fade toward its plain twin's. Within each doubling 2^f is 1 + a f
+// + (1 - a) f^2, which meets 2^f at both ends; its slope is a at one end and
+// 2 - a at the other, and a = 2/3 makes the end's twice the start's, so the
+// slope runs on unbroken into the next doubling. Within 0.35% of 2^f.
 //
 // With z = 2 y log2 e (y = 32 x) and e^2y = 2^z = m 2^n, tanh = (m - 2^-n) /
 // (m + 2^-n): one divide, its quotient already the output's 2^15 scale. m =
@@ -1020,7 +1025,9 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
     const int32_t doublings_q15 = (timbre < 0 ? 0 : timbre) * kGainDoublings; \
     const int32_t fraction_q15 = doublings_q15 & 0x7fff; \
     const int32_t gain_log2e = (kGainLeast_log2e + (fraction_q15 \
-        * (485 + (fraction_q15 * 254 >> 15)) >> 15)) << (doublings_q15 >> 15); \
+        * ((2 * kGainLeast_log2e + 1) / 3 \
+           + (fraction_q15 * ((kGainLeast_log2e + 1) / 3) >> 15)) >> 15)) \
+        << (doublings_q15 >> 15); \
     const int32_t z_q24 = (CARRIER) * gain_log2e + bias_q24; \
     const uint32_t magnitude_q24 = \
         static_cast<uint32_t>(z_q24 < 0 ? -z_q24 : z_q24); \
@@ -1056,7 +1063,6 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
 // 16 bits, its constant exactly 1, times C0 in q14 -- one MUL a degree, every
 // constant an immediate, so nothing is read from flash but the two sines.
 // Within 7e-5 of C0 2^f, 0.0007 cycle at the top of the sweep.
-static const uint32_t kSizzleC0_q14 = 35746;  // e^(5 pi / 6) / 2 pi
 
 // The transfer family's carriers through sizzle, at full width: the phase moves
 // 16 cycles a unit of x, so a 16-bit carrier's own rounding is the next limit.

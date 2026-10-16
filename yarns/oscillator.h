@@ -60,8 +60,11 @@ const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
 // up to (2 + curve(offset_max)) / 2 of the gain, so the gain peaks the
 // reciprocal of that under the share: 2 / (2 + tanh(2)) for WIND, and
 // 2 / (2 + fold_back(0.7)) for BOWED, whose curve also spans -1..1.
-const uint16_t kWindPeakHeadroom_u15 = 22111;
-const uint16_t kBowedPeakHeadroom_u15 = 22573;
+// Rounded down: the gain may not exceed the bound.
+const uint16_t kWindPeakHeadroom_u15 = static_cast<uint16_t>(
+    2 / (2 + __builtin_tanh(2.0)) * 32768);
+const uint16_t kBowedPeakHeadroom_u15 = static_cast<uint16_t>(
+    2 / (2 + 0.7 * __builtin_exp(0.5 - 0.7 * 0.7 / 2)) * 32768);
 #ifdef TEST
 // LOOP_DC_BEFORE_GAIN (oscillator.cc): the loop shapes' DC blocker before the
 // gain, under headroom 1.
