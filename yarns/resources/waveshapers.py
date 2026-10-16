@@ -35,7 +35,6 @@ def scale(x, min=-32766, max=32766, center=True):
 
 x = ((numpy.arange(0, 257) / 128.0 - 1.0))
 x[-1] = x[-2]
-violent_overdrive = numpy.tanh(32.0 * x)
 # overdrive = numpy.tanh(5.0 * x)
 # moderate_overdrive = numpy.tanh(2.0 * x)
 
@@ -73,7 +72,6 @@ fold_back = 4.0 * x * numpy.exp(0.5 - 8.0 * x * x)
 # sine_fold = sine + cubic + knee
 
 # waveshapers.append(('moderate_overdrive', scale(moderate_overdrive)))
-# violent_overdrive: SINE TANH computes tanh(32 x) (RenderTanhSine).
 waveshapers.append(('soft_limit', scale(soft_limit)))
 waveshapers.append(('fold_back', scale(fold_back)))
 # waveshapers.append(('sine_fold', scale(sine_fold, center=False)))

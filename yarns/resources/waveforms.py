@@ -84,7 +84,6 @@ def scale(array, min=-32766, max=32766, center=True, dither_level=2):
   array = array * (max - min) + min
   return dither(array, order=dither_level)
 
-sine_quadrant_input = numpy.arange(WAVETABLE_SIZE + 1) / float(WAVETABLE_SIZE) * (numpy.pi / 2)
 
 # Band limited waveforms.
 SAMPLE_RATE=45000
@@ -103,9 +102,6 @@ fill = numpy.fmod(
     numpy.arange(WAVETABLE_SIZE + 1),
     WAVETABLE_SIZE)
 
-sizzle_input = sine_quadrant_input * 2 + numpy.pi / 3
-sizzle = numpy.sin(numpy.exp(sizzle_input)) * 127.5 + 127.5
-# sizzle: SINE EXPONENTIAL computes sin(exp(u)) (RenderExponentialSine).
 
 for zone in range(num_zones):
   f0 = 440.0 * 2.0 ** ((18 + 8 * zone - 69) / 12.0)

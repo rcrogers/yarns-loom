@@ -172,10 +172,10 @@ static inline bool IsTransferBiased(OscillatorShape shape) {
 
 // How steep the shape's carrier and curve are, which sets its fold knee:
 // tri=2 (derivative discontinuities), sine=1, expo=3 (peak slope), carrier *
-// curve -- except sizzle, 3 whatever its carrier, as its sine-only predecessor
-// had: the carrier's own factor on top capped full TIMBRE at middle C at 47%
-// (tri) and 36% (expo) of the range, against the sine's 64% they were chosen
-// at. Tanh takes no knee, so its 1 is never read.
+// curve -- except sizzle, 3 whatever its carrier, so the tri and expo carriers
+// reach as far as the sine's: their own factors on top would cap full TIMBRE at
+// middle C at 47% and 36% of the range, against 64%. Tanh takes no knee, so its
+// 1 is never read.
 static inline uint8_t TransferCrestFactor(OscillatorShape shape) {
   static const uint8_t kSlopeFactor[] = {2, 1, 3, 1, 3};  // by TransferCurve
   const uint8_t curve = TransferCurveOf(shape);
@@ -192,9 +192,9 @@ static const int32_t kTanhAsymmetricBias_q24 = 42666249;
 // Sizzle's bias is where its sine sits at rest. Unbiased that is the zero
 // crossing, as for the periodic curves; biased it is 1/8 cycle on, as theirs.
 // The exponential's own C0 puts it at frac(C0) = 0.1817 cycle, so each is an
-// offset from there. The output is the sine as it stands: the mean the table
-// took out was the curve's over x, not the waveform's, which moves with TIMBRE
-// by far more, and with it went the scale that made room for it.
+// offset from there. The output is the sine as it stands, no mean taken out:
+// the waveform's mean moves with TIMBRE by far more than a fixed offset could
+// follow.
 static const uint32_t kSizzleRestPhaseOffset = 3514455338u;  // -0.1817 cycle
 static const uint32_t kSizzleBiasedRestPhaseOffset = 4051326250u;  // -0.0567
 
@@ -1022,11 +1022,9 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
 
 // sin(exp(u)), u = 5 pi / 6 + pi x / 2, computed: exp(u) / 2 pi cycles is
 // C0 2^(a x), a = pi / (2 ln 2), C0 = e^(5 pi / 6) / 2 pi, which runs 0.45 to
-// 10.5 cycles across x -- its fraction is the phase of a sine. The table it
-// replaces held ~8 points a cycle at the top, and the interpolation between
-// added up to 29 dB of aliasing over the curve itself at full TIMBRE; the
-// phase-derived dither it carried broke that error up into noise rather than
-// lowering it, and goes with it.
+// 10.5 cycles across x -- its fraction is the phase of a sine. Computed, not
+// tabulated: a table of the curve would hold ~8 points a cycle at the top, and
+// interpolating between them aliases by up to 29 dB over the curve itself.
 //
 // C0 2^f as cycles in q29 (it reaches 4.4): 2^f in Q15 by a degree-4 Horner in
 // 16 bits, its constant exactly 1, times C0 in q14 -- one MUL a degree, every
