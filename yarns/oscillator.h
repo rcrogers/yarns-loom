@@ -380,6 +380,8 @@ class Oscillator {
   // void RenderFoldSine(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix);
   void RenderDiracComb(int16_t* input_samples, int16_t* audio_mix);
+  // carrier_mixed: the even variant's, which mixes the carrier back in.
+  template <bool carrier_mixed>
   void RenderTransfer(int16_t* input_samples, int16_t* audio_mix);
   void RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix);
   void RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix);

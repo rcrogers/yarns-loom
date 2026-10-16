@@ -149,8 +149,10 @@ enum TransferCurve {
 // Each curve's variants by where its rest point puts the harmonics: odd the
 // least even share of the energy over the TIMBRE sweep, even the most, and
 // balanced the share halfway between the two. For the periodic curves odd and
-// even are exact, so balanced is half the energy; sizzle's and tanh's own
-// extremes fall short of 0 and 1, and balanced is halfway between them.
+// even rests are exact, so balanced is half the energy; sizzle's and tanh's own
+// extremes fall short of 0 and 1, and balanced is halfway between them. The
+// periodic curves' even rest alone has no fundamental, so their even variant
+// mixes the carrier back in (RenderTransfer).
 enum TransferVariant {
   TRANSFER_VARIANT_ODD,
   TRANSFER_VARIANT_BALANCED,
@@ -294,24 +296,24 @@ const Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderTransferTanh,
   &Oscillator::RenderTransferTanh,
   &Oscillator::RenderTransferTanh,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<true>,
+  &Oscillator::RenderTransfer<true>,
+  &Oscillator::RenderTransfer<true>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<true>,
+  &Oscillator::RenderTransfer<true>,
+  &Oscillator::RenderTransfer<true>,
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
@@ -321,15 +323,15 @@ const Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<false>,
+  &Oscillator::RenderTransfer<true>,
+  &Oscillator::RenderTransfer<true>,
+  &Oscillator::RenderTransfer<true>,
   &Oscillator::RenderFM,
 };
 
@@ -1159,7 +1161,8 @@ void Oscillator::RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix
 // transfer peak (phase 1/4), the fold threshold -- maximum amplitude before
 // wavefolding begins, and for odd a clean pass-through. Even, resting on the
 // peak: a quarter cycle each way, so the curve's rise and fall each pass once,
-// the carrier full-wave rectified -- even harmonics alone, at full level.
+// the carrier full-wave rectified -- even harmonics alone, at full level, to
+// which RenderTransfer adds the carrier.
 
 inline uint32_t amplify_for_transfer(
     int16_t sample, int16_t dynamic_gain_u15, uint32_t bias,
@@ -1179,6 +1182,12 @@ inline uint32_t amplify_for_transfer(
   return amped_sample + bias;
 }
 
+// Even rests on the curve's crest, about which the curve is symmetric, so its
+// output repeats every half cycle of the carrier: no fundamental, the note an
+// octave up. Even mixes the carrier back in, equally, which puts the note back
+// and, two full-scale signals halved, stays inside full scale. A function of
+// its own, so odd and balanced carry none of its cost.
+template <bool carrier_mixed>
 void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   const uint8_t carrier_index = transfer_carrier_;
   const uint8_t transfer_index = transfer_function_;
@@ -1207,7 +1216,8 @@ void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
     this_sample = CARRIER; \
     uint32_t transfer_phase = \
         amplify_for_transfer(this_sample, timbre >> gain_shift, bias, least_phase); \
-    this_sample = TRANSFER; \
+    this_sample = carrier_mixed \
+        ? (this_sample + (TRANSFER)) >> 1 : (TRANSFER); \
   )
 
   if (carrier_index == TRANSFER_CURVE_TRI) {
