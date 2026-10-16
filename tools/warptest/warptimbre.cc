@@ -67,7 +67,7 @@ int main() {
     {OSC_SHAPE_CZ_SAW_LP,     OSC_SHAPE_NOISE_BP},
     {OSC_SHAPE_VARIABLE_SAW,  OSC_SHAPE_LP_PULSE},
     {OSC_SHAPE_SYNC_SINE,     OSC_SHAPE_CZ_PULSE_LP},
-    {OSC_SHAPE_SINE_THRU_TANH, OSC_SHAPE_DIRAC_COMB},
+    {OSC_SHAPE_SINE_THRU_TANH_ODD, OSC_SHAPE_DIRAC_COMB},
   };
   double worst_now = 0, worst_old = 0;
   for (size_t k = 0; k < sizeof(pairs)/sizeof(pairs[0]); ++k) {

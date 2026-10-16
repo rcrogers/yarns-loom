@@ -136,11 +136,8 @@ static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
 static const uint32_t kTransferPeakPhase = 1u << (32 - 2);
-// Biased variants add a DC bias (after amplification) to shift the operating
-// point on the transfer function, creating asymmetric harmonic content.
-static const uint32_t kTransferAsymmetricBias = kTransferPeakPhase / 2;  // 1/8 cycle -- max asymmetry
 // The carriers and transfer curves, numbered so a carrier's index within its
-// curve's six shapes is its code. Tanh and sizzle are transfer curves only:
+// variant's three shapes is its code. Tanh and sizzle are transfer curves only:
 // they are not periodic in their input, so they cannot be carriers.
 enum TransferCurve {
   TRANSFER_CURVE_TRI,
@@ -149,25 +146,45 @@ enum TransferCurve {
   TRANSFER_CURVE_TANH,
   TRANSFER_CURVE_SIZZLE
 };
-static const OscillatorShape kFirstTransferShape = OSC_SHAPE_TRI_THRU_TANH;
-static const OscillatorShape kLastTransferShape = OSC_SHAPE_EXP_THRU_EXP_BIASED;
+// Each curve's variants by where its rest point puts the harmonics: odd only,
+// odd and even in equal energy over the TIMBRE sweep, even the most. Tanh has
+// no balanced variant: its even share never reaches half (at most 0.054 of
+// the energy at the least gain, 0.444 at the most, approached as the offset
+// grows without bound and the level falls away).
+enum TransferVariant {
+  TRANSFER_VARIANT_ODD,
+  TRANSFER_VARIANT_BALANCED,
+  TRANSFER_VARIANT_EVEN
+};
+static const OscillatorShape kFirstTransferShape = OSC_SHAPE_TRI_THRU_TANH_ODD;
+static const OscillatorShape kLastTransferShape = OSC_SHAPE_EXP_THRU_EXP_EVEN;
 
 static inline bool IsTransferShape(OscillatorShape shape) {
   return shape >= kFirstTransferShape && shape <= kLastTransferShape;
 }
 
-// Six shapes a curve: the three carriers, then the same three biased. The
-// curves go tanh, tri, sine, sizzle, expo.
+// Three shapes a variant, one a carrier: tanh's odd and even, then nine shapes
+// a curve -- odd, balanced, even -- for tri, sine, sizzle and expo.
+static const int kTanhShapes = 6;
 static inline uint8_t TransferCurveOf(OscillatorShape shape) {
   static const uint8_t kCurveInEnumOrder[] = {
-    TRANSFER_CURVE_TANH, TRANSFER_CURVE_TRI, TRANSFER_CURVE_SINE,
-    TRANSFER_CURVE_SIZZLE, TRANSFER_CURVE_EXP
+    TRANSFER_CURVE_TRI, TRANSFER_CURVE_SINE, TRANSFER_CURVE_SIZZLE,
+    TRANSFER_CURVE_EXP
   };
-  return kCurveInEnumOrder[(shape - kFirstTransferShape) / 6];
+  const int index = shape - kFirstTransferShape;
+  return index < kTanhShapes ? TRANSFER_CURVE_TANH
+      : kCurveInEnumOrder[(index - kTanhShapes) / 9];
 }
 
-static inline bool IsTransferBiased(OscillatorShape shape) {
-  return (shape - kFirstTransferShape) % 6 >= 3;
+static inline uint8_t TransferVariantOf(OscillatorShape shape) {
+  const int index = shape - kFirstTransferShape;
+  return index < kTanhShapes
+      ? (index < 3 ? TRANSFER_VARIANT_ODD : TRANSFER_VARIANT_EVEN)
+      : (index - kTanhShapes) / 3 % 3;
+}
+
+static inline uint8_t TransferCarrierOf(OscillatorShape shape) {
+  return (shape - kFirstTransferShape) % 3;
 }
 
 // How steep the shape's carrier and curve are, which sets its fold knee:
@@ -179,7 +196,7 @@ static inline bool IsTransferBiased(OscillatorShape shape) {
 static inline uint8_t TransferCrestFactor(OscillatorShape shape) {
   static const uint8_t kSlopeFactor[] = {2, 1, 3, 1, 3};  // by TransferCurve
   const uint8_t curve = TransferCurveOf(shape);
-  const uint8_t carrier = (shape - kFirstTransferShape) % 3;
+  const uint8_t carrier = TransferCarrierOf(shape);
   return kSlopeFactor[curve]
       * (curve == TRANSFER_CURVE_SIZZLE ? 1 : kSlopeFactor[carrier]);
 }
@@ -189,27 +206,50 @@ static inline uint8_t TransferCrestFactor(OscillatorShape shape) {
 static const double kPi = 3.14159265358979323846;
 static const double kLog2E = 1.0 / __builtin_log(2.0);
 
-// The biased tanh sits where the biased sine curve does: at rest it reads
-// sin(pi / 4) of full scale, which takes y = atanh(sin(pi / 4)) = asinh(1) =
-// ln(1 + sqrt 2) -- in RenderTransferTanh's exponent units, z = 2 y log2 e =
-// 2 log2(1 + sqrt 2), in q24.
-static const int32_t kTanhAsymmetricBias_q24 = static_cast<int32_t>(
-    2 * __builtin_log2(1 + __builtin_sqrt(2.0)) * (1 << 24) + 0.5);
+// A phase of so many degrees, 2^32 a cycle, for 0 <= degrees < 360.
+#define PHASE_OF_DEGREES(degrees) \
+    static_cast<uint32_t>((degrees) / 360.0 * 4294967296.0 + 0.5)
 
-// Sizzle's bias is where its sine sits at rest. Unbiased that is the zero
-// crossing, as for the periodic curves; biased it is 1/8 cycle on, as theirs.
-// The exponential's own C0 puts it at frac(C0) = 0.1817 cycle, so each is an
-// offset from there. The output is the sine as it stands, no mean taken out:
-// the waveform's mean moves with TIMBRE by far more than a fixed offset could
-// follow.
+// The periodic curves are odd about 0 and even about a quarter cycle, so odd
+// is a bias of 0 and even a quarter cycle, at every TIMBRE. Balanced is where
+// even takes half the energy averaged over the sweep, measured
+// (resonator-scripts/angles210.py), the carrier a sine: it differs a curve.
+static const uint32_t kTransferBalancedBias[] = {
+  PHASE_OF_DEGREES(53.5),  // tri
+  PHASE_OF_DEGREES(49.5),  // sine
+  PHASE_OF_DEGREES(49.4),  // expo
+};
+
+static inline uint32_t TransferBias(uint8_t curve, uint8_t variant) {
+  return variant == TRANSFER_VARIANT_ODD ? 0
+      : variant == TRANSFER_VARIANT_EVEN ? kTransferPeakPhase
+      : kTransferBalancedBias[curve];
+}
+
+// Even tanh offsets the carrier before the gain, by 2/3 of its peak: where the
+// even harmonics peak in level at every gain from 2 up (within 0.3 dB, and 3 dB
+// short at the least gain). An offset after the gain fades against the swing
+// as the gain rises, and with it the evens.
+static const int32_t kTanhEvenCarrierOffset = (2 << 15) / 3;
+
+// Sizzle's variants are where its sine sits at rest. Its exponential is not odd
+// in the carrier, so no rest gives odd or even alone past the bottom of TIMBRE;
+// averaged over the sweep, the even share is least at -20 degrees (0.34), half
+// at 27.4, and most at 65.4 (0.63), measured (resonator-scripts/angles210.py).
+// The exponential's own C0 rests it at frac(C0): 65.4 degrees, the most even,
+// so even takes no offset and the others are offsets from it. The output is the
+// sine as it stands, no mean taken out: the waveform's mean moves with TIMBRE by
+// far more than a fixed offset could follow.
 static const uint32_t kSizzleC0_q14 = static_cast<uint32_t>(
     __builtin_exp(5 * kPi / 6) / (2 * kPi) * (1 << 14) + 0.5);
-// At x = 0 the phase is C0 in q14 shifted to 2^32 a cycle; its fraction, taken
-// off, puts the rest exactly on the zero crossing.
-static const uint32_t kSizzleRestPhaseOffset =
-    0u - ((kSizzleC0_q14 & ((1 << 14) - 1)) << (32 - 14));
-static const uint32_t kSizzleBiasedRestPhaseOffset =
-    kSizzleRestPhaseOffset + (1u << 29);
+// At x = 0 the phase is C0 in q14 shifted to 2^32 a cycle.
+static const uint32_t kSizzleRestPhase =
+    (kSizzleC0_q14 & ((1 << 14) - 1)) << (32 - 14);
+static const uint32_t kSizzleRestPhaseOffset[] = {  // by TransferVariant
+  PHASE_OF_DEGREES(360 - 20.0) - kSizzleRestPhase,
+  PHASE_OF_DEGREES(27.4) - kSizzleRestPhase,
+  0,
+};
 
 /* static */
 const Oscillator::RenderFn Oscillator::fn_table_[] = {
@@ -262,12 +302,24 @@ const Oscillator::RenderFn Oscillator::fn_table_[] = {
   &Oscillator::RenderTransfer,
   &Oscillator::RenderTransfer,
   &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer,
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
   &Oscillator::RenderTransferSizzle,
+  &Oscillator::RenderTransferSizzle,
+  &Oscillator::RenderTransferSizzle,
+  &Oscillator::RenderTransferSizzle,
+  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer,
+  &Oscillator::RenderTransfer,
   &Oscillator::RenderTransfer,
   &Oscillator::RenderTransfer,
   &Oscillator::RenderTransfer,
@@ -510,12 +562,12 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   if (!sounding()) ResetFilterState();
 
   if (IsTransferShape(new_shape)) {
-    uint8_t index = new_shape - kFirstTransferShape;
-    transfer_carrier_ = index % 3;
+    transfer_carrier_ = TransferCarrierOf(new_shape);
     transfer_function_ = TransferCurveOf(new_shape);
     // The periodic curves' only: tanh and sizzle pick theirs up per block,
-    // in their own units (kTanhAsymmetricBias_q24, kSizzle*RestPhaseOffset).
-    transfer_bias_ = IsTransferBiased(new_shape) ? kTransferAsymmetricBias : 0;
+    // in their own units (kTanhEvenCarrierOffset, kSizzleRestPhaseOffset).
+    transfer_bias_ = transfer_function_ < TRANSFER_CURVE_TANH
+        ? TransferBias(transfer_function_, TransferVariantOf(new_shape)) : 0;
     // Halve max transfer gain when triangle is involved (carrier or transfer)
     // to compensate for its derivative discontinuities.
     transfer_gain_shift_ =
@@ -1017,7 +1069,8 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
   const int32_t kGainDoublings = 5;
   const int32_t kGainLeast_log2e =
       static_cast<int32_t>(kGainLeast * 1024 * kLog2E + 0.5);
-  const int32_t bias_q24 = IsTransferBiased(shape_) ? kTanhAsymmetricBias_q24 : 0;
+  const int32_t carrier_offset =
+      TransferVariantOf(shape_) == TRANSFER_VARIANT_EVEN ? kTanhEvenCarrierOffset : 0;
   const uint16_t* carrier_table = transfer_carrier_ == TRANSFER_CURVE_SINE
       ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
 #define TANH_LOOP(CARRIER) \
@@ -1028,7 +1081,7 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
         * ((2 * kGainLeast_log2e + 1) / 3 \
            + (fraction_q15 * ((kGainLeast_log2e + 1) / 3) >> 15)) >> 15)) \
         << (doublings_q15 >> 15); \
-    const int32_t z_q24 = (CARRIER) * gain_log2e + bias_q24; \
+    const int32_t z_q24 = ((CARRIER) + carrier_offset) * gain_log2e; \
     const uint32_t magnitude_q24 = \
         static_cast<uint32_t>(z_q24 < 0 ? -z_q24 : z_q24); \
     int32_t shaped = 32767; \
@@ -1074,8 +1127,7 @@ void Oscillator::RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix
   // the carrier. 15 bits of a reshape the TIMBRE map by 0.003%.
   const int32_t kExponentGain_q14 =
       static_cast<int32_t>(kPi / 2 * kLog2E * (1 << 14) + 0.5);
-  const uint32_t rest_phase_offset = IsTransferBiased(shape_)
-      ? kSizzleBiasedRestPhaseOffset : kSizzleRestPhaseOffset;
+  const uint32_t rest_phase_offset = kSizzleRestPhaseOffset[TransferVariantOf(shape_)];
   RENDER_WITH_GAIN_AMPLIFYING_OUTPUT(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff; // Use top 7/8
     // a x in q28: carrier * 2^31 times gain * a * 2^29, high word.
@@ -1100,18 +1152,21 @@ void Oscillator::RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix
 // Key property: all transfer functions satisfy f(0) = 0 (zero-crossing at
 // phase 0, peak at phase 1/4). This ensures input 0 produces output 0.
 //
-// At min timbre, the input peak maps to the transfer peak (phase 1/4),
-// placing the signal at the fold threshold: maximum amplitude before
-// wavefolding begins. Output equals input (clean pass-through).
+// At min timbre the input swings by the least phase. Odd and balanced: to the
+// transfer peak (phase 1/4), the fold threshold -- maximum amplitude before
+// wavefolding begins, and for odd a clean pass-through. Even, resting on the
+// peak: a quarter cycle each way, so the curve's rise and fall each pass once,
+// the carrier full-wave rectified -- even harmonics alone, at full level.
 
 inline uint32_t amplify_for_transfer(
-    int16_t sample, int16_t dynamic_gain_u15, uint32_t bias) {
-  // min_gain derivation (at min timbre, input peak maps to transfer peak):
-  //   input_peak * min_gain * 2^kTransferMaxGainBits + bias = phase_peak
-  //   2^15 * min_gain * 2^4 = 2^30 - bias
-  //   min_gain = (2^30 - bias) >> 19
+    int16_t sample, int16_t dynamic_gain_u15, uint32_t bias,
+    uint32_t least_phase) {
+  // min_gain derivation (at min timbre, the input peak swings least_phase):
+  //   input_peak * min_gain * 2^kTransferMaxGainBits = least_phase
+  //   2^15 * min_gain * 2^4 = least_phase
+  //   min_gain = least_phase >> 19
   int32_t min_gain =
-      (kTransferPeakPhase - bias) >> (kSamplePeakBits + kTransferMaxGainBits);
+      least_phase >> (kSamplePeakBits + kTransferMaxGainBits);
 
   int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
 
@@ -1125,6 +1180,9 @@ void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   const uint8_t carrier_index = transfer_carrier_;
   const uint8_t transfer_index = transfer_function_;
   uint32_t bias = transfer_bias_;
+  const uint32_t least_phase =
+      TransferVariantOf(shape_) == TRANSFER_VARIANT_EVEN
+          ? kTransferPeakPhase : kTransferPeakPhase - bias;
   uint8_t gain_shift = transfer_gain_shift_;
   // The shape is fixed for the whole block, so the choice is made here and the
   // loop carries no dispatch. It used to switch twice per sample on indices set
@@ -1145,7 +1203,7 @@ void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   RENDER_PERIODIC( \
     this_sample = CARRIER; \
     uint32_t transfer_phase = \
-        amplify_for_transfer(this_sample, timbre >> gain_shift, bias); \
+        amplify_for_transfer(this_sample, timbre >> gain_shift, bias, least_phase); \
     this_sample = TRANSFER; \
   )
 

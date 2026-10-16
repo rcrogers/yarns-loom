@@ -708,16 +708,20 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 
 #### `-ᵀ`, `-^`, `-s`, `-w`, `-e` Waveshaping transfer functions
 - Timbre: drive or folding amount (amplification of the carrier wave into the transfer function)
-- Shapes: 30 variants, grouped under 5 distinct transfer functions
+- Shapes: 42 variants, grouped under 5 distinct transfer functions
 - Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
 - Transfer function (second symbol):
   - Tanh (`ᵀ`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
   - Triangle (`^`), sine (`s`), expo (`e`): folding
   - Sizzle (`w`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
-- Biased variants of transfer function (`⊥`, `ˇ`, `ˢ`, `ʍ`, `ə`): offset the transfer function input, producing asymmetric harmonics
-  - Folding and sizzle transfer functions: an eighth of a cycle
-  - Tanh: to where its output rests at the same level as the biased sine's
+- Each transfer function comes in up to three variants, by where its input rests, which sets the balance of odd and even harmonics:
+  - Odd (the symbol upright): odd harmonics only, or as near as the curve allows
+  - Balanced (the symbol on its side: `>`, and sideways `s`, `e`, `w`): odd and even harmonics in equal energy, averaged over the timbre sweep
+  - Even (the symbol upside down: `⊥`, `ˇ`, `ˢ`, `ʍ`, `ə`): even harmonics only, or as many as the curve allows
+  - Folding transfer functions: odd and even are exact at every timbre; even starts as the carrier full-wave rectified
+  - Sizzle: its exponential is lopsided, so no variant is purely odd or even past the bottom of the timbre range; even is the sound of the original sizzle
+  - Tanh: odd and even only (its even harmonics never reach half the energy); even offsets the carrier before the drive, so the evens grow with timbre
 
 #### `FM` Frequency modulation
 - Timbre: modulation index
