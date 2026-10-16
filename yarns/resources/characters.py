@@ -229,16 +229,12 @@ characters = {
   '\xC4': 'abjk', # rotated 'e' (expo)
   '\xCA': 'bjgf', # rotated 'w' (sizzle)
 
-  # Transfer function symbols on their side (balanced): each turned in its
-  # own quarter or half, read in stroke order
+  # Transfer function symbols on their side (balanced): each turned with its
+  # top to the left, read in stroke order
   '\xCB': 'hjb',   # 's' (sine)
   '\xCC': 'lndc',  # 'e' (expo)
   '\xCD': 'ajld',  # 'w' (sizzle)
-  '\xCE': 'bck',   # tiny T (tanh)
-
-  # Tanh transfer function symbol: a tiny T, and inverted for biased
-  '\xC8': 'ah',
-  '\xC9': 'md',
+  '\xCE': 'efpk',  # 'T' (tanh)
 
   '\xC5': 'fpkc', # down stair-step
   

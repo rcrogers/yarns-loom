@@ -706,19 +706,19 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `┴┴` Dirac comb
 - Timbre: harmonic content
 
-#### `-ᵀ`, `-^`, `-s`, `-w`, `-e` Waveshaping transfer functions
+#### `-T`, `-^`, `-s`, `-w`, `-e` Waveshaping transfer functions
 - Timbre: drive or folding amount (amplification of the carrier wave into the transfer function)
 - Shapes: 45 variants, grouped under 5 distinct transfer functions
 - Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
 - Transfer function (second symbol):
-  - Tanh (`ᵀ`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
+  - Tanh (`T`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
   - Triangle (`^`), sine (`s`), expo (`e`): folding
   - Sizzle (`w`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
 - Each transfer function comes in three variants, by where its input rests, which sets the balance of odd and even harmonics:
   - Odd (the symbol upright): odd harmonics only, or as near as the curve allows
-  - Balanced (the symbol sideways: `<`, and sideways `s`, `e`, `w`, `ᵀ`): halfway between odd and even, averaged over the timbre sweep -- for the folding transfer functions, odd and even harmonics in equal energy
-  - Even (the symbol inverted: `⊥`, `ˇ`, `ˢ`, `ʍ`, `ə`): even harmonics only, or as many as the curve allows
+  - Balanced (the symbol sideways: `<`, and sideways `s`, `e`, `w`, `T`): halfway between odd and even, averaged over the timbre sweep -- for the folding transfer functions, odd and even harmonics in equal energy
+  - Even (the symbol inverted: `┴`, `ˇ`, `ˢ`, `ʍ`, `ə`): even harmonics only, or as many as the curve allows
   - Folding transfer functions: odd and even are exact at every timbre; even starts as the carrier full-wave rectified
   - Sizzle: its exponential is lopsided, so no variant is purely odd or even past the bottom of the timbre range; even is the sound of the original sizzle
   - Tanh: its even harmonics never reach half the energy, so balanced is half of what even gives; even and balanced offset the carrier before the drive, so the evens grow with timbre
