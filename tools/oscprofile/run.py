@@ -22,11 +22,17 @@
 # QEMU logs only the code a measured call can reach (ranges.py says why that
 # loses nothing): the rest is the harness preparing each call.
 #
+# Each job runs QEMU twice: first untraced with flashload.so, which records
+# where every load read, then traced; fold.py prices the second by the first.
+# The image's tag is a digest of what builds it, so tools of another version
+# build and keep their own.
+#
 # Several sessions at once:
 #   - a job takes one of the cache's CPU slots, one per Docker CPU, so every
 #     run on the machine together stays within Docker's CPUs;
 #   - one run at a time in a worktree: a second waits for the first;
-#   - a job whose trace stops for WATCHDOG_SECONDS fails the run;
+#   - a job whose trace stops, or whose flashload run lasts, WATCHDOG_SECONDS
+#     fails the run;
 #   - the container outlives a killed run by CONTAINER_SECONDS at most.
 import fcntl
 import hashlib
@@ -47,7 +53,9 @@ OUT = os.path.join(ROOT, 'build/oscprofile')
 CACHE = os.environ.get('OSCPROFILE_CACHE',
                        os.path.expanduser('~/.cache/yarns-oscprofile'))
 CACHE_DAYS = 30
-IMAGE = 'oscprofile-qemu'
+IMAGE = 'oscprofile-qemu:' + hashlib.sha1(b''.join(
+    open(os.path.join(HERE, name), 'rb').read()
+    for name in ('Dockerfile', 'flashload.c'))).hexdigest()[:12]
 CONTAINER = 'oscprofile-%d' % os.getpid()
 CONTAINER_SECONDS = 6 * 3600
 WATCHDOG_SECONDS = 300
@@ -59,6 +67,8 @@ ENVELOPE_FLAGS = ['_ZN5yarns8Envelope18HandOffToNextStage']
 ENVELOPE_PARTS = 16
 # What a run leaves, and what the cache keeps of it.
 RESULTS = ('fold.json', 'qemu_out.txt')
+QEMU = ('qemu-system-arm -M lm3s6965evb -display none -serial null -monitor none '
+        '-semihosting -semihosting-config arg=prof,%s -kernel ../profile.elf')
 
 
 def tool(*arguments):
@@ -163,24 +173,29 @@ def profile(job, slots):
   directory, address_filter_text, arguments, flags = job
   path = os.path.join(OUT, directory)
   os.makedirs(path, exist_ok=True)
-  for stale in ('job.txt',) + RESULTS + ('qemu.log',):
+  for stale in ('job.txt',) + RESULTS + ('qemu.log', 'reads.txt'):
     if os.path.exists(os.path.join(path, stale)):
       os.remove(os.path.join(path, stale))
   with Slot(slots), open(os.path.join(path, 'qemu.log'), 'w') as log, \
        open(os.path.join(path, 'fold.json'), 'w') as summary:
+    subprocess.check_call(
+        ['docker', 'exec', '-w', '/workdir/build/oscprofile/' + directory, CONTAINER,
+         'bash', '-c', ('timeout %d ' % WATCHDOG_SECONDS + QEMU
+                        + ' -plugin /opt/oscprofile/flashload.so,out=reads.txt')
+         % arguments],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
     qemu = subprocess.Popen(
         ['docker', 'exec', '-i', '-w', '/workdir/build/oscprofile/' + directory,
          CONTAINER, 'bash', '-o', 'pipefail', '-c',
-         'qemu-system-arm -M lm3s6965evb -display none -serial null -monitor none '
-         '-semihosting -semihosting-config arg=prof,%s -kernel ../profile.elf '
-         '-d exec,in_asm,nochain -dfilter %s -D /dev/stdout | gzip -1'
+         (QEMU + ' -d exec,in_asm,nochain -dfilter %s -D /dev/stdout | gzip -1')
          % (arguments, address_filter_text)],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log)
     gunzip = subprocess.Popen(['gzip', '-dc'], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE)
     fold = subprocess.Popen(
         [sys.executable, os.path.join(HERE, 'fold.py'),
-         os.path.join(OUT, 'profile.dis'), os.path.join(OUT, 'profile.sym')] + flags,
+         os.path.join(OUT, 'profile.dis'), os.path.join(OUT, 'profile.sym'),
+         '--reads=' + os.path.join(path, 'reads.txt')] + flags,
         stdin=gunzip.stdout, stdout=summary)
     gunzip.stdout.close()
     # The trace passes through here so the watchdog can see it move.
