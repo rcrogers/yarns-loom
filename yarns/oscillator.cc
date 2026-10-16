@@ -184,10 +184,17 @@ static inline uint8_t TransferCrestFactor(OscillatorShape shape) {
       * (curve == TRANSFER_CURVE_SIZZLE ? 1 : kSlopeFactor[carrier]);
 }
 
+// The constants the derivations below are written in. GCC folds the builtins
+// of constants at compile time, so each derived value is an immediate.
+static const double kPi = 3.14159265358979323846;
+static const double kLog2E = 1.0 / __builtin_log(2.0);
+
 // The biased tanh sits where the biased sine curve does: at rest it reads
-// sin(1/8 cycle) = 0.707 of full scale, which takes y = atanh(0.707) = 0.881 --
-// in RenderTransferTanh's exponent units, z = 2 y log2 e, 2.542 in q24.
-static const int32_t kTanhAsymmetricBias_q24 = 42666249;
+// sin(pi / 4) of full scale, which takes y = atanh(sin(pi / 4)) = asinh(1) =
+// ln(1 + sqrt 2) -- in RenderTransferTanh's exponent units, z = 2 y log2 e =
+// 2 log2(1 + sqrt 2), in q24.
+static const int32_t kTanhAsymmetricBias_q24 = static_cast<int32_t>(
+    2 * __builtin_log2(1 + __builtin_sqrt(2.0)) * (1 << 24) + 0.5);
 
 // Sizzle's bias is where its sine sits at rest. Unbiased that is the zero
 // crossing, as for the periodic curves; biased it is 1/8 cycle on, as theirs.
@@ -195,8 +202,11 @@ static const int32_t kTanhAsymmetricBias_q24 = 42666249;
 // offset from there. The output is the sine as it stands, no mean taken out:
 // the waveform's mean moves with TIMBRE by far more than a fixed offset could
 // follow.
-static const uint32_t kSizzleRestPhaseOffset = 3514455338u;  // -0.1817 cycle
-static const uint32_t kSizzleBiasedRestPhaseOffset = 4051326250u;  // -0.0567
+static const double kSizzleC0 = __builtin_exp(5 * kPi / 6) / (2 * kPi);
+static const uint32_t kSizzleRestPhaseOffset = 0u - static_cast<uint32_t>(
+    (kSizzleC0 - __builtin_floor(kSizzleC0)) * 4294967296.0 + 0.5);
+static const uint32_t kSizzleBiasedRestPhaseOffset =
+    kSizzleRestPhaseOffset + (1u << 29);
 
 /* static */
 const Oscillator::RenderFn Oscillator::fn_table_[] = {
@@ -988,23 +998,28 @@ void Oscillator::RenderTransferCarrier_q31(int32_t* carrier_q31) {
 // 2^frac(z) in Q15 is a degree-3 fit by Horner in 16 bits, every coefficient an
 // immediate, within 1.9e-4 of 2^f: under 3 LSB of tanh. Its constant is
 // exactly 1, so m >= 2^-n and tanh >= 0. log2 e rides on the gain, so z is
-// one MUL off the carrier: the gain times 2 log2 e / 2^15, 739 at a gain of 0.5,
-// the doubling's quadratic scaled by it. Below zero TIMBRE is the least gain.
-// Past y = 5.89, where tanh rounds to full scale, it is taken as that:
-// 0x11000000 is an immediate.
+// one MUL off the carrier: the gain times 2 log2 e / 2^15, the doubling's
+// quadratic scaled by its value at the least gain. Below zero TIMBRE is the
+// least gain. Past z = 17 tanh is taken as full scale: there e^2y = 2^17, and
+// 1 - tanh = 2 / (2^17 + 1) is under half an LSB of 2^15.
 //
 // The curve is small enough to copy once a carrier, as RenderTransfer's are:
 // the carrier, read in the loop, holds no buffer and costs no second pass.
 void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) {
-  const uint32_t kSaturation_q24 = 0x11000000;
+  const uint32_t kSaturation_q24 = 17 << 24;
+  // The gain's ends, 0.5 and 16: five doublings.
+  const double kGainLeast = 0.5;
+  const int32_t kGainDoublings = 5;
+  const int32_t kGainLeast_log2e =
+      static_cast<int32_t>(kGainLeast * 1024 * kLog2E + 0.5);
   const int32_t bias_q24 = IsTransferBiased(shape_) ? kTanhAsymmetricBias_q24 : 0;
   const uint16_t* carrier_table = transfer_carrier_ == TRANSFER_CURVE_SINE
       ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
 #define TANH_LOOP(CARRIER) \
   RENDER_PERIODIC( \
-    const int32_t doublings_q15 = (timbre < 0 ? 0 : timbre) * 5; \
+    const int32_t doublings_q15 = (timbre < 0 ? 0 : timbre) * kGainDoublings; \
     const int32_t fraction_q15 = doublings_q15 & 0x7fff; \
-    const int32_t gain_log2e = (739 + (fraction_q15 \
+    const int32_t gain_log2e = (kGainLeast_log2e + (fraction_q15 \
         * (485 + (fraction_q15 * 254 >> 15)) >> 15)) << (doublings_q15 >> 15); \
     const int32_t z_q24 = (CARRIER) * gain_log2e + bias_q24; \
     const uint32_t magnitude_q24 = \
@@ -1051,7 +1066,8 @@ void Oscillator::RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix
   const int32_t* carrier = carrier_q31;
   // a in q14, carried by the TIMBRE gain: the exponent is then one SMULL off
   // the carrier. 15 bits of a reshape the TIMBRE map by 0.003%.
-  const int32_t kExponentGain_q14 = 37129;
+  const int32_t kExponentGain_q14 =
+      static_cast<int32_t>(kPi / 2 * kLog2E * (1 << 14) + 0.5);
   const uint32_t rest_phase_offset = IsTransferBiased(shape_)
       ? kSizzleBiasedRestPhaseOffset : kSizzleRestPhaseOffset;
   RENDER_WITH_GAIN_AMPLIFYING_OUTPUT(
@@ -1599,8 +1615,7 @@ static inline int32_t JetNoise(int32_t excitation) { return excitation; }
 static const int32_t kLoopUnitBits = 13;
 static const int32_t kLoopUnitShift_q15_14 =
     kLoopUnitBits + ResonatorState::kFractionalBits;
-// Q 25.
-static const int16_t kLoopDamp_u1_14 = 655;
+static const int16_t kLoopDamp_u1_14 = (1 << 14) / 25;  // Q 25
 // TIMBRE halved: the span the offset and the loop gain are both read across.
 static const int32_t kLoopOffsetBits = kEnvelopeSampleBits - 1;
 // Input noise of 2^-this loop units at full gain.
@@ -1628,6 +1643,19 @@ static const int32_t kLoopRoughnessShift = 16 - kLoopRoughnessFractionBits;
 static const int32_t kLoopRampGuardBits = 2;
 // The DC blocker's running mean forgets 2^-this a sample: 28 Hz at 45 kHz.
 static const int32_t kLoopDcBlockerShift = 8;
+// 2^(-i / 24) for i semitones, 2^15 the unit: the roughness's halving every two
+// octaves, across two.
+#define LOOP_HALVING(i) static_cast<uint16_t>(__builtin_exp2(-(i) / 24.0) * 32768 + 0.5)
+static const uint16_t kLoopHalvingAcrossTwoOctaves_u15[25] = {
+  LOOP_HALVING(0), LOOP_HALVING(1), LOOP_HALVING(2), LOOP_HALVING(3),
+  LOOP_HALVING(4), LOOP_HALVING(5), LOOP_HALVING(6), LOOP_HALVING(7),
+  LOOP_HALVING(8), LOOP_HALVING(9), LOOP_HALVING(10), LOOP_HALVING(11),
+  LOOP_HALVING(12), LOOP_HALVING(13), LOOP_HALVING(14), LOOP_HALVING(15),
+  LOOP_HALVING(16), LOOP_HALVING(17), LOOP_HALVING(18), LOOP_HALVING(19),
+  LOOP_HALVING(20), LOOP_HALVING(21), LOOP_HALVING(22), LOOP_HALVING(23),
+  LOOP_HALVING(24),
+};
+#undef LOOP_HALVING
 
 // The curve at x - 32768, x held to the table's span: the bias lets one USAT
 // do the clip.
@@ -1692,9 +1720,9 @@ static inline int32_t LoopTableAt(const T* table, int32_t half_timbre) {
 // WIND: tanh, offset 0..2, so the bottom stays a sine and the top squares off.
 struct WindLoop {
   static const int16_t* Curve() { return SoftLimitTableAsRegister(); }
-  static const int32_t kOffsetTop_q15 = 32768;
-  static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
-  static const int32_t kLoopGainTop_q15 = 81920;  // 2.5
+  static const int32_t kOffsetTop_q15 = static_cast<int32_t>(2.0 / 2 * 32768);
+  static const int32_t kLoopGainBottom_q15 = static_cast<int32_t>(1.3 * 32768 + 0.5);
+  static const int32_t kLoopGainTop_q15 = static_cast<int32_t>(2.5 * 32768);
   // sech^2, the slope of tanh, is 1 - tanh^2.
   static int32_t SlopeAtRest_q15(const int16_t*, int32_t, int32_t rest) {
     return 32768 - (rest * rest >> 15);
@@ -1715,10 +1743,10 @@ struct WindLoop {
 // bow pressure wavering, which roughens every partial into a scrape.
 struct BowedLoop {
   static const int16_t* Curve() { return TableAsRegister(ws_fold_back); }
-  static const int32_t kOffsetTop_q15 = 11469;  // 0.7 of 2
-  static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
-  // 40: the harmonics keep coming as TIMBRE rises; at 7 the top was a plateau.
-  static const int32_t kLoopGainTop_q15 = 1310720;
+  static const int32_t kOffsetTop_q15 = static_cast<int32_t>(0.7 / 2 * 32768 + 0.5);
+  static const int32_t kLoopGainBottom_q15 = static_cast<int32_t>(1.3 * 32768 + 0.5);
+  // The harmonics keep coming as TIMBRE rises all the way to 40.
+  static const int32_t kLoopGainTop_q15 = 40 << 15;
   // The secant across one table step each side, 1/16 of a unit: the table's
   // own slope there, which no closed form of the curve's value gives.
   static int32_t SlopeAtRest_q15(const int16_t* curve, int32_t biased_offset,
@@ -1750,7 +1778,8 @@ struct BowedLoop {
   // k 0.2, in u1.14 times q15: Q 25 up to a loop gain of 5, then d * L = 0.2.
   // That halves the flat start a strong loop has before it settles, and holds
   // the settled pull to a constant.
-  static const int32_t kDampTimesLoopGain = 107374182;
+  static const int32_t kDampTimesLoopGain =
+      static_cast<int32_t>(0.2 * (1 << 14) * (1 << 15) + 0.5);
   static const bool kRoughnessByPitch = true;
   // 2^-1: jitter 0.5 at A3.
   static const int32_t kJitterShift = 17;
@@ -1814,18 +1843,13 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   // kLoopRoughnessFractionBits fraction bits, held to 1/8..4.
   int32_t roughness = 0;
   if (Loop::kRoughnessByPitch) {
-    // 2^(-i / 24) for i semitones, 2^15 the unit.
-    static const uint16_t kHalvingAcrossTwoOctaves_u15[25] = {
-        32768, 31835, 30929, 30048, 29193, 28362, 27554, 26770, 26008,
-        25268, 24548, 23849, 23170, 22511, 21870, 21247, 20643, 20055,
-        19484, 18929, 18390, 17867, 17358, 16864, 16384 };
     const int32_t kTwoOctaves = 24 << 7;
     // Enough two-octave spans below A3 that MIDI 0 counts up from zero.
     const int32_t kSpansBelowA3 = 4;
     const int32_t from = pitch_ - (57 << 7) + kSpansBelowA3 * kTwoOctaves;
     const int32_t spans = from / kTwoOctaves;
     const int32_t within = from - spans * kTwoOctaves;
-    const uint16_t* entry = &kHalvingAcrossTwoOctaves_u15[within >> 7];
+    const uint16_t* entry = &kLoopHalvingAcrossTwoOctaves_u15[within >> 7];
     const int32_t halving_u15 =
         entry[0] + ((entry[1] - entry[0]) * (within & 0x7f) >> 7);
     roughness = halving_u15
