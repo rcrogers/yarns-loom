@@ -1043,6 +1043,16 @@ void Oscillator::RenderTransferCarrier_q31(int32_t* carrier_q31) {
   phase_ = phase;
 }
 
+// 2^f in Q15 for a fraction f in 16 bits: a degree-3 fit by Horner in 16 bits,
+// every coefficient an immediate, within 1.9e-4 of 2^f. Its constant is
+// exactly 1.
+static inline uint32_t Exp2Fraction_q15(uint32_t fraction_u16) {
+  uint32_t mantissa_q15 = 2591;
+  mantissa_q15 = 7357 + (mantissa_q15 * fraction_u16 >> 16);
+  mantissa_q15 = 22819 + (mantissa_q15 * fraction_u16 >> 16);
+  return 32768 + (mantissa_q15 * fraction_u16 >> 16);
+}
+
 // The transfer family's carriers through tanh(y): y is the carrier times the
 // TIMBRE's gain, plus the bias. It drives rather than folds, so it takes
 // neither the family's gain law nor its fold knee.
@@ -1058,9 +1068,8 @@ void Oscillator::RenderTransferCarrier_q31(int32_t* carrier_q31) {
 //
 // With z = 2 y log2 e (y = 32 x) and e^2y = 2^z = m 2^n, tanh = (m - 2^-n) /
 // (m + 2^-n): one divide, its quotient already the output's 2^15 scale. m =
-// 2^frac(z) in Q15 is a degree-3 fit by Horner in 16 bits, every coefficient an
-// immediate, within 1.9e-4 of 2^f: under 3 LSB of tanh. Its constant is
-// exactly 1, so m >= 2^-n and tanh >= 0. log2 e rides on the gain, so z is
+// 2^frac(z) is Exp2Fraction_q15, under 3 LSB of tanh; its constant is exactly
+// 1, so m >= 2^-n and tanh >= 0. log2 e rides on the gain, so z is
 // one MUL off the carrier: the gain times 2 log2 e / 2^15, the doubling's
 // quadratic scaled by its value at the least gain. Below zero TIMBRE is the
 // least gain. Past z = 17 tanh is taken as full scale: there e^2y = 2^17, and
@@ -1091,12 +1100,8 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
         static_cast<uint32_t>(z_q24 < 0 ? -z_q24 : z_q24); \
     int32_t shaped = 32767; \
     if (magnitude_q24 < kSaturation_q24) { \
-      const uint32_t fraction_u16 = (magnitude_q24 >> 8) & 0xffff; \
-      uint32_t mantissa_q15 = 2591; \
-      mantissa_q15 = 7357 + (mantissa_q15 * fraction_u16 >> 16); \
-      mantissa_q15 = 22819 + (mantissa_q15 * fraction_u16 >> 16); \
-      mantissa_q15 = 32768 + (mantissa_q15 * fraction_u16 >> 16); \
-      const uint32_t mantissa_q30 = mantissa_q15 << 15; \
+      const uint32_t mantissa_q30 = \
+          Exp2Fraction_q15((magnitude_q24 >> 8) & 0xffff) << 15; \
       const uint32_t reciprocal_q30 = (1u << 30) >> (magnitude_q24 >> 24); \
       shaped = (mantissa_q30 - reciprocal_q30) \
           / ((mantissa_q30 + reciprocal_q30 + (1u << 14)) >> 15); \
