@@ -719,7 +719,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
   - Odd (the symbol upright): odd harmonics only, or as near as the curve allows
   - Balanced (the symbol sideways: `<`, and sideways `s`, `e`, `w`, `T`): halfway between odd and even, averaged over the timbre sweep -- for the folding transfer functions, odd and even harmonics in equal energy
   - Even (the symbol inverted: `┴`, `ˇ`, `ˢ`, `ʍ`, `ə`): as many even harmonics as the curve allows
-  - Folding transfer functions: odd is exact at every timbre. Even harmonics alone would have no fundamental and sound an octave up, so even mixes the carrier back in, equally: the fundamental under the even harmonics of the fold
+  - Folding transfer functions: odd is exact at every timbre. Even harmonics alone would have no fundamental and sound an octave up, so even mixes the carrier back in at the level of the odd variant's fundamental, which falls with timbre as odd's does: the fundamental under the even harmonics of the fold
   - Sizzle: its exponential is lopsided, so no variant is purely odd or even past the bottom of the timbre range; even is the sound of the original sizzle
   - Tanh: its even harmonics never reach half the energy, so balanced is half of what even gives; even and balanced offset the carrier before the drive, so the evens grow with timbre
 

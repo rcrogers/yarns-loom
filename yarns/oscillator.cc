@@ -1169,17 +1169,21 @@ void Oscillator::RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix
 // the carrier full-wave rectified -- even harmonics alone, at full level, to
 // which RenderTransfer adds the carrier.
 
+// The carrier's gain into the transfer: the input peak swings least_phase at
+// min timbre, and 1.875 x more per unit of dynamic gain.
+//   input_peak * min_gain * 2^kTransferMaxGainBits = least_phase
+//   2^15 * min_gain * 2^4 = least_phase
+//   min_gain = least_phase >> 19
+inline int32_t transfer_gain(int16_t dynamic_gain_u15, uint32_t least_phase) {
+  int32_t min_gain =
+      least_phase >> (kSamplePeakBits + kTransferMaxGainBits);
+  return min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
+}
+
 inline uint32_t amplify_for_transfer(
     int16_t sample, int16_t dynamic_gain_u15, uint32_t bias,
     uint32_t least_phase) {
-  // min_gain derivation (at min timbre, the input peak swings least_phase):
-  //   input_peak * min_gain * 2^kTransferMaxGainBits = least_phase
-  //   2^15 * min_gain * 2^4 = least_phase
-  //   min_gain = least_phase >> 19
-  int32_t min_gain =
-      least_phase >> (kSamplePeakBits + kTransferMaxGainBits);
-
-  int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
+  int32_t gain = transfer_gain(dynamic_gain_u15, least_phase);
 
   // Signed multiply, then reinterpret as phase (wrapping is intentional)
   uint32_t amped_sample = ((uint32_t)(sample * gain)) << kTransferMaxGainBits;
@@ -1189,9 +1193,66 @@ inline uint32_t amplify_for_transfer(
 
 // Even rests on the curve's crest, about which the curve is symmetric, so its
 // output repeats every half cycle of the carrier: no fundamental, the note an
-// octave up. Even mixes the carrier back in, equally, which puts the note back
-// and, two full-scale signals halved, stays inside full scale. A function of
-// its own, so odd and balanced carry none of its cost.
+// octave up. Even mixes the carrier back in, at the weight that gives it the
+// odd variant's fundamental: (fold + a carrier) / (1 + a), a the odd variant's
+// fundamental over the carrier's own, which stays inside full scale.
+//
+// Odd's fundamental against the drive beta (2 pi the swing, in radians; the
+// swing is the gain 2^-13 cycles) is a train of humps under an envelope
+// min(cap, k beta^-p) -- for sine thru sine |2 J1(beta)| (Jacobi-Anger) under
+// 1.596 / sqrt(beta). a follows the envelope, not the humps, whose zeros would
+// leave no fundamental. cap, k and p are each pair's, fitted on the humps'
+// peaks to within 0.2 dB (resonator-scripts/even278.py): p is about 1/2 for a
+// sine carrier, 1 for a triangle's, 0.3 for an expo's.
+struct EvenFundamental {
+  uint16_t cap_q15;
+  uint16_t exponent_q15;
+  // log2 k - p log2(2 pi 2^-13), so log2 a = this - p log2 gain.
+  int32_t log2_offset_q16;
+};
+
+#define EVEN_FUNDAMENTAL(cap, k, p) { \
+    static_cast<uint16_t>((cap) * 32768 + 0.5), \
+    static_cast<uint16_t>((p) * 32768 + 0.5), \
+    static_cast<int32_t>(__builtin_floor( \
+        (__builtin_log2(k) - (p) * __builtin_log2(2 * kPi / 8192)) * 65536 \
+        + 0.5)) }
+
+static const EvenFundamental kEvenFundamental[3][3] = {  // [carrier][curve]
+  { EVEN_FUNDAMENTAL(1.131, 2.146, 1.03),     // tri thru tri
+    EVEN_FUNDAMENTAL(1.347, 2.731, 1.03),     // tri thru sine
+    EVEN_FUNDAMENTAL(1.464, 3.266, 1.04) },   // tri thru expo
+  { EVEN_FUNDAMENTAL(1.029, 1.325, 0.51),     // sine thru tri
+    EVEN_FUNDAMENTAL(1.164, 1.601, 0.50),     // sine thru sine
+    EVEN_FUNDAMENTAL(1.225, 1.789, 0.50) },   // sine thru expo
+  { EVEN_FUNDAMENTAL(1.006, 1.267, 0.32),     // expo thru tri
+    EVEN_FUNDAMENTAL(1.083, 1.425, 0.31),     // expo thru sine
+    EVEN_FUNDAMENTAL(1.113, 1.509, 0.30) },   // expo thru expo
+};
+#undef EVEN_FUNDAMENTAL
+
+// The carrier's weight a / (1 + a) in Q15 at this TIMBRE. log2 of the gain is
+// the leading one's place plus the mantissa's fraction f, log2(1 + f) taken as
+// f + 0.34655 f (1 - f), within 0.008 -- 0.05 dB of a at p = 1. Twice a block,
+// so a call, not inlined at both.
+static __attribute__((noinline)) int32_t EvenCarrierMix_q15(
+    int16_t timbre, uint8_t gain_shift, const EvenFundamental& fundamental) {
+  const uint32_t gain = static_cast<uint32_t>(
+      transfer_gain((timbre < 0 ? 0 : timbre) >> gain_shift, kTransferPeakPhase));
+  const int32_t leading_zeros = __builtin_clz(gain);
+  const uint32_t fraction_u16 = (gain << leading_zeros) >> 15 & 0xffff;
+  const uint32_t kLog2Bow_q16 = 22712;
+  const int32_t log2_gain_q16 = ((31 - leading_zeros) << 16) + fraction_u16
+      + ((fraction_u16 * (65536 - fraction_u16) >> 16) * kLog2Bow_q16 >> 16);
+  const int32_t log2_a_q16 = fundamental.log2_offset_q16 - static_cast<int32_t>(
+      static_cast<int64_t>(fundamental.exponent_q15) * log2_gain_q16 >> 15);
+  const int32_t whole = log2_a_q16 >> 16;
+  const uint32_t mantissa_q15 = Exp2Fraction_q15(log2_a_q16 & 0xffff);
+  uint32_t a_q15 = whole >= 0 ? mantissa_q15 << whole : mantissa_q15 >> -whole;
+  if (a_q15 > fundamental.cap_q15) a_q15 = fundamental.cap_q15;
+  return (a_q15 << 15) / (32768 + a_q15);
+}
+
 template <bool carrier_mixed>
 void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   const uint8_t carrier_index = transfer_carrier_;
@@ -1215,14 +1276,35 @@ void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
       carrier_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
   const uint16_t* transfer_table =
       transfer_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
+  // Even's carrier weight at the block's first and last TIMBRE, ramped between
+  // them sample by sample in Q23.
+  int32_t carrier_mix_q23 = 0;
+  int32_t carrier_mix_step_q23 = 0;
+  if (carrier_mixed) {
+    const EvenFundamental& fundamental =
+        kEvenFundamental[carrier_index][transfer_index];
+    const int32_t first_q15 =
+        EvenCarrierMix_q15(input_samples[0], gain_shift, fundamental);
+    const int32_t last_q15 = EvenCarrierMix_q15(
+        input_samples[kAudioBlockSize - 1], gain_shift, fundamental);
+    carrier_mix_q23 = first_q15 << 8;
+    carrier_mix_step_q23 = (last_q15 - first_q15) * (1 << 8)
+        / static_cast<int32_t>(kAudioBlockSize - 1);
+  }
 
 #define TRANSFER_LOOP(CARRIER, TRANSFER) \
   RENDER_PERIODIC( \
     this_sample = CARRIER; \
     uint32_t transfer_phase = \
         amplify_for_transfer(this_sample, timbre >> gain_shift, bias, least_phase); \
-    this_sample = carrier_mixed \
-        ? (this_sample + (TRANSFER)) >> 1 : (TRANSFER); \
+    if (carrier_mixed) { \
+      const int32_t fold = TRANSFER; \
+      this_sample = fold \
+          + ((this_sample - fold) * (carrier_mix_q23 >> 8) >> 15); \
+      carrier_mix_q23 += carrier_mix_step_q23; \
+    } else { \
+      this_sample = TRANSFER; \
+    } \
   )
 
   if (carrier_index == TRANSFER_CURVE_TRI) {
