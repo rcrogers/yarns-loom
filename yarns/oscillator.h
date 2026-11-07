@@ -387,44 +387,50 @@ class Oscillator {
   static const RenderFn fn_table_[];
   
  private:
+  // A method fn_table_ names is inlined into its RenderThunk, its only caller,
+  // so the table points at the render itself: no extra branch. Not those
+  // GCC compiles slower inlined (SyncSaw, SawPulseMorph, VariablePulse,
+  // PhaseDistortionPulse, by 1-6 cycles a sample, measured): theirs is a
+  // thunk that branches to the method.
+#define RENDERED_BY_THUNK inline __attribute__((always_inline))
   template <RenderMethod method>
   static void RenderThunk(
       Oscillator* oscillator, int16_t* input_samples, int16_t* audio_mix) {
     (oscillator->*method)(input_samples, audio_mix);
   }
 
-  void RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix);
   void RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix);
-  void RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix);
-  void RenderLPPulse(int16_t* input_samples, int16_t* audio_mix);
-  void RenderLPSaw(int16_t* input_samples, int16_t* audio_mix);
-  void RenderVariableSine(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderLPPulse(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderLPSaw(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderVariableSine(int16_t* input_samples, int16_t* audio_mix);
   void RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix);
-  void RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix);
   void RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix);
-  void RenderSyncSine(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderSyncSine(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncTriangle(int16_t* input_samples, int16_t* audio_mix);
-  void RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix);
-  void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
-  void RenderWind(int16_t* input_samples, int16_t* audio_mix);
-  void RenderBowed(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderWind(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderBowed(int16_t* input_samples, int16_t* audio_mix);
   // The loop shapes' one body; Loop names the curve and the ranges (see
   // WindLoop in oscillator.cc).
   template <typename Loop>
   void RenderLoop(int16_t* input_samples, int16_t* audio_mix);
-  void RenderPing(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderPing(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldSine(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix);
-  void RenderDiracComb(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderDiracComb(int16_t* input_samples, int16_t* audio_mix);
   // carrier_mixed: the even variant's, which mixes the carrier back in.
   template <bool carrier_mixed>
-  void RenderTransfer(int16_t* input_samples, int16_t* audio_mix);
-  void RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix);
-  void RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderTransfer(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix);
   // The block's carrier, at full width, advancing the phase.
   void RenderTransferCarrier_q31(int32_t* carrier_q31);
-  void RenderFM(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderFM(int16_t* input_samples, int16_t* audio_mix);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
@@ -534,6 +540,7 @@ class Oscillator {
  private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);
 };
+#undef RENDERED_BY_THUNK
 
 }  // namespace yarns
 
