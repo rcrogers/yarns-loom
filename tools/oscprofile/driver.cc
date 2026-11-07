@@ -73,13 +73,17 @@ void RenderCase(int shape, int16_t pitch, int sweep, int gain) {
   const int steps = kBlocks * kAudioBlockSize;
   for (int b = 0; b < kBlocks; ++b) {
     osc.Refresh(pitch, 0, 0, 0);
-    int16_t timbre_gain[2 * kAudioBlockSize];
+    // Static: the frame limit is the firmware's, and this harness frame holds
+    // the shape's whole input besides.
+    static Oscillator::ShapeInputs inputs;
+    int16_t* const timbre_gain = inputs.narrow;
     int16_t mix[kAudioBlockSize] = { 0 };
     for (size_t i = 0; i < kAudioBlockSize; ++i) {
       const int step = b * kAudioBlockSize + i;
       timbre_gain[i] = osc.WarpTimbre(RawTimbre(sweep, step, steps),
                                       static_cast<OscillatorShape>(shape));
-      timbre_gain[i + kAudioBlockSize] = GainAt(gain, step, steps);
+      inputs.SetGain(i, GainAt(gain, step, steps),
+                     static_cast<OscillatorShape>(shape));
     }
     ProfileBlockBegin();
     (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);
@@ -92,15 +96,17 @@ Envelope envelope;
 ADSR adsr;
 
 // What an envelope drives, as its callers set it: Oscillator::NoteOn's gain
-// envelope at one voice's peak and its TIMBRE envelope either way, and
-// CVOutput's, whose DAC codes fall as its volts rise.
-enum Target { kGain, kTimbreUp, kTimbreDown, kCv, kNumTargets };
+// envelope at one voice's peak, and at full scale and wide for a shape that
+// takes_wide_gain; its TIMBRE envelope either way; and CVOutput's, whose DAC
+// codes fall as its volts rise.
+enum Target { kGain, kTimbreUp, kTimbreDown, kCv, kGainWide, kNumTargets };
 struct Range { int32_t min_s16, max_s16, ceiling_s16; };
 const Range kRanges[kNumTargets] = {
   { 0, INT16_MAX >> 1, INT16_MAX >> 1 },
   { 0, 12000, kEnvelopeSampleMax },
   { 0, -12000, kEnvelopeSampleMax },
   { 27000, 2500, kEnvelopeSampleMax },
+  { 0, kEnvelopeSampleMax, kEnvelopeSampleMax },
 };
 // The bias held, or stepped the most it can between blocks.
 enum Bias { kBiasHeld, kBiasStepping, kNumBiases };
@@ -124,13 +130,18 @@ const int kRetriggerBlocks = 3;
 const int kEnvelopeCalls =
     1 + kHeldBlocks + 1 + kHeldBlocks + 1 + kReleaseBlocks + 1 + kRetriggerBlocks;
 
-void RenderEnvelopeBlocks(int blocks, int bias, int* block) {
+void RenderEnvelopeBlocks(int target, int blocks, int bias, int* block) {
   int16_t samples[kAudioBlockSize];
+  int32_t samples_q30[kAudioBlockSize];
   for (int b = 0; b < blocks; ++b, ++*block) {
     const int32_t bias_q31 = bias == kBiasHeld ? 0
         : (*block & 1) ? kBiasStep_q31 : -kBiasStep_q31;
     ProfileBlockBegin();
-    envelope.RenderSamples(samples, bias_q31);
+    if (target == kGainWide) {
+      envelope.RenderSamples(samples_q30, bias_q31);
+    } else {
+      envelope.RenderSamples(samples, bias_q31);
+    }
     ProfileBlockEnd();
   }
 }
@@ -154,15 +165,15 @@ void EnvelopeCase(int target, int bias, int attack, int decay, int sustain,
   envelope.Init(0);
   int block = 0;
   NoteOn(range, amount_q30, audible_samples);
-  RenderEnvelopeBlocks(kHeldBlocks, bias, &block);
+  RenderEnvelopeBlocks(target, kHeldBlocks, bias, &block);
   NoteOn(range, amount_q30, audible_samples);
-  RenderEnvelopeBlocks(kHeldBlocks, bias, &block);
+  RenderEnvelopeBlocks(target, kHeldBlocks, bias, &block);
   ProfileBlockBegin();
   envelope.NoteOff();
   ProfileBlockEnd();
-  RenderEnvelopeBlocks(kReleaseBlocks, bias, &block);
+  RenderEnvelopeBlocks(target, kReleaseBlocks, bias, &block);
   NoteOn(range, amount_q30, audible_samples);
-  RenderEnvelopeBlocks(kRetriggerBlocks, bias, &block);
+  RenderEnvelopeBlocks(target, kRetriggerBlocks, bias, &block);
 }
 
 // Every envelope case whose index is `part` modulo `parts`.

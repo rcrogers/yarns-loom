@@ -192,7 +192,8 @@ uint32_t HashShape(int shape, bool dump) {
           pitch_q16 / g_pitch_quantum * g_pitch_quantum;
       osc.Refresh(static_cast<int16_t>(quantized >> 16),
                   static_cast<uint16_t>(quantized), 0, 0);
-      int16_t timbre_gain[2 * kAudioBlockSize];
+      Oscillator::ShapeInputs inputs;
+      int16_t* const timbre_gain = inputs.narrow;
       int16_t mix[kAudioBlockSize];
       memset(mix, 0, sizeof(mix));
       for (size_t i = 0; i < kAudioBlockSize; ++i) {
@@ -207,8 +208,8 @@ uint32_t HashShape(int shape, bool dump) {
                  : static_cast<int16_t>(g_held_timbre))
             : static_cast<int16_t>(
                 from + (to - from) * step / (g_blocks * kAudioBlockSize));
-        timbre_gain[i + kAudioBlockSize] =
-            GainAt(gain_profile, step, g_blocks * kAudioBlockSize);
+        inputs.SetGain(i, GainAt(gain_profile, step, g_blocks * kAudioBlockSize),
+                       static_cast<OscillatorShape>(shape));
       }
       (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);
       for (size_t i = 0; i < kAudioBlockSize; ++i) {

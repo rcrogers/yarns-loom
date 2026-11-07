@@ -67,7 +67,8 @@ int main() {
           osc.svf_.lp = INT16_MAX;
           // Several blocks, so state carried between them is exercised too.
           for (int b = 0; b < 6; ++b) {
-            int16_t timbre_gain[2 * kAudioBlockSize];
+            Oscillator::ShapeInputs inputs;
+            int16_t* const timbre_gain = inputs.narrow;
             int16_t mix[kAudioBlockSize];
             memset(mix, 0, sizeof(mix));
             // Alternate ends block to block, and ramp between them within a
@@ -78,7 +79,8 @@ int main() {
             for (size_t i = 0; i < kAudioBlockSize; ++i) {
               timbre_gain[i] = static_cast<int16_t>(
                   from + (to - from) * static_cast<int>(i) / kAudioBlockSize);
-              timbre_gain[i + kAudioBlockSize] = static_cast<int16_t>(gains[g]);
+              inputs.SetGain(i, static_cast<int16_t>(gains[g]),
+                             static_cast<OscillatorShape>(s));
             }
             (osc.*Oscillator::fn_table_[s])(timbre_gain, mix);
           }

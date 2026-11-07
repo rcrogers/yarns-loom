@@ -36,10 +36,11 @@ CALLS = (['NoteOn'] + ['held block'] * driver_constant('kHeldBlocks')
          + ['NoteOff'] + ['release block'] * driver_constant('kReleaseBlocks')
          + ['NoteOn, releasing'] + ['block after it'] * driver_constant('kRetriggerBlocks'))
 BLOCK_KINDS = ('held block', 'release block', 'block after it')
-TARGETS = ('gain', 'TIMBRE up', 'TIMBRE down', 'CV')
+TARGETS = ('gain', 'TIMBRE up', 'TIMBRE down', 'CV', 'gain wide')
 BIASES = ('bias held', 'bias stepping')
 PEAKS = ('panel peak', 'peak at sustain')
-HAND_OFF = '_ZN5yarns8Envelope18HandOffToNextStage'
+# A stage hand-off inside a block is a Trigger: the render's only call to it.
+HAND_OFF = '_ZN5yarns8Envelope7TriggerE'
 PARTS = sorted(int(d[3:]) for d in os.listdir(measured.OUT) if re.match(r'^env\d+$', d))
 
 
