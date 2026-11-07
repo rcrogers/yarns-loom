@@ -189,7 +189,11 @@ enum OscillatorShape {
 class Oscillator {
  public:
   // Multiply-accumulates each sample (* gain >> 15) into audio_mix.
-  typedef void (Oscillator::*RenderFn)(int16_t* input_samples, int16_t* audio_mix);
+  typedef void (Oscillator::*RenderMethod)(int16_t* input_samples, int16_t* audio_mix);
+  // A shape's render as a plain function, so a table entry is 4 bytes, not a
+  // member pointer's 8: RenderThunk calls the method it is instantiated for.
+  typedef void (*RenderFn)(
+      Oscillator* oscillator, int16_t* input_samples, int16_t* audio_mix);
 
   Oscillator() { }
   ~Oscillator() { }
@@ -383,6 +387,12 @@ class Oscillator {
   static const RenderFn fn_table_[];
   
  private:
+  template <RenderMethod method>
+  static void RenderThunk(
+      Oscillator* oscillator, int16_t* input_samples, int16_t* audio_mix) {
+    (oscillator->*method)(input_samples, audio_mix);
+  }
+
   void RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix);
   void RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix);
   void RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix);

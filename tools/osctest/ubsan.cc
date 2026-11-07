@@ -82,7 +82,7 @@ int main() {
               inputs.SetGain(i, static_cast<int16_t>(gains[g]),
                              static_cast<OscillatorShape>(s));
             }
-            (osc.*Oscillator::fn_table_[s])(timbre_gain, mix);
+            Oscillator::fn_table_[s](&osc, timbre_gain, mix);
           }
           ++cases;
 

@@ -211,7 +211,7 @@ uint32_t HashShape(int shape, bool dump) {
         inputs.SetGain(i, GainAt(gain_profile, step, g_blocks * kAudioBlockSize),
                        static_cast<OscillatorShape>(shape));
       }
-      (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);
+      Oscillator::fn_table_[shape](&osc, timbre_gain, mix);
       for (size_t i = 0; i < kAudioBlockSize; ++i) {
         hash = Fnv(hash, mix[i]);
         if (g_collect_slot >= 0 && g_collect_index < kCollected) {

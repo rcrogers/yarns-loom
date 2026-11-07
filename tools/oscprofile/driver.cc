@@ -86,7 +86,7 @@ void RenderCase(int shape, int16_t pitch, int sweep, int gain) {
                      static_cast<OscillatorShape>(shape));
     }
     ProfileBlockBegin();
-    (osc.*Oscillator::fn_table_[shape])(timbre_gain, mix);
+    Oscillator::fn_table_[shape](&osc, timbre_gain, mix);
     ProfileBlockEnd();
   }
 }
