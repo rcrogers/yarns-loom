@@ -193,6 +193,7 @@ class Envelope {
 
  private:
   int32_t ChiffSlewInput_q30() const;
+  void CacheStageAdjustedTarget();
   inline ChiffRunDecay AdvanceChiffDecay(uint32_t run_samples);
   void AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff);
 
@@ -249,6 +250,8 @@ class Envelope {
   // Where the current stage began. With the stage phase this anchors the
   // nominal value in closed form.
   int32_t stage_start_q30_;
+  // What nominal chases this stage; Trigger caches it.
+  int32_t stage_adjusted_target_q1_30_;
   int32_t nominal_value_q30_;
   // min(note floor, 0). USAT bounds [0, 2^30), so a note reaching below zero is
   // rendered offset by its floor. State, not a local: GCC spills it there.
