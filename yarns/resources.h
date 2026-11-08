@@ -62,6 +62,7 @@ extern const uint16_t* const char_table[];
 
 extern const char str_dummy[];
 extern const uint16_t lut_env_expo_u16[];
+extern const uint16_t lut_chiff_rms_over_start_u16[];
 extern const uint16_t lut_expo2_neg_u16[];
 extern const uint16_t lut_sine_quadrant_u16[];
 extern const uint16_t lut_expo_quadrant_u16[];
@@ -135,19 +136,21 @@ extern const uint16_t chr_blinking_characters[];
 #define STR_DUMMY 0  // dummy
 #define LUT_ENV_EXPO_U16 0
 #define LUT_ENV_EXPO_U16_SIZE 257
-#define LUT_EXPO2_NEG_U16 1
+#define LUT_CHIFF_RMS_OVER_START_U16 1
+#define LUT_CHIFF_RMS_OVER_START_U16_SIZE 257
+#define LUT_EXPO2_NEG_U16 2
 #define LUT_EXPO2_NEG_U16_SIZE 257
-#define LUT_SINE_QUADRANT_U16 2
+#define LUT_SINE_QUADRANT_U16 3
 #define LUT_SINE_QUADRANT_U16_SIZE 257
-#define LUT_EXPO_QUADRANT_U16 3
+#define LUT_EXPO_QUADRANT_U16 4
 #define LUT_EXPO_QUADRANT_U16_SIZE 257
-#define LUT_ARPEGGIATOR_PATTERNS 4
+#define LUT_ARPEGGIATOR_PATTERNS 5
 #define LUT_ARPEGGIATOR_PATTERNS_SIZE 23
-#define LUT_CONSONANCE 5
+#define LUT_CONSONANCE 6
 #define LUT_CONSONANCE_SIZE 1536
-#define LUT_CLOCK_RATIO_TICKS 6
+#define LUT_CLOCK_RATIO_TICKS 7
 #define LUT_CLOCK_RATIO_TICKS_SIZE 32
-#define LUT_SVF_CUTOFF_U15 7
+#define LUT_SVF_CUTOFF_U15 8
 #define LUT_SVF_CUTOFF_U15_SIZE 257
 #define LUT_SCALE_PYTHAGOREAN 0
 #define LUT_SCALE_PYTHAGOREAN_SIZE 12

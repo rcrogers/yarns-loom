@@ -103,6 +103,14 @@ def envelope():
     env_expo = make_expo(env_linear)
     lookup_tables.append(('env_expo_u16', env_expo / env_expo.max() * 65535.0))
 
+    # A chiff run's RMS amount over its starting amount. The amount decays as
+    # e^(-4 phase), so over a run spanning phase p the mean square is
+    # (1 - e^(-8p)) / (8p) of the start's. Indexed by the span, [0, 1].
+    chiff_span = numpy.arange(0, num_expo_values + 1) / num_expo_values
+    chiff_span[0] = 1e-9
+    chiff_rms = numpy.sqrt((1.0 - numpy.exp(-8.0 * chiff_span)) / (8.0 * chiff_span))
+    lookup_tables.append(('chiff_rms_over_start_u16', numpy.round(chiff_rms * 65535.0)))
+
     # def make_expo_inverse(expo_value):
     #     return -numpy.log(1.0 - expo_value) / 4.0
 
