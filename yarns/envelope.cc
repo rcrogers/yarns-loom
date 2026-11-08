@@ -104,14 +104,6 @@ inline uint32_t OffsetForChiffAmplitude(
 const uint32_t kOne_q31_sqrt = static_cast<uint32_t>(
   32768.0 * __builtin_sqrt(2.0) + 0.5);
 
-// The chiff's amplitude within a block, Q1.30, and the shift that puts the
-// high word of the state times it back in the state's place. It rises at most
-// half an octave a block: a decay only falls, and the slew gain it divides out
-// falls with it.
-const int32_t kChiffAmplitudeOne_q1_30 = 1 << 30;
-const int kChiffAmplitudeHighWordShift = 2;
-const int32_t kChiffAmplitudeMaxOctaves_q5_27 = 1 << 26;
-
 // lut_env_expo_u16's last entry. Naming it lets ChiffAmountAtPhase_q30 normalise
 // by subtraction.
 const uint32_t kEnvExpoFull_u16 = 65535;
@@ -165,7 +157,6 @@ void Envelope::Init(int16_t zero_value_s16) {
   value_without_bias_q30_ = zero_value_q30;
   nominal_value_q30_ = zero_value_q30;
   chiff_slew_state_q26_ = 0;
-  chiff_amplitude_q1_30_ = kChiffAmplitudeOne_q1_30;
   stage_start_q30_ = zero_value_q30;
   value_floor_q30_ = std::min<int32_t>(zero_value_q30, 0);
   value_ceiling_q30_ = kValueMax_q30;
@@ -751,22 +742,6 @@ void Envelope::Trigger(EnvelopeStage stage) {
         * (retained_q31)) >> 32)) << 1;                                       \
   } while (0)
 
-// The amplitude steps as the rate does: half a word either side of a whole
-// word, every sample of a partial one. Q1.30 times Q1.30, the high word up two.
-#define YARNS_CHIFF_ASM_REFINE_AMPLITUDE(step)                                \
-  "  ldr   lr, %[amplitude]\n"                                                \
-  "  ldr   ip, %[" step "]\n"                                                 \
-  "  smull ip, lr, lr, ip\n"                                                  \
-  "  lsl   lr, lr, #2\n"                                                      \
-  "  str   lr, %[amplitude]\n"
-
-#define YARNS_CHIFF_REFINE_AMPLITUDE(step_q1_30)                              \
-  do {                                                                        \
-    chiff_amplitude_q1_30 = static_cast<int32_t>(                             \
-      ((static_cast<int64_t>(chiff_amplitude_q1_30) * (step_q1_30)) >> 32))   \
-      << 2;                                                                   \
-  } while (0)
-
 #define YARNS_CHIFF_ASM_SAMPLE(bit_offset, STORE) \
   "  ubfx  ip, %[draws], #" bit_offset ", %[draw_bits]\n" /* one draw, low end         */ \
   "  ldr   lr, [%[levels], ip, lsl #2]\n"                 /* what the slew chases      */ \
@@ -782,14 +757,12 @@ void Envelope::Trigger(EnvelopeStage stage) {
   "  smull ip, lr, %[delta], %[stage_rate]\n"             /* delta to the adj. target  */ \
   "  sub   %[delta], %[delta], lr, lsl #1\n"              /*   at the STAGE's rate     */ \
   "  add   %[target], %[target], %[target_slope]\n"       /* bias + mean + adj. target */ \
-  "  ldr   lr, %[amplitude]\n"                            /* the chiff at its          */ \
-  "  smull ip, lr, %[chiff], lr\n"                        /*   amplitude, high word    */ \
   "  sub   ip, %[target], %[delta]\n"                     /* the mean                  */ \
   "  cmp   ip, %[mean_max]\n"                             /* HELD OFF THE HIGH RAIL    */ \
   "  it    gt\n"                                          /*   per sample, because a    */ \
   "  movgt ip, %[mean_max]\n"                             /*   ramped correction cannot \
                                                            *   track an exponential value */ \
-  "  add   ip, ip, lr, lsl %[amplitude_shift]\n"          /*   exponential value       */ \
+  "  add   ip, ip, %[chiff], lsl %[state_shift]\n"        /*   exponential value       */ \
   STORE
 // The narrow sample: saturate and shift, one op.
 #define YARNS_CHIFF_ASM_STORE_NARROW \
@@ -811,24 +784,20 @@ void Envelope::Trigger(EnvelopeStage stage) {
   [chiff_rate] "+r"(chiff_slew_rate_q31),                                     \
   [target] "+r"(target_with_all_bias),                                        \
   [buf] "+r"(sample_buffer),                                                  \
-  [draws] "+r"(draws),                                                        \
-  [amplitude] "+m"(chiff_amplitude_q1_30)
+  [draws] "+r"(draws)
 #define YARNS_CHIFF_ASM_INPUTS                                                \
   /* In MEMORY, deliberately: the body is at the register ceiling and this is
    * read once per WORD, not per sample, so a stack slot is the cheap home. */ \
   [rate_retained] "m"(chiff_slew_rate_retained_per_sample_q31),                 \
   [rate_retained_half_word] "m"(chiff_slew_rate_retained_per_half_word_q31),     \
-  [amplitude_step] "m"(chiff_amplitude_step_per_sample_q1_30),                  \
-  [amplitude_step_half_word] "m"(chiff_amplitude_step_per_half_word_q1_30),     \
   [levels] "r"(chiff_levels_q4_26),                                           \
   [clip] "r"(chiff_clip_threshold_q26),                                       \
   [mean_max] "r"(mean_max_q30),                                               \
   [stage_rate] "r"(stage_slew_rate_q31),                                      \
   [target_slope] "r"(target_with_all_bias_slope),                             \
   [draw_bits] "i"(kChiffDrawBits),                                            \
-  [amplitude_shift] "i"(                                                      \
-    kChiffLevelFractionalBits - kChiffSlewStateFractionalBits                 \
-    + kChiffAmplitudeHighWordShift),                                          \
+  [state_shift] "i"(                                                          \
+    kChiffLevelFractionalBits - kChiffSlewStateFractionalBits),               \
   [sample_bits] "i"(kSampleBits),                                             \
   [sat_bits] "i"(kEnvelopeSampleBits),                                        \
   [value_bits] "i"(kEnvelopeValueBits)
@@ -863,11 +832,9 @@ void Envelope::Trigger(EnvelopeStage stage) {
     int32_t mean_q30 = static_cast<int32_t>(target_with_all_bias                     \
       - static_cast<uint32_t>(nominal_delta_q1_30));                              \
     if (mean_q30 > mean_max_q30) mean_q30 = mean_max_q30;                         \
-    const int32_t chiff_at_amplitude = static_cast<int32_t>(                  \
-      (static_cast<int64_t>(chiff_slew_state_q26) * chiff_amplitude_q1_30) >> 32); \
     StoreSample(&sample_buffer, wide, static_cast<int32_t>(                   \
       static_cast<uint32_t>(mean_q30)                                         \
-      + (static_cast<uint32_t>(chiff_at_amplitude) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits + kChiffAmplitudeHighWordShift)))); \
+      + (static_cast<uint32_t>(chiff_slew_state_q26) << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits)))); \
   } while (0)
 
 // The asm's USAT and store, at either width.
@@ -912,28 +879,6 @@ static int32_t ChiffClipThreshold_q30(
     chiff_slew_input_q30, chiff_amplitude_q30 << kChiffClipAmplitudesShift);
 }
 
-// log2 of a Q30 fraction, Q5.27: the leading bit's place and a linear
-// mantissa, within 0.086 octave. The floor is 15 octaves down, so a zero
-// fraction is a fade through them and a difference of two still fits Q5.27.
-static inline int32_t Log2OfFraction_q5_27(int32_t fraction_q30) {
-  const uint32_t kFloor_q30 = 1u << (30 - 15);
-  const uint32_t x = static_cast<uint32_t>(fraction_q30) | kFloor_q30;
-  const int32_t leading_zeros = __builtin_clz(x);
-  const uint32_t mantissa_q5_27 = ((x << leading_zeros) << 1) >> 5;
-  return ((1 - leading_zeros) << 27) + static_cast<int32_t>(mantissa_q5_27);
-}
-
-// 2^e, Q1.30, for e at most kChiffAmplitudeMaxOctaves: the slew rate's own exp2
-// map, read at -e.
-static inline int32_t Exp2_q1_30(int32_t e_q5_27) {
-  if (e_q5_27 <= 0) {
-    return static_cast<int32_t>(SlewRateFromTimeLog2_q31(
-      static_cast<uint32_t>(-e_q5_27)) >> 1);
-  }
-  return static_cast<int32_t>(SlewRateFromTimeLog2_q31(
-    static_cast<uint32_t>((1 << 27) - e_q5_27)));
-}
-
 // ALWAYS INLINED, and it has to be said rather than left to GCC 4.8: it has one
 // call site and -finline-functions-called-once, and it was STILL emitted as a
 // call. Out of line it cannot share anything with the render's own setup, so
@@ -945,8 +890,6 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
   decay.slew_time_step_q5_27 = 0;
   decay.drive_q4_26 = 1 << kChiffSlewStateFractionalBits;  // 1.0
   decay.live_samples = run_samples;
-  decay.amplitude_step_per_sample_q1_30 = kChiffAmplitudeOne_q1_30;
-  decay.amplitude_step_per_half_word_q1_30 = kChiffAmplitudeOne_q1_30;
   if (!chiff_amount_initial_q30_) return decay;
   // Saturate on the high word and on the phase left, not on a 64-bit compare:
   // one umull answers whether the product fits.
@@ -972,39 +915,23 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
     chiff_amount_q30_, chiff_slew_time_at_amount_zero_q5_27_);
   decay.slew_time_step_q5_27 =
     (chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) / decay.live_samples;
-  decay.drive_q4_26 = ChiffDriveAtAmount_q4_26(chiff_amount_q30);
-  // Against this run's START slew time: the writeback to the end is at the
-  // loop's tail, so the slew time and amount here are a consistent pair.
-  //   - Derived HERE and not at the tail, where the start state is really
-  //     established, because here it shares its exp2 with the render's own
-  //     rate. Moving it to the tail cost 47 cycles a run for that reason.
-  const int32_t chiff_slew_input_fraction_start_q30 =
-    ChiffSlewInputFractionAtAmount_q30(
-      chiff_amount_q30, chiff_slew_time_log2_q5_27_,
-      static_cast<int32_t>(
-        SlewRateFromTimeLog2_q31(chiff_slew_time_log2_q5_27_)));
-  chiff_slew_input_fraction_q30_ = chiff_slew_input_fraction_start_q30;
-  // The levels are set once a block, from its start. What the block should
-  // end at is the input fraction a block starting there would take: the slew
-  // gain is the same in both at the end's rate, so the ratio of the two
-  // fractions is the amplitude the render must reach, and it gets there
-  // geometrically. A decay that completes leaves a zero fraction: the
-  // amplitude falls through all its octaves by the decay's last sample.
-  const int32_t chiff_slew_input_fraction_end_q30 =
-    ChiffSlewInputFractionAtAmount_q30(
-      chiff_amount_q30_, chiff_slew_time_end_q5_27,
-      static_cast<int32_t>(
-        SlewRateFromTimeLog2_q31(chiff_slew_time_end_q5_27)));
-  const int32_t amplitude_octaves_q5_27 = std::min<int32_t>(
-    Log2OfFraction_q5_27(chiff_slew_input_fraction_end_q30)
-      - Log2OfFraction_q5_27(chiff_slew_input_fraction_start_q30),
-    kChiffAmplitudeMaxOctaves_q5_27);
-  const int32_t amplitude_octaves_per_sample_q5_27 =
-    amplitude_octaves_q5_27 / static_cast<int32_t>(decay.live_samples);
-  decay.amplitude_step_per_sample_q1_30 =
-    Exp2_q1_30(amplitude_octaves_per_sample_q5_27);
-  decay.amplitude_step_per_half_word_q1_30 = Exp2_q1_30(
-    amplitude_octaves_per_sample_q5_27 * static_cast<int32_t>(kChiffDrawsPerWord / 2));
+  // The run renders at its RMS amount, a fixed fraction of its starting
+  // amount for a given phase span: a run carries the energy the decay does.
+  const uint32_t chiff_amount_rms_q30 = static_cast<uint32_t>(
+    (static_cast<uint64_t>(chiff_amount_q30) * Interpolate824(
+       lut_chiff_rms_over_start_u16, chiff_phase_end_q32 - chiff_phase_q32_))
+    >> 16);
+  decay.drive_q4_26 = ChiffDriveAtAmount_q4_26(chiff_amount_rms_q30);
+  // The gain is divided out a quarter of the way across the run's slew time:
+  // the rate falls through the run, and the energy is front-loaded. FITTED,
+  // against a chiff re-read every sample: the start reads ~3 dB low at
+  // DURATION 6..10 and the midpoint ~3 dB high.
+  const uint32_t chiff_slew_time_compensated_q5_27 = chiff_slew_time_log2_q5_27_
+    + ((chiff_slew_time_end_q5_27 - chiff_slew_time_log2_q5_27_) >> 2);
+  chiff_slew_input_fraction_q30_ = ChiffSlewInputFractionAtAmount_q30(
+    chiff_amount_rms_q30, chiff_slew_time_compensated_q5_27,
+    static_cast<int32_t>(
+      SlewRateFromTimeLog2_q31(chiff_slew_time_compensated_q5_27)));
   chiff_phase_q32_ = chiff_phase_end_q32;
   return decay;
 }
@@ -1015,9 +942,6 @@ inline Envelope::ChiffRunDecay Envelope::AdvanceChiffDecay(uint32_t run_samples)
 uint32_t Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chiff) {
   const ChiffRunDecay decay = AdvanceChiffDecay(block_samples);
   chiff->slew_time_step_q5_27 = decay.slew_time_step_q5_27;
-  chiff->amplitude_step_per_sample_q1_30 = decay.amplitude_step_per_sample_q1_30;
-  chiff->amplitude_step_per_half_word_q1_30 =
-    decay.amplitude_step_per_half_word_q1_30;
   // Derived, not stored: the rate and the slew time are one quantity, held in
   // one accumulator.
   const uint32_t slew_time_q5_27 = chiff_slew_time_log2_q5_27_;
@@ -1165,7 +1089,7 @@ inline bool Envelope::EndRun(
   // it: value_without_bias() returns int16_t and tremolo() multiplies in
   // int32, so both wrap out of range.
   int32_t value_without_bias_q30 = nominal_value_q30 + static_cast<int32_t>(
-    static_cast<uint32_t>(ChiffAmplitudeTimes(chiff_slew_state_q26_))
+    static_cast<uint32_t>(chiff_slew_state_q26_)
     << (kChiffLevelFractionalBits - kChiffSlewStateFractionalBits));
   if (value_without_bias_q30 < value_floor_q30_) {
     value_without_bias_q30 = value_floor_q30_;
@@ -1207,12 +1131,6 @@ void Envelope::RenderRun(
       chiff->rate_retained_per_sample_q31;
     const uint32_t chiff_slew_rate_retained_per_half_word_q31 =
       chiff->rate_retained_per_half_word_q31;
-    // On the stack, deliberately: the body is at the register ceiling.
-    int32_t chiff_amplitude_q1_30 = chiff_amplitude_q1_30_;
-    const int32_t chiff_amplitude_step_per_sample_q1_30 =
-      chiff->amplitude_step_per_sample_q1_30;
-    const int32_t chiff_amplitude_step_per_half_word_q1_30 =
-      chiff->amplitude_step_per_half_word_q1_30;
     const int32_t* const chiff_levels_q4_26 = chiff->levels_q4_26;
     const int32_t chiff_clip_threshold_q26 = chiff->clip_threshold_q26;
     const int32_t mean_max_q30 = chiff->mean_max_q30;
@@ -1246,7 +1164,6 @@ void Envelope::RenderRun(
         __asm__ volatile( \
           "1:\n" \
           YARNS_CHIFF_ASM_REFINE("rate_retained_half_word") \
-          YARNS_CHIFF_ASM_REFINE_AMPLITUDE("amplitude_step_half_word") \
           YARNS_CHIFF_ASM_SAMPLE("0", STORE) \
           YARNS_CHIFF_ASM_SAMPLE("4", STORE) \
           YARNS_CHIFF_ASM_SAMPLE("8", STORE) \
@@ -1256,7 +1173,6 @@ void Envelope::RenderRun(
           YARNS_CHIFF_ASM_SAMPLE("24", STORE) \
           YARNS_CHIFF_ASM_SAMPLE("28", STORE) \
           YARNS_CHIFF_ASM_REFINE("rate_retained_half_word") \
-          YARNS_CHIFF_ASM_REFINE_AMPLITUDE("amplitude_step_half_word") \
           "  eor   %[draws], %[draws], %[draws], lsl #13\n" \
           "  eor   %[draws], %[draws], %[draws], lsr #17\n" \
           "  eor   %[draws], %[draws], %[draws], lsl #5\n" \
@@ -1274,14 +1190,12 @@ void Envelope::RenderRun(
 #else
         while (words_left--) {
           YARNS_CHIFF_REFINE_RATE(chiff_slew_rate_retained_per_half_word_q31);
-          YARNS_CHIFF_REFINE_AMPLITUDE(chiff_amplitude_step_per_half_word_q1_30);
           for (uint32_t i = 0; i < kChiffDrawsPerWord; ++i) {
             YARNS_CHIFF_RENDER_SAMPLE(
               static_cast<int32_t>((draws >> (i * kChiffDrawBits))
                                    & kChiffDrawValueMax));
           }
           YARNS_CHIFF_REFINE_RATE(chiff_slew_rate_retained_per_half_word_q31);
-          YARNS_CHIFF_REFINE_AMPLITUDE(chiff_amplitude_step_per_half_word_q1_30);
           draws = NextXorshift32(draws);
         }
 #endif
@@ -1306,7 +1220,6 @@ void Envelope::RenderRun(
       "  beq   2f\n" \
       "1:\n" \
       YARNS_CHIFF_ASM_REFINE("rate_retained") \
-      YARNS_CHIFF_ASM_REFINE_AMPLITUDE("amplitude_step") \
       YARNS_CHIFF_ASM_SAMPLE("0", STORE) \
       "  lsr   %[draws], %[draws], %[draw_bits]\n" \
       "  cmp   %[buf], %[end]\n" \
@@ -1325,7 +1238,6 @@ void Envelope::RenderRun(
     while (sample_buffer != chunk_end) {
       // One draw, consumed low end first, matching the asm's UBFX then LSR.
       YARNS_CHIFF_REFINE_RATE(chiff_slew_rate_retained_per_sample_q31);
-      YARNS_CHIFF_REFINE_AMPLITUDE(chiff_amplitude_step_per_sample_q1_30);
       YARNS_CHIFF_RENDER_SAMPLE(static_cast<int32_t>(draws & kChiffDrawValueMax));
       draws >>= kChiffDrawBits;
     }
@@ -1342,7 +1254,6 @@ void Envelope::RenderRun(
     // Where the rate reached, for the next run in this block to continue from.
     chiff->slew_rate_q31 = chiff_slew_rate_q31;
     chiff_slew_state_q26_ = chiff_slew_state_q26;
-    chiff_amplitude_q1_30_ = chiff_amplitude_q1_30;
     run.nominal_delta_q1_30 = nominal_delta_q1_30;
     cursor->sample_buffer = sample_buffer;
     cursor->samples_left -= run.run_samples;
@@ -1364,18 +1275,26 @@ void Envelope::RenderBlock(
   int16_t* sample_buffer, bool wide, int32_t bias_target_q31) {
   // Bias is unaffected by a stage change, so it is computed once a block.
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
+  // The chiff's decay ends a run: past that sample it is silent for the rest
+  // of the note.
   ChiffBlock chiff;
   const uint32_t live_samples = AdvanceChiffForBlock(kAudioBlockSize, &chiff);
-  BlockCursor cursor = { sample_buffer, kAudioBlockSize, bias_q31_, wide };
+  BlockCursor cursor = { sample_buffer, live_samples, bias_q31_, wide };
   RenderRun(&cursor, &chiff, bias_slope_q31);
   // The schedule's end slew time becomes the next block's start. Needs no
   // bound: the step is a truncating divide, so this lands at or under the end
   // it was derived from. The battery watches the invariant.
   chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * live_samples;
-  // The next block's levels start where this one's amplitude reached: the
-  // state takes the amplitude, which starts over at one.
-  chiff_slew_state_q26_ = ChiffAmplitudeTimes(chiff_slew_state_q26_);
-  chiff_amplitude_q1_30_ = kChiffAmplitudeOne_q1_30;
+  if (live_samples < kAudioBlockSize) {
+    // What AdvanceChiffForBlock makes of a zero input.
+    chiff.slew_time_step_q5_27 = 0;
+    chiff.clip_threshold_q26 = 0;
+    chiff.mean_min_q30 = 0;
+    chiff.mean_max_q30 = value_ceiling_q30_;
+    std::fill(chiff.levels_q4_26, chiff.levels_q4_26 + (1 << kChiffDrawBits), 0);
+    cursor.samples_left = kAudioBlockSize - live_samples;
+    RenderRun(&cursor, &chiff, bias_slope_q31);
+  }
 }
 
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {

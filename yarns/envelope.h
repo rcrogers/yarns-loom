@@ -123,9 +123,6 @@ class Envelope {
     int32_t slew_rate_q31;
     uint32_t rate_retained_per_sample_q31;
     uint32_t rate_retained_per_half_word_q31;
-    // What a sample and half a word take off the chiff's amplitude.
-    int32_t amplitude_step_per_sample_q1_30;
-    int32_t amplitude_step_per_half_word_q1_30;
     uint32_t slew_time_step_q5_27;
     int32_t clip_threshold_q26;
     int32_t mean_min_q30;
@@ -167,8 +164,6 @@ class Envelope {
     uint32_t slew_time_step_q5_27;   // per sample
     int32_t drive_q4_26;             // at the amount the run STARTS from
     uint32_t live_samples;           // up to where the decay completes
-    int32_t amplitude_step_per_sample_q1_30;
-    int32_t amplitude_step_per_half_word_q1_30;
   };
 
 
@@ -254,14 +249,6 @@ class Envelope {
   // Half the note's ALLOWED range. A level, so it rescales with the others.
   int32_t chiff_slew_input_max_q30_;
   int32_t chiff_slew_state_q26_;
-  // The chiff's amplitude within the block, against its levels: one at the
-  // block's start.
-  int32_t chiff_amplitude_q1_30_;
-  // The state at the amplitude, in the state's own format.
-  inline int32_t ChiffAmplitudeTimes(int32_t chiff_slew_state_q26) const {
-    return static_cast<int32_t>(
-      (static_cast<int64_t>(chiff_slew_state_q26) * chiff_amplitude_q1_30_) >> 30);
-  }
 
   // Where the current stage began. With the stage phase this anchors the
   // nominal value in closed form.
