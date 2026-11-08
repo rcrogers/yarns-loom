@@ -128,6 +128,8 @@ class Envelope {
     int32_t mean_min_q30;
     int32_t mean_max_q30;
     int32_t levels_q4_26[1 << kChiffDrawBits];
+    // Samples until the chiff's decay completes, counted down across runs.
+    uint32_t live_samples_left;
   };
 
   // The buffer is 16-bit slots; a wide sample takes two.
@@ -154,6 +156,7 @@ class Envelope {
   };
   // Every run the block reaches, setup to hand-off.
   void RenderRun(BlockCursor* cursor, ChiffBlock* chiff, int32_t bias_slope_q31);
+  void SilenceChiffBlock(ChiffBlock* chiff) const;
   bool EndRun(const Run& run, int32_t* bias_q31, int32_t bias_slope_q31);
 
   void Rescale(int32_t numerator, int32_t denominator);

@@ -1016,6 +1016,8 @@ inline void Envelope::BeginRun(
   // below degenerates on its own. The worst case is a live chiff.
   uint32_t run_samples = block_samples_left;
   if (timed) run_samples = std::min<uint32_t>(run_samples, stage_samples_left_);
+  // And by the chiff: where its decay completes, it falls silent.
+  run_samples = std::min<uint32_t>(run_samples, chiff->live_samples_left);
   run->timed = timed;
   run->run_samples = run_samples;
 
@@ -1258,6 +1260,8 @@ void Envelope::RenderRun(
     cursor->sample_buffer = sample_buffer;
     cursor->samples_left -= run.run_samples;
     stage_ended = EndRun(run, &cursor->bias_q31, bias_slope_q31);
+    chiff->live_samples_left -= run.run_samples;
+    if (!chiff->live_samples_left) SilenceChiffBlock(chiff);
   } while (stage_ended || cursor->samples_left);
 }
 
@@ -1275,26 +1279,29 @@ void Envelope::RenderBlock(
   int16_t* sample_buffer, bool wide, int32_t bias_target_q31) {
   // Bias is unaffected by a stage change, so it is computed once a block.
   const int32_t bias_slope_q31 = ((bias_target_q31 >> 1) - (bias_q31_ >> 1)) >> (kAudioBlockSizeBits - 1);
-  // The chiff's decay ends a run: past that sample it is silent for the rest
-  // of the note.
   ChiffBlock chiff;
   const uint32_t live_samples = AdvanceChiffForBlock(kAudioBlockSize, &chiff);
-  BlockCursor cursor = { sample_buffer, live_samples, bias_q31_, wide };
-  RenderRun(&cursor, &chiff, bias_slope_q31);
   // The schedule's end slew time becomes the next block's start. Needs no
   // bound: the step is a truncating divide, so this lands at or under the end
   // it was derived from. The battery watches the invariant.
-  chiff_slew_time_log2_q5_27_ += chiff.slew_time_step_q5_27 * live_samples;
-  if (live_samples < kAudioBlockSize) {
-    // What AdvanceChiffForBlock makes of a zero input.
-    chiff.slew_time_step_q5_27 = 0;
-    chiff.clip_threshold_q26 = 0;
-    chiff.mean_min_q30 = 0;
-    chiff.mean_max_q30 = value_ceiling_q30_;
-    std::fill(chiff.levels_q4_26, chiff.levels_q4_26 + (1 << kChiffDrawBits), 0);
-    cursor.samples_left = kAudioBlockSize - live_samples;
-    RenderRun(&cursor, &chiff, bias_slope_q31);
-  }
+  const uint32_t slew_time_step_q5_27 = chiff.slew_time_step_q5_27;
+  // A decay that completes inside the block is an event the runs end at, like
+  // a stage's; one that does not has none this block.
+  chiff.live_samples_left =
+    live_samples < kAudioBlockSize ? live_samples : UINT32_MAX;
+  BlockCursor cursor = { sample_buffer, kAudioBlockSize, bias_q31_, wide };
+  RenderRun(&cursor, &chiff, bias_slope_q31);
+  chiff_slew_time_log2_q5_27_ += slew_time_step_q5_27 * live_samples;
+}
+
+// What AdvanceChiffForBlock makes of a zero input: the chiff held at zero, and
+// the mean free to reach either rail.
+void Envelope::SilenceChiffBlock(ChiffBlock* chiff) const {
+  chiff->clip_threshold_q26 = 0;
+  chiff->mean_min_q30 = 0;
+  chiff->mean_max_q30 = value_ceiling_q30_;
+  std::fill(chiff->levels_q4_26, chiff->levels_q4_26 + (1 << kChiffDrawBits), 0);
+  chiff->live_samples_left = UINT32_MAX;
 }
 
 void Envelope::RenderSamples(int16_t* sample_buffer, int32_t bias_target_q31) {
