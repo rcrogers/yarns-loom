@@ -959,10 +959,9 @@ uint32_t Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chif
   {
     const int32_t one_level_q1_26 = driven_slew_input_q4_26 / kChiffDrawValueMax;
     for (int32_t draw = 0; draw <= kChiffDrawValueMax; ++draw) {
-      chiff->level_table_q4_26[draw] =
+      chiff->levels_q4_26[draw] =
         (2 * draw - kChiffDrawValueMax) * one_level_q1_26;
     }
-    chiff->levels_q4_26 = chiff->level_table_q4_26;
   }
   // Wider than the rails allow (min >= max): the clamp is abandoned and the
   // mean centred, so the chiff clips both sides.
@@ -1246,9 +1245,6 @@ void Envelope::RenderRun(
 #undef YARNS_CHIFF_ASM_STATE
 #undef YARNS_CHIFF_ASM_INPUTS
 
-// What a chiff chases once it has fallen silent.
-const int32_t kSilentChiffLevels_q4_26[1 << kChiffDrawBits] = { 0 };
-
 // The buffer is 16-bit slots; a wide sample takes two.
 void Envelope::RenderBlock(
   int16_t* sample_buffer, bool wide, int32_t bias_target_q31) {
@@ -1270,7 +1266,7 @@ void Envelope::RenderBlock(
     chiff.clip_threshold_q26 = 0;
     chiff.mean_min_q30 = 0;
     chiff.mean_max_q30 = value_ceiling_q30_;
-    chiff.levels_q4_26 = kSilentChiffLevels_q4_26;
+    std::fill(chiff.levels_q4_26, chiff.levels_q4_26 + (1 << kChiffDrawBits), 0);
     cursor.samples_left = kAudioBlockSize - live_samples;
     RenderRun(&cursor, &chiff, bias_slope_q31);
   }

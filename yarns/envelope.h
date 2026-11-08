@@ -126,9 +126,7 @@ class Envelope {
     int32_t clip_threshold_q26;
     int32_t mean_min_q30;
     int32_t mean_max_q30;
-    int32_t level_table_q4_26[1 << kChiffDrawBits];
-    // The table, or the silent levels once the chiff's decay has completed.
-    const int32_t* levels_q4_26;
+    int32_t levels_q4_26[1 << kChiffDrawBits];
   };
 
   // The buffer is 16-bit slots; a wide sample takes two.
