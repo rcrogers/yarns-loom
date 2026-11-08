@@ -115,13 +115,14 @@ class Envelope {
   // and all sixteen levels three times over, because the STAGE happened to end.
   //
   // The one thing that genuinely wanted the run boundary was the slew rate's
-  // tread, and it does not any more: the render refines the rate every sample,
-  // so it crosses a run boundary without noticing one.
+  // tread, and it does not any more: the render refines the rate within the
+  // run, so it crosses a run boundary without noticing one.
   struct ChiffBlock {
     // The only member that moves: the render advances it a sample at a time and
     // carries it from one run to the next.
     int32_t slew_rate_q31;
     uint32_t rate_retained_per_sample_q31;
+    uint32_t rate_retained_per_half_word_q31;
     uint32_t slew_time_step_q5_27;
     int32_t clip_threshold_q26;
     int32_t mean_min_q30;
