@@ -973,9 +973,11 @@ uint32_t Envelope::AdvanceChiffForBlock(uint32_t block_samples, ChiffBlock* chif
   //     it says. A constant divisor: one multiply.
   {
     const int32_t one_level_q1_26 = driven_slew_input_q4_26 / kChiffDrawValueMax;
+    // (2 draw - kChiffDrawValueMax) * one_level, by steps of two levels.
+    int32_t level_q4_26 = -kChiffDrawValueMax * one_level_q1_26;
     for (int32_t draw = 0; draw <= kChiffDrawValueMax; ++draw) {
-      chiff->levels_q4_26[draw] =
-        (2 * draw - kChiffDrawValueMax) * one_level_q1_26;
+      chiff->levels_q4_26[draw] = level_q4_26;
+      level_q4_26 += 2 * one_level_q1_26;
     }
   }
   // Wider than the rails allow (min >= max): the clamp is abandoned and the
