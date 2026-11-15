@@ -145,6 +145,13 @@ struct Part {
   }
 };
 
+// Printed as it is rendered, so a capture's memory does not grow with its
+// length: the QEMU build of this driver has 64 KB.
+static void Print(std::vector<int>* samples) {
+  for (size_t i = 0; i < samples->size(); ++i) printf("%d\n", (*samples)[i]);
+  samples->clear();
+}
+
 static void Run(Part* p, const int* pitches, int16_t timbre, int blocks,
                 std::vector<int>* out) {
   for (int b = 0; b < blocks; ++b) {
@@ -266,6 +273,7 @@ int main(int argc, char** argv) {
     Run(&p, pit, charge_timbre, lead > pre ? lead - pre : 0, NULL);
     std::vector<int> v;
     Run(&p, pit, charge_timbre, lead > pre ? pre : lead, &v);
+    Print(&v);
     if (switching) p.SetShape(static_cast<OscillatorShape>(to));
     // release_at: blocks into the capture at which the key is let go, so one
     // file holds the charge AND the ring it leaves behind.
@@ -278,8 +286,8 @@ int main(int argc, char** argv) {
       const int16_t t = static_cast<int16_t>(
           timbre + (timbre_end - timbre) * b / (blocks > 1 ? blocks - 1 : 1));
       Run(&p, pit, t, 1, &v);
+      Print(&v);
     }
-    for (size_t i = 0; i < v.size(); ++i) printf("%d\n", v[i]);
     if (p.railed)
       fprintf(stderr, "NOTE: the mix code left the +/-5 V span on %ld samples -- "
               "on hardware those jump to the opposite rail\n", p.railed);
