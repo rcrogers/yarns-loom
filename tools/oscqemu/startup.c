@@ -19,6 +19,7 @@ static int semihost(int op, void* arg) {
   return r0;
 }
 #define SYS_OPEN        0x01
+#define SYS_WRITE0      0x04
 #define SYS_CLOSE       0x02
 #define SYS_WRITE       0x05
 #define SYS_GET_CMDLINE 0x15
@@ -33,9 +34,22 @@ int _write(int fd, const char* buf, int len) {
   int not_written = semihost(SYS_WRITE, block);
   return len - not_written;
 }
+// A run that dies says why, on the console, and QEMU exits non-zero.
+static void Fail(const char* reason) {
+  semihost(SYS_WRITE0, (void*)reason);
+  semihost(SYS_EXIT, (void*)0x20023 /* ADP_Stopped_RunTimeErrorUnknown */);
+  for (;;) {}
+}
+
+// The heap stops short of the stack by kStackGuardBytes.
+static const uint32_t kStackGuardBytes = 1024;
+
 void* _sbrk(int incr) {
   static char* heap;
   if (!heap) heap = (char*)&_end;
+  char* sp;
+  __asm__ volatile("mov %0, sp" : "=r"(sp));
+  if (heap + incr > sp - kStackGuardBytes) Fail("heap exhausted: it would reach the stack\n");
   char* prev = heap;
   heap += incr;
   return prev;
@@ -65,8 +79,8 @@ void Reset_Handler(void) {
   for (uint32_t* dst = &_sbss; dst < &_ebss;) *dst++ = 0;
   __libc_init_array();  // C++ static constructors
 
-  // Route the sample stream to a host file (path relative to QEMU's cwd, which
-  // is tools/qemutest/ since build.sh cd's there), so the host can diff it.
+  // Route the sample stream to a host file in QEMU's working directory, so the
+  // host can diff it.
   { static const char kOut[] = "qemu_out.txt";
     uint32_t open_block[3] = { (uint32_t)kOut, 4 /* "w" */, sizeof(kOut) - 1 };
     out_handle = semihost(SYS_OPEN, open_block); }
@@ -96,9 +110,21 @@ void Reset_Handler(void) {
   for (;;) {}
 }
 
-// Two-entry vector table is enough for QEMU boot: initial SP + reset.
+static void NmiHandler(void) { Fail("NMI\n"); }
+static void HardFaultHandler(void) { Fail("hard fault\n"); }
+static void MemManageHandler(void) { Fail("memory management fault\n"); }
+static void BusFaultHandler(void) { Fail("bus fault\n"); }
+static void UsageFaultHandler(void) { Fail("usage fault\n"); }
+
+// Initial SP, reset, and the faults, so a crash ends the run instead of
+// jumping through an empty vector.
 __attribute__((section(".isr_vector"), used))
 void (* const g_pfnVectors[])(void) = {
   (void (*)(void))&_estack,
   Reset_Handler,
+  NmiHandler,
+  HardFaultHandler,
+  MemManageHandler,
+  BusFaultHandler,
+  UsageFaultHandler,
 };
