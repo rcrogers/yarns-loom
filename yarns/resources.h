@@ -105,7 +105,6 @@ extern const int16_t wav_exponential[];
 extern const int16_t wav_ring[];
 extern const int16_t wav_steps[];
 extern const int16_t wav_noise[];
-extern const int16_t wav_sizzle[];
 extern const int16_t wav_bandlimited_comb_0[];
 extern const int16_t wav_bandlimited_comb_1[];
 extern const int16_t wav_bandlimited_comb_2[];
@@ -121,7 +120,6 @@ extern const int16_t wav_bandlimited_comb_11[];
 extern const int16_t wav_bandlimited_comb_12[];
 extern const int16_t wav_bandlimited_comb_13[];
 extern const int16_t wav_bandlimited_comb_14[];
-extern const int16_t ws_violent_overdrive[];
 extern const int16_t ws_soft_limit[];
 extern const int16_t ws_fold_back[];
 extern const uint32_t lut_lfo_increments[];
@@ -227,43 +225,39 @@ extern const uint16_t chr_blinking_characters[];
 #define WAV_STEPS_SIZE 257
 #define WAV_NOISE 3
 #define WAV_NOISE_SIZE 257
-#define WAV_SIZZLE 4
-#define WAV_SIZZLE_SIZE 257
-#define WAV_BANDLIMITED_COMB_0 5
+#define WAV_BANDLIMITED_COMB_0 4
 #define WAV_BANDLIMITED_COMB_0_SIZE 257
-#define WAV_BANDLIMITED_COMB_1 6
+#define WAV_BANDLIMITED_COMB_1 5
 #define WAV_BANDLIMITED_COMB_1_SIZE 257
-#define WAV_BANDLIMITED_COMB_2 7
+#define WAV_BANDLIMITED_COMB_2 6
 #define WAV_BANDLIMITED_COMB_2_SIZE 257
-#define WAV_BANDLIMITED_COMB_3 8
+#define WAV_BANDLIMITED_COMB_3 7
 #define WAV_BANDLIMITED_COMB_3_SIZE 257
-#define WAV_BANDLIMITED_COMB_4 9
+#define WAV_BANDLIMITED_COMB_4 8
 #define WAV_BANDLIMITED_COMB_4_SIZE 257
-#define WAV_BANDLIMITED_COMB_5 10
+#define WAV_BANDLIMITED_COMB_5 9
 #define WAV_BANDLIMITED_COMB_5_SIZE 257
-#define WAV_BANDLIMITED_COMB_6 11
+#define WAV_BANDLIMITED_COMB_6 10
 #define WAV_BANDLIMITED_COMB_6_SIZE 257
-#define WAV_BANDLIMITED_COMB_7 12
+#define WAV_BANDLIMITED_COMB_7 11
 #define WAV_BANDLIMITED_COMB_7_SIZE 257
-#define WAV_BANDLIMITED_COMB_8 13
+#define WAV_BANDLIMITED_COMB_8 12
 #define WAV_BANDLIMITED_COMB_8_SIZE 257
-#define WAV_BANDLIMITED_COMB_9 14
+#define WAV_BANDLIMITED_COMB_9 13
 #define WAV_BANDLIMITED_COMB_9_SIZE 257
-#define WAV_BANDLIMITED_COMB_10 15
+#define WAV_BANDLIMITED_COMB_10 14
 #define WAV_BANDLIMITED_COMB_10_SIZE 257
-#define WAV_BANDLIMITED_COMB_11 16
+#define WAV_BANDLIMITED_COMB_11 15
 #define WAV_BANDLIMITED_COMB_11_SIZE 257
-#define WAV_BANDLIMITED_COMB_12 17
+#define WAV_BANDLIMITED_COMB_12 16
 #define WAV_BANDLIMITED_COMB_12_SIZE 257
-#define WAV_BANDLIMITED_COMB_13 18
+#define WAV_BANDLIMITED_COMB_13 17
 #define WAV_BANDLIMITED_COMB_13_SIZE 257
-#define WAV_BANDLIMITED_COMB_14 19
+#define WAV_BANDLIMITED_COMB_14 18
 #define WAV_BANDLIMITED_COMB_14_SIZE 257
-#define WS_VIOLENT_OVERDRIVE 0
-#define WS_VIOLENT_OVERDRIVE_SIZE 257
-#define WS_SOFT_LIMIT 1
+#define WS_SOFT_LIMIT 0
 #define WS_SOFT_LIMIT_SIZE 257
-#define WS_FOLD_BACK 2
+#define WS_FOLD_BACK 1
 #define WS_FOLD_BACK_SIZE 257
 #define LUT_LFO_INCREMENTS 0
 #define LUT_LFO_INCREMENTS_SIZE 64

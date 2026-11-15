@@ -60,8 +60,16 @@ const uint16_t kIncoherentScaleRatioMax_u2_14 = 2 << 14;
 // up to (2 + curve(offset_max)) / 2 of the gain, so the gain peaks the
 // reciprocal of that under the share: 2 / (2 + tanh(2)) for WIND, and
 // 2 / (2 + fold_back(0.7)) for BOWED, whose curve also spans -1..1.
-const uint16_t kWindPeakHeadroom_u15 = 22111;
-const uint16_t kBowedPeakHeadroom_u15 = 22573;
+// Rounded down: the gain may not exceed the bound.
+const uint16_t kWindPeakHeadroom_u15 = static_cast<uint16_t>(
+    2 / (2 + __builtin_tanh(2.0)) * 32768);
+const uint16_t kBowedPeakHeadroom_u15 = static_cast<uint16_t>(
+    2 / (2 + 0.7 * __builtin_exp(0.5 - 0.7 * 0.7 / 2)) * 32768);
+#ifdef TEST
+// LOOP_DC_BEFORE_GAIN (oscillator.cc): the loop shapes' DC blocker before the
+// gain, under headroom 1.
+extern int g_loop_dc_before_gain;
+#endif
 
 class StateVariableFilter : public SVF {
  public:
@@ -130,33 +138,62 @@ enum OscillatorShape {
   // OSC_SHAPE_FOLD_SINE,
   // OSC_SHAPE_FOLD_TRIANGLE,
   OSC_SHAPE_DIRAC_COMB,
-  OSC_SHAPE_TANH_SINE,
-  OSC_SHAPE_EXP_SINE,
-  OSC_SHAPE_TRI_THRU_TRI,
-  OSC_SHAPE_SINE_THRU_TRI,
-  OSC_SHAPE_EXP_THRU_TRI,
-  OSC_SHAPE_TRI_THRU_TRI_BIASED,
-  OSC_SHAPE_SINE_THRU_TRI_BIASED,
-  OSC_SHAPE_EXP_THRU_TRI_BIASED,
-  OSC_SHAPE_TRI_THRU_SINE,
-  OSC_SHAPE_SINE_THRU_SINE,
-  OSC_SHAPE_EXP_THRU_SINE,
-  OSC_SHAPE_TRI_THRU_SINE_BIASED,
-  OSC_SHAPE_SINE_THRU_SINE_BIASED,
-  OSC_SHAPE_EXP_THRU_SINE_BIASED,
-  OSC_SHAPE_TRI_THRU_EXP,
-  OSC_SHAPE_SINE_THRU_EXP,
-  OSC_SHAPE_EXP_THRU_EXP,
-  OSC_SHAPE_TRI_THRU_EXP_BIASED,
-  OSC_SHAPE_SINE_THRU_EXP_BIASED,
-  OSC_SHAPE_EXP_THRU_EXP_BIASED,
+  OSC_SHAPE_TRI_THRU_TANH_ODD,
+  OSC_SHAPE_SINE_THRU_TANH_ODD,
+  OSC_SHAPE_EXP_THRU_TANH_ODD,
+  OSC_SHAPE_TRI_THRU_TANH_BALANCED,
+  OSC_SHAPE_SINE_THRU_TANH_BALANCED,
+  OSC_SHAPE_EXP_THRU_TANH_BALANCED,
+  OSC_SHAPE_TRI_THRU_TANH_EVEN,
+  OSC_SHAPE_SINE_THRU_TANH_EVEN,
+  OSC_SHAPE_EXP_THRU_TANH_EVEN,
+  OSC_SHAPE_TRI_THRU_TRI_ODD,
+  OSC_SHAPE_SINE_THRU_TRI_ODD,
+  OSC_SHAPE_EXP_THRU_TRI_ODD,
+  OSC_SHAPE_TRI_THRU_TRI_BALANCED,
+  OSC_SHAPE_SINE_THRU_TRI_BALANCED,
+  OSC_SHAPE_EXP_THRU_TRI_BALANCED,
+  OSC_SHAPE_TRI_THRU_TRI_EVEN,
+  OSC_SHAPE_SINE_THRU_TRI_EVEN,
+  OSC_SHAPE_EXP_THRU_TRI_EVEN,
+  OSC_SHAPE_TRI_THRU_SINE_ODD,
+  OSC_SHAPE_SINE_THRU_SINE_ODD,
+  OSC_SHAPE_EXP_THRU_SINE_ODD,
+  OSC_SHAPE_TRI_THRU_SINE_BALANCED,
+  OSC_SHAPE_SINE_THRU_SINE_BALANCED,
+  OSC_SHAPE_EXP_THRU_SINE_BALANCED,
+  OSC_SHAPE_TRI_THRU_SINE_EVEN,
+  OSC_SHAPE_SINE_THRU_SINE_EVEN,
+  OSC_SHAPE_EXP_THRU_SINE_EVEN,
+  OSC_SHAPE_TRI_THRU_SIZZLE_ODD,
+  OSC_SHAPE_SINE_THRU_SIZZLE_ODD,
+  OSC_SHAPE_EXP_THRU_SIZZLE_ODD,
+  OSC_SHAPE_TRI_THRU_SIZZLE_BALANCED,
+  OSC_SHAPE_SINE_THRU_SIZZLE_BALANCED,
+  OSC_SHAPE_EXP_THRU_SIZZLE_BALANCED,
+  OSC_SHAPE_TRI_THRU_SIZZLE_EVEN,
+  OSC_SHAPE_SINE_THRU_SIZZLE_EVEN,
+  OSC_SHAPE_EXP_THRU_SIZZLE_EVEN,
+  OSC_SHAPE_TRI_THRU_EXP_ODD,
+  OSC_SHAPE_SINE_THRU_EXP_ODD,
+  OSC_SHAPE_EXP_THRU_EXP_ODD,
+  OSC_SHAPE_TRI_THRU_EXP_BALANCED,
+  OSC_SHAPE_SINE_THRU_EXP_BALANCED,
+  OSC_SHAPE_EXP_THRU_EXP_BALANCED,
+  OSC_SHAPE_TRI_THRU_EXP_EVEN,
+  OSC_SHAPE_SINE_THRU_EXP_EVEN,
+  OSC_SHAPE_EXP_THRU_EXP_EVEN,
   OSC_SHAPE_FM,
 };
 
 class Oscillator {
  public:
   // Multiply-accumulates each sample (* gain >> 15) into audio_mix.
-  typedef void (Oscillator::*RenderFn)(int16_t* input_samples, int16_t* audio_mix);
+  typedef void (Oscillator::*RenderMethod)(int16_t* input_samples, int16_t* audio_mix);
+  // A shape's render as a plain function, so a table entry is 4 bytes, not a
+  // member pointer's 8: RenderThunk calls the method it is instantiated for.
+  typedef void (*RenderFn)(
+      Oscillator* oscillator, int16_t* input_samples, int16_t* audio_mix);
 
   Oscillator() { }
   ~Oscillator() { }
@@ -191,7 +228,6 @@ class Oscillator {
     pd_square_.polarity = false;
     high_ = false;
     next_sample_ = 0;
-    transfer_crest_factor_ = 1;
   }
 
   void Refresh(int16_t pitch, int16_t timbre_bias, uint16_t gain_bias) {
@@ -238,6 +274,33 @@ class Oscillator {
     previous_damp_drive_u15_ = 0;
   }
 
+  // The resonators that are excited by the gain itself take it wide, so its
+  // steps under one narrow LSB do not ring them. The other shapes that spend it
+  // before a filter or loop scale their excitation by it, where such a step is
+  // a change of level, not an excitation.
+  static inline bool takes_wide_gain(OscillatorShape shape) {
+    return shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP;
+  }
+  static const int kGainNarrowToWideShift =
+      kEnvelopeValueBits - kEnvelopeSampleBits;
+
+  // What a shape is handed: the timbre, then the gain in the form the shape
+  // reads -- narrow, or wide where takes_wide_gain.
+  union ShapeInputs {
+    int16_t narrow[2 * kAudioBlockSize];
+    struct {
+      int16_t timbre[kAudioBlockSize];
+      int32_t gain_q30[kAudioBlockSize];
+    } wide;
+    inline void SetGain(size_t i, int16_t gain, OscillatorShape shape) {
+      if (takes_wide_gain(shape)) {
+        wide.gain_q30[i] = static_cast<int32_t>(gain) << kGainNarrowToWideShift;
+      } else {
+        narrow[kAudioBlockSize + i] = gain;
+      }
+    }
+  };
+
   // What the gain envelope runs at, which is not the same as what the shape is
   // worth. A shape that spends the gain BEFORE its filter drives an excitation
   // with it, so the envelope is a full-range drive and the share is applied to
@@ -251,13 +314,16 @@ class Oscillator {
     // homogeneous in gain, so the envelope can carry the share -- under the
     // headroom the DC blocker needs.
     if (shape == OSC_SHAPE_WIND || shape == OSC_SHAPE_BOWED) {
-      const uint16_t headroom_u15 = shape == OSC_SHAPE_WIND
+      uint16_t headroom_u15 = shape == OSC_SHAPE_WIND
           ? kWindPeakHeadroom_u15 : kBowedPeakHeadroom_u15;
+#ifdef TEST
+      if (g_loop_dc_before_gain) headroom_u15 = 32767;
+#endif
       return static_cast<uint16_t>(
           coherent_scale_codes_u16_ * headroom_u15 >> 15);
     }
-    const bool spends_gain_before_the_filter = shape == OSC_SHAPE_WHISTLE
-        || (shape >= OSC_SHAPE_PING_LP && shape <= OSC_SHAPE_PING_HP);
+    const bool spends_gain_before_the_filter =
+        shape == OSC_SHAPE_WHISTLE || takes_wide_gain(shape);
     return spends_gain_before_the_filter
         ? kEnvelopeSampleMax : coherent_scale_codes_u16_;
   }
@@ -321,34 +387,50 @@ class Oscillator {
   static const RenderFn fn_table_[];
   
  private:
-  void RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix);
+  // A method fn_table_ names is inlined into its RenderThunk, its only caller,
+  // so the table points at the render itself: no extra branch. Not those
+  // GCC compiles slower inlined (SyncSaw, SawPulseMorph, VariablePulse,
+  // PhaseDistortionPulse, by 1-6 cycles a sample, measured): theirs is a
+  // thunk that branches to the method.
+#define RENDERED_BY_THUNK inline __attribute__((always_inline))
+  template <RenderMethod method>
+  static void RenderThunk(
+      Oscillator* oscillator, int16_t* input_samples, int16_t* audio_mix) {
+    (oscillator->*method)(input_samples, audio_mix);
+  }
+
+  RENDERED_BY_THUNK void RenderFilteredNoise(int16_t* input_samples, int16_t* audio_mix);
   void RenderPhaseDistortionPulse(int16_t* input_samples, int16_t* audio_mix);
-  void RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix);
-  void RenderLPPulse(int16_t* input_samples, int16_t* audio_mix);
-  void RenderLPSaw(int16_t* input_samples, int16_t* audio_mix);
-  void RenderVariableSine(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderPhaseDistortionSaw(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderLPPulse(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderLPSaw(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderVariableSine(int16_t* input_samples, int16_t* audio_mix);
   void RenderVariablePulse(int16_t* input_samples, int16_t* audio_mix);
-  void RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderVariableSaw(int16_t* input_samples, int16_t* audio_mix);
   void RenderSawPulseMorph(int16_t* input_samples, int16_t* audio_mix);
-  void RenderSyncSine(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderSyncSine(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncTriangle(int16_t* input_samples, int16_t* audio_mix);
-  void RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderSyncPulse(int16_t* input_samples, int16_t* audio_mix);
   void RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix);
-  void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
-  void RenderWind(int16_t* input_samples, int16_t* audio_mix);
-  void RenderBowed(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderWhistle(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderWind(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderBowed(int16_t* input_samples, int16_t* audio_mix);
   // The loop shapes' one body; Loop names the curve and the ranges (see
   // WindLoop in oscillator.cc).
   template <typename Loop>
   void RenderLoop(int16_t* input_samples, int16_t* audio_mix);
-  void RenderPing(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderPing(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldSine(int16_t* input_samples, int16_t* audio_mix);
   // void RenderFoldTriangle(int16_t* input_samples, int16_t* audio_mix);
-  void RenderDiracComb(int16_t* input_samples, int16_t* audio_mix);
-  void RenderTanhSine(int16_t* input_samples, int16_t* audio_mix);
-  void RenderExponentialSine(int16_t* input_samples, int16_t* audio_mix);
-  void RenderTransfer(int16_t* input_samples, int16_t* audio_mix);
-  void RenderFM(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderDiracComb(int16_t* input_samples, int16_t* audio_mix);
+  // carrier_mixed: the even variant's, which mixes the carrier back in.
+  template <bool carrier_mixed>
+  RENDERED_BY_THUNK void RenderTransfer(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix);
+  RENDERED_BY_THUNK void RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix);
+  // The block's carrier, at full width, advancing the phase.
+  void RenderTransferCarrier_q31(int32_t* carrier_q31);
+  RENDERED_BY_THUNK void RenderFM(int16_t* input_samples, int16_t* audio_mix);
   
   uint32_t ComputePhaseIncrement(int16_t midi_pitch) const;
   
@@ -386,11 +468,37 @@ class Oscillator {
     return quadrant_lookup(lut_sine_quadrant_u16, phase);
   }
 
+  // A quadrant table interpolated at full width, * 2^31 (less 2^15 at the
+  // peaks): the 16 bits quadrant_lookup() drops are what a shaper that
+  // amplifies its input's error -- sizzle, whose phase moves 16 cycles a unit --
+  // needs.
+  inline int32_t quadrant_lookup_q31(const uint16_t* table, uint32_t phase) const {
+    uint32_t quarter_phase = phase << 2;
+    quarter_phase ^= -((phase >> 30) & 1);
+    const int32_t a = table[quarter_phase >> 24];
+    const int32_t b = table[(quarter_phase >> 24) + 1];
+    const int32_t value = (a << 15)
+        + ((b - a) * static_cast<int32_t>((quarter_phase >> 8) & 0xffff) >> 1);
+    const int32_t sign = static_cast<int32_t>(phase) >> 31;
+    return (value ^ sign) - sign;
+  }
+
+  inline int32_t sine_q31(uint32_t phase) const {
+    return quadrant_lookup_q31(lut_sine_quadrant_u16, phase);
+  }
+
   inline int16_t triangle(uint32_t phase) const {
     // Phase offset ensures f(0) = 0, with peak at phase 1/4 (like sine).
     // This simplifies transfer waveshaping: input 0 always yields output 0.
     phase += 0x40000000;
     return ((phase >> 15) ^ (phase >> 31 ? 0xffff : 0x0000)) - 0x8000;
+  }
+
+  // The same at full width, * 2^31: triangle() is its top 16 bits.
+  inline int32_t triangle_q31(uint32_t phase) const {
+    phase += 0x40000000;
+    const uint32_t fold = static_cast<uint32_t>(static_cast<int32_t>(phase) >> 31);
+    return static_cast<int32_t>(((phase << 1) ^ fold) ^ 0x80000000u);
   }
 
   // Narrowest first, so the byte and halfword fields sit inside the reach of
@@ -402,7 +510,6 @@ class Oscillator {
   // render.
   uint8_t transfer_carrier_;
   uint8_t transfer_function_;
-  uint8_t transfer_crest_factor_;
   uint8_t transfer_gain_shift_;
 
   int16_t raw_timbre_bias_;
@@ -433,6 +540,7 @@ class Oscillator {
  private:
   DISALLOW_COPY_AND_ASSIGN(Oscillator);
 };
+#undef RENDERED_BY_THUNK
 
 }  // namespace yarns
 

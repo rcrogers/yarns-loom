@@ -227,6 +227,14 @@ characters = {
   '\xC2': 'agp',  # rotated 's' (sine)
   '\xC3': 'gj',   # rotated '^' (tri)
   '\xC4': 'abjk', # rotated 'e' (expo)
+  '\xCA': 'bjgf', # rotated 'w' (sizzle)
+
+  # Transfer function symbols on their side (balanced): each turned with its
+  # top to the left, read in stroke order
+  '\xCB': 'hjb',   # 's' (sine)
+  '\xCC': 'lndc',  # 'e' (expo)
+  '\xCD': 'ajld',  # 'w' (sizzle)
+  '\xCE': 'efpk',  # 'T' (tanh)
 
   '\xC5': 'fpkc', # down stair-step
   

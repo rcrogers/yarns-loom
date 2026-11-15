@@ -136,70 +136,203 @@ static const int kSamplePeakBits = 15;
 static const int kTransferMaxGainBits = 4; // 16x max gain
 // Transfer peak phase (1/4 cycle = 2^30)
 static const uint32_t kTransferPeakPhase = 1u << (32 - 2);
-// Biased variants add a DC bias (after amplification) to shift the operating
-// point on the transfer function, creating asymmetric harmonic content.
-static const uint32_t kTransferAsymmetricBias = kTransferPeakPhase / 2;  // 1/8 cycle -- max asymmetry
-// Order of the carrier and transfer curves within the transfer shape enum.
+// The carriers and transfer curves, numbered so a carrier's index within its
+// variant's three shapes is its code. Tanh and sizzle are transfer curves only:
+// they are not periodic in their input, so they cannot be carriers.
 enum TransferCurve {
   TRANSFER_CURVE_TRI,
   TRANSFER_CURVE_SINE,
-  TRANSFER_CURVE_EXP
+  TRANSFER_CURVE_EXP,
+  TRANSFER_CURVE_TANH,
+  TRANSFER_CURVE_SIZZLE
+};
+// Each curve's variants by where its rest point puts the harmonics: odd the
+// least even share of the energy over the TIMBRE sweep, even the most, and
+// balanced the share halfway between the two. For the periodic curves odd and
+// even rests are exact, so balanced is half the energy; sizzle's and tanh's own
+// extremes fall short of 0 and 1, and balanced is halfway between them. The
+// periodic curves' even rest alone has no fundamental, so their even variant
+// mixes the carrier back in (RenderTransfer).
+enum TransferVariant {
+  TRANSFER_VARIANT_ODD,
+  TRANSFER_VARIANT_BALANCED,
+  TRANSFER_VARIANT_EVEN
+};
+static const OscillatorShape kFirstTransferShape = OSC_SHAPE_TRI_THRU_TANH_ODD;
+static const OscillatorShape kLastTransferShape = OSC_SHAPE_EXP_THRU_EXP_EVEN;
+
+static inline bool IsTransferShape(OscillatorShape shape) {
+  return shape >= kFirstTransferShape && shape <= kLastTransferShape;
+}
+
+// Nine shapes a curve: odd, balanced, even, three carriers each. The curves go
+// tanh, tri, sine, sizzle, expo.
+static inline uint8_t TransferCurveOf(OscillatorShape shape) {
+  static const uint8_t kCurveInEnumOrder[] = {
+    TRANSFER_CURVE_TANH, TRANSFER_CURVE_TRI, TRANSFER_CURVE_SINE,
+    TRANSFER_CURVE_SIZZLE, TRANSFER_CURVE_EXP
+  };
+  return kCurveInEnumOrder[(shape - kFirstTransferShape) / 9];
+}
+
+static inline uint8_t TransferVariantOf(OscillatorShape shape) {
+  return (shape - kFirstTransferShape) / 3 % 3;
+}
+
+static inline uint8_t TransferCarrierOf(OscillatorShape shape) {
+  return (shape - kFirstTransferShape) % 3;
+}
+
+// How steep the shape's carrier and curve are, which sets its fold knee:
+// tri=2 (derivative discontinuities), sine=1, expo=3 (peak slope), carrier *
+// curve -- except sizzle, 3 whatever its carrier, so the tri and expo carriers
+// reach as far as the sine's: their own factors on top would cap full TIMBRE at
+// middle C at 47% and 36% of the range, against 64%. Tanh takes no knee, so its
+// 1 is never read.
+static inline uint8_t TransferCrestFactor(OscillatorShape shape) {
+  static const uint8_t kSlopeFactor[] = {2, 1, 3, 1, 3};  // by TransferCurve
+  const uint8_t curve = TransferCurveOf(shape);
+  const uint8_t carrier = TransferCarrierOf(shape);
+  return kSlopeFactor[curve]
+      * (curve == TRANSFER_CURVE_SIZZLE ? 1 : kSlopeFactor[carrier]);
+}
+
+// The constants the derivations below are written in. GCC folds the builtins
+// of constants at compile time, so each derived value is an immediate.
+static const double kPi = 3.14159265358979323846;
+static const double kLog2E = 1.0 / __builtin_log(2.0);
+
+// A phase of so many degrees, 2^32 a cycle, for 0 <= degrees < 360.
+#define PHASE_OF_DEGREES(degrees) \
+    static_cast<uint32_t>((degrees) / 360.0 * 4294967296.0 + 0.5)
+
+// The periodic curves are odd about 0 and even about a quarter cycle, so odd
+// is a bias of 0 and even a quarter cycle, at every TIMBRE. Balanced is where
+// even takes half the energy averaged over the sweep, measured
+// (resonator-scripts/angles210.py), the carrier a sine: it differs a curve.
+static const uint32_t kTransferBalancedBias[] = {
+  PHASE_OF_DEGREES(53.5),  // tri
+  PHASE_OF_DEGREES(49.5),  // sine
+  PHASE_OF_DEGREES(49.4),  // expo
+};
+
+static inline uint32_t TransferBias(uint8_t curve, uint8_t variant) {
+  return variant == TRANSFER_VARIANT_ODD ? 0
+      : variant == TRANSFER_VARIANT_EVEN ? kTransferPeakPhase
+      : kTransferBalancedBias[curve];
+}
+
+// Tanh offsets the carrier before the gain: an offset after it fades against
+// the swing as the gain rises, and with it the evens. Even by 2/3 of the
+// carrier's peak, where the even harmonics peak in level at every gain from 2
+// up (within 0.3 dB, and 3 dB short at the least gain); its even share is 0.181
+// over the sweep. Balanced by 0.358, where the share is half that, measured
+// (resonator-scripts/half221.py).
+static const int32_t kTanhCarrierOffset[] = {  // by TransferVariant
+  0,
+  static_cast<int32_t>(0.358 * 32768 + 0.5),
+  (2 << 15) / 3,
+};
+
+// Sizzle's variants are where its sine sits at rest. Its exponential is not odd
+// in the carrier, so no rest gives odd or even alone past the bottom of TIMBRE;
+// averaged over the sweep, the even share is least at -20 degrees (0.34), most
+// at 65.4 (0.63), and halfway between at 24.3, measured
+// (resonator-scripts/angles210.py, half221.py).
+// The exponential's own C0 rests it at frac(C0): 65.4 degrees, the most even,
+// so even takes no offset and the others are offsets from it. The output is the
+// sine as it stands, no mean taken out: the waveform's mean moves with TIMBRE by
+// far more than a fixed offset could follow.
+static const uint32_t kSizzleC0_q14 = static_cast<uint32_t>(
+    __builtin_exp(5 * kPi / 6) / (2 * kPi) * (1 << 14) + 0.5);
+// At x = 0 the phase is C0 in q14 shifted to 2^32 a cycle.
+static const uint32_t kSizzleRestPhase =
+    (kSizzleC0_q14 & ((1 << 14) - 1)) << (32 - 14);
+static const uint32_t kSizzleRestPhaseOffset[] = {  // by TransferVariant
+  PHASE_OF_DEGREES(360 - 20.0) - kSizzleRestPhase,
+  PHASE_OF_DEGREES(24.3) - kSizzleRestPhase,
+  0,
 };
 
 /* static */
 const Oscillator::RenderFn Oscillator::fn_table_[] = {
-  &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderFilteredNoise,
-  &Oscillator::RenderWhistle,
-  &Oscillator::RenderWind,
-  &Oscillator::RenderBowed,
-  &Oscillator::RenderPing,
-  &Oscillator::RenderPing,
-  &Oscillator::RenderPing,
-  &Oscillator::RenderLPPulse,
-  &Oscillator::RenderLPSaw,
-  &Oscillator::RenderPhaseDistortionPulse,
-  &Oscillator::RenderPhaseDistortionPulse,
-  &Oscillator::RenderPhaseDistortionPulse,
-  &Oscillator::RenderPhaseDistortionPulse,
-  &Oscillator::RenderPhaseDistortionSaw,
-  &Oscillator::RenderPhaseDistortionSaw,
-  &Oscillator::RenderPhaseDistortionSaw,
-  &Oscillator::RenderPhaseDistortionSaw,
-  &Oscillator::RenderVariableSine,
-  &Oscillator::RenderVariablePulse,
-  &Oscillator::RenderVariableSaw,
-  &Oscillator::RenderSawPulseMorph,
-  &Oscillator::RenderSyncSine,
+  &RenderThunk<&Oscillator::RenderFilteredNoise>,
+  &RenderThunk<&Oscillator::RenderFilteredNoise>,
+  &RenderThunk<&Oscillator::RenderFilteredNoise>,
+  &RenderThunk<&Oscillator::RenderFilteredNoise>,
+  &RenderThunk<&Oscillator::RenderWhistle>,
+  &RenderThunk<&Oscillator::RenderWind>,
+  &RenderThunk<&Oscillator::RenderBowed>,
+  &RenderThunk<&Oscillator::RenderPing>,
+  &RenderThunk<&Oscillator::RenderPing>,
+  &RenderThunk<&Oscillator::RenderPing>,
+  &RenderThunk<&Oscillator::RenderLPPulse>,
+  &RenderThunk<&Oscillator::RenderLPSaw>,
+  &RenderThunk<&Oscillator::RenderPhaseDistortionPulse>,
+  &RenderThunk<&Oscillator::RenderPhaseDistortionPulse>,
+  &RenderThunk<&Oscillator::RenderPhaseDistortionPulse>,
+  &RenderThunk<&Oscillator::RenderPhaseDistortionPulse>,
+  &RenderThunk<&Oscillator::RenderPhaseDistortionSaw>,
+  &RenderThunk<&Oscillator::RenderPhaseDistortionSaw>,
+  &RenderThunk<&Oscillator::RenderPhaseDistortionSaw>,
+  &RenderThunk<&Oscillator::RenderPhaseDistortionSaw>,
+  &RenderThunk<&Oscillator::RenderVariableSine>,
+  &RenderThunk<&Oscillator::RenderVariablePulse>,
+  &RenderThunk<&Oscillator::RenderVariableSaw>,
+  &RenderThunk<&Oscillator::RenderSawPulseMorph>,
+  &RenderThunk<&Oscillator::RenderSyncSine>,
   // &Oscillator::RenderSyncTriangle,
-  &Oscillator::RenderSyncPulse,
-  &Oscillator::RenderSyncSaw,
+  &RenderThunk<&Oscillator::RenderSyncPulse>,
+  &RenderThunk<&Oscillator::RenderSyncSaw>,
   // &Oscillator::RenderFoldSine,
   // &Oscillator::RenderFoldTriangle,
-  &Oscillator::RenderDiracComb,
-  &Oscillator::RenderTanhSine,
-  &Oscillator::RenderExponentialSine,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderTransfer,
-  &Oscillator::RenderFM,
+  &RenderThunk<&Oscillator::RenderDiracComb>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransferTanh>,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransferSizzle>,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<false> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderTransfer<true> >,
+  &RenderThunk<&Oscillator::RenderFM>,
 };
 
 STATIC_ASSERT(
@@ -351,11 +484,13 @@ int16_t Oscillator::WarpTimbre(
     return DampFromResonance(timbre);
   }
 
-  if (
-    shape == OSC_SHAPE_EXP_SINE ||
-    (shape >= OSC_SHAPE_TRI_THRU_TRI && shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) ||
-    shape >= OSC_SHAPE_FM
-  ) {
+  // Tanh drives rather than folds, so it has no fold count to cap; below zero
+  // is the least drive, as below zero is no fold for the rest of the family.
+  if (IsTransferShape(shape) && TransferCurveOf(shape) == TRANSFER_CURVE_TANH) {
+    return TimbreAtOrAboveZero(timbre);
+  }
+
+  if (IsTransferShape(shape) || shape >= OSC_SHAPE_FM) {
     // Below zero is the bottom of the fold, which is no fold. Two things go
     // wrong without this: one path returns the timbre unchanged, so a negative
     // reaches the transfer render and is shifted left there as a value its own
@@ -366,18 +501,10 @@ int16_t Oscillator::WarpTimbre(
     // pitch-dependent ceiling.  f(t) = knee * t / (knee + t), computed as
     // t - t^2/(knee + t) to avoid 32-bit overflow.
     //
-    // Crest factor compensates for carrier/transfer steepness:
-    // tri=2 (derivative discontinuities), sine=1, expo=3 (peak slope).
-    // Combined factor is carrier * transfer.
-    uint8_t crest_factor;
-    if (shape >= OSC_SHAPE_TRI_THRU_TRI &&
-        shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
-      crest_factor = transfer_crest_factor_;
-    } else if (shape == OSC_SHAPE_EXP_SINE) {
-      crest_factor = 3;
-    } else {
-      crest_factor = 1;  // FM
-    }
+    // The crest factor is the shape's own, the one asked about: set_shape asks
+    // for the new shape's before it has become the current one.
+    const uint8_t crest_factor =
+        IsTransferShape(shape) ? TransferCrestFactor(shape) : 1;  // 1: FM
     uint32_t max_folds = 0x80000000u / ComputePhaseIncrement(pitch) / crest_factor;
     if (max_folds > 0x80000u) return timbre;
     int32_t knee = static_cast<int32_t>(max_folds << (kSamplePeakBits - kTransferMaxGainBits));
@@ -440,16 +567,13 @@ void Oscillator::set_shape(OscillatorShape new_shape) {
   // would cut the note.
   if (!sounding()) ResetFilterState();
 
-  transfer_crest_factor_ = 1;
-  if (new_shape >= OSC_SHAPE_TRI_THRU_TRI &&
-      new_shape <= OSC_SHAPE_EXP_THRU_EXP_BIASED) {
-    static const uint8_t slope_factor[] = {2, 1, 3}; // tri, sine, expo
-    uint8_t index = new_shape - OSC_SHAPE_TRI_THRU_TRI;
-    transfer_carrier_ = index % 3;
-    transfer_function_ = index / 6;
-    transfer_bias_ = (index % 6) >= 3 ? kTransferAsymmetricBias : 0;
-    transfer_crest_factor_ = slope_factor[transfer_carrier_]
-        * slope_factor[transfer_function_];
+  if (IsTransferShape(new_shape)) {
+    transfer_carrier_ = TransferCarrierOf(new_shape);
+    transfer_function_ = TransferCurveOf(new_shape);
+    // The periodic curves' only: tanh and sizzle pick theirs up per block,
+    // in their own units (kTanhCarrierOffset, kSizzleRestPhaseOffset).
+    transfer_bias_ = transfer_function_ < TRANSFER_CURVE_TANH
+        ? TransferBias(transfer_function_, TransferVariantOf(new_shape)) : 0;
     // Halve max transfer gain when triangle is involved (carrier or transfer)
     // to compensate for its derivative discontinuities.
     transfer_gain_shift_ =
@@ -493,33 +617,42 @@ void Oscillator::Render(int16_t* audio_mix) {
   // envelope renders below.
   // Timbre at [p], gain at [p + kAudioBlockSize]: one pointer walks both, and
   // every register held here is one the shape cannot have.
-  int16_t timbre_gain[2 * kAudioBlockSize];
+  ShapeInputs timbre_gain;
   // The shapes are handed the WHOLE array and index the gain half off it, so
   // what they take is input_samples, not either half by itself.
-  int16_t* input_samples = &timbre_gain[0];
-  int16_t* gain_samples = &timbre_gain[kAudioBlockSize];
+  int16_t* input_samples = &timbre_gain.narrow[0];
+  int16_t* gain_samples = &timbre_gain.narrow[kAudioBlockSize];
   int16_t timbre_bias = WarpTimbre(raw_timbre_bias_);
   timbre_envelope_.RenderSamples(
     input_samples, static_cast<int32_t>(static_cast<uint32_t>(timbre_bias) << 16));
 
   int16_t gain_bias = gain_envelope_.tremolo(raw_gain_bias_);
-  gain_envelope_.RenderSamples(
-    gain_samples, static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16));
+  const int32_t gain_bias_q31 =
+    static_cast<int32_t>(static_cast<uint32_t>(gain_bias) << 16);
+  const bool gain_wide = takes_wide_gain(shape_);
+  if (gain_wide) {
+    gain_envelope_.RenderSamples(timbre_gain.wide.gain_q30, gain_bias_q31);
+  } else {
+    gain_envelope_.RenderSamples(gain_samples, gain_bias_q31);
+  }
 
 #ifdef TEST
+  // The hooks below read and write the narrow format whatever the shape takes.
   // GAIN_PROBE=n prints every gain sample of the first n blocks rendered.
   static int gain_probe_blocks =
       getenv("GAIN_PROBE") ? atoi(getenv("GAIN_PROBE")) : 0;
   if (gain_probe_blocks > 0) {
     --gain_probe_blocks;
     for (size_t i = 0; i < kAudioBlockSize; ++i)
-      fprintf(stderr, "%d\n", gain_samples[i]);
+      fprintf(stderr, "%d\n", gain_wide
+          ? timbre_gain.wide.gain_q30[i] >> kGainNarrowToWideShift : gain_samples[i]);
   }
   // CTL_DUMP=1 prints every sample's timbre and gain, as the shape reads them.
   static const bool ctl_dump = getenv("CTL_DUMP") != NULL;
   if (ctl_dump) {
     for (size_t i = 0; i < kAudioBlockSize; ++i)
-      fprintf(stderr, "%d %d\n", input_samples[i], gain_samples[i]);
+      fprintf(stderr, "%d %d\n", input_samples[i], gain_wide
+          ? timbre_gain.wide.gain_q30[i] >> kGainNarrowToWideShift : gain_samples[i]);
   }
   // CTL_REPLAY=path reads CTL_DUMP's format back and hands the shape THAT in
   // place of the envelopes: a timbre from one render and a gain from another.
@@ -528,17 +661,24 @@ void Oscillator::Render(int16_t* audio_mix) {
       getenv("CTL_REPLAY") ? fopen(getenv("CTL_REPLAY"), "r") : NULL;
   if (ctl_replay) {
     for (size_t i = 0; i < kAudioBlockSize; ++i) {
-      int timbre, gain;
-      if (fscanf(ctl_replay, "%d %d", &timbre, &gain) != 2) break;
+      // The gain may carry a fraction: a wide gain keeps it, a narrow one
+      // floors it, as the envelope's own shift does.
+      int timbre;
+      double gain;
+      if (fscanf(ctl_replay, "%d %lf", &timbre, &gain) != 2) break;
       input_samples[i] = static_cast<int16_t>(timbre);
-      gain_samples[i] = static_cast<int16_t>(gain);
+      if (gain_wide) {
+        timbre_gain.wide.gain_q30[i] = static_cast<int32_t>(
+            __builtin_floor(__builtin_ldexp(gain, kGainNarrowToWideShift)));
+      } else {
+        gain_samples[i] = static_cast<int16_t>(__builtin_floor(gain));
+      }
     }
   }
 #endif
   uint8_t fn_index = shape_;
   CONSTRAIN(fn_index, 0, OSC_SHAPE_FM);
-  RenderFn fn = fn_table_[fn_index];
-  (this->*fn)(input_samples, audio_mix);
+  fn_table_[fn_index](this, input_samples, audio_mix);
 }
 
 // Gain is read at input_samples[kAudioBlockSize], which is why there is no
@@ -891,31 +1031,145 @@ void Oscillator::RenderSyncSaw(int16_t* input_samples, int16_t* audio_mix) {
 //   )
 // }
 
-void Oscillator::RenderTanhSine(int16_t* input_samples, int16_t* audio_mix) {
-  RENDER_PERIODIC(
-    this_sample = sine(phase);
-    int16_t baseline = this_sample >> 6;
-    this_sample = baseline + ((this_sample - baseline) * timbre >> 15);
-    this_sample = Interpolate88(ws_violent_overdrive, this_sample + 32768);
-  )
+// Sizzle's carrier, a block at a time, before the curve: in the curve's loop,
+// its phase, increment, table and choice of carrier would hold four registers
+// the curve needs, and sizzle's curve is too large to copy once a carrier. Two
+// samples an iteration, as the loop's own count and branch are a fifth of its
+// cost.
+void Oscillator::RenderTransferCarrier_q31(int32_t* carrier_q31) {
+  uint32_t phase = phase_;
+  const uint32_t phase_increment = phase_increment_;
+  if (transfer_carrier_ == TRANSFER_CURVE_TRI) {
+    for (size_t i = 0; i < kAudioBlockSize; i += 2) {
+      phase += phase_increment;
+      carrier_q31[i] = triangle_q31(phase);
+      phase += phase_increment;
+      carrier_q31[i + 1] = triangle_q31(phase);
+    }
+  } else {
+    const uint16_t* table = transfer_carrier_ == TRANSFER_CURVE_SINE
+        ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
+    for (size_t i = 0; i < kAudioBlockSize; i += 2) {
+      phase += phase_increment;
+      carrier_q31[i] = quadrant_lookup_q31(table, phase);
+      phase += phase_increment;
+      carrier_q31[i + 1] = quadrant_lookup_q31(table, phase);
+    }
+  }
+  phase_ = phase;
 }
 
-void Oscillator::RenderExponentialSine(int16_t* input_samples, int16_t* audio_mix) {
-  RENDER_PERIODIC(
+// 2^f in Q15 for a fraction f in 16 bits: a degree-3 fit by Horner in 16 bits,
+// every coefficient an immediate, within 1.9e-4 of 2^f. Its constant is
+// exactly 1.
+static inline uint32_t Exp2Fraction_q15(uint32_t fraction_u16) {
+  uint32_t mantissa_q15 = 2591;
+  mantissa_q15 = 7357 + (mantissa_q15 * fraction_u16 >> 16);
+  mantissa_q15 = 22819 + (mantissa_q15 * fraction_u16 >> 16);
+  return 32768 + (mantissa_q15 * fraction_u16 >> 16);
+}
+
+// The transfer family's carriers through tanh(y): y is the carrier times the
+// TIMBRE's gain, plus the bias. It drives rather than folds, so it takes
+// neither the family's gain law nor its fold knee.
+//
+// The gain is exponential in TIMBRE, 0.5 to 16 -- five doublings, 2^(5 t) -- so
+// the knob moves as evenly as the sound does: the level is within 0.2 dB of its
+// ceiling by a gain of 8, and past 16 no harmonic but the highest moves by more
+// than 2 dB, while the aliasing at high notes grows and a biased shape's even
+// harmonics fade toward its plain twin's. Within each doubling 2^f is 1 + a f
+// + (1 - a) f^2, which meets 2^f at both ends; its slope is a at one end and
+// 2 - a at the other, and a = 2/3 makes the end's twice the start's, so the
+// slope runs on unbroken into the next doubling. Within 0.35% of 2^f.
+//
+// With z = 2 y log2 e (y = 32 x) and e^2y = 2^z = m 2^n, tanh = (m - 2^-n) /
+// (m + 2^-n): one divide, its quotient already the output's 2^15 scale. m =
+// 2^frac(z) is Exp2Fraction_q15, under 3 LSB of tanh; its constant is exactly
+// 1, so m >= 2^-n and tanh >= 0. log2 e rides on the gain, so z is
+// one MUL off the carrier: the gain times 2 log2 e / 2^15, the doubling's
+// quadratic scaled by its value at the least gain. Below zero TIMBRE is the
+// least gain. Past z = 17 tanh is taken as full scale: there e^2y = 2^17, and
+// 1 - tanh = 2 / (2^17 + 1) is under half an LSB of 2^15.
+//
+// The curve is small enough to copy once a carrier, as RenderTransfer's are:
+// the carrier, read in the loop, holds no buffer and costs no second pass.
+void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) {
+  const uint32_t kSaturation_q24 = 17 << 24;
+  // The gain's ends, 0.5 and 16: five doublings.
+  const double kGainLeast = 0.5;
+  const int32_t kGainDoublings = 5;
+  const int32_t kGainLeast_log2e =
+      static_cast<int32_t>(kGainLeast * 1024 * kLog2E + 0.5);
+  const int32_t carrier_offset = kTanhCarrierOffset[TransferVariantOf(shape_)];
+  const uint16_t* carrier_table = transfer_carrier_ == TRANSFER_CURVE_SINE
+      ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
+#define TANH_LOOP(CARRIER) \
+  RENDER_PERIODIC( \
+    const int32_t doublings_q15 = (timbre < 0 ? 0 : timbre) * kGainDoublings; \
+    const int32_t fraction_q15 = doublings_q15 & 0x7fff; \
+    const int32_t gain_log2e = (kGainLeast_log2e + (fraction_q15 \
+        * ((2 * kGainLeast_log2e + 1) / 3 \
+           + (fraction_q15 * ((kGainLeast_log2e + 1) / 3) >> 15)) >> 15)) \
+        << (doublings_q15 >> 15); \
+    const int32_t z_q24 = ((CARRIER) + carrier_offset) * gain_log2e; \
+    const uint32_t magnitude_q24 = \
+        static_cast<uint32_t>(z_q24 < 0 ? -z_q24 : z_q24); \
+    int32_t shaped = 32767; \
+    if (magnitude_q24 < kSaturation_q24) { \
+      const uint32_t mantissa_q30 = \
+          Exp2Fraction_q15((magnitude_q24 >> 8) & 0xffff) << 15; \
+      const uint32_t reciprocal_q30 = (1u << 30) >> (magnitude_q24 >> 24); \
+      shaped = (mantissa_q30 - reciprocal_q30) \
+          / ((mantissa_q30 + reciprocal_q30 + (1u << 14)) >> 15); \
+    } \
+    this_sample = z_q24 < 0 ? -shaped : shaped; \
+  )
+  if (transfer_carrier_ == TRANSFER_CURVE_TRI) {
+    TANH_LOOP(triangle(phase))
+  } else {
+    TANH_LOOP(quadrant_lookup(carrier_table, phase))
+  }
+#undef TANH_LOOP
+}
+
+// sin(exp(u)), u = 5 pi / 6 + pi x / 2, computed: exp(u) / 2 pi cycles is
+// C0 2^(a x), a = pi / (2 ln 2), C0 = e^(5 pi / 6) / 2 pi, which runs 0.45 to
+// 10.5 cycles across x -- its fraction is the phase of a sine. Computed, not
+// tabulated: a table of the curve would hold ~8 points a cycle at the top, and
+// interpolating between them aliases by up to 29 dB over the curve itself.
+//
+// C0 2^f as cycles in q29 (it reaches 4.4): 2^f in Q15 by a degree-4 Horner in
+// 16 bits, its constant exactly 1, times C0 in q14 -- one MUL a degree, every
+// constant an immediate, so nothing is read from flash but the two sines.
+// Within 7e-5 of C0 2^f, 0.0007 cycle at the top of the sweep.
+
+// The transfer family's carriers through sizzle, at full width: the phase moves
+// 16 cycles a unit of x, so a 16-bit carrier's own rounding is the next limit.
+void Oscillator::RenderTransferSizzle(int16_t* input_samples, int16_t* audio_mix) {
+  int32_t carrier_q31[kAudioBlockSize];
+  RenderTransferCarrier_q31(carrier_q31);
+  const int32_t* carrier = carrier_q31;
+  // a in q14, carried by the TIMBRE gain: the exponent is then one SMULL off
+  // the carrier. 15 bits of a reshape the TIMBRE map by 0.003%.
+  const int32_t kExponentGain_q14 =
+      static_cast<int32_t>(kPi / 2 * kLog2E * (1 << 14) + 0.5);
+  const uint32_t rest_phase_offset = kSizzleRestPhaseOffset[TransferVariantOf(shape_)];
+  RENDER_WITH_GAIN_AMPLIFYING_OUTPUT(
     timbre = (timbre >> 1) + (timbre >> 2) + (timbre >> 3) + 0x0fff; // Use top 7/8
-    int16_t sine_sample = sine(phase);
-    int32_t scaled_sine = sine_sample * timbre;
-
-    int16_t dither = phase ^ (phase >> 16);
-    int16_t dither_14 = dither >> (16 - 14);
-    int32_t dithered_scaled_sine = (scaled_sine + dither_14) >> 15;
-
-    this_sample = Interpolate88(wav_sizzle, dithered_scaled_sine + 0x8000);
+    // a x in q28: carrier * 2^31 times gain * a * 2^29, high word.
+    const int32_t exponent_q28 = MulHighS(*carrier++, timbre * kExponentGain_q14);
+    const int32_t whole = exponent_q28 >> 28;  // -3 .. 2
+    const uint32_t fraction_u16 = (static_cast<uint32_t>(exponent_q28) >> 12) & 0xffff;
+    uint32_t exp2_q15 = 448;
+    exp2_q15 = 1695 + (exp2_q15 * fraction_u16 >> 16);
+    exp2_q15 = 7917 + (exp2_q15 * fraction_u16 >> 16);
+    exp2_q15 = 22707 + (exp2_q15 * fraction_u16 >> 16);
+    exp2_q15 = 32768 + (exp2_q15 * fraction_u16 >> 16);
+    const uint32_t cycles_q29 = kSizzleC0_q14 * exp2_q15;
+    const uint32_t sizzle_phase = (cycles_q29 << (3 + whole)) + rest_phase_offset;
+    this_sample = sine(sizzle_phase);
   )
 }
-
-
-
 
 // Transfer waveshaping: input sample is amplified and used as phase for a
 // transfer function (sine or triangle). The transfer function's output
@@ -924,20 +1178,28 @@ void Oscillator::RenderExponentialSine(int16_t* input_samples, int16_t* audio_mi
 // Key property: all transfer functions satisfy f(0) = 0 (zero-crossing at
 // phase 0, peak at phase 1/4). This ensures input 0 produces output 0.
 //
-// At min timbre, the input peak maps to the transfer peak (phase 1/4),
-// placing the signal at the fold threshold: maximum amplitude before
-// wavefolding begins. Output equals input (clean pass-through).
+// At min timbre the input swings by the least phase. Odd and balanced: to the
+// transfer peak (phase 1/4), the fold threshold -- maximum amplitude before
+// wavefolding begins, and for odd a clean pass-through. Even, resting on the
+// peak: a quarter cycle each way, so the curve's rise and fall each pass once,
+// the carrier full-wave rectified -- even harmonics alone, at full level, to
+// which RenderTransfer adds the carrier.
+
+// The carrier's gain into the transfer: the input peak swings least_phase at
+// min timbre, and 1.875 x more per unit of dynamic gain.
+//   input_peak * min_gain * 2^kTransferMaxGainBits = least_phase
+//   2^15 * min_gain * 2^4 = least_phase
+//   min_gain = least_phase >> 19
+inline int32_t transfer_gain(int16_t dynamic_gain_u15, uint32_t least_phase) {
+  int32_t min_gain =
+      least_phase >> (kSamplePeakBits + kTransferMaxGainBits);
+  return min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
+}
 
 inline uint32_t amplify_for_transfer(
-    int16_t sample, int16_t dynamic_gain_u15, uint32_t bias) {
-  // min_gain derivation (at min timbre, input peak maps to transfer peak):
-  //   input_peak * min_gain * 2^kTransferMaxGainBits + bias = phase_peak
-  //   2^15 * min_gain * 2^4 = 2^30 - bias
-  //   min_gain = (2^30 - bias) >> 19
-  int32_t min_gain =
-      (kTransferPeakPhase - bias) >> (kSamplePeakBits + kTransferMaxGainBits);
-
-  int32_t gain = min_gain + (dynamic_gain_u15 << 1) - (dynamic_gain_u15 >> (kTransferMaxGainBits - 1));
+    int16_t sample, int16_t dynamic_gain_u15, uint32_t bias,
+    uint32_t least_phase) {
+  int32_t gain = transfer_gain(dynamic_gain_u15, least_phase);
 
   // Signed multiply, then reinterpret as phase (wrapping is intentional)
   uint32_t amped_sample = ((uint32_t)(sample * gain)) << kTransferMaxGainBits;
@@ -945,10 +1207,76 @@ inline uint32_t amplify_for_transfer(
   return amped_sample + bias;
 }
 
+// Even rests on the curve's crest, about which the curve is symmetric, so its
+// output repeats every half cycle of the carrier: no fundamental, the note an
+// octave up. Even mixes the carrier back in, at the weight that gives it the
+// odd variant's fundamental: (fold + a carrier) / (1 + a), a the odd variant's
+// fundamental over the carrier's own, which stays inside full scale.
+//
+// Odd's fundamental against the drive beta (2 pi the swing, in radians; the
+// swing is the gain 2^-13 cycles) is a train of humps under an envelope
+// min(cap, k beta^-p) -- for sine thru sine |2 J1(beta)| (Jacobi-Anger) under
+// 1.596 / sqrt(beta). a follows the envelope, not the humps, whose zeros would
+// leave no fundamental. cap, k and p are each pair's, fitted on the humps'
+// peaks to within 0.2 dB (resonator-scripts/even278.py): p is about 1/2 for a
+// sine carrier, 1 for a triangle's, 0.3 for an expo's.
+struct EvenFundamental {
+  uint16_t cap_q15;
+  uint16_t exponent_q15;
+  // log2 k - p log2(2 pi 2^-13), so log2 a = this - p log2 gain.
+  int32_t log2_offset_q16;
+};
+
+#define EVEN_FUNDAMENTAL(cap, k, p) { \
+    static_cast<uint16_t>((cap) * 32768 + 0.5), \
+    static_cast<uint16_t>((p) * 32768 + 0.5), \
+    static_cast<int32_t>(__builtin_floor( \
+        (__builtin_log2(k) - (p) * __builtin_log2(2 * kPi / 8192)) * 65536 \
+        + 0.5)) }
+
+static const EvenFundamental kEvenFundamental[3][3] = {  // [carrier][curve]
+  { EVEN_FUNDAMENTAL(1.131, 2.146, 1.03),     // tri thru tri
+    EVEN_FUNDAMENTAL(1.347, 2.731, 1.03),     // tri thru sine
+    EVEN_FUNDAMENTAL(1.464, 3.266, 1.04) },   // tri thru expo
+  { EVEN_FUNDAMENTAL(1.029, 1.325, 0.51),     // sine thru tri
+    EVEN_FUNDAMENTAL(1.164, 1.601, 0.50),     // sine thru sine
+    EVEN_FUNDAMENTAL(1.225, 1.789, 0.50) },   // sine thru expo
+  { EVEN_FUNDAMENTAL(1.006, 1.267, 0.32),     // expo thru tri
+    EVEN_FUNDAMENTAL(1.083, 1.425, 0.31),     // expo thru sine
+    EVEN_FUNDAMENTAL(1.113, 1.509, 0.30) },   // expo thru expo
+};
+#undef EVEN_FUNDAMENTAL
+
+// The carrier's weight a / (1 + a) in Q15 at this TIMBRE. log2 of the gain is
+// the leading one's place plus the mantissa's fraction f, log2(1 + f) taken as
+// f + 0.34655 f (1 - f), within 0.008 -- 0.05 dB of a at p = 1. Twice a block,
+// so a call, not inlined at both.
+static __attribute__((noinline)) int32_t EvenCarrierMix_q15(
+    int16_t timbre, uint8_t gain_shift, const EvenFundamental& fundamental) {
+  const uint32_t gain = static_cast<uint32_t>(
+      transfer_gain((timbre < 0 ? 0 : timbre) >> gain_shift, kTransferPeakPhase));
+  const int32_t leading_zeros = __builtin_clz(gain);
+  const uint32_t fraction_u16 = (gain << leading_zeros) >> 15 & 0xffff;
+  const uint32_t kLog2Bow_q16 = 22712;
+  const int32_t log2_gain_q16 = ((31 - leading_zeros) << 16) + fraction_u16
+      + ((fraction_u16 * (65536 - fraction_u16) >> 16) * kLog2Bow_q16 >> 16);
+  const int32_t log2_a_q16 = fundamental.log2_offset_q16 - static_cast<int32_t>(
+      static_cast<int64_t>(fundamental.exponent_q15) * log2_gain_q16 >> 15);
+  const int32_t whole = log2_a_q16 >> 16;
+  const uint32_t mantissa_q15 = Exp2Fraction_q15(log2_a_q16 & 0xffff);
+  uint32_t a_q15 = whole >= 0 ? mantissa_q15 << whole : mantissa_q15 >> -whole;
+  if (a_q15 > fundamental.cap_q15) a_q15 = fundamental.cap_q15;
+  return (a_q15 << 15) / (32768 + a_q15);
+}
+
+template <bool carrier_mixed>
 void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   const uint8_t carrier_index = transfer_carrier_;
   const uint8_t transfer_index = transfer_function_;
   uint32_t bias = transfer_bias_;
+  const uint32_t least_phase =
+      TransferVariantOf(shape_) == TRANSFER_VARIANT_EVEN
+          ? kTransferPeakPhase : kTransferPeakPhase - bias;
   uint8_t gain_shift = transfer_gain_shift_;
   // The shape is fixed for the whole block, so the choice is made here and the
   // loop carries no dispatch. It used to switch twice per sample on indices set
@@ -958,18 +1286,41 @@ void Oscillator::RenderTransfer(int16_t* input_samples, int16_t* audio_mix) {
   // Sine and expo are the same code with a different quadrant table, so that
   // choice is a pointer. Triangle is separate code, so the specialisation is
   // 2x2: one loop per (carrier is triangle?, transfer is triangle?).
-  // Both indices come from `% 3` and `/ 6`, so neither can leave [0, 2].
+  // The carrier comes from `% 3`, and fn_table_ sends only the tri, sine and
+  // expo curves here, so neither index can leave [0, 2].
   const uint16_t* carrier_table =
       carrier_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
   const uint16_t* transfer_table =
       transfer_index == TRANSFER_CURVE_SINE ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
+  // Even's carrier weight at the block's first and last TIMBRE, ramped between
+  // them sample by sample in Q23.
+  int32_t carrier_mix_q23 = 0;
+  int32_t carrier_mix_step_q23 = 0;
+  if (carrier_mixed) {
+    const EvenFundamental& fundamental =
+        kEvenFundamental[carrier_index][transfer_index];
+    const int32_t first_q15 =
+        EvenCarrierMix_q15(input_samples[0], gain_shift, fundamental);
+    const int32_t last_q15 = EvenCarrierMix_q15(
+        input_samples[kAudioBlockSize - 1], gain_shift, fundamental);
+    carrier_mix_q23 = first_q15 << 8;
+    carrier_mix_step_q23 = (last_q15 - first_q15) * (1 << 8)
+        / static_cast<int32_t>(kAudioBlockSize - 1);
+  }
 
 #define TRANSFER_LOOP(CARRIER, TRANSFER) \
   RENDER_PERIODIC( \
     this_sample = CARRIER; \
     uint32_t transfer_phase = \
-        amplify_for_transfer(this_sample, timbre >> gain_shift, bias); \
-    this_sample = TRANSFER; \
+        amplify_for_transfer(this_sample, timbre >> gain_shift, bias, least_phase); \
+    if (carrier_mixed) { \
+      const int32_t fold = TRANSFER; \
+      this_sample = fold \
+          + ((this_sample - fold) * (carrier_mix_q23 >> 8) >> 15); \
+      carrier_mix_q23 += carrier_mix_step_q23; \
+    } else { \
+      this_sample = TRANSFER; \
+    } \
   )
 
   if (carrier_index == TRANSFER_CURVE_TRI) {
@@ -1367,6 +1718,9 @@ static double g_bow_pressure =
 static int g_bow_out_lp = getenv("BOW_OUT") ? !strcmp(getenv("BOW_OUT"), "lp") : 0;
 // LOOP_MEAN_PROBE=1: RenderLoop prints its DC blocker's mean once a block.
 static int g_loop_mean_probe = getenv("LOOP_MEAN_PROBE") ? 1 : 0;
+// LOOP_DC_BEFORE_GAIN=1: the loop shapes take their DC out of the curve before
+// the gain rather than out of the gained tap, under headroom 1 (oscillator.h).
+int g_loop_dc_before_gain = getenv("LOOP_DC_BEFORE_GAIN") ? 1 : 0;
 // BOW_D_REF=d_u1_14 couples the bow with that fixed damping in place of the
 // timbre's d, so the loop gain rises with Q; BOW_D_PROBE=1 prints d per sample.
 static double g_bow_d_ref =
@@ -1441,8 +1795,7 @@ static inline int32_t JetNoise(int32_t excitation) { return excitation; }
 static const int32_t kLoopUnitBits = 13;
 static const int32_t kLoopUnitShift_q15_14 =
     kLoopUnitBits + ResonatorState::kFractionalBits;
-// Q 25.
-static const int16_t kLoopDamp_u1_14 = 655;
+static const int16_t kLoopDamp_u1_14 = (1 << 14) / 25;  // Q 25
 // TIMBRE halved: the span the offset and the loop gain are both read across.
 static const int32_t kLoopOffsetBits = kEnvelopeSampleBits - 1;
 // Input noise of 2^-this loop units at full gain.
@@ -1466,14 +1819,23 @@ static const int32_t kLoopJitterPreShift = 12;
 // fraction bits leave the draw at the noise times scale, 2^-5.
 static const int32_t kLoopRoughnessFractionBits = 11;
 static const int32_t kLoopRoughnessShift = 16 - kLoopRoughnessFractionBits;
-// The ratio the scale is the root of, with twice the scale's fraction bits.
-// RenderLoop holds the scale to 1/8..4, MIDI 129..9: past the keyboard
-// either way, so the clamp only guards the arithmetic.
-static const int32_t kLoopRoughnessRatioFractionBits = 2 * kLoopRoughnessFractionBits;
 // The multiplier's ends are held to at least 2^-this of the block's larger gain.
 static const int32_t kLoopRampGuardBits = 2;
 // The DC blocker's running mean forgets 2^-this a sample: 28 Hz at 45 kHz.
 static const int32_t kLoopDcBlockerShift = 8;
+// 2^(-i / 24) for i semitones, 2^15 the unit: the roughness's halving every two
+// octaves, across two.
+#define LOOP_HALVING(i) static_cast<uint16_t>(__builtin_exp2(-(i) / 24.0) * 32768 + 0.5)
+static const uint16_t kLoopHalvingAcrossTwoOctaves_u15[25] = {
+  LOOP_HALVING(0), LOOP_HALVING(1), LOOP_HALVING(2), LOOP_HALVING(3),
+  LOOP_HALVING(4), LOOP_HALVING(5), LOOP_HALVING(6), LOOP_HALVING(7),
+  LOOP_HALVING(8), LOOP_HALVING(9), LOOP_HALVING(10), LOOP_HALVING(11),
+  LOOP_HALVING(12), LOOP_HALVING(13), LOOP_HALVING(14), LOOP_HALVING(15),
+  LOOP_HALVING(16), LOOP_HALVING(17), LOOP_HALVING(18), LOOP_HALVING(19),
+  LOOP_HALVING(20), LOOP_HALVING(21), LOOP_HALVING(22), LOOP_HALVING(23),
+  LOOP_HALVING(24),
+};
+#undef LOOP_HALVING
 
 // The curve at x - 32768, x held to the table's span: the bias lets one USAT
 // do the clip.
@@ -1538,9 +1900,9 @@ static inline int32_t LoopTableAt(const T* table, int32_t half_timbre) {
 // WIND: tanh, offset 0..2, so the bottom stays a sine and the top squares off.
 struct WindLoop {
   static const int16_t* Curve() { return SoftLimitTableAsRegister(); }
-  static const int32_t kOffsetTop_q15 = 32768;
-  static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
-  static const int32_t kLoopGainTop_q15 = 81920;  // 2.5
+  static const int32_t kOffsetTop_q15 = static_cast<int32_t>(2.0 / 2 * 32768);
+  static const int32_t kLoopGainBottom_q15 = static_cast<int32_t>(1.3 * 32768 + 0.5);
+  static const int32_t kLoopGainTop_q15 = static_cast<int32_t>(2.5 * 32768);
   // sech^2, the slope of tanh, is 1 - tanh^2.
   static int32_t SlopeAtRest_q15(const int16_t*, int32_t, int32_t rest) {
     return 32768 - (rest * rest >> 15);
@@ -1561,10 +1923,10 @@ struct WindLoop {
 // bow pressure wavering, which roughens every partial into a scrape.
 struct BowedLoop {
   static const int16_t* Curve() { return TableAsRegister(ws_fold_back); }
-  static const int32_t kOffsetTop_q15 = 11469;  // 0.7 of 2
-  static const int32_t kLoopGainBottom_q15 = 42598;  // 1.3
-  // 40: the harmonics keep coming as TIMBRE rises; at 7 the top was a plateau.
-  static const int32_t kLoopGainTop_q15 = 1310720;
+  static const int32_t kOffsetTop_q15 = static_cast<int32_t>(0.7 / 2 * 32768 + 0.5);
+  static const int32_t kLoopGainBottom_q15 = static_cast<int32_t>(1.3 * 32768 + 0.5);
+  // The harmonics keep coming as TIMBRE rises all the way to 40.
+  static const int32_t kLoopGainTop_q15 = 40 << 15;
   // The secant across one table step each side, 1/16 of a unit: the table's
   // own slope there, which no closed form of the curve's value gives.
   static int32_t SlopeAtRest_q15(const int16_t* curve, int32_t biased_offset,
@@ -1596,7 +1958,8 @@ struct BowedLoop {
   // k 0.2, in u1.14 times q15: Q 25 up to a loop gain of 5, then d * L = 0.2.
   // That halves the flat start a strong loop has before it settles, and holds
   // the settled pull to a constant.
-  static const int32_t kDampTimesLoopGain = 107374182;
+  static const int32_t kDampTimesLoopGain =
+      static_cast<int32_t>(0.2 * (1 << 14) * (1 << 15) + 0.5);
   static const bool kRoughnessByPitch = true;
   // 2^-1: jitter 0.5 at A3.
   static const int32_t kJitterShift = 17;
@@ -1653,19 +2016,26 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
   if (Loop::kDampTimesLoopGain) {
     damp_u1_14 = std::min(damp_u1_14, Loop::kDampTimesLoopGain / loop_gain_q15);
   }
-  // sqrt(f(A3) / f), from the cutoffs (proportional to the frequency within
-  // 0.2% to A6), with kLoopRoughnessFractionBits fraction bits: the root of
-  // their ratio carried with twice those.
+  // sqrt(f(A3) / f) = 2^(-semitones from A3 / 24): it halves every two
+  // octaves. A table across two octaves, interpolated, shifted by how many
+  // two-octave spans lie between the note and A3 -- a few cycles a block, where
+  // the ratio's divide and square root cost ~220 (measured under QEMU). With
+  // kLoopRoughnessFractionBits fraction bits, held to 1/8..4.
   int32_t roughness = 0;
   if (Loop::kRoughnessByPitch) {
-    const uint32_t a3_cutoff = static_cast<uint32_t>(SVF::CutoffFromFreq_q0_31(57 << 7));
-    uint32_t ratio = DivU64ByU32(
-        a3_cutoff >> (32 - kLoopRoughnessRatioFractionBits),
-        a3_cutoff << kLoopRoughnessRatioFractionBits,
-        static_cast<uint32_t>(note_cutoff_q0_31));
-    CONSTRAIN(ratio, (1u << kLoopRoughnessRatioFractionBits) >> 6,
-              (1u << kLoopRoughnessRatioFractionBits) << 4);
-    roughness = static_cast<int32_t>(IntegerSqrt(ratio));
+    const int32_t kTwoOctaves = 24 << 7;
+    // Enough two-octave spans below A3 that MIDI 0 counts up from zero.
+    const int32_t kSpansBelowA3 = 4;
+    const int32_t from = pitch_ - (57 << 7) + kSpansBelowA3 * kTwoOctaves;
+    const int32_t spans = from / kTwoOctaves;
+    const int32_t within = from - spans * kTwoOctaves;
+    const uint16_t* entry = &kLoopHalvingAcrossTwoOctaves_u15[within >> 7];
+    const int32_t halving_u15 =
+        entry[0] + ((entry[1] - entry[0]) * (within & 0x7f) >> 7);
+    roughness = halving_u15
+        >> (spans - kSpansBelowA3 + 15 - kLoopRoughnessFractionBits);
+    CONSTRAIN(roughness, 1 << (kLoopRoughnessFractionBits - 3),
+              1 << (kLoopRoughnessFractionBits + 2));
   }
   const int32_t first_gain = input_samples[kAudioBlockSize];
   const int32_t last_gain = input_samples[2 * kAudioBlockSize - 1];
@@ -1747,9 +2117,21 @@ void Oscillator::RenderLoop(int16_t* input_samples, int16_t* audio_mix) {
           + 2 * MulHighS(note_cutoff_q0_31, cycle_detune_q31);
     }
     // At half scale, less its running mean.
+#ifdef TEST
+    if (g_loop_dc_before_gain) {
+      // The DC taken out of the curve's value before the gain spends it: the
+      // output is gain * (curve - its running mean), both inside the curve's
+      // span, so it never passes the gain -- the headroom is 1.
+      tap_mean_q8 += curve_value - (tap_mean_q8 >> kLoopDcBlockerShift);
+      this_sample = gain * (curve_value - (tap_mean_q8 >> kLoopDcBlockerShift)) >> 16;
+    } else {
+#endif
     const int32_t tap = shaped >> 16;
     tap_mean_q8 += tap - (tap_mean_q8 >> kLoopDcBlockerShift);
     this_sample = tap - (tap_mean_q8 >> kLoopDcBlockerShift);
+#ifdef TEST
+    }
+#endif
     multiplier += multiplier_slope;
   )
   state.bp_q15_14 = bp_q15_14;
@@ -1895,29 +2277,37 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // The ratio of the two peaks, so it follows either one if it moves.
   const int32_t kUnityStateToOutput_q12 =
       (kEnvelopeSampleMax << 12) / INT16_MAX;
-  // A full-peak ring drives the curve this many times past unity, well past
-  // its end: saturation holds the ring at the ceiling and brightens its onset,
-  // and a lower envelope peak walks it back into the curve. Taken after the
-  // curve's scale, so the drive is u3.12 and s0.15 times it stays under 2^30.
-  const int32_t kPingDriveMultiple = 32;
-  STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom << 3,
+  // How far past unity a full-peak ring drives the curve, in eighths. bp and hp
+  // ring about zero: twice unity brightens the onset and leaves the tail clean.
+  // lp carries the excitation's level under its ring, which moves the ring up
+  // the curve, so it takes three quarters for the same cleanness. Taken after
+  // the curve's scale, so the drive is u3.12 and s0.15 times it stays under
+  // 2^30.
+  const int32_t kPingDrive_q3 = 16;
+  const int32_t kPingLowPassDrive_q3 = 6;
+  STATIC_ASSERT(kPingDrive_q3 <= kSoftLimitHeadroom << 6,
                 ping_drive_fits_its_bits);
+  const int32_t drive_q3 =
+      shape_ == OSC_SHAPE_PING_LP ? kPingLowPassDrive_q3 : kPingDrive_q3;
   const int32_t state_into_curve_q12 = TEST_CURVE_DRIVE(StateIntoCurve(
       kUnityStateToOutput_q12 * coherent_scale_u15_ >> 15,
-      coherent_scale_codes_u16_) * kPingDriveMultiple);
+      coherent_scale_codes_u16_) * drive_q3 >> 3);
   const int32_t scale_u15 = coherent_scale_u15_;
   // The exciter carries the gain envelope's DC, which lp passes: once the ring
   // dies away its state sits at the excitation's own level -- a thump under a
   // percussive envelope, a standing offset under a sustained one. bp and hp
   // reject it.
+  // The resonant step response overshoots its input, so the excitation is
+  // half the gain, and every bit of it the state can hold.
+  // A narrow gain count is one state unit.
+  const int kGainQ30ToHalfQ15_14 = kEnvelopeValueBits - kEnvelopeSampleBits
+      + 1 - ResonatorState::kFractionalBits;
+  const int32_t* gain_q30 =
+      reinterpret_cast<const int32_t*>(input_samples + kAudioBlockSize);
 #define PING_LOOP(OUTPUT) \
   RENDER_CORE(this_sample, \
-    const int16_t gain = input_samples[kAudioBlockSize]; \
-    /* The resonant step response overshoots its input, so the excitation is */ \
-    /* halved to leave room for the overshoot. */ \
     const int32_t state_q15_14 = svf.RenderSampleAtPitch<OUTPUT>( \
-        &state, PreShape((gain >> 1) * (1 << ResonatorState::kFractionalBits)), \
-        timbre); \
+        &state, PreShape(*gain_q30++ >> kGainQ30ToHalfQ15_14), timbre); \
     InLoopSaturate(&state.bp_q15_14, state_into_curve_q32); \
     const int16_t* curve = SoftLimitTableAsRegister(); \
     this_sample = ResonatorShape(curve, MulHighS( \

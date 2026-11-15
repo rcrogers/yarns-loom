@@ -674,7 +674,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
 - The gain envelope is used as a direct DC input to ping the filter, instead of amplifying the oscillator's output
-    - A full-peak ring saturates, brightening its onset into a pluck; a lower envelope peak rings more cleanly
+    - A full-peak ring is driven gently into soft saturation, brightening its onset while the tail rings clean; a lower envelope peak rings cleaner still
 - Shapes: low-pass, band-pass, high-pass
 
 #### `-◝` Analog wave into state-variable filter
@@ -706,19 +706,22 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `┴┴` Dirac comb
 - Timbre: harmonic content
 
-#### `ST` Compressed sine: hyperbolic tangent (tanh) function
-- Timbre: compression amount
-
-#### `SX` Exponential sine
-- Timbre: exponentiation amount
-
-#### `-^`, `-s`, `-e` Wavefolding transfer functions
-- Timbre: folding amount (amplification of the carrier wave into the transfer function)
-- Shapes: 18 variants, grouped under 3 distinct transfer functions
+#### `-T`, `-^`, `-s`, `-w`, `-e` Waveshaping transfer functions
+- Timbre: drive or folding amount (amplification of the carrier wave into the transfer function)
+- Shapes: 45 variants, grouped under 5 distinct transfer functions
 - Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
-- Transfer function (second symbol): triangle (`^`), sine (`s`), expo (`e`)
-- Biased variants of transfer function (`ˇ`, `ˢ`, `ə`): offset the transfer function input by a quarter cycle, producing asymmetric harmonics
+- Transfer function (second symbol):
+  - Tanh (`T`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
+  - Triangle (`^`), sine (`s`), expo (`e`): folding
+  - Sizzle (`w`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
+- Each transfer function comes in three variants, by where its input rests, which sets the balance of odd and even harmonics:
+  - Odd (the symbol upright): odd harmonics only, or as near as the curve allows
+  - Balanced (the symbol sideways: `<`, and sideways `s`, `e`, `w`, `T`): halfway between odd and even, averaged over the timbre sweep -- for the folding transfer functions, odd and even harmonics in equal energy
+  - Even (the symbol inverted: `┴`, `ˇ`, `ˢ`, `ʍ`, `ə`): as many even harmonics as the curve allows
+  - Folding transfer functions: odd is exact at every timbre. Even harmonics alone would have no fundamental and sound an octave up, so even mixes the carrier back in at the level of the odd variant's fundamental, which falls with timbre as odd's does: the fundamental under the even harmonics of the fold
+  - Sizzle: its exponential is lopsided, so no variant is purely odd or even past the bottom of the timbre range; even is the sound of the original sizzle
+  - Tanh: its even harmonics never reach half the energy, so balanced is half of what even gives; even and balanced offset the carrier before the drive, so the evens grow with timbre
 
 #### `FM` Frequency modulation
 - Timbre: modulation index

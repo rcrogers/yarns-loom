@@ -24,7 +24,9 @@ ARCH="-mcpu=cortex-m3 -mthumb -mfloat-abi=soft"
 
 $BIN/arm-none-eabi-g++ -c $FLAGS tools/oscprofile/driver.cc -o $OUT/driver.o
 $BIN/arm-none-eabi-gcc $ARCH -O2 -std=gnu99 -c tools/oscqemu/startup.c -o $OUT/startup.o
-$BIN/arm-none-eabi-g++ $ARCH --specs=nano.specs -nostartfiles \
+# The firmware's own C library, not newlib-nano: a shape that calls into it
+# (memset for a zeroed array) is measured on the code the firmware runs.
+$BIN/arm-none-eabi-g++ $ARCH -nostartfiles \
   -T tools/oscprofile/profile.ld -Wl,--gc-sections \
   $OUT/driver.o $OUT/startup.o \
   build/yarns/oscillator.o build/yarns/envelope.o build/yarns/resources.o \
