@@ -674,7 +674,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Timbre: resonance of the SVF, from zero to self-oscillation
 - Note pitch controls the cutoff frequency of the SVF
 - The gain envelope is used as a direct DC input to ping the filter, instead of amplifying the oscillator's output
-    - A full-peak ring saturates, brightening its onset into a pluck; a lower envelope peak rings more cleanly
+    - A full-peak ring is driven gently into soft saturation, brightening its onset while the tail rings clean; a lower envelope peak rings cleaner still
 - Shapes: low-pass, band-pass, high-pass
 
 #### `-◝` Analog wave into state-variable filter
