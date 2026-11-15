@@ -2277,16 +2277,21 @@ void Oscillator::RenderPing(int16_t* input_samples, int16_t* audio_mix) {
   // The ratio of the two peaks, so it follows either one if it moves.
   const int32_t kUnityStateToOutput_q12 =
       (kEnvelopeSampleMax << 12) / INT16_MAX;
-  // A full-peak ring drives the curve this many times past unity, well past
-  // its end: saturation holds the ring at the ceiling and brightens its onset,
-  // and a lower envelope peak walks it back into the curve. Taken after the
-  // curve's scale, so the drive is u3.12 and s0.15 times it stays under 2^30.
-  const int32_t kPingDriveMultiple = 32;
-  STATIC_ASSERT(kPingDriveMultiple <= kSoftLimitHeadroom << 3,
+  // How far past unity a full-peak ring drives the curve, in eighths. bp and hp
+  // ring about zero: twice unity brightens the onset and leaves the tail clean.
+  // lp carries the excitation's level under its ring, which moves the ring up
+  // the curve, so it takes three quarters for the same cleanness. Taken after
+  // the curve's scale, so the drive is u3.12 and s0.15 times it stays under
+  // 2^30.
+  const int32_t kPingDrive_q3 = 16;
+  const int32_t kPingLowPassDrive_q3 = 6;
+  STATIC_ASSERT(kPingDrive_q3 <= kSoftLimitHeadroom << 6,
                 ping_drive_fits_its_bits);
+  const int32_t drive_q3 =
+      shape_ == OSC_SHAPE_PING_LP ? kPingLowPassDrive_q3 : kPingDrive_q3;
   const int32_t state_into_curve_q12 = TEST_CURVE_DRIVE(StateIntoCurve(
       kUnityStateToOutput_q12 * coherent_scale_u15_ >> 15,
-      coherent_scale_codes_u16_) * kPingDriveMultiple);
+      coherent_scale_codes_u16_) * drive_q3 >> 3);
   const int32_t scale_u15 = coherent_scale_u15_;
   // The exciter carries the gain envelope's DC, which lp passes: once the ring
   // dies away its state sits at the excitation's own level -- a thump under a
