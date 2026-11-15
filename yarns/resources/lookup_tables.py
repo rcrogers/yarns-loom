@@ -225,30 +225,45 @@ def envelope():
 
   max_time = 10.0  # seconds
   num_duration_values = 128
-  gamma = 0.25
   envelope_rate = audio_rate
-  # min_time = env_shift_samples / envelope_rate
-  min_time = 4.0 / envelope_rate
-  # print('min_time', min_time)
-  min_samples = min_time * envelope_rate
-  max_samples = max_time * envelope_rate
+  max_increment = excursion - 1
 
-  def phase_increments(seconds):
-    max_samples = seconds * envelope_rate
-    min_increment = excursion / max_samples
-    max_increment = excursion / min_samples
-    rates = numpy.linspace(numpy.power(max_increment, -gamma), numpy.power(min_increment, -gamma), num_duration_values)
-    values = list(numpy.power(rates, -1/gamma).astype(int))
+  def with_guard(values):
+    values = list(values)
     values.append(values[-1])  # Interpolate88 guard entry
     return values
 
+  def increments_from_samples(samples):
+    return with_guard(numpy.minimum(excursion / samples, max_increment).astype(int))
+
+  # Whole-sample stage lengths, every setting distinct: one sample per step
+  # while that is the coarser step, then a constant ratio up to max_time.
+  max_stage_samples = max_time * envelope_rate
+  def stage_ratio(linear_count):
+    return (max_stage_samples / linear_count) ** (
+        1.0 / (num_duration_values - linear_count))
+  linear_count = 1
+  while (linear_count + 1.0) / linear_count >= stage_ratio(linear_count + 1):
+    linear_count += 1
+  ratio = stage_ratio(linear_count)
+  stage_samples = list(range(1, linear_count + 1)) + [
+      int(round(linear_count * ratio ** step))
+      for step in range(1, num_duration_values - linear_count + 1)]
+  # Floor of the reciprocal, so the envelope's UINT32_MAX / increment reads back
+  # exactly the samples asked for.
+  lookup_tables_32.append(('envelope_phase_increments', with_guard(
+      [max_increment // samples for samples in stage_samples])))
+
+  # The exciter window reaches twice as far as a stage, so a chiff can outlast
+  # the longest one. Its duration^gamma is linear in the setting.
+  chiff_min_samples = 4.0
+  gamma = 0.25
+  chiff_samples = numpy.power(numpy.linspace(
+      numpy.power(chiff_min_samples, gamma),
+      numpy.power(2 * max_time * envelope_rate, gamma),
+      num_duration_values), 1 / gamma)
   lookup_tables_32.append(
-      ('envelope_phase_increments', phase_increments(max_time))
-  )
-  # The exciter window is a time like any envelope stage, on the same curve, but
-  # reaching twice as far so a chiff can outlast the longest stage.
-  lookup_tables_32.append(
-      ('chiff_phase_increments', phase_increments(2 * max_time))
+      ('chiff_phase_increments', increments_from_samples(chiff_samples))
   )
 
   # sample_counts = excursion / numpy.array(values)

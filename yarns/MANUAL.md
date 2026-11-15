@@ -539,7 +539,8 @@ New and improved values for `VO (VOICING)` setting:
     - Turning clockwise (positive): peak level is increasingly damped by low note velocity
     - Turning counter-clockwise (negative): peak level is increasingly damped by high note velocity
 - All curves are exponential
-- Min/max stage times: ~0.089 ms (4 samples = 4/45000 of a second) to 10 seconds
+- Min/max stage times: ~0.022 ms (1 sample = 1/45000 of a second) to 10 seconds
+- Stage time settings 0-10 are 1 to 11 samples, one sample apart; above that, each step lengthens the stage by the same ratio, ~9.5%
 
 #### Exciter
 The exciter adds a burst of noise to the start of each note, in the manner of a struck or plucked string.

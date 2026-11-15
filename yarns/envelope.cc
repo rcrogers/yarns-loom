@@ -113,7 +113,9 @@ const uint32_t kEnvExpoFull_u16 = 65535;
 // remaining (absorbed by the next stage's slew). Tunable by ear: larger
 // front-loads the curve and lands closer to the target; smaller straightens
 // the curve but leaves a bigger residual at handoff.
-const uint32_t kSlewTimesPerStageLog2_q5_27 = 2u << 27;
+const uint32_t kSlewTimesPerStageLog2 = 2;
+const uint32_t kSlewTimesPerStageLog2_q5_27 = kSlewTimesPerStageLog2 << 27;
+const uint32_t kSlewTimesPerStage = 1u << kSlewTimesPerStageLog2;
 
 // Caps how slow a slew may get, so the exp2 helper's `>> integer_part` stays
 // well-defined. 2^27 samples is ~50 minutes at 45 kHz, already absurd.
@@ -134,7 +136,8 @@ const uint32_t kChiffAmountFull_q30 = 1u << kChiffAmountFractionalBits;
 const uint32_t kChiffLevelFractionalBits = 30;
 const uint32_t kChiffSlewStateFractionalBits = 26;
 // Capped.
-static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27);
+static inline int32_t SlewRateFromSlewTime_q31(
+    uint32_t slew_time_log2_q5_27, uint32_t stage_samples);
 
 void Envelope::Init(int16_t zero_value_s16) {
   // Statics start null, and a re-Init on a layout change must land back
@@ -142,7 +145,7 @@ void Envelope::Init(int16_t zero_value_s16) {
   adsr_ = NULL;
   stage_phase_increment_u32_ = 0;
   stage_samples_left_ = 0;
-  stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(0);
+  stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(0, kSlewTimesPerStage);
   chiff_slew_time_log2_q5_27_ = 0;
   chiff_slew_time_at_amount_zero_q5_27_ = 0;
   chiff_slew_input_fraction_q30_ = 0;
@@ -189,7 +192,7 @@ int32_t Envelope::ChiffSlewInput_q30() const {
 // clamped. The /4 is kSlewTimesPerStageLog2. log2 as integer bits plus a
 // linear mantissa fraction, max error ~0.09.
 static uint32_t ChiffSlewTimeFromSamples_q5_27(uint32_t samples) {
-  if (samples < 4) return 0;  // the fastest slew, not a jump; see kMaxSlewRate
+  if (samples < 4) return 0;  // the fastest slew, not a jump; see kStageSlewRateCap_q31
   uint32_t leading_zeros = __builtin_clz(samples);
   uint32_t integer_bits = 31 - leading_zeros;
   uint32_t mantissa_frac_q5_27 =
@@ -579,22 +582,38 @@ static inline uint32_t SlewRateFromTimeLog2_q31(uint32_t slew_time_log2_q5_27) {
   return (two_pow_neg_fraction_u16 << 15) >> integer_part;
 }
 
-// 1 - e^-1, the true slew coefficient at a one-sample time constant.
+// 1 - e^(-kSlewTimesPerStage / samples): the true slew coefficient of a stage
+// of `samples` spanning kSlewTimesPerStage time constants, Q31.
+#define YARNS_STAGE_SLEW_RATE_CAP_Q31(samples) static_cast<int32_t>( \
+  (1.0 - __builtin_exp(-static_cast<double>(kSlewTimesPerStage) / (samples))) \
+  * 2147483648.0 + 0.5)
+// Indexed by stage samples - 1, through kSlewTimesPerStage samples.
 //   - rate = 2^-t is the small-rate approximation of 1 - e^(-1/tau). It
-//     reaches 1.0 at t = 0, where the truth is 0.632, and a rate of 1.0 is not a slew
-//     -- the value arrives in one sample.
-//   - Capping removes the "stage too short to slew" special case and lands a
-//     short stage where every other stage lands: 1 - 0.632 is e^-1, so a
-//     4-sample stage covers 1 - e^-4 like the rest.
-//   - 4 samples is the shortest stage that exists: modulate_7_13 clamps to
-//     [0, 8191], so the increment table bottoms out at UINT32_MAX/4.
+//     reaches 1.0 at kSlewTimesPerStage samples, where the truth is 1 - e^-1,
+//     and a rate of 1.0 is not a slew -- the value arrives in one sample.
+//   - Capping lands a short stage where every other stage lands: each covers
+//     1 - e^-kSlewTimesPerStage.
 //   - The cap lives on the rate, not on the exp2 it is read from.
-static inline int32_t SlewRateFromSlewTime_q31(uint32_t slew_time_log2_q5_27) {
-  const int32_t kMaxSlewRate_q31 = static_cast<int32_t>(
-    (1.0 - __builtin_exp(-1.0)) * 2147483648.0 + 0.5);
+static const int32_t kStageSlewRateCap_q31[] = {
+  YARNS_STAGE_SLEW_RATE_CAP_Q31(1),
+  YARNS_STAGE_SLEW_RATE_CAP_Q31(2),
+  YARNS_STAGE_SLEW_RATE_CAP_Q31(3),
+  YARNS_STAGE_SLEW_RATE_CAP_Q31(4),
+};
+#undef YARNS_STAGE_SLEW_RATE_CAP_Q31
+STATIC_ASSERT(
+  sizeof(kStageSlewRateCap_q31) / sizeof(kStageSlewRateCap_q31[0])
+    == kSlewTimesPerStage,
+  one_cap_per_stage_length_below_the_approximation);
+
+// Longer stages share the cap at kSlewTimesPerStage samples.
+static inline int32_t SlewRateFromSlewTime_q31(
+    uint32_t slew_time_log2_q5_27, uint32_t stage_samples) {
+  const int32_t cap_q31 = kStageSlewRateCap_q31[
+    std::min(stage_samples, kSlewTimesPerStage) - 1];
   const int32_t rate_q31 = static_cast<int32_t>(
     SlewRateFromTimeLog2_q31(slew_time_log2_q5_27));
-  return rate_q31 > kMaxSlewRate_q31 ? kMaxSlewRate_q31 : rate_q31;
+  return rate_q31 > cap_q31 ? cap_q31 : rate_q31;
 }
 
 // The same reciprocal the envelope stages use to turn an increment into a span.
@@ -681,7 +700,8 @@ void Envelope::Trigger(EnvelopeStage stage) {
   // The stage's rate changes only here, so this is where it is derived: it
   // costs an exp2 table interpolation, for a quantity that moves once a stage.
   // The slew time it comes from is a local, this being its only reader.
-  stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(stage_slew_time_log2_q5_27);
+  stage_slew_rate_q31_ = SlewRateFromSlewTime_q31(
+    stage_slew_time_log2_q5_27, stage_samples_left_);
   // A release only speeds the decay up. CHIFF DURATION owns the schedule; the
   // release adds one deadline, so the chiff dies with the note that makes it.
   if (stage == ENV_STAGE_RELEASE && stage_samples_left_ && chiff_amount_initial_q30_) {
