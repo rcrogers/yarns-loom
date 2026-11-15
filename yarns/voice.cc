@@ -368,8 +368,8 @@ void Voice::NoteOn(
   // Velocity-modulated LUT index via modulate_7_13.
   // distance_6 is 6-bit; << 1 adapts to 7-bit init so full mod (±64)
   // spans the full distance_6 range.  13-bit result << 1 gives a 6.8
-  // index for Interpolate88 over the 64-entry (+guard) portamento LUT.
-  uint32_t base_increment = Interpolate88(
+  // index for InterpolateU32Table88 over the 64-entry (+guard) portamento LUT.
+  uint32_t base_increment = InterpolateU32Table88(
     lut_portamento_increments,
     modulate_7_13(
       static_cast<uint8_t>(distance_6 << 1),

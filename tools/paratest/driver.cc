@@ -44,7 +44,7 @@ static int OptInt(int argc, char** argv, const char* key, int fallback) {
 }
 
 static uint32_t EnvIncrement(int setting) {
-  return Interpolate88(lut_envelope_phase_increments, setting << 8);
+  return InterpolateU32Table88(lut_envelope_phase_increments, setting << 8);
 }
 
 // A part's worth of audio voices, sharing one mix buffer.
@@ -217,7 +217,7 @@ int main(int argc, char** argv) {
   const uint32_t exciter = OptInt(argc, argv, "exciter_q30", 0)
       ? static_cast<uint32_t>(OptInt(argc, argv, "exciter_q30", 0))
       : static_cast<uint32_t>(OptInt(argc, argv, "exciter", 0)) * ((1u << 30) / 127);
-  const uint32_t exciter_samples = exciter ? ChiffAudibleSamples(Interpolate88(
+  const uint32_t exciter_samples = exciter ? ChiffAudibleSamples(InterpolateU32Table88(
       lut_chiff_phase_increments, OptInt(argc, argv, "exciter_dur", 40) << 8)) : 0;
 
   if (!strcmp(mode, "dump")) {

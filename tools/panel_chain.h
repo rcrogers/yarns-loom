@@ -21,6 +21,7 @@
 
 #include "yarns/envelope.h"
 #include "yarns/resources.h"
+#include "yarns/utils.h"
 
 #include <algorithm>
 
@@ -29,7 +30,7 @@ namespace yarns {
 // One timed stage's setting -> phase increment. Only 128 stage lengths exist,
 // which is why milliseconds cannot express what the module does.
 inline uint32_t PanelStageIncrement(int setting, int mod, int velocity) {
-  return Interpolate88(
+  return InterpolateU32Table88(
       lut_envelope_phase_increments,
       modulate_7_13(static_cast<uint8_t>(setting), static_cast<int8_t>(mod),
                     static_cast<uint8_t>(velocity)) << (15 - 13));
@@ -88,7 +89,7 @@ inline uint32_t PanelChiffAmount_q30(
 // EXCITER DURATION names a time on its own table; the envelope takes samples.
 inline uint32_t PanelChiffAudibleSamples(
     int duration_setting, int duration_mod_velocity, int velocity) {
-  return ChiffAudibleSamples(Interpolate88(
+  return ChiffAudibleSamples(InterpolateU32Table88(
       lut_chiff_phase_increments,
       modulate_7_13(static_cast<uint8_t>(duration_setting),
                     static_cast<int8_t>(duration_mod_velocity),
