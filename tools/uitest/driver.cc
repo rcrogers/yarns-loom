@@ -58,7 +58,7 @@ bool Tick() {
 // somewhere it should not have.
 void PrintTick(bool frame_high) {
   printf("%u %d %u %d",
-         display.blink_counter_,
+         display.prefix_flash_counter_,
          display.scrolling_ ? 1 : 0,
          display.scrolling_step_,
          display.displayed_buffer_ == display.short_buffer_ ? 1 : 0);
@@ -119,15 +119,15 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // A whole prefix-flash cycle: the flash runs on blink_counter_ over
-  // kBlinkMask while the frame swap runs on frame_counter_ over
+  // A whole prefix-flash cycle: the flash runs on prefix_flash_counter_ over
+  // kPrefixFlashPeriod while the frame swap runs on frame_counter_ over
   // kFrameBlinkMask, so a check needs both counters' worth of ticks and the
   // frame each one drew under.
   if (!strcmp(mode, "prefix")) {
     const char prefix = argc > 3 && argv[3][0] ? argv[3][0] : 'P';
     display.Print(short_string, short_string, UINT16_MAX, 0, prefix);
     if (argc > 4 && !strcmp(argv[4], "blink")) display.set_blink(true);
-    for (int t = 0; t < kBlinkMask * 6; ++t) PrintTick(Tick());
+    for (int t = 0; t < kPrefixFlashPeriod * 6; ++t) PrintTick(Tick());
     return 0;
   }
 
