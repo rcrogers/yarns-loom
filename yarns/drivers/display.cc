@@ -131,6 +131,7 @@ void Display::Init() {
   
   std::fill(&blink_frame_[0], &blink_frame_[kDisplayWidth], 0);
   brightness_ = UINT16_MAX;
+  prefix_flash_counter_ = 0;
   frame_counter_ = 0;
   prefix_transitions_ = false;
 }
@@ -172,26 +173,17 @@ void Display::RefreshSlow() {
     }
   }
 
+  const uint16_t kPrefixShowEnd = kPrefixFlashPeriod - kPrefixGapTime;
+  const uint16_t kPrefixShowStart = kPrefixShowEnd - kPrefixShowTime;
+  const uint16_t kNumberShowEnd = kPrefixShowStart - kPrefixGapTime;
   displayed_buffer_ = (scrolling_ && !scrolling_pre_delay_timer_)
       ? long_buffer_ + scrolling_step_
-      : (
-        // 0...24/32: show normal short buffer
-        !prefix_transitions_ ||
-        blink_counter_ < ((kBlinkMask >> 1) + (kBlinkMask >> 2))
+      : !prefix_transitions_ || prefix_flash_counter_ < kNumberShowEnd
         ? short_buffer_
-        : (
-          ( // Show brief blank before/after prefix, so there's an obvious transition even when prefix == left char, e.g. "113")
-            blink_counter_ < ( // 24/32...25/32: blank
-              (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 5)
-            ) ||
-            blink_counter_ > ( // 31/32...32/32: blank
-              (kBlinkMask >> 1) + (kBlinkMask >> 2) + (kBlinkMask >> 3) + (kBlinkMask >> 4) + (kBlinkMask >> 5)
-            )
-          )
-          ? prefix_blank_buffer_
-          : prefix_show_buffer_ // 25/32...31/32: prefix
-        )
-      );
+        : prefix_flash_counter_ >= kPrefixShowStart
+            && prefix_flash_counter_ < kPrefixShowEnd
+          ? prefix_show_buffer_
+          : prefix_blank_buffer_;
 
   if (fading_increment_) {
     fading_counter_ += fading_increment_;
@@ -200,7 +192,7 @@ void Display::RefreshSlow() {
   } else {
     actual_brightness_ = brightness_;
   }
-  blink_counter_ = (blink_counter_ + 1) % kBlinkMask;
+  prefix_flash_counter_ = (prefix_flash_counter_ + 1) % kPrefixFlashPeriod;
   frame_counter_ = (frame_counter_ + 1) % kFrameBlinkMask;
 
 #else

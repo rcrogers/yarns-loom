@@ -38,13 +38,17 @@ namespace yarns {
 const uint8_t kDisplayWidth = 2;
 const uint8_t kScrollBufferSize = 64;
 // Counted in RefreshSlow, which Ui::Poll drives at 1kHz, so these are periods
-// in milliseconds. Divisible by 32, which keeps the prefix flash's fractions
-// exact. ui.cc derives the held-key rate from this, so it may not move.
+// in milliseconds. ui.cc derives the held-key rate from this.
 const uint16_t kBlinkMask = 320;
 // A frame swap -- a glyph's second frame, or set_blink's blank -- runs at a
 // THIRD of the held-key rate (kBlinkMask >> 1), so the two read as different
-// things. Its own counter: sharing kBlinkMask would drag the held keys along.
+// things.
 const uint16_t kFrameBlinkMask = 3 * (kBlinkMask >> 1);
+// The prefix flash: the number, a gap, the prefix, a gap. The gaps make the
+// transition visible when the prefix matches the left digit, e.g. "113".
+const uint16_t kPrefixFlashPeriod = 480;
+const uint16_t kPrefixShowTime = 160;
+const uint16_t kPrefixGapTime = 10;
 
 // A character's share of the light, 0 to kDisplayBrightnessPWMPeriod. The pins
 // the characters are enabled by are timer outputs, so the duty is where this
@@ -123,7 +127,7 @@ class Display {
   uint16_t active_position_;
   uint16_t mux_ticks_left_;
   uint16_t brightness_;
-  uint16_t blink_counter_;
+  uint16_t prefix_flash_counter_;
   uint16_t frame_counter_;
   // Whether the prefix flash actually transitions. Without it every prefix
   // buffer holds the short name, and switching only breaks frame_high()'s

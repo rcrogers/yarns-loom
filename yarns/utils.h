@@ -49,6 +49,15 @@ uint32_t DivU64ByU32(uint32_t hi, uint32_t lo, uint32_t divisor);
 // Keeps full precision at extreme ratios, where a Q15 factor collapses.
 int32_t ScaleRatio(int32_t value, uint32_t numerator, uint32_t denominator);
 
+// stmlib's Interpolate88 for a uint32_t table, with the product widened: its
+// int32 product overflows once neighbouring entries differ by more than 2^24.
+inline uint32_t InterpolateU32Table88(const uint32_t* table, uint16_t index) {
+  const uint32_t a = table[index >> 8];
+  const uint32_t b = table[(index >> 8) + 1];
+  return a + static_cast<int32_t>(
+    ((static_cast<int64_t>(b) - a) * (index & 0xff)) >> 8);
+}
+
 // xorshift32. Zero is a fixed point, so a seed must be nonzero.
 //
 // Inline, unlike the rest of this header: its callers are per-sample loops, and

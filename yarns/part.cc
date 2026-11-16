@@ -39,6 +39,7 @@
 #include "yarns/just_intonation_processor.h"
 #include "yarns/midi_handler.h"
 #include "yarns/resources.h"
+#include "yarns/utils.h"
 #include "yarns/voice.h"
 #include "yarns/multi.h"
 
@@ -833,15 +834,15 @@ void Part::VoiceNoteOn(
     std::max(kMinPeak_u16, UINT16_MAX - (damping_22 >> (22 - 16)));
   adsr.sustain_u16 = modulate_7_13(voicing_.env_init_sustain, voicing_.env_mod_sustain, vel) << (16 - 13);
   // NB: this LUT only has 128 values, so we use a 15-bit index
-  adsr.attack_u32   = Interpolate88(
+  adsr.attack_u32   = InterpolateU32Table88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_attack  , voicing_.env_mod_attack , vel) << (15 - 13)
   );
-  adsr.decay_u32    = Interpolate88(
+  adsr.decay_u32    = InterpolateU32Table88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_decay   , voicing_.env_mod_decay  , vel) << (15 - 13)
   );
-  adsr.release_u32  = Interpolate88(
+  adsr.release_u32  = InterpolateU32Table88(
     lut_envelope_phase_increments,
     modulate_7_13(voicing_.env_init_release , voicing_.env_mod_release, vel) << (15 - 13)
   );
@@ -863,7 +864,7 @@ void Part::VoiceNoteOn(
   // shaped like every other envelope stage, so it modulates the same way.
   // Converted HERE, once: a note starts up to four envelopes and they all want
   // the same duration.
-  uint32_t chiff_audible_samples = ChiffAudibleSamples(Interpolate88(
+  uint32_t chiff_audible_samples = ChiffAudibleSamples(InterpolateU32Table88(
     lut_chiff_phase_increments,
     modulate_7_13(voicing_.chiff_duration, voicing_.chiff_duration_mod_velocity, vel) << (15 - 13)
   ));
