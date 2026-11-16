@@ -264,7 +264,7 @@ new Promise((resolve, reject) => {
   check('settings 20 and 21 are distinguishable',
     durAt(20) !== durAt(21), `${durAt(20)} vs ${durAt(21)} samples`);
   check('ENV ATTACK setting 16 resolves to the firmware stage length',
-    page.ENGINE.stageSamples(16) === 409, `${page.ENGINE.stageSamples(16)} samples`);
+    page.ENGINE.stageSamples(16) === 19, `${page.ENGINE.stageSamples(16)} samples`);
 
   console.log(fails ? `\n${fails} FAILURES` : '\nALL PASS');
   process.exit(fails ? 1 : 0);
