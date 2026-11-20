@@ -225,10 +225,10 @@ static inline uint32_t TransferBias(uint8_t curve, uint8_t variant) {
 // Tanh offsets the carrier before the gain: an offset after it fades against
 // the swing as the gain rises, and with it the evens. Even by 2/3 of the
 // carrier's peak, where the even harmonics peak in level at every gain from 2
-// up (within 0.3 dB, and 3 dB short at the least gain); its even share is 0.181
-// over the sweep. Balanced by 0.358, where the share is half that, measured
-// (resonator-scripts/half221.py).
-static const double kTanhBalancedOffset = 0.358;
+// up (within 0.3 dB, and 3 dB short at the least gain); its even share is 0.190
+// over its sweep. Balanced by 0.368, where the share over its own sweep is half
+// that, measured (tools/osctest/tanh_balance.py).
+static const double kTanhBalancedOffset = 0.368;
 static const double kTanhEvenOffset = 2.0 / 3;
 static const int32_t kTanhCarrierOffset[] = {  // by TransferVariant
   0,
@@ -236,7 +236,7 @@ static const int32_t kTanhCarrierOffset[] = {  // by TransferVariant
   static_cast<int32_t>(kTanhEvenOffset * 32768 + 0.5),
 };
 // An offset c leaves the carrier's steepest crossing sqrt(1 - c^2) as steep,
-// so the variant's gain is raised by -log2(1 - c^2) / 2 doublings.
+// so the variant's top gain is raised by -log2(1 - c^2) / 2 doublings.
 #define TANH_GAIN_SHIFT_Q12(offset) static_cast<int32_t>( \
     -0.5 * kLog2E * __builtin_log(1 - (offset) * (offset)) * 4096 + 0.5)
 static const int32_t kTanhGainShift_q12[] = {  // by TransferVariant
@@ -501,12 +501,12 @@ int16_t Oscillator::WarpTimbre(
 
   // Tanh drives rather than folds, so it has no fold count to cap; below zero
   // is the least drive, as below zero is no fold for the rest of the family.
-  // The knob spans kTanhKnobDoublings from the variant's shift.
+  // The knob spans kTanhKnobDoublings plus the variant's shift, from the least
+  // gain.
   if (IsTransferShape(shape) && TransferCurveOf(shape) == TRANSFER_CURVE_TANH) {
-    const int32_t doublings_q15 =
-        TimbreAtOrAboveZero(timbre) * kTanhKnobDoublings
-        + (kTanhGainShift_q12[TransferVariantOf(shape)] << (15 - 12));
-    return static_cast<int16_t>((doublings_q15 << 12) / kTanhRenderDoublings_q12);
+    return static_cast<int16_t>(TimbreAtOrAboveZero(timbre)
+        * ((kTanhKnobDoublings << 12) + kTanhGainShift_q12[TransferVariantOf(shape)])
+        / kTanhRenderDoublings_q12);
   }
 
   if (IsTransferShape(shape) || shape >= OSC_SHAPE_FM) {
@@ -1093,7 +1093,7 @@ static inline uint32_t Exp2Fraction_q15(uint32_t fraction_u16) {
 // neither the family's gain law nor its fold knee.
 //
 // The gain is exponential in TIMBRE, 2^(kTanhRenderDoublings t) from 0.5;
-// WarpTimbre gives the knob kTanhKnobDoublings of it from the variant's shift.
+// WarpTimbre gives each variant kTanhKnobDoublings plus its shift of it.
 // Five doublings from 0.5 to 16, the odd variant's, so
 // the knob moves as evenly as the sound does: the level is within 0.2 dB of its
 // ceiling by a gain of 8, and past 16 no harmonic but the highest moves by more
