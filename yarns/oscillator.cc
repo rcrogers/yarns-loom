@@ -225,13 +225,46 @@ static inline uint32_t TransferBias(uint8_t curve, uint8_t variant) {
 // Tanh offsets the carrier before the gain: an offset after it fades against
 // the swing as the gain rises, and with it the evens. Even by 2/3 of the
 // carrier's peak, where the even harmonics peak in level at every gain from 2
-// up (within 0.3 dB, and 3 dB short at the least gain); its even share is 0.181
-// over the sweep. Balanced by 0.358, where the share is half that, measured
-// (resonator-scripts/half221.py).
+// up (within 0.3 dB, and 3 dB short at the least gain); its even share is 0.192
+// over its sine-carrier sweep. Balanced by 0.371, where the share over its own
+// sweep is half that, measured (tools/osctest/tanh_balance.py).
+static const double kTanhBalancedOffset = 0.371;
+static const double kTanhEvenOffset = 2.0 / 3;
 static const int32_t kTanhCarrierOffset[] = {  // by TransferVariant
   0,
-  static_cast<int32_t>(0.358 * 32768 + 0.5),
-  (2 << 15) / 3,
+  static_cast<int32_t>(kTanhBalancedOffset * 32768 + 0.5),
+  static_cast<int32_t>(kTanhEvenOffset * 32768 + 0.5),
+};
+// An offset leaves the carrier's steepest crossing less steep, so a variant's
+// top gain is raised: the doublings at which its DIN sharpness best tracks
+// odd's over the knob, MIDI 36-72, measured (tools/osctest/tanh_shift_fit.py).
+// Sine balanced lands on the edge slope's -log2(1 - c^2) / 2; expo takes more
+// than its edge slope says. Tri's slope is the same at every crossing, and its
+// even variant is brighter low on the knob than any gain can follow: none.
+static const int32_t kTanhKnobDoublings = 5;
+static const double kTanhSineBalancedShift = 0.10;
+static const double kTanhSineEvenShift = 0.50;
+static const double kTanhExpoBalancedShift = 0.60;
+static const double kTanhExpoEvenShift = 1.40;
+#define TANH_DOUBLINGS_Q12(doublings) \
+    static_cast<int32_t>((doublings) * 4096 + 0.5)
+static const int32_t kTanhGainShift_q12[][3] = {  // [carrier][variant]
+  { 0, 0, 0 },
+  { 0, TANH_DOUBLINGS_Q12(kTanhSineBalancedShift),
+    TANH_DOUBLINGS_Q12(kTanhSineEvenShift) },
+  { 0, TANH_DOUBLINGS_Q12(kTanhExpoBalancedShift),
+    TANH_DOUBLINGS_Q12(kTanhExpoEvenShift) },
+};
+// The render's doublings: the knob's plus the carrier's largest shift, even's.
+#define TANH_TRI_RENDER_DOUBLINGS_Q12 TANH_DOUBLINGS_Q12(kTanhKnobDoublings)
+#define TANH_SINE_RENDER_DOUBLINGS_Q12 \
+    TANH_DOUBLINGS_Q12(kTanhKnobDoublings + kTanhSineEvenShift)
+#define TANH_EXPO_RENDER_DOUBLINGS_Q12 \
+    TANH_DOUBLINGS_Q12(kTanhKnobDoublings + kTanhExpoEvenShift)
+static const int32_t kTanhRenderDoublings_q12[] = {  // by carrier
+  TANH_TRI_RENDER_DOUBLINGS_Q12,
+  TANH_SINE_RENDER_DOUBLINGS_Q12,
+  TANH_EXPO_RENDER_DOUBLINGS_Q12,
 };
 
 // Sizzle's variants are where its sine sits at rest. Its exponential is not odd
@@ -486,8 +519,14 @@ int16_t Oscillator::WarpTimbre(
 
   // Tanh drives rather than folds, so it has no fold count to cap; below zero
   // is the least drive, as below zero is no fold for the rest of the family.
+  // The knob spans kTanhKnobDoublings plus the variant's shift, from the least
+  // gain.
   if (IsTransferShape(shape) && TransferCurveOf(shape) == TRANSFER_CURVE_TANH) {
-    return TimbreAtOrAboveZero(timbre);
+    const uint8_t carrier = TransferCarrierOf(shape);
+    return static_cast<int16_t>(TimbreAtOrAboveZero(timbre)
+        * ((kTanhKnobDoublings << 12)
+           + kTanhGainShift_q12[carrier][TransferVariantOf(shape)])
+        / kTanhRenderDoublings_q12[carrier]);
   }
 
   if (IsTransferShape(shape) || shape >= OSC_SHAPE_FM) {
@@ -1073,7 +1112,11 @@ static inline uint32_t Exp2Fraction_q15(uint32_t fraction_u16) {
 // TIMBRE's gain, plus the bias. It drives rather than folds, so it takes
 // neither the family's gain law nor its fold knee.
 //
-// The gain is exponential in TIMBRE, 0.5 to 16 -- five doublings, 2^(5 t) -- so
+// The gain is exponential in TIMBRE, 0.5 times 2 to the carrier's render
+// doublings times t; WarpTimbre gives each variant kTanhKnobDoublings plus its
+// shift of them. |carrier + offset| times the gain reaches 3.4e9 at expo's
+// top, so the product is unsigned.
+// Five doublings from 0.5 to 16, the odd variant's, so
 // the knob moves as evenly as the sound does: the level is within 0.2 dB of its
 // ceiling by a gain of 8, and past 16 no harmonic but the highest moves by more
 // than 2 dB, while the aliasing at high notes grows and a biased shape's even
@@ -1095,25 +1138,23 @@ static inline uint32_t Exp2Fraction_q15(uint32_t fraction_u16) {
 // the carrier, read in the loop, holds no buffer and costs no second pass.
 void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) {
   const uint32_t kSaturation_q24 = 17 << 24;
-  // The gain's ends, 0.5 and 16: five doublings.
   const double kGainLeast = 0.5;
-  const int32_t kGainDoublings = 5;
   const int32_t kGainLeast_log2e =
       static_cast<int32_t>(kGainLeast * 1024 * kLog2E + 0.5);
   const int32_t carrier_offset = kTanhCarrierOffset[TransferVariantOf(shape_)];
-  const uint16_t* carrier_table = transfer_carrier_ == TRANSFER_CURVE_SINE
-      ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
-#define TANH_LOOP(CARRIER) \
+#define TANH_LOOP(CARRIER, RENDER_DOUBLINGS_Q12) \
   RENDER_PERIODIC( \
-    const int32_t doublings_q15 = (timbre < 0 ? 0 : timbre) * kGainDoublings; \
+    const int32_t doublings_q15 = \
+        (timbre < 0 ? 0 : timbre) * (RENDER_DOUBLINGS_Q12) >> 12; \
     const int32_t fraction_q15 = doublings_q15 & 0x7fff; \
     const int32_t gain_log2e = (kGainLeast_log2e + (fraction_q15 \
         * ((2 * kGainLeast_log2e + 1) / 3 \
            + (fraction_q15 * ((kGainLeast_log2e + 1) / 3) >> 15)) >> 15)) \
         << (doublings_q15 >> 15); \
-    const int32_t z_q24 = ((CARRIER) + carrier_offset) * gain_log2e; \
+    const int32_t driven = (CARRIER) + carrier_offset; \
     const uint32_t magnitude_q24 = \
-        static_cast<uint32_t>(z_q24 < 0 ? -z_q24 : z_q24); \
+        static_cast<uint32_t>(driven < 0 ? -driven : driven) \
+        * static_cast<uint32_t>(gain_log2e); \
     int32_t shaped = 32767; \
     if (magnitude_q24 < kSaturation_q24) { \
       const uint32_t mantissa_q30 = \
@@ -1122,12 +1163,16 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
       shaped = (mantissa_q30 - reciprocal_q30) \
           / ((mantissa_q30 + reciprocal_q30 + (1u << 14)) >> 15); \
     } \
-    this_sample = z_q24 < 0 ? -shaped : shaped; \
+    this_sample = driven < 0 ? -shaped : shaped; \
   )
   if (transfer_carrier_ == TRANSFER_CURVE_TRI) {
-    TANH_LOOP(triangle(phase))
+    TANH_LOOP(triangle(phase), TANH_TRI_RENDER_DOUBLINGS_Q12)
+  } else if (transfer_carrier_ == TRANSFER_CURVE_SINE) {
+    TANH_LOOP(quadrant_lookup(lut_sine_quadrant_u16, phase),
+              TANH_SINE_RENDER_DOUBLINGS_Q12)
   } else {
-    TANH_LOOP(quadrant_lookup(carrier_table, phase))
+    TANH_LOOP(quadrant_lookup(lut_expo_quadrant_u16, phase),
+              TANH_EXPO_RENDER_DOUBLINGS_Q12)
   }
 #undef TANH_LOOP
 }
