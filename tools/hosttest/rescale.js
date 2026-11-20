@@ -9,8 +9,12 @@
 // It had ONE caller and NO test, which is why. This is the test.
 'use strict';
 const H = require('./harness');
+// The rescale lands mid-attack, the value still rising, so a glide back toward
+// the unscaled trajectory would show.
 const AT_BLOCK = 40, BLOCK = 64;
-const base = `basic 0 64 attack_setting=60 decay_setting=64 sustain_setting=90 ` +
+const FULL_SCALE = 32767;
+const FACTORS = [2, 3];
+const base = `basic 0 64 attack_setting=96 decay_setting=64 sustain_setting=90 ` +
              `release_setting=64 gate=900 tail=50 rescale_block=${AT_BLOCK}`;
 let failures = 0;
 function check(name, ok, detail) {
@@ -20,7 +24,14 @@ function check(name, ok, detail) {
 const dry = H.runNumbers(base);
 // One block after the rescale, so the ramp inside the block it lands in is past.
 const at = (AT_BLOCK + 1) * BLOCK;
-for (const factor of [2, 3]) {
+// The scaled value must fit, or the rail answers instead of Rescale.
+const probed = Math.max(dry[at], dry[at + 8 * BLOCK]);
+check('fixture: the largest factor leaves headroom',
+      probed * Math.max(...FACTORS) < FULL_SCALE,
+      `${probed} x ${Math.max(...FACTORS)} against ${FULL_SCALE}`);
+check('fixture: the rescale lands mid-stage, the value still rising',
+      dry[at + 8 * BLOCK] > dry[at], `${dry[at]} -> ${dry[at + 8 * BLOCK]}`);
+for (const factor of FACTORS) {
   const wet = H.runNumbers(`${base} rescale=${factor}`);
   const before = dry[at - 2 * BLOCK], after = wet[at], plain = dry[at];
   const ratio = plain > 0 ? after / plain : 0;
