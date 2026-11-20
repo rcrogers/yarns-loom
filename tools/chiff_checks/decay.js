@@ -138,7 +138,7 @@ loadPage(pagePath).then(page => {
     const gateMs = Math.max(5, Math.min(20000, durationMs * gateFraction));
     const notches = [], cliffs = [];
     let peakDb = -999, audibleMax = 0, lastCurve = null, lastSmooth = null;
-    for (const seed of SEEDS) {
+    for (const [realization, seed] of SEEDS.entries()) {
     const p = {
       attack, decay: DECAY_RELEASE, sustain: 70, release: DECAY_RELEASE,
       amplitudeModVelocity: 0, velocity: 100, amountModVelocity: 0,
@@ -177,8 +177,12 @@ loadPage(pagePath).then(page => {
     // is the stretch this check exists to judge. Subtracting the mean was also
     // what forced the block to be large; with it gone the block only has to
     // hold enough samples to average.
+    // EACH REALIZATION ALSO STARTS ITS BLOCKS AT ITS OWN PHASE. Where the
+    // landing falls within a block moved a short note's cliff by up to 11 dB
+    // with the audio unchanged, so one grid is a draw, as one seed is.
+    const gridPhase = Math.round(realization * BLOCK / SEEDS.length);
     const curve = [];
-    for (let lo = 0; lo + BLOCK <= n; lo += BLOCK) {
+    for (let lo = gridPhase; lo + BLOCK <= n; lo += BLOCK) {
       let sq = 0;
       for (let i = lo; i < lo + BLOCK; i++) sq += resid[i] * resid[i];
       const sd = Math.sqrt(sq / BLOCK);
