@@ -85,12 +85,16 @@ const MIN_BLOCKS = 8;
 // Below this the chiff's motion is not heard as noise but as drift on the
 // envelope, so it is not what this check is about.
 const HIGHPASS_HZ = 20;
-const ATTACKS = [24, 40, 64, 96, 127];
+// The stage lengths the limits were calibrated on, as settings of the current
+// table: attacks of 30 ms, 154 ms, 0.79 s, 3.4 s and 10 s, and a 0.79 s decay
+// and release.
+const ATTACKS = [63, 81, 99, 115, 127];
+const DECAY_RELEASE = 99;
 // THE METRIC IS TAKEN OVER SEVERAL SEEDS AND THE MEDIAN REPORTED. A notch is a
 // feature of noise, and one realization of noise dips wherever it likes: on a
-// single seed this check reported a 7.6 dB notch at ENV ATTACK 24 that TWELVE
+// single seed this check reported a 7.6 dB notch at the 30 ms attack that TWELVE
 // other seeds put at 0.0 dB -- an invented failure, and the user could not see
-// it in the sim. The real notch at ENV ATTACK 96/127 survives the same test
+// it in the sim. The real notch at the 3.4 s and 10 s attacks survives the same test
 // (7 of 12 seeds over the limit, 3.9-7.9 dB, always in the same stretch), so
 // the median separates the two cleanly.
 const SEEDS = [0xCAFEBABE, 0x1234ABCD, 0x0BADF00D, 0x51CE7A11, 0x2B7E1516];
@@ -126,7 +130,7 @@ loadPage(pagePath).then(page => {
   for (const c of cases) {
     const { attack, chiffDuration, gateFraction } = c;
     const probe = page.render({
-      attack, decay: 64, sustain: 70, release: 64,
+      attack, decay: DECAY_RELEASE, sustain: 70, release: DECAY_RELEASE,
       amplitudeModVelocity: 0, velocity: 100, amountModVelocity: 0,
       amount, chiffDuration, gateMs: 1000, seed: SEEDS[0],
     });
@@ -134,9 +138,9 @@ loadPage(pagePath).then(page => {
     const gateMs = Math.max(5, Math.min(20000, durationMs * gateFraction));
     const notches = [], cliffs = [];
     let peakDb = -999, audibleMax = 0, lastCurve = null, lastSmooth = null;
-    for (const seed of SEEDS) {
+    for (const [realization, seed] of SEEDS.entries()) {
     const p = {
-      attack, decay: 64, sustain: 70, release: 64,
+      attack, decay: DECAY_RELEASE, sustain: 70, release: DECAY_RELEASE,
       amplitudeModVelocity: 0, velocity: 100, amountModVelocity: 0,
       amount, chiffDuration, seed, gateMs,
     };
@@ -173,8 +177,12 @@ loadPage(pagePath).then(page => {
     // is the stretch this check exists to judge. Subtracting the mean was also
     // what forced the block to be large; with it gone the block only has to
     // hold enough samples to average.
+    // EACH REALIZATION ALSO STARTS ITS BLOCKS AT ITS OWN PHASE. Where the
+    // landing falls within a block moved a short note's cliff by up to 11 dB
+    // with the audio unchanged, so one grid is a draw, as one seed is.
+    const gridPhase = Math.round(realization * BLOCK / SEEDS.length);
     const curve = [];
-    for (let lo = 0; lo + BLOCK <= n; lo += BLOCK) {
+    for (let lo = gridPhase; lo + BLOCK <= n; lo += BLOCK) {
       let sq = 0;
       for (let i = lo; i < lo + BLOCK; i++) sq += resid[i] * resid[i];
       const sd = Math.sqrt(sq / BLOCK);
