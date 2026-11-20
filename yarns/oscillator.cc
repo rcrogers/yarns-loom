@@ -235,37 +235,35 @@ static const int32_t kTanhCarrierOffset[] = {  // by TransferVariant
   static_cast<int32_t>(kTanhBalancedOffset * 32768 + 0.5),
   static_cast<int32_t>(kTanhEvenOffset * 32768 + 0.5),
 };
-// An offset leaves the carrier's steepest crossing less steep, so a variant's
-// top gain is raised: the doublings at which its DIN sharpness best tracks
+// The doublings of gain TIMBRE spans: odd's five, plus a shift that raises a
+// biased variant's top, as an offset leaves the carrier's steepest crossing
+// less steep. Each shift is where the variant's DIN sharpness best tracks
 // odd's over the knob, MIDI 36-72, measured (tools/osctest/tanh_shift_fit.py).
 // Sine balanced lands on the edge slope's -log2(1 - c^2) / 2; expo takes more
-// than its edge slope says. Tri's slope is the same at every crossing, and its
-// even variant is brighter low on the knob than any gain can follow: none.
-static const int32_t kTanhKnobDoublings = 5;
+// than its edge slope says. Tri's slope is the same at every crossing, and no
+// gain law fits its even variant: tri's odd and balanced grow duller before
+// they brighten, low on the knob, and even does not. Tri takes none.
+// Full scale is the variant's own top, so a chiff at the rail drives no
+// further than the knob does.
+static const int32_t kTanhOddDoublings = 5;
 static const double kTanhSineBalancedShift = 0.10;
 static const double kTanhSineEvenShift = 0.50;
 static const double kTanhExpoBalancedShift = 0.60;
 static const double kTanhExpoEvenShift = 1.40;
 #define TANH_DOUBLINGS_Q12(doublings) \
     static_cast<int32_t>((doublings) * 4096 + 0.5)
-static const int32_t kTanhGainShift_q12[][3] = {  // [carrier][variant]
-  { 0, 0, 0 },
-  { 0, TANH_DOUBLINGS_Q12(kTanhSineBalancedShift),
-    TANH_DOUBLINGS_Q12(kTanhSineEvenShift) },
-  { 0, TANH_DOUBLINGS_Q12(kTanhExpoBalancedShift),
-    TANH_DOUBLINGS_Q12(kTanhExpoEvenShift) },
+static const int32_t kTanhDoublings_q12[][3] = {  // [carrier][variant]
+  { TANH_DOUBLINGS_Q12(kTanhOddDoublings),
+    TANH_DOUBLINGS_Q12(kTanhOddDoublings),
+    TANH_DOUBLINGS_Q12(kTanhOddDoublings) },
+  { TANH_DOUBLINGS_Q12(kTanhOddDoublings),
+    TANH_DOUBLINGS_Q12(kTanhOddDoublings + kTanhSineBalancedShift),
+    TANH_DOUBLINGS_Q12(kTanhOddDoublings + kTanhSineEvenShift) },
+  { TANH_DOUBLINGS_Q12(kTanhOddDoublings),
+    TANH_DOUBLINGS_Q12(kTanhOddDoublings + kTanhExpoBalancedShift),
+    TANH_DOUBLINGS_Q12(kTanhOddDoublings + kTanhExpoEvenShift) },
 };
-// The render's doublings: the knob's plus the carrier's largest shift, even's.
-#define TANH_TRI_RENDER_DOUBLINGS_Q12 TANH_DOUBLINGS_Q12(kTanhKnobDoublings)
-#define TANH_SINE_RENDER_DOUBLINGS_Q12 \
-    TANH_DOUBLINGS_Q12(kTanhKnobDoublings + kTanhSineEvenShift)
-#define TANH_EXPO_RENDER_DOUBLINGS_Q12 \
-    TANH_DOUBLINGS_Q12(kTanhKnobDoublings + kTanhExpoEvenShift)
-static const int32_t kTanhRenderDoublings_q12[] = {  // by carrier
-  TANH_TRI_RENDER_DOUBLINGS_Q12,
-  TANH_SINE_RENDER_DOUBLINGS_Q12,
-  TANH_EXPO_RENDER_DOUBLINGS_Q12,
-};
+#undef TANH_DOUBLINGS_Q12
 
 // Sizzle's variants are where its sine sits at rest. Its exponential is not odd
 // in the carrier, so no rest gives odd or even alone past the bottom of TIMBRE;
@@ -519,14 +517,8 @@ int16_t Oscillator::WarpTimbre(
 
   // Tanh drives rather than folds, so it has no fold count to cap; below zero
   // is the least drive, as below zero is no fold for the rest of the family.
-  // The knob spans kTanhKnobDoublings plus the variant's shift, from the least
-  // gain.
   if (IsTransferShape(shape) && TransferCurveOf(shape) == TRANSFER_CURVE_TANH) {
-    const uint8_t carrier = TransferCarrierOf(shape);
-    return static_cast<int16_t>(TimbreAtOrAboveZero(timbre)
-        * ((kTanhKnobDoublings << 12)
-           + kTanhGainShift_q12[carrier][TransferVariantOf(shape)])
-        / kTanhRenderDoublings_q12[carrier]);
+    return TimbreAtOrAboveZero(timbre);
   }
 
   if (IsTransferShape(shape) || shape >= OSC_SHAPE_FM) {
@@ -1112,10 +1104,9 @@ static inline uint32_t Exp2Fraction_q15(uint32_t fraction_u16) {
 // TIMBRE's gain, plus the bias. It drives rather than folds, so it takes
 // neither the family's gain law nor its fold knee.
 //
-// The gain is exponential in TIMBRE, 0.5 times 2 to the carrier's render
-// doublings times t; WarpTimbre gives each variant kTanhKnobDoublings plus its
-// shift of them. |carrier + offset| times the gain reaches 3.4e9 at expo's
-// top, so the product is unsigned.
+// The gain is exponential in TIMBRE, 0.5 times 2 to the variant's
+// kTanhDoublings_q12 times t. |carrier + offset| times the gain reaches 3.4e9
+// at expo even's top, so the product is unsigned.
 // Five doublings from 0.5 to 16, the odd variant's, so
 // the knob moves as evenly as the sound does: the level is within 0.2 dB of its
 // ceiling by a gain of 8, and past 16 no harmonic but the highest moves by more
@@ -1141,11 +1132,15 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
   const double kGainLeast = 0.5;
   const int32_t kGainLeast_log2e =
       static_cast<int32_t>(kGainLeast * 1024 * kLog2E + 0.5);
-  const int32_t carrier_offset = kTanhCarrierOffset[TransferVariantOf(shape_)];
-#define TANH_LOOP(CARRIER, RENDER_DOUBLINGS_Q12) \
+  const uint8_t variant = TransferVariantOf(shape_);
+  const int32_t carrier_offset = kTanhCarrierOffset[variant];
+  const int32_t doublings_q12 = kTanhDoublings_q12[transfer_carrier_][variant];
+  const uint16_t* carrier_table = transfer_carrier_ == TRANSFER_CURVE_SINE
+      ? lut_sine_quadrant_u16 : lut_expo_quadrant_u16;
+#define TANH_LOOP(CARRIER) \
   RENDER_PERIODIC( \
     const int32_t doublings_q15 = \
-        (timbre < 0 ? 0 : timbre) * (RENDER_DOUBLINGS_Q12) >> 12; \
+        (timbre < 0 ? 0 : timbre) * doublings_q12 >> 12; \
     const int32_t fraction_q15 = doublings_q15 & 0x7fff; \
     const int32_t gain_log2e = (kGainLeast_log2e + (fraction_q15 \
         * ((2 * kGainLeast_log2e + 1) / 3 \
@@ -1166,13 +1161,9 @@ void Oscillator::RenderTransferTanh(int16_t* input_samples, int16_t* audio_mix) 
     this_sample = driven < 0 ? -shaped : shaped; \
   )
   if (transfer_carrier_ == TRANSFER_CURVE_TRI) {
-    TANH_LOOP(triangle(phase), TANH_TRI_RENDER_DOUBLINGS_Q12)
-  } else if (transfer_carrier_ == TRANSFER_CURVE_SINE) {
-    TANH_LOOP(quadrant_lookup(lut_sine_quadrant_u16, phase),
-              TANH_SINE_RENDER_DOUBLINGS_Q12)
+    TANH_LOOP(triangle(phase))
   } else {
-    TANH_LOOP(quadrant_lookup(lut_expo_quadrant_u16, phase),
-              TANH_EXPO_RENDER_DOUBLINGS_Q12)
+    TANH_LOOP(quadrant_lookup(carrier_table, phase))
   }
 #undef TANH_LOOP
 }

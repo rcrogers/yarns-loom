@@ -3,7 +3,7 @@
 # for the gain law RenderTransferTanh and WarpTimbre apply on the sine carrier.
 #
 # A variant spans 5 + s doublings from gain 0.5, s its measured shift
-# (kTanhGainShift_q12, tanh_shift_fit.py). Its even share is the even
+# (kTanhDoublings_q12, tanh_shift_fit.py). Its even share is the even
 # harmonics' fraction of the harmonic power, h1..h199, averaged over a uniform
 # TIMBRE sweep. Balanced is the offset whose share is halfway between odd's
 # (c = 0) and even's (c = 2/3).
