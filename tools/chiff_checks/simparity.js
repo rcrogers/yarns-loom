@@ -263,8 +263,10 @@ new Promise((resolve, reject) => {
     `${durAt(0)} / ${durAt(64)} / ${durAt(127)}`);
   check('settings 20 and 21 are distinguishable',
     durAt(20) !== durAt(21), `${durAt(20)} vs ${durAt(21)} samples`);
+  const nativeAttack16 = H.reportedSamples('report 0 0 attack_setting=16', 'attack');
   check('ENV ATTACK setting 16 resolves to the firmware stage length',
-    page.ENGINE.stageSamples(16) === 19, `${page.ENGINE.stageSamples(16)} samples`);
+    page.ENGINE.stageSamples(16) === nativeAttack16,
+    `page ${page.ENGINE.stageSamples(16)}, native ${nativeAttack16} samples`);
 
   console.log(fails ? `\n${fails} FAILURES` : '\nALL PASS');
   process.exit(fails ? 1 : 0);

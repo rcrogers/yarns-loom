@@ -33,16 +33,21 @@ function runNumbers(args, opts) {
   return run(args, opts).trim().split('\n').map(Number);
 }
 
-// The chiff's duration in samples, straight from the driver's own report.
+// A length in samples, straight from the driver's own report: `quantity` is
+// the word the report prints before "N smp" (chiff, attack, decay, release).
 //
 // report=1 prints to STDERR and returns early, so fold stderr in: capturing it
 // via stdio returns stdout, which is null. Two of the three copies of this
 // function shipped with that bug, which is why there is now one.
-function chiffDurationSamples(args) {
+function reportedSamples(args, quantity) {
   const out = run(`${args} report=1 2>&1`);
-  const m = /chiff (\d+) smp/.exec(out);
-  if (!m) throw new Error(`no chiff duration in report for: ${args}\n${out}`);
+  const m = new RegExp(`${quantity} (\\d+) smp`).exec(out);
+  if (!m) throw new Error(`no ${quantity} length in report for: ${args}\n${out}`);
   return +m[1];
+}
+
+function chiffDurationSamples(args) {
+  return reportedSamples(args, 'chiff');
 }
 
 // Ask, do not hardcode. Cached: it costs a process.
@@ -58,5 +63,5 @@ function frameHz() {
 }
 
 module.exports = {
-  DIR, TEST, run, runNumbers, requireBuilt, chiffDurationSamples, frameHz,
+  DIR, TEST, run, runNumbers, requireBuilt, reportedSamples, chiffDurationSamples, frameHz,
 };
