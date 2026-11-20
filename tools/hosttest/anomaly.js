@@ -92,10 +92,14 @@ function durationSamples(duration) {
   return require('./harness').chiffDurationSamples(`report 96 ${duration}`);
 }
 
+// The release must still be falling when the render ends: a release that has
+// finished rests at 0, and the dwell check would read that rest as pinned.
+const RELEASE_SETTING = 99;
+
 function run(attack, duration, amount) {
   const args = [
     'basic', amount, duration,
-    `attack_setting=${attack}`, 'decay_setting=64', 'release_setting=64',
+    `attack_setting=${attack}`, 'decay_setting=64', `release_setting=${RELEASE_SETTING}`,
     'sustain_setting=70', `peak=${PEAK_PCT}`, 'gate=400', 'tail=300', 'range=32767',
   ].join(' ');
   return execSync(`./${BINARY} ${args}`, { cwd: HERE, maxBuffer: 1e9 })
@@ -104,8 +108,10 @@ function run(attack, duration, amount) {
 
 const results = [];
 const excursions = [];
+const releaseFinished = [];
 for (const attack of ATTACKS) {
   const classic = run(attack, 0, 0);
+  if (classic[classic.length - 1] === 0) releaseFinished.push(attack);
 
   for (const duration of DURATIONS) {
     const chiff = run(attack, duration, AMOUNT);
@@ -144,6 +150,12 @@ console.log(`swept ${results.length} setting combinations at amount ${AMOUNT} ($
 console.log('metric: once the chiff duration is up the burst is inert, so the');
 console.log('        output must converge onto the amount-0 render; this is the');
 console.log('        residual gap, as a fraction of the note range\n');
+
+if (releaseFinished.length) {
+  console.log(`FAIL fixture: release setting ${RELEASE_SETTING} reaches 0 inside the` +
+    ` render at attack ${releaseFinished.join(', ')}; raise RELEASE_SETTING`);
+  process.exit(1);
+}
 
 if (UPDATE) {
   const out = {};
@@ -214,7 +226,7 @@ const r = worse[0];
 console.log('\nLook at the worst one:');
 console.log(`  node plot.js /tmp/anomaly.png 200 \\\n` +
   `    "classic:basic 0 ${r.duration} attack_setting=${r.attack} decay_setting=64 ` +
-  `release_setting=64 sustain_setting=70 gate=400" \\\n` +
+  `release_setting=${RELEASE_SETTING} sustain_setting=70 gate=400" \\\n` +
   `    "chiff:basic ${AMOUNT} ${r.duration} attack_setting=${r.attack} decay_setting=64 ` +
-  `release_setting=64 sustain_setting=70 gate=400"`);
+  `release_setting=${RELEASE_SETTING} sustain_setting=70 gate=400"`);
 process.exit(1);
