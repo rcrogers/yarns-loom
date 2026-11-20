@@ -55,13 +55,10 @@ const INAUDIBLE_DB = -78;
 //
 // THE NOTCH is the input-cap band. Where the cap binds, the level follows the
 // slew's own response instead of slew_input_max * amount, and at a 2-5 Hz corner
-// per-block excursion swings wildly because the block is a few percent of one
 // the per-block excursion swings wildly because the block is a few percent of
-// one cycle. Scaling the block with the duration was TRIED: it cuts failures
-// 14 -> 11 but SKIPS 7 settings outright (a 44 s duration gives a 2.2 s block,
-// longer than
-// the audible part), so it trades failures for blindness. The right fix is a
-// block that scales with the SLEW TIME, which needs per-block slew data this
+// one cycle. A block scaled with the duration skips settings outright (a 44 s
+// duration gives a 2.2 s block, longer than the audible part). The block that
+// fits is one scaled with the SLEW TIME, which needs per-block slew data this
 // check is not given -- a redesign, not a recalibration.
 //
 // THE CLIFF is the landing, and it is structural: the amount lands ON zero and
