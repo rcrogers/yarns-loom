@@ -223,11 +223,15 @@ characters = {
   '\xC0': 'plcb', # sqrt
   '\xC1': 'fhak', # pi
 
+  # Transfer function symbol with no lowercase letter, drawn at lowercase height
+  '\xC8': 'pkm',  # short 'T' (tanh)
+
   # Rotated transfer function symbols (180 degrees)
   '\xC2': 'agp',  # rotated 's' (sine)
   '\xC3': 'gj',   # rotated '^' (tri)
   '\xC4': 'abjk', # rotated 'e' (expo)
   '\xCA': 'bjgf', # rotated 'w' (sizzle)
+  '\xC9': 'hpk',  # rotated short 'T' (tanh)
 
   # Transfer function symbols on their side (balanced): each turned with its
   # top to the left, read in stroke order
