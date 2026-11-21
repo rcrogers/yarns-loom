@@ -713,13 +713,13 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
 - Transfer function (second symbol):
-  - Tanh (`T` at lowercase height): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
+  - Tanh (`ᴛ`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
   - Triangle (`^`), sine (`s`), expo (`e`): folding
   - Sizzle (`w`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
 - Each transfer function comes in three variants, by where its input rests, which sets the balance of odd and even harmonics:
   - Odd (the symbol upright): odd harmonics only, or as near as the curve allows
   - Balanced (the symbol sideways: `<`, and sideways `s`, `e`, `w`, `T`): halfway between odd and even, averaged over the timbre sweep -- for the folding transfer functions, odd and even harmonics in equal energy
-  - Even (the symbol inverted: `┴` at lowercase height, `ˇ`, `ˢ`, `ʍ`, `ə`): as many even harmonics as the curve allows
+  - Even (the symbol inverted: `┴`, `ˇ`, `ˢ`, `ʍ`, `ə`): as many even harmonics as the curve allows
   - Folding transfer functions: odd is exact at every timbre. Even harmonics alone would have no fundamental and sound an octave up, so even mixes the carrier back in at the level of the odd variant's fundamental, which falls with timbre as odd's does: the fundamental under the even harmonics of the fold
   - Sizzle: its exponential is lopsided, so no variant is purely odd or even past the bottom of the timbre range; even is the sound of the original sizzle
   - Tanh: its even harmonics never reach half the energy, so balanced is half of what even gives; even and balanced offset the carrier before the drive, so the evens grow with timbre. On the sine and expo carriers, even and balanced drive harder toward the top of the timbre range, so they brighten with timbre as odd does
