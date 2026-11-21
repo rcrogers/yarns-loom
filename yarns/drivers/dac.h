@@ -55,6 +55,11 @@ const uint32_t kTotalFrames = kAudioBlockSize * kNumBlocks;
 // causes the DAC to ignore the entire frame, holding its current output.
 const uint16_t kNoopHighWord = 0xC000;
 const uint16_t kNoopLowWord = 0x0000;
+// 32-bit little-endian view of the (kNoopHighWord, kNoopLowWord) pair:
+// memory layout is [high LSB, high MSB, low LSB, low MSB] = [00, C0, 00, 00].
+const uint32_t kNoopPacked =
+    static_cast<uint32_t>(kNoopHighWord) |
+    (static_cast<uint32_t>(kNoopLowWord) << 16);
 
 // Frames ahead of the DMA cursor to place DC injections.
 // 1 frame = 8 DMA words = ~3200 CPU cycles of margin. Wildly conservative.
@@ -78,12 +83,28 @@ class Dac {
     fillable_block_ = first_block_consumed ? 0 : 1;
   }
 
-  // Bits: 8 command | 16 data | 8 padding
-  inline uint32_t FormatCommandWords(uint8_t channel, uint16_t value) const {
-    uint16_t dac_channel = kNumCVOutputs - 1 - channel;
-    uint16_t high = 0x1000 | (dac_channel << 9) | (value >> 8);
-    uint16_t low = value << 8;
-    return (high << 16) | low;
+  // Format a (high16, low16) DAC command pair as a single 32-bit word, laid
+  // out for a direct little-endian store into the volatile uint16_t SPI
+  // buffer (ptr[0] = high16, ptr[1] = low16).
+  //
+  // Semantic frame: 8-bit command | 16-bit data | 8-bit padding.
+  //   high16 = 0x1000 | (dac_channel << 9) | (value >> 8)
+  //   low16  = (value & 0xFF) << 8
+  //
+  // Packing as a uint32 in LE memory order:
+  //   bits  0-7  : value high byte         (high16 LSB)
+  //   bits  8-15 : 0x10 | (dac_channel<<1) (high16 MSB, the command byte)
+  //   bits 16-23 : 0                       (low16 LSB, the padding byte)
+  //   bits 24-31 : value low byte          (low16 MSB)
+  //
+  // (value >> 8) | (value << 24) is the ROR-by-8 pattern; GCC fuses it
+  // into a single ROR instruction. Saves a store vs separate STRH pair.
+  inline uint32_t FormatCommandWord(uint8_t channel, uint16_t value) const {
+    const uint16_t dac_channel = kNumCVOutputs - 1 - channel;
+    const uint32_t cmd_const =
+        static_cast<uint32_t>(0x1000) | (dac_channel << 9);
+    const uint32_t v = value;
+    return cmd_const | (v >> 8) | (v << 24);
   }
 
   void BufferSamples(uint8_t block, uint8_t channel, int16_t* samples);

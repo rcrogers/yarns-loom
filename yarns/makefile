@@ -63,6 +63,11 @@ STACK_RESERVATION   = 2048
 STACK_CCFLAGS       = -Wframe-larger-than=$(STACK_FRAME_WARN) -fstack-usage \
                       -DSTACK_RESERVATION_BYTES=$(STACK_RESERVATION)
 
+# Total on-chip SRAM. Must match the RAM region LENGTH in
+# stm32f10x_flash_md_application_small.ld (20K for STM32F10x MD). Used by the
+# `syx` rule to report free RAM = RAM_SIZE - (data + bss) - STACK_RESERVATION.
+RAM_SIZE            = 20480
+
 include stmlib/makefile.inc
 
 MAKEFLAGS += -j8
@@ -75,4 +80,30 @@ HEX2SYSEX = python tools/hex2sysex/hex2sysex.py
 $(BUILD_DIR)%.syx: $(BUILD_DIR)%.bin
 	$(HEX2SYSEX) $(SYSEX_FLAGS) --syx -o $@ $<
 
-syx: $(BUILD_DIR)$(TARGET).syx
+# Preset-storage budget, read back out of a probe that is compiled, never linked.
+STORAGE_PROBE_SRC = yarns/tools/storage_budget_probe.cc
+STORAGE_PROBE_OBJ = $(BUILD_DIR)storage_budget_probe.o
+
+# No generated dep file out here, and a stale budget is worse than a compile.
+.PHONY: always_rebuild
+always_rebuild:
+
+$(STORAGE_PROBE_OBJ): $(STORAGE_PROBE_SRC) always_rebuild | $(BUILD_DIR)
+	$(CXX) -c $(CCFLAGS) $(CPPFLAGS) $< -o $@
+
+# Each asserts that its scope's kFreeBits is not understated. Compiling them is
+# the whole test; they report nothing.
+FREE_BITS_CHECK_OBJS = $(BUILD_DIR)free_bits_check_part.o \
+                       $(BUILD_DIR)free_bits_check_multi.o
+
+$(BUILD_DIR)free_bits_check_%.o: yarns/tools/free_bits_check_%.cc always_rebuild | $(BUILD_DIR)
+	$(CXX) -c $(CCFLAGS) $(CPPFLAGS) $< -o $@
+
+syx: $(BUILD_DIR)$(TARGET).syx $(STORAGE_PROBE_OBJ) $(FREE_BITS_CHECK_OBJS)
+	@$(SIZE) $(TARGET_ELF) | awk 'NR==2 { \
+	  used = $$2 + $$3; \
+	  free = $(RAM_SIZE) - used - $(STACK_RESERVATION); \
+	  printf "(%cram_used%c, %d)\n(%cram_free%c, %d)\n", 39, 39, used, 39, 39, free }'
+	@$(NM) -t d --print-size --defined-only $(STORAGE_PROBE_OBJ) | \
+	  awk '$$4 ~ /^probe_/ { sub(/^probe_[0-9]+_/, "", $$4); \
+	    printf "(%cpreset_%s%c, %d)\n", 39, $$4, 39, $$2 - 1 }'

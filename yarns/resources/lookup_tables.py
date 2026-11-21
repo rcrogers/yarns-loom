@@ -101,31 +101,40 @@ def envelope():
     env_linear = numpy.arange(0, num_expo_values + 1) / num_expo_values
     env_linear[-1] = env_linear[-2]
     env_expo = make_expo(env_linear)
-    lookup_tables.append(('env_expo', env_expo / env_expo.max() * 65535.0))
+    lookup_tables.append(('env_expo_u16', env_expo / env_expo.max() * 65535.0))
 
     # def make_expo_inverse(expo_value):
     #     return -numpy.log(1.0 - expo_value) / 4.0
 
     # env_inverse_expo = make_expo_inverse(env_expo)
-    # lookup_tables.append(('env_inverse_expo', env_inverse_expo / env_inverse_expo.max() * 65535.0))
+    # lookup_tables.append(('env_inverse_expo_u16', env_inverse_expo / env_inverse_expo.max() * 65535.0))
   expo()
 
+  # 2^-x over one octave of x in [0, 1], as a uint16 fraction (65535 at x=0,
+  # 32768 at x=1). The chiff mixing crossfade needs 2^-(shift drop): index
+  # this by the fractional drop, then right-shift by the integer drop. This
+  # is a pure exponential ratio -- distinct from lut_env_expo_u16, which is the
+  # normalized 1 - e^(-4*phi) duty *shape*.
+  expo2_neg_input = numpy.arange(257) / 256.0
+  expo2_neg = numpy.power(2.0, -expo2_neg_input) * 65535.0
+  lookup_tables.append(('expo2_neg_u16', numpy.round(expo2_neg)))
+
   # Quarter sine wave (0 to pi/2) for symmetric lookup with quadrant logic.
-  # uint16_t range (0..65535) for use with quadrant_lookup alongside lut_env_expo.
+  # uint16_t range (0..65535) for use with quadrant_lookup alongside lut_env_expo_u16.
   sine_quadrant_input = numpy.arange(257) / 256.0 * (numpy.pi / 2)
   sine_quadrant = numpy.sin(sine_quadrant_input) * 65535.0
-  lookup_tables.append(('sine_quadrant', numpy.round(sine_quadrant)))
+  lookup_tables.append(('sine_quadrant_u16', numpy.round(sine_quadrant)))
 
   # C1-continuous expo-like quarter wave for quadrant_lookup.
   # 1-(1-x)^3: f'(0)=3 (steep), f'(1)=0 (smooth at quadrant boundary).
   expo_quadrant_input = numpy.arange(257) / 256.0
   expo_quadrant = (1.0 - (1.0 - expo_quadrant_input) ** 3) * 65535.0
-  lookup_tables.append(('expo_quadrant', numpy.round(expo_quadrant)))
+  lookup_tables.append(('expo_quadrant_u16', numpy.round(expo_quadrant)))
 
   # Like the above, but with 7-bit phase and 7-bit value instead of 8-bit phase and 16-bit value
   # env_linear = numpy.arange(0, 128.0 + 1) / 128
   # env_expo_7bit = make_expo(env_linear)
-  # lookup_tables_8.append(('env_expo_7bit', env_expo_7bit / env_expo_7bit.max() * 127.0))
+  # lookup_tables_8.append(('env_expo_u7', env_expo_7bit / env_expo_7bit.max() * 127.0))
 
 
   # # Array of length 128 that maps a 7-bit exponential value to a 16-bit phase
@@ -216,21 +225,45 @@ def envelope():
 
   max_time = 10.0  # seconds
   num_duration_values = 128
-  gamma = 0.25
   envelope_rate = audio_rate
-  # min_time = env_shift_samples / envelope_rate
-  min_time = 4.0 / envelope_rate
-  # print('min_time', min_time)
-  min_samples = min_time * envelope_rate
-  max_samples = max_time * envelope_rate
+  max_increment = excursion - 1
 
-  min_increment = excursion / max_samples
-  max_increment = excursion / min_samples
-  rates = numpy.linspace(numpy.power(max_increment, -gamma), numpy.power(min_increment, -gamma), num_duration_values)
-  values = list(numpy.power(rates, -1/gamma).astype(int))
-  values.append(values[-1])  # Interpolate88 guard entry
+  def with_guard(values):
+    values = list(values)
+    values.append(values[-1])  # Interpolate88 guard entry
+    return values
+
+  def increments_from_samples(samples):
+    return with_guard(numpy.minimum(excursion / samples, max_increment).astype(int))
+
+  # Whole-sample stage lengths, every setting distinct: one sample per step
+  # while that is the coarser step, then a constant ratio up to max_time.
+  max_stage_samples = max_time * envelope_rate
+  def stage_ratio(linear_count):
+    return (max_stage_samples / linear_count) ** (
+        1.0 / (num_duration_values - linear_count))
+  linear_count = 1
+  while (linear_count + 1.0) / linear_count >= stage_ratio(linear_count + 1):
+    linear_count += 1
+  ratio = stage_ratio(linear_count)
+  stage_samples = list(range(1, linear_count + 1)) + [
+      int(round(linear_count * ratio ** step))
+      for step in range(1, num_duration_values - linear_count + 1)]
+  # Floor of the reciprocal, so the envelope's UINT32_MAX / increment reads back
+  # exactly the samples asked for.
+  lookup_tables_32.append(('envelope_phase_increments', with_guard(
+      [max_increment // samples for samples in stage_samples])))
+
+  # The exciter window reaches twice as far as a stage, so a chiff can outlast
+  # the longest one. Its duration^gamma is linear in the setting.
+  chiff_min_samples = 4.0
+  gamma = 0.25
+  chiff_samples = numpy.power(numpy.linspace(
+      numpy.power(chiff_min_samples, gamma),
+      numpy.power(2 * max_time * envelope_rate, gamma),
+      num_duration_values), 1 / gamma)
   lookup_tables_32.append(
-      ('envelope_phase_increments', values)
+      ('chiff_phase_increments', increments_from_samples(chiff_samples))
   )
 
   # sample_counts = excursion / numpy.array(values)
@@ -822,18 +855,13 @@ cutoff = 440.0 * 2 ** ((numpy.arange(0, 257) - 69) / 12.0)
 f = cutoff / audio_rate
 f[f > 1 / 8.0] = 1 / 8.0
 f = 2 * numpy.sin(numpy.pi * f)
-resonance = numpy.arange(0, 257) / 260.0
-damp = numpy.minimum(2 * (1 - resonance ** 0.25),
-       numpy.minimum(2, 2 / f - f * 0.5))
+# Damping is no longer a table. Every shape whose resonance varies now reads one
+# geometric map in oscillator.cc, which reaches zero damping -- a lossless
+# resonator -- where a table of 2*(1 - r^0.25) stopped at Q 130. The shapes whose
+# resonance is fixed name their damp at the call site.
 
 lookup_tables.append(
-    ('svf_cutoff', f * 32767.0)
+    ('svf_cutoff_u15', f * 32767.0)
 )
 
-lookup_tables.append(
-    ('svf_damp', damp * 32767.0)
-)
 
-lookup_tables.append(
-    ('svf_scale', ((damp / 2) ** 0.5) * 32767.0)
-)
