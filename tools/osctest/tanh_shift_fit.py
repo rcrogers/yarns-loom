@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# The tanh variants' top-gain shifts (kTanhGainShift_q12): for one carrier,
+# The tanh variants' top-gain shifts (kTanhDoublings_q12): for one carrier,
 # the doublings at which a biased variant's DIN 45692 sharpness best tracks the
 # odd variant's over the knob.
 #
