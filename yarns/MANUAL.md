@@ -713,7 +713,7 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 - Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
 - Transfer function (second symbol):
-  - Tanh (`T`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
+  - Tanh (`ᴛ`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
   - Triangle (`^`), sine (`s`), expo (`e`): folding
   - Sizzle (`w`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
 - Each transfer function comes in three variants, by where its input rests, which sets the balance of odd and even harmonics:
