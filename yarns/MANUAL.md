@@ -539,7 +539,27 @@ New and improved values for `VO (VOICING)` setting:
     - Turning clockwise (positive): peak level is increasingly damped by low note velocity
     - Turning counter-clockwise (negative): peak level is increasingly damped by high note velocity
 - All curves are exponential
-- Min/max stage times: ~0.089 ms (4 samples = 4/45000 of a second) to 10 seconds
+- Min/max stage times: ~0.022 ms (1 sample = 1/45000 of a second) to 10 seconds
+- Stage time settings 0-10 are 1 to 11 samples, one sample apart; above that, each step lengthens the stage by the same ratio, ~9.5%
+
+#### Exciter
+The exciter adds a burst of noise to the start of each note, in the manner of a struck or plucked string.
+
+The noise has **its own decay envelope**, separate from the note's ADSR and usually much shorter. `EXCITER AMOUNT` sets how high that decay starts; `EXCITER DURATION` sets how long it takes to fall to silence. Once it has fallen, the note is left with exactly the shape its ADSR describes.
+
+- Configured per-part in `▽A (AMPLITUDE MENU)`
+- The noise rides on the note's envelope, so it reaches every [envelope destination](#modulation-destinations-for-envelope-output): oscillator gain, oscillator timbre, and the envelope aux CV
+- Two glyphs, both an `X` between a pair of bars. `X̲̅` brackets it above and below (a height, for amount); `|X|` brackets it left and right (a width, for duration). The bars blink away and return, leaving the bare `X` on alternate frames — the panel shows two characters, and the bars are part of the first one
+- Part setting `X̲̅I (EXCITER AMOUNT INIT)` sets how much noise a note starts with
+    - Zero: no noise at all, and the note is exactly its nominal ADSR shape
+    - Turning clockwise: the noise grows brighter and louder as its filter opens
+    - Past the middle of the range, the noise is also driven into clipping, becoming harsher and more square as it approaches maximum
+- Part setting `|X|I (EXCITER DURATION INIT)` sets how long the noise takes to decay
+    - An absolute length of time, from ~0.089 ms to ~20 seconds, independent of the ADSR stage times — note this reaches twice the 10 second maximum of an individual ADSR stage
+    - The decay is exponential, so most of the noise's character happens early in the note
+    - A note's release cuts the decay short: the noise is forced to finish by the end of the release stage, so a short release truncates a long exciter
+- Part settings for the bipolar modulation of each voice's exciter by that voice's note velocity:
+    - `X̲̅V (EXCITER AMOUNT MOD VEL)`, `|X|V (EXCITER DURATION MOD VEL)`
 
 #### How the envelope adapts to interruptions
 Envelope adjusts to notes that begin/end while a stage or another note is in progress:
@@ -625,27 +645,59 @@ Part setting `OM (OSCILLATOR MODE)` in `▽O (OSCILLATOR MENU)` sets whether the
 ### Oscillator shape
 Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscillator shape for all voices in the part.
 
-#### `*-` Filtered noise
-- Timbre: filter cutoff (resonance is set by note pitch)
+#### `*-` Noise into state-variable filter
+- Timbre: cutoff frequency of the SVF
+- Note pitch controls the resonance of the SVF, from zero to self-oscillation
 - Shapes: low-pass, notch, band-pass, high-pass
 
+#### `WH` Whistle: enveloped noise into tuned state-variable filter
+- Timbre: resonance of the SVF, from zero to self-oscillation
+- Note pitch controls the cutoff frequency of the SVF
+- The [gain envelope](#modulation-destinations-for-envelope-output) amplifies the filter's noise input, instead of amplifying the oscillator's output
+
+#### `WN` Wind: tuned state-variable filter fed back through a saturating stage
+- Timbre: from a pure tone through brighter, brassier tones with even harmonics, up to a square-like tone
+- Note pitch controls the tuning of the filter
+- The [gain envelope](#modulation-destinations-for-envelope-output) both strikes the filter and sets the level of the feedback, instead of amplifying the oscillator's output
+    - A fast attack strikes the note so it sounds at once; a slower attack lets it swell in
+    - At higher timbre settings, an attack of a few milliseconds gives a brassy, even-harmonic onset
+    - A fast release brightens the tone as it fades
+
+#### `BW` Bowed: tuned state-variable filter fed back through a friction curve
+- Timbre: from a pure tone through bright, scratchy tones rich in both even and odd harmonics, still gaining harmonics at the top of the range
+- Note pitch controls the tuning of the filter, which stays in tune at every timbre
+- The [gain envelope](#modulation-destinations-for-envelope-output) both strikes the filter and sets the level of the feedback, instead of amplifying the oscillator's output
+    - A fast attack strikes the note so it sounds at once; a slower attack lets it swell in
+    - A fast decay or release fades the note without throwing its pitch
+- The feedback wavers like bow pressure, adding a scrape that grows with timbre and sounds even across the keyboard
+
+#### `P-` Ping: direct envelope signal into tuned state-variable filter
+- Timbre: resonance of the SVF, from zero to self-oscillation
+- Note pitch controls the cutoff frequency of the SVF
+- The gain envelope is used as a direct DC input to ping the filter, instead of amplifying the oscillator's output
+    - A full-peak ring is driven gently into soft saturation, brightening its onset while the tail rings clean; a lower envelope peak rings cleaner still
+- Shapes: low-pass, band-pass, high-pass
+
+#### `-◝` Analog wave into state-variable filter
+- Timbre: cutoff frequency of the low-pass SVF, relative to the note's pitch
+- Resonance is fixed
+- Shapes: pulse (Q = 130), saw (Q = 6.9)
+
 #### `┌┐CZ` Phase distortion, resonant pulse
-- Timbre: filter cutoff
+- Timbre: cutoff frequency of the digital filter, relative to the note's pitch
 - Shapes: low-pass, peaking, band-pass, high-pass
 
-#### `|⟍CZ` Phase distortion, resonant saw
-- Timbre: filter cutoff
+#### `│╲CZ` Phase distortion, resonant saw
+- Timbre: cutoff frequency of the digital filter, relative to the note's pitch
 - Shapes: low-pass, peaking, band-pass, high-pass
 
-#### `-◝` State-variable filter, low-pass
-- Timbre: filter cutoff (resonance is constant)
-- Shapes: pulse, saw
+#### `-W` Width modulation
+- Timbre: compresses each cycle of the carrier wave into a decreasing fraction of the period of the note's pitch
+- Shapes: sine, pulse, saw
+    - Pulse and saw freeze in place after completing a cycle, resetting at the next period
+    - Sine returns to zero after completing a cycle, resuming motion at the next period
 
-#### `-W` Pulse-width modulation
-- Timbre: pulse width
-- Shapes: pulse, saw
-
-#### `|⟍┌┐` Saw-pulse morph
+#### `│╲┌┐` Saw-pulse morph
 - Timbre: morph from saw to pulse
 
 #### `-$` Hard sync
@@ -655,19 +707,22 @@ Part setting `OS (OSCILLATOR SHAPE)` in `▽O (OSCILLATOR MENU)` sets the oscill
 #### `┴┴` Dirac comb
 - Timbre: harmonic content
 
-#### `ST` Compressed sine: hyperbolic tangent (tanh) function
-- Timbre: compression amount
-
-#### `SX` Exponential sine
-- Timbre: exponentiation amount
-
-#### `-s`, `-^`, `-e` Wavefolding transfer functions
-- Timbre: folding amount (amplification of the carrier wave into the transfer function)
-- Shapes: 18 variants, grouped under 3 distinct transfer functions
-- Carrier wave (first symbol): sine (`S`), triangle (`^`), expo (`e`)
+#### `-T`, `-^`, `-s`, `-w`, `-e` Waveshaping transfer functions
+- Timbre: drive or folding amount (amplification of the carrier wave into the transfer function)
+- Shapes: 45 variants, grouped under 5 distinct transfer functions
+- Carrier wave (first symbol): triangle (`^`), sine (`S`), expo (`e`)
   - "Expo" is a saturated sine derived from the shape of an envelope segment, flipped and mirrored into a periodic function
-- Transfer function (second symbol): sine (`s`), triangle (`^`), expo (`e`)
-- Biased variants of transfer function (`ˢ`, `ˇ`, `ə`): offset the transfer function input by a quarter cycle, producing asymmetric harmonics
+- Transfer function (second symbol):
+  - Tanh (`ᴛ`): hyperbolic tangent; timbre drives the carrier into saturation rather than folding it
+  - Triangle (`^`), sine (`s`), expo (`e`): folding
+  - Sizzle (`w`): sine of an exponential; timbre sweeps the carrier through an ever-faster sine
+- Each transfer function comes in three variants, by where its input rests, which sets the balance of odd and even harmonics:
+  - Odd (the symbol upright): odd harmonics only, or as near as the curve allows
+  - Balanced (the symbol sideways: `<`, and sideways `s`, `e`, `w`, `T`): halfway between odd and even, averaged over the timbre sweep -- for the folding transfer functions, odd and even harmonics in equal energy
+  - Even (the symbol inverted: `┴`, `ˇ`, `ˢ`, `ʍ`, `ə`): as many even harmonics as the curve allows
+  - Folding transfer functions: odd is exact at every timbre. Even harmonics alone would have no fundamental and sound an octave up, so even mixes the carrier back in at the level of the odd variant's fundamental, which falls with timbre as odd's does: the fundamental under the even harmonics of the fold
+  - Sizzle: its exponential is lopsided, so no variant is purely odd or even past the bottom of the timbre range; even is the sound of the original sizzle
+  - Tanh: its even harmonics never reach half the energy, so balanced is half of what even gives; even and balanced offset the carrier before the drive, so the evens grow with timbre. On the sine and expo carriers, even and balanced drive harder toward the top of the timbre range, so they brighten with timbre as odd does
 
 #### `FM` Frequency modulation
 - Timbre: modulation index
